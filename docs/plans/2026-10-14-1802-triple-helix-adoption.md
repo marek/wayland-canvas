@@ -38,6 +38,6 @@ The repo-local `.venv` holds meson and ninja so nothing is installed system-wide
 - [x] Tests strand: the headless scenarios moved into `tests/scenarios/` (gestures, input, launcher with a custom desktop entry), suites `unit` and `scenarios`, `tools/check.sh`
 - [x] Generic to whoever works: "the user" throughout; identity, branch and attribution rules and their purpose once in `workspace/repos.md`; the branch hook refuses `claude/` and any branch not under the contributor's first name
 - [x] Plans: the compositor build, the launcher, the review findings, C++ and scriptability, and this one, with the index
-- [ ] Verification: `tools/check-plans.sh` passes; no dangling relative links in `docs/` and the root `.md` files; the never-table grep finds nothing in `docs/intents` outside `bugs/`; `scripts/agent-setup.sh` run twice gives the same links; `tools/check.sh` passes
-- [ ] Committed per phase: plans, conventions and tooling, intents, tests strand, review fixes
+- [x] Verification: `tools/check-plans.sh` passes; no dangling relative links in `docs/` and the root `.md` files; the never-table grep finds nothing in `docs/intents` outside `bugs/`; `scripts/agent-setup.sh` run twice gives the same links; `tools/check.sh` passes
+- [x] Committed per phase: plans, conventions and tooling, intents, review fixes, tests strand
 - [ ] Push (the user to decide)
