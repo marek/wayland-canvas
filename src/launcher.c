@@ -474,7 +474,7 @@ static struct wlr_texture *draw_panel(struct cv_server *server,
 	paint_text(cr, "\xE2\x86\x91\xE2\x86\x93 select   Enter open   Esc close",
 		UI_FONT, COLOR_LAUNCHER_DIM_TEXT, 20, fcy, (int)w - 40);
 	char count[32];
-	snprintf(count, sizeof count, "%zu apps", l->nresults);
+	snprintf(count, sizeof count, "%zu app%s", l->nresults, l->nresults == 1 ? "" : "s");
 	int cw = text_width(cr, count, UI_FONT, -1);
 	paint_text(cr, count, UI_FONT, COLOR_LAUNCHER_DIM_TEXT, w - 20 - cw, fcy, -1);
 

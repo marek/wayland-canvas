@@ -40,6 +40,27 @@ and `/usr/share/applications`, with icons from your icon theme). Type to filter,
 close. New windows open in the middle of the screen you're looking at (or of
 the overview's target).
 
+To add your own entry, use the standard XDG desktop-entry file that every Linux
+launcher reads: save e.g. `~/.local/share/applications/my-tool.desktop`
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=My Tool
+GenericName=What it does
+Exec=/path/to/command --some-flag
+Icon=utilities-terminal
+Terminal=false
+Keywords=tool;helper;
+```
+
+It shows up the next time the launcher opens (entries are re-read on every open).
+`Icon` is a theme icon name or an absolute image path; `Terminal=true` runs the
+command inside `$TERMINAL`. `Exec` only allows double quotes, so put anything
+shell-heavy in a script, and check files with `desktop-file-validate`. To hide an
+app, put a copy of its `.desktop` file here with `NoDisplay=true`; yours wins over
+the system one.
+
 ## Concepts
 
 - **Canvas**: every output has its own camera onto one shared plane.
