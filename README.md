@@ -9,12 +9,12 @@ Windows get Windows-11-style title bars with minimize, maximize/restore and clos
 
 Needs a C11 compiler, meson ≥ 1.3, ninja, and the wlroots 0.20 dependencies
 (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat, xkbcommon,
-pixman, libdisplay-info, hwdata) plus cairo and pango.
+pixman, libdisplay-info, hwdata) plus cairo, pango, librsvg and glib.
 
 ```sh
 meson setup build
 ninja -C build
-meson test -C build        # unit tests for the navigation/tiling math
+tools/check.sh             # builds, then the unit and headless scenario suites
 ```
 
 If `wlroots-0.20` isn't installed system-wide, meson fetches 0.20.2 into

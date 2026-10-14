@@ -115,6 +115,7 @@ test(
 		link_with: geometry_lib,
 		dependencies: m_dep,
 	),
+	suite: 'unit',
 )
 
 test(
@@ -125,4 +126,32 @@ test(
 		include_directories: include_directories('src'),
 		link_with: desktop_entry_lib,
 	),
+	suite: 'unit',
 )
+
+# End-to-end scenarios: the real compositor on the headless backend, real
+# foot clients, fake input devices, grim screenshots. Registered only when
+# foot and grim are on PATH; they still need a GPU render node at run time
+# (headless GLES2 rendering). Serial: each owns the display namespace.
+foot_prog = find_program('foot', required: false)
+grim_prog = find_program('grim', required: false)
+if foot_prog.found() and grim_prog.found()
+	scenario_env = environment()
+	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
+	foreach scenario : ['gestures', 'input', 'launcher']
+		test(
+			scenario,
+			executable(
+				'scenario-' + scenario,
+				'tests/scenarios/' + scenario + '.c',
+				include_directories: include_directories('src'),
+				link_with: core_lib,
+				dependencies: [wlroots, wayland_server, xkbcommon, cairo, m_dep],
+			),
+			suite: 'scenarios',
+			is_parallel: false,
+			timeout: 180,
+			env: scenario_env,
+		)
+	endforeach
+endif
