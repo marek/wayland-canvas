@@ -140,3 +140,23 @@ idle-inhibit, virtual-keyboard.
 No Xwayland, no output-configuration protocol (set the scale with `-S`), no session
 lock, full repaint of an output per changed frame (no damage regions), no window
 open/close animations.
+
+## Working on this repo
+
+Development rules and the design corpus live beside the code — see
+[AGENTS.md](AGENTS.md): the triple helix of **intents** (what the compositor
+must satisfy), **tests** and **implementation**, with plans, skills and roles
+beside it.
+
+| Folder | What |
+|---|---|
+| `src/` | Compositor source (`src/config.h` holds the tunables) |
+| `tests/` | Unit tests and headless scenario sources (`tests/scenarios/`) |
+| `tools/` | `check.sh` (build + test), `check-plans.sh`, hooks |
+| `scripts/` | `agent-setup.sh` (links skills, roles and hooks into `.claude/`) |
+| `protocols/` | Protocol XML used beyond wlroots' set |
+| `docs/intents/` | Normative design specs (the intent corpus) |
+| `docs/plans/` | Dated, tracked work plans |
+| `docs/skills/` | How to work here |
+| `docs/roles/` | Working personas (developer, tester, reviewer, planner) |
+| `tmp/` | Git-ignored scratch space (`CANVAS_TMP` overrides) |
