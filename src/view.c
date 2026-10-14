@@ -660,6 +660,9 @@ static void handle_unmap(struct wl_listener *listener, void *data) {
 	if (server->grab_view == view) {
 		input_cancel_grab(server);
 	}
+	if (server->last_title_view == view) {
+		server->last_title_view = NULL;
+	}
 	view->mapped = false;
 	wl_list_remove(&view->link);
 	wl_list_init(&view->link);

@@ -242,6 +242,10 @@ void desktop_destroy(struct cv_desktop *desktop) {
 	}
 	if (server->gesture.desktop == desktop) {
 		server->gesture.desktop = NULL;
+		// An abandon swipe has nothing left to slide; tile and combine fall back to the target.
+		if (server->gesture.kind == CV_GESTURE_ABANDON) {
+			server->gesture.kind = CV_GESTURE_IGNORED;
+		}
 	}
 	if (server->gesture.merge_from == desktop) {
 		server->gesture.merge_from = NULL;

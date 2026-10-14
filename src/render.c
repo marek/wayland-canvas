@@ -805,9 +805,13 @@ static void send_surface_feedback(const struct cv_render_ctx *ctx) {
 		}
 		if (!entered) {
 			wlr_surface_send_enter(surface, wlr_output);
-			wlr_fractional_scale_v1_notify_scale(surface, ctx->scale);
-			wlr_surface_set_preferred_buffer_scale(surface,
-				(int32_t)ceil(ctx->scale));
+			// Like view_update_outputs: the sharpest output the surface is on wins.
+			double scale = 1;
+			wl_list_for_each(so, &surface->current_outputs, link) {
+				scale = fmax(scale, so->output->scale);
+			}
+			wlr_fractional_scale_v1_notify_scale(surface, scale);
+			wlr_surface_set_preferred_buffer_scale(surface, (int32_t)ceil(scale));
 		}
 		wlr_presentation_surface_textured_on_output(surface, wlr_output);
 		if (drawn_surfaces[i].frame_done) {

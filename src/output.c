@@ -239,7 +239,14 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	}
 	if (server->gesture.output == output) {
 		server->gesture.output = NULL;
-		server->gesture.kind = CV_GESTURE_IGNORED;
+		// A forwarded gesture still owes its client the end event.
+		if (server->gesture.kind != CV_GESTURE_FORWARD) {
+			if (server->gesture.kind == CV_GESTURE_ABANDON &&
+					server->gesture.desktop != NULL) {
+				server->gesture.desktop->swipe_offset = 0;
+			}
+			server->gesture.kind = CV_GESTURE_IGNORED;
+		}
 	}
 	struct cv_view *view;
 	wl_list_for_each(view, &server->views, link) {

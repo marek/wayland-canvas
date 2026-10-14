@@ -1664,8 +1664,8 @@ static void handle_request_start_drag(struct wl_listener *listener,
 		}
 		return;
 	}
-	wlr_seat_request_start_drag(server->seat, event->drag, event->origin,
-		event->serial);
+	// Start the drag itself; re-requesting it would re-emit this event forever.
+	wlr_seat_start_pointer_drag(server->seat, event->drag, event->serial);
 }
 
 static void handle_drag_icon_commit(struct wl_listener *listener, void *data) {
