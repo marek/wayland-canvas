@@ -1,0 +1,51 @@
+# Build and run
+
+> Owns the build, its dependencies, and the ways to run the
+> compositor. The test venues are owned by `AGENTS.md` and the
+> `verification` skill.
+
+## Requirement
+
+A clean checkout builds and runs with two commands and no manual
+fetching: wlroots arrives by itself when the system does not have it.
+
+## Behavior
+
+### Dependencies
+
+A C11 compiler, meson ≥ 1.3 and ninja; the wlroots 0.20 dependencies
+(wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat,
+xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
+(decorations, launcher); librsvg and glib (icons).
+
+### Build
+
+| Subject | Rule |
+|---|---|
+| Commands | `meson setup build`, `ninja -C build` |
+| venv fallback | when the system has no meson and ninja, they are pip-installed into a `.venv` at the repo root (git-ignored) and run from there |
+| wlroots | the system `wlroots-0.20` when installed; otherwise meson fetches wlroots 0.20.2 per `subprojects/wlroots.wrap` into `subprojects/wlroots/` (ignored) and links it statically with only what this compositor needs — the GLES2 renderer, the DRM and libinput backends, session on, Xwayland and libliftoff off ([../platform/wlroots.md](../platform/wlroots.md)) |
+| Protocol header | the layer-shell protocol header is generated at build time from `protocols/wlr-layer-shell-unstable-v1.xml` |
+| Unit tests | `meson test -C build`; the scenario suite and everything at once run through `tools/check.sh` |
+
+### Running
+
+| Mode | How | Notes |
+|---|---|---|
+| From a TTY | `./build/wayland-canvas` | DRM/KMS via libseat/logind. Use a spare TTY: a hung compositor holds the keyboard, so VT switching cannot save you — wrapping a first run in `timeout` (for example `timeout 15m`) is the habit |
+| Nested | the same command from a terminal inside another compositor | renders at 1x ([../render/hidpi.md](../render/hidpi.md)); the host may swallow 3- and 4-finger gestures it binds itself, and a lone Super tap passes through ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
+| Startup command | `-s <cmd>` | run at startup, for example `-s foot` |
+| Scale | `-S <scale>`, or `$WAYLAND_CANVAS_SCALE` | default by the dpi rule: 2 on dense panels, else 1 ([../render/hidpi.md](../render/hidpi.md)) |
+| Debug | `-d` | debug logging |
+
+The terminal binding (`Super+Return`) and `Terminal=true` desktop
+entries run `$TERMINAL`, falling back to `foot`.
+
+## Cross-links
+
+- [repos.md](repos.md) — what is committed and pushed.
+- [../platform/wlroots.md](../platform/wlroots.md) — the wlroots
+  version and subproject rule.
+- [../render/hidpi.md](../render/hidpi.md) — scale and crispness.
+- [../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
+  — the terminal binding and nested-mode input notes.
