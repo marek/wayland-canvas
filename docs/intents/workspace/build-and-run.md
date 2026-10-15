@@ -32,6 +32,7 @@ xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
 | wlroots | the system `wlroots-0.20` when installed; otherwise meson fetches wlroots 0.20.2 per `subprojects/wlroots.wrap` into `subprojects/wlroots/` (ignored) and links it statically with only what this compositor needs — the GLES2 renderer, the DRM and libinput backends, session on, Xwayland and libliftoff off ([../platform/wlroots.md](../platform/wlroots.md)) |
 | Protocol header | the layer-shell protocol header is generated at build time from `protocols/wlr-layer-shell-unstable-v1.xml` |
 | Unit tests | `meson test -C build`; the scenario suite and everything at once run through `tools/check.sh`, which configures through the native file and re-creates a build dir that was configured with GCC |
+| Packages | `ninja -C build package-arch` / `package-deb` produce a `.pkg.tar.zst` / `.deb` under `build/packages/` ([packaging.md](packaging.md) owns the formats and the guarantees) |
 
 ### Running
 

@@ -46,6 +46,7 @@ their values.
 | [glossary.md](glossary.md) | Term disambiguation |
 | [workspace/repos.md](workspace/repos.md) | The single repo, identity, pushing, what is committed, the wlroots subproject |
 | [workspace/build-and-run.md](workspace/build-and-run.md) | Build deps, meson, running: TTY, nested, options, scale |
+| [workspace/packaging.md](workspace/packaging.md) | The two package formats, the session file, the default-session rules per display manager, the change journal, install and uninstall guarantees |
 | [canvas/infinite-canvas.md](canvas/infinite-canvas.md) | The plane, per-output cameras, 1:1 vs zoomed, the pixel grid, panning, momentum, snap, free areas, the grid |
 | [canvas/desktops.md](canvas/desktops.md) | What a desktop is, membership, frames never move windows, ids, create, abandon, combine, tile |
 | [canvas/overview.md](canvas/overview.md) | Entering and leaving, fit, the target model, hop semantics, the overview UI: tabs, help line, shelf, hints, pointer and key actions |

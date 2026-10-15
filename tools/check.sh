@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build and run both test strands: `meson test --suite unit` first, then
-# `meson test --suite scenarios`. Exits non-zero on the first failure.
+# Build and run the test strands in order: `meson test --suite unit`, then
+# `meson test --suite packaging`, then `meson test --suite scenarios`. Exits
+# non-zero on the first failure.
 #
 # The scenarios need `foot` and `grim` on PATH and a GPU render node at run
 # time; when those programs are missing, meson registers no scenario tests
@@ -57,7 +58,11 @@ if [[ "$unit_only" -eq 1 ]]; then
 	exit 0
 fi
 
+echo "check.sh: meson test -C build --suite packaging --print-errorlogs"
+meson test -C build --suite packaging --print-errorlogs
+echo "check.sh: packaging suite passed"
+
 echo "check.sh: meson test -C build --suite scenarios --print-errorlogs"
 meson test -C build --suite scenarios --print-errorlogs
 echo "check.sh: scenarios suite passed"
-echo "check.sh: done (unit + scenarios)"
+echo "check.sh: done (unit + packaging + scenarios)"

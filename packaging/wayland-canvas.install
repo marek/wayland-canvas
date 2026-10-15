@@ -1,0 +1,17 @@
+# pacman install scriptlet for wayland-canvas. It never prompts (pacman
+# forbids that); the interactive default-session question belongs to
+# tools/install.sh.
+
+pre_remove() {
+	# restore any default session this package set before its own files
+	# (the session tool included) disappear, so the login never points at
+	# a session that no longer exists
+	if command -v wayland-canvas-session >/dev/null 2>&1; then
+		wayland-canvas-session restore || true
+	fi
+}
+
+post_install() {
+	echo "wayland-canvas: pick it at your display manager's login screen, or run"
+	echo "  wayland-canvas-session set-default   # to make it the default session"
+}

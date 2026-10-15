@@ -5,6 +5,27 @@ unbounded plane; **virtual desktops are screen-sized dashed frames** you drag ov
 the windows however you like. You can work on a desktop or anywhere in between.
 Windows get Windows-11-style title bars with minimize, maximize/restore and close.
 
+## Install
+
+Binary packages for Arch and Arch-based distributions (`.pkg.tar.zst`, built
+with makepkg) and for Debian/Ubuntu (`.deb`, built inside a rootless Debian
+root filesystem):
+
+```sh
+ninja -C build package-arch   # or package-deb; artifacts in build/packages/
+tools/install.sh              # builds the package for your distro, installs it
+                              # with the system package manager, and asks
+                              # whether to make wayland-canvas the default
+tools/install.sh --uninstall  # restores the previous default, then removes it
+```
+
+`wayland-canvas-session status | set-default | restore` shows or changes the
+default session later; `restore` puts every display-manager file back byte
+for byte. SDDM (autologin and the remembered last session), GDM
+(AccountsService), LightDM and greetd are covered; on anything else the tool
+changes nothing and says how to start the compositor. Removing the package
+directly (`pacman -R`, `apt remove`) restores the default as well.
+
 ## Build
 
 Needs clang (LLVM) — the compositor is C++26 and the wlroots subproject builds
@@ -182,3 +203,4 @@ beside it.
 | `docs/skills/` | How to work here |
 | `docs/roles/` | Working personas (developer, tester, reviewer, planner) |
 | `tmp/` | Git-ignored scratch space (`CANVAS_TMP` overrides) |
+| `packaging/` | Package definitions: Arch `PKGBUILD` + install scriptlet, Debian control and maintainer scripts, the session file, the default-session tool, the source-tarball builder |

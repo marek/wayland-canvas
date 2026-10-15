@@ -124,6 +124,28 @@ install_subdir(
 	install_dir: get_option('datadir') / 'wayland-canvas',
 )
 
+# What the distribution packages carry beyond the binary: the session file
+# the display managers list, and the default-session tool.
+install_data(
+	'packaging/wayland-canvas.desktop',
+	install_dir: get_option('datadir') / 'wayland-sessions',
+)
+install_data(
+	'packaging/wayland-canvas-session',
+	install_dir: get_option('bindir'),
+	install_mode: 'rwxr-xr-x',
+)
+
+# ninja -C build package-arch / package-deb — artifacts under build/packages/.
+run_target(
+	'package-arch',
+	command: [find_program('tools/package-arch.sh'), meson.project_build_root()],
+)
+run_target(
+	'package-deb',
+	command: [find_program('tools/package-deb.sh'), meson.project_build_root()],
+)
+
 test(
 	'geometry',
 	executable(
@@ -175,3 +197,15 @@ if foot_prog.found() and grim_prog.found()
 		)
 	endforeach
 endif
+
+# The default-session tool against fake roots, one per display manager.
+packaging_env = environment()
+packaging_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
+test(
+	'packaging',
+	find_program('tests/test_packaging.sh'),
+	suite: 'packaging',
+	is_parallel: false,
+	timeout: 120,
+	env: packaging_env,
+)

@@ -1,0 +1,569 @@
+#!/usr/bin/env bash
+# wayland-canvas-session — show, set and restore the default wayland-canvas
+# session of the detected display manager.
+#
+#   status       what the login would start today
+#   set-default  make wayland-canvas the session the login starts on its own
+#   restore      put every file back exactly as it was before set-default
+#
+# --root DIR    operate under DIR instead of / (tests, staged roots)
+# --user NAME   the login user, for display managers that store the session
+#               per user (GDM's AccountsService); default: the sudo caller,
+#               the configured autologin user, or the current user
+#
+# What set-default changes depends on the display manager:
+#   sddm     [Autologin] Session= in the config that enables autologin, and
+#            the remembered [Last] Session= in /var/lib/sddm/state.conf
+#            (when RememberLastSession is not false)
+#   gdm      [User] Session= in /var/lib/AccountsService/users/<user>
+#   lightdm  autologin-session= in the config that enables autologin, and the
+#            greeter's remembered last-session in
+#            /var/lib/lightdm/.cache/lightdm-gtk-greeter-state
+#   greetd   command in [default_session]: the argument after --cmd when the
+#            current command is a greeter, the whole command otherwise
+#
+# Every change is recorded under /var/lib/wayland-canvas/session-default —
+# whole previous file contents, so restore returns each file byte for byte,
+# including files that did not exist. Nothing else is touched; an unknown
+# display manager is reported, not guessed at.
+set -euo pipefail
+
+session_file=wayland-canvas.desktop # sddm and gdm value
+session_name=wayland-canvas         # lightdm and greetd value (no .desktop)
+state_rel=/var/lib/wayland-canvas/session-default
+
+root=
+user=
+cmd=
+
+usage() {
+	sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+	echo "wayland-canvas-session: $*" >&2
+	exit 2
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+		--root)
+			[ $# -ge 2 ] || die "--root needs a directory"
+			root=$2
+			shift 2
+			;;
+		--root=*)
+			root=${1#*=}
+			shift
+			;;
+		--user)
+			[ $# -ge 2 ] || die "--user needs a name"
+			user=$2
+			shift 2
+			;;
+		--user=*)
+			user=${1#*=}
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		status | set-default | restore)
+			if [ -n "$cmd" ]; then die "one command at a time"; fi
+			cmd=$1
+			shift
+			;;
+		*)
+			die "unknown argument: $1 (try --help)"
+			;;
+	esac
+done
+[ -n "$cmd" ] || die "missing command: status, set-default or restore (try --help)"
+root=${root%/}
+
+# --- paths and the change journal ------------------------------------------
+
+# Every path inside this script is root-relative (starts with /) and is
+# prefixed with $root at the last moment, so a --root run and a real run
+# share all logic.
+
+state=$root$state_rel
+blobs=$state/blobs
+journal=$state/journal
+records=0
+
+journal_init() {
+	# Create the state tree, then the journal; the tree's own directories are
+	# recorded so restore removes them again when it created them.
+	local created=() d
+	d=$state_rel
+	while [ ! -d "$root$d" ]; do
+		created=("$d" "${created[@]}")
+		d=${d%/*}
+	done
+	mkdir -p "$blobs"
+	touch "$journal"
+	for d in "${created[@]}"; do
+		printf 'dir	%s
+' "$d" >>"$journal"
+	done
+}
+
+record_file() { # $1 root-relative path — journal its current state, once
+	local path=$1 target=$root$1 mode blobname
+	if [ -f "$journal" ] && grep -qsF $'file	'"$path"$'\t' "$journal"; then
+		return 0
+	fi
+	records=$((records + 1))
+	printf -v blobname 'blobs/%04d' "$records"
+	if [ -e "$target" ]; then
+		mode=$(stat -c '%a' "$target")
+		cp "$target" "$state/$blobname"
+		printf 'file	%s	%s	1	%s
+' "$path" "$mode" "$blobname" >>"$journal"
+	else
+		printf 'file	%s	-	0	-
+' "$path" >>"$journal"
+	fi
+}
+
+ensure_dir() { # $1 root-relative dir — create it, recording what was created
+	local missing=() d=$1
+	while [ ! -d "$root$d" ] && [ "$d" != / ]; do
+		missing=("$d" "${missing[@]}")
+		d=${d%/*}
+	done
+	for d in "${missing[@]}"; do
+		mkdir "$root$d"
+		printf 'dir	%s
+' "$d" >>"$journal"
+	done
+}
+
+# --- ini and toml line editing ----------------------------------------------
+
+ini_get() { # $1 path $2 section $3 key → value, "" when absent
+	local file=$root$1 section=$2 key=$3
+	if [ ! -f "$file" ]; then
+		return 0
+	fi
+	awk -v sec="$section" -v key="$key" '
+		/^[[:space:]]*\[.*\][[:space:]]*$/ {
+			header = $0
+			sub(/^[[:space:]]*\[/, "", header)
+			sub(/\][[:space:]]*$/, "", header)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", header)
+			insec = (header == sec)
+			next
+		}
+		insec && match($0, "^[[:space:]]*" key "[[:space:]]*=") {
+			v = substr($0, RSTART + RLENGTH)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+			gsub(/^"|"$/, "", v)
+			print v
+			exit
+		}
+	' "$file"
+}
+
+ini_set() { # $1 path $2 section $3 key $4 value — path must exist
+	local path=$1 section=$2 key=$3 value=$4 file=$root$1 tmp
+	record_file "$path"
+	tmp=$(mktemp "${file%/*}/.wayland-canvas-session.XXXXXX")
+	awk -v sec="$section" -v key="$key" -v val="$value" '
+		BEGIN { insec = 0; secseen = 0; done = 0 }
+		/^[[:space:]]*\[.*\][[:space:]]*$/ {
+			if (insec && !done) { print key "=" val; done = 1 }
+			header = $0
+			sub(/^[[:space:]]*\[/, "", header)
+			sub(/\][[:space:]]*$/, "", header)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", header)
+			insec = (header == sec)
+			if (insec) secseen = 1
+			print
+			next
+		}
+		insec && !done && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
+			print key "=" val
+			done = 1
+			next
+		}
+		{ print }
+		END {
+			if (!done) {
+				if (!secseen) { print ""; print "[" sec "]" }
+				print key "=" val
+			}
+		}
+	' "$file" >"$tmp"
+	chmod --reference="$file" "$tmp"
+	mv "$tmp" "$file"
+}
+
+create_file() { # $1 path $2 mode $3 content — path must not exist
+	local path=$1 mode=$2 content=$3 file=$root$1 tmp
+	record_file "$path"
+	ensure_dir "${path%/*}"
+	tmp=$(mktemp "${file%/*}/.wayland-canvas-session.XXXXXX")
+	printf '%s' "$content" >"$tmp"
+	chmod "$mode" "$tmp"
+	mv "$tmp" "$file"
+}
+
+greetd_set_command() { # $1 path $2 new command — replaces [default_session] command
+	local path=$1 new=$2 file=$root$1 tmp
+	record_file "$path"
+	tmp=$(mktemp "${file%/*}/.wayland-canvas-session.XXXXXX")
+	awk -v new="$new" '
+		BEGIN { insec = 0; done = 0 }
+		/^[[:space:]]*\[.*\][[:space:]]*$/ {
+			header = $0
+			sub(/^[[:space:]]*\[/, "", header)
+			sub(/\][[:space:]]*$/, "", header)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", header)
+			insec = (header == "default_session")
+			print
+			next
+		}
+		insec && !done && $0 ~ /^[[:space:]]*command[[:space:]]*=/ {
+			print "command = \"" new "\""
+			done = 1
+			next
+		}
+		{ print }
+	' "$file" >"$tmp"
+	chmod --reference="$file" "$tmp"
+	mv "$tmp" "$file"
+}
+
+# --- display manager detection ----------------------------------------------
+
+dm=none
+dm_source=
+
+detect_dm() {
+	local svc=$root/etc/systemd/system/display-manager.service target f
+	if [ -L "$svc" ]; then
+		target=$(readlink "$svc")
+		target=${target##*/}
+		target=${target%.service}
+		case $target in
+			sddm | gdm | gdm3 | lightdm | greetd) dm=$target ;;
+		esac
+		dm_source=/etc/systemd/system/display-manager.service
+	fi
+	if [ "$dm" = none ]; then
+		# No systemd unit to ask: fall back to configuration that exists only
+		# when the display manager is in use, most specific signal first.
+		if [ -f "$root/etc/greetd/config.toml" ]; then
+			dm=greetd
+			dm_source=/etc/greetd/config.toml
+		elif compgen -G "$root/var/lib/AccountsService/users/*" >/dev/null; then
+			dm=gdm
+			dm_source=/var/lib/AccountsService/users
+		elif [ -f "$root/etc/lightdm/lightdm.conf" ] ||
+			compgen -G "$root/etc/lightdm/lightdm.conf.d/*.conf" >/dev/null; then
+			dm=lightdm
+			dm_source=/etc/lightdm/lightdm.conf
+		elif [ -f "$root/etc/sddm.conf" ] ||
+			compgen -G "$root/etc/sddm.conf.d/*.conf" >/dev/null; then
+			dm=sddm
+			dm_source=/etc/sddm.conf.d
+		fi
+	fi
+	[ "$dm" = gdm3 ] && dm=gdm
+	return 0
+}
+
+login_user() {
+	local f
+	if [ -n "$user" ]; then
+		printf '%s\n' "$user"
+		return 0
+	fi
+	if [ -n "${SUDO_USER:-}" ]; then
+		printf '%s\n' "$SUDO_USER"
+		return 0
+	fi
+	for f in $(sddm_conf_list); do
+		if [ -n "$(ini_get "$f" Autologin User)" ]; then
+			ini_get "$f" Autologin User
+			return 0
+		fi
+	done
+	for f in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
+		if [ "$(ini_get "$f" daemon AutomaticLoginEnable)" = true ] &&
+			[ -n "$(ini_get "$f" daemon AutomaticLogin)" ]; then
+			ini_get "$f" daemon AutomaticLogin
+			return 0
+		fi
+	done
+	if [ -n "$(lightdm_autologin_conf)" ] &&
+		[ -n "$(ini_get "$(lightdm_autologin_conf)" 'Seat:*' autologin-user)" ]; then
+		ini_get "$(lightdm_autologin_conf)" 'Seat:*' autologin-user
+		return 0
+	fi
+	id -un
+}
+
+# --- per display manager: status and set-default -----------------------------
+
+sddm_conf_list() { # main config then drop-ins, sorted
+	local f
+	if [ -f "$root/etc/sddm.conf" ]; then
+		printf '%s\n' /etc/sddm.conf
+	fi
+	for f in $(LC_ALL=C ls -1 "$root/etc/sddm.conf.d"/*.conf 2>/dev/null || true); do
+		printf '%s\n' "${f#"$root"}"
+	done
+}
+
+lightdm_conf_list() {
+	local f
+	if [ -f "$root/etc/lightdm/lightdm.conf" ]; then
+		printf '%s\n' /etc/lightdm/lightdm.conf
+	fi
+	for f in $(LC_ALL=C ls -1 "$root/etc/lightdm/lightdm.conf.d"/*.conf 2>/dev/null || true); do
+		printf '%s\n' "${f#"$root"}"
+	done
+}
+
+lightdm_autologin_conf() { # the config file that enables autologin, or ""
+	local f seat
+	for f in $(lightdm_conf_list); do
+		for seat in 'Seat:*' 'Seat:0'; do
+			if [ -n "$(ini_get "$f" "$seat" autologin-user)" ]; then
+				printf '%s\n' "$f"
+				return 0
+			fi
+		done
+	done
+	return 0
+}
+
+status_sddm() {
+	local f autofile= remember=yes session
+	for f in $(sddm_conf_list); do
+		if [ -n "$(ini_get "$f" Autologin User)" ]; then
+			autofile=$f
+		fi
+		if [ "$(ini_get "$f" General RememberLastSession)" = false ]; then
+			remember=no
+		fi
+	done
+	if [ -n "$autofile" ]; then
+		session=$(ini_get "$autofile" Autologin Session)
+		echo "  autologin: user $(ini_get "$autofile" Autologin User), session ${session:-<none>} ($autofile)"
+	fi
+	echo "  remembered sessions: $remember"
+	session=$(ini_get /var/lib/sddm/state.conf Last Session)
+	echo "  last session: ${session:-<none>} (/var/lib/sddm/state.conf)"
+}
+
+set_default_sddm() {
+	local f autofile= remember=yes edits=0
+	for f in $(sddm_conf_list); do
+		if [ -n "$(ini_get "$f" Autologin User)" ]; then
+			autofile=$f
+		fi
+		if [ "$(ini_get "$f" General RememberLastSession)" = false ]; then
+			remember=no
+		fi
+	done
+	if [ -z "$autofile" ] && [ "$remember" = no ]; then
+		echo "wayland-canvas-session: sddm has no autologin and remembers no session"
+		echo "  pick wayland-canvas at the login screen, or start it from a TTY: wayland-canvas"
+		return 1
+	fi
+	journal_init
+	if [ -n "$autofile" ]; then
+		ini_set "$autofile" Autologin Session "$session_file"
+		echo "  $autofile: [Autologin] Session=$session_file"
+		edits=1
+	fi
+	if [ "$remember" = yes ]; then
+		if [ -f "$root/var/lib/sddm/state.conf" ]; then
+			ini_set /var/lib/sddm/state.conf Last Session "$session_file"
+		else
+			create_file /var/lib/sddm/state.conf 644 "[Last]
+Session=$session_file
+"
+		fi
+		echo "  /var/lib/sddm/state.conf: [Last] Session=$session_file"
+		edits=1
+	fi
+	return 0
+}
+
+status_gdm() {
+	local u session
+	u=$(login_user)
+	session=$(ini_get "/var/lib/AccountsService/users/$u" User Session)
+	echo "  user: $u"
+	echo "  session: ${session:-<none>} (/var/lib/AccountsService/users/$u)"
+}
+
+set_default_gdm() {
+	local u f
+	u=$(login_user)
+	f=/var/lib/AccountsService/users/$u
+	journal_init
+	if [ -f "$root$f" ]; then
+		ini_set "$f" User Session "$session_file"
+	else
+		create_file "$f" 644 "[User]
+Session=$session_file
+"
+	fi
+	echo "  $f: [User] Session=$session_file (user $u)"
+}
+
+status_lightdm() {
+	local f session
+	f=$(lightdm_autologin_conf)
+	if [ -n "$f" ]; then
+		session=$(ini_get "$f" 'Seat:*' autologin-session)
+		echo "  autologin: user $(ini_get "$f" 'Seat:*' autologin-user), session ${session:-<none>} ($f)"
+	fi
+	session=$(ini_get /var/lib/lightdm/.cache/lightdm-gtk-greeter-state greeter last-session)
+	echo "  last session: ${session:-<none>} (/var/lib/lightdm/.cache/lightdm-gtk-greeter-state)"
+}
+
+set_default_lightdm() {
+	local f greeter_state=/var/lib/lightdm/.cache/lightdm-gtk-greeter-state
+	f=$(lightdm_autologin_conf)
+	if [ -z "$f" ] && [ ! -f "$root$greeter_state" ]; then
+		echo "wayland-canvas-session: lightdm has no autologin and no remembered session"
+		echo "  pick wayland-canvas at the login screen, or start it from a TTY: wayland-canvas"
+		return 1
+	fi
+	journal_init
+	if [ -n "$f" ]; then
+		ini_set "$f" 'Seat:*' autologin-session "$session_name"
+		echo "  $f: [Seat:*] autologin-session=$session_name"
+	fi
+	if [ -f "$root$greeter_state" ]; then
+		ini_set "$greeter_state" greeter last-session "$session_name"
+	else
+		create_file "$greeter_state" 644 "[greeter]
+last-session=$session_name
+"
+	fi
+	echo "  $greeter_state: [greeter] last-session=$session_name"
+}
+
+status_greetd() {
+	local command
+	command=$(ini_get /etc/greetd/config.toml default_session command)
+	echo "  default session command: ${command:-<none>} (/etc/greetd/config.toml)"
+}
+
+set_default_greetd() {
+	local f=/etc/greetd/config.toml old new
+	old=$(ini_get "$f" default_session command)
+	if [ -z "$old" ]; then
+		echo "wayland-canvas-session: greetd has no command in [default_session]"
+		echo "  start wayland-canvas from a TTY: wayland-canvas"
+		return 1
+	fi
+	if [[ $old == *--cmd* ]]; then
+		# a greeter picks the session: point its --cmd at wayland-canvas
+		new="${old%%--cmd*}--cmd $session_name"
+	else
+		new=$session_name
+	fi
+	journal_init
+	greetd_set_command "$f" "$new"
+	echo "  $f: [default_session] command = \"$new\""
+}
+
+manual_start() {
+	echo "  start wayland-canvas from a TTY (log out, then on a spare VT: wayland-canvas)"
+	echo "  or pick it at the login screen when your display manager lists it"
+}
+
+# --- commands ----------------------------------------------------------------
+
+cmd_status() {
+	detect_dm
+	echo "display manager: $dm${dm_source:+ (via $dm_source)}"
+	case $dm in
+		sddm) status_sddm ;;
+		gdm) status_gdm ;;
+		lightdm) status_lightdm ;;
+		greetd) status_greetd ;;
+		none) manual_start ;;
+	esac
+	if [ -f "$journal" ]; then
+		echo "wayland-canvas default: set (undo with wayland-canvas-session restore)"
+	else
+		echo "wayland-canvas default: not set"
+	fi
+}
+
+cmd_set_default() {
+	if [ -f "$journal" ]; then
+		# start from the real previous state, not from our own changes
+		echo "wayland-canvas-session: a default is already recorded; restoring it first"
+		cmd_restore
+	fi
+	detect_dm
+	case $dm in
+		sddm) set_default_sddm ;;
+		gdm) set_default_gdm ;;
+		lightdm) set_default_lightdm ;;
+		greetd) set_default_greetd ;;
+		none)
+			echo "wayland-canvas-session: no supported display manager detected (sddm, gdm, lightdm, greetd)"
+			echo "  nothing was changed"
+			manual_start
+			return 1
+			;;
+	esac
+	if [ -f "$journal" ]; then
+		echo "wayland-canvas default: set (undo with wayland-canvas-session restore)"
+	fi
+}
+
+cmd_restore() {
+	if [ ! -f "$journal" ]; then
+		echo "wayland-canvas-session: nothing recorded, nothing to restore"
+		return 0
+	fi
+	local type path mode existed blob target
+	# files first: recreated ones need their directories, deleted ones may
+	# empty the directories the journal created
+	while IFS=$'\t' read -r type path mode existed blob; do
+		if [ "$type" != file ]; then
+			continue
+		fi
+		target=$root$path
+		if [ "$existed" = 1 ]; then
+			mkdir -p "${target%/*}"
+			cp "$state/$blob" "$target"
+			chmod "$mode" "$target"
+		else
+			rm -f "$target"
+		fi
+	done <"$journal"
+	# the directories set-default created, deepest first, only when empty
+	local dirs=() d
+	while IFS=$'\t' read -r type path; do
+		if [ "$type" = dir ]; then
+			dirs=("$path" "${dirs[@]}")
+		fi
+	done <"$journal"
+	rm -rf "$state"
+	for d in "${dirs[@]}"; do
+		rmdir "$root$d" 2>/dev/null || true
+	done
+	echo "wayland-canvas-session: default restored"
+	return 0
+}
+
+case $cmd in
+	status) cmd_status ;;
+	set-default) cmd_set_default ;;
+	restore) cmd_restore ;;
+esac

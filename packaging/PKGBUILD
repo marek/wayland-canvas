@@ -1,0 +1,63 @@
+# wayland-canvas, packaged from the local source tree by tools/package-arch.sh
+# (ninja -C build package-arch). The source tarball is generated next to this
+# file; its checksum is SKIP because it is a local artifact, not a download.
+pkgname=wayland-canvas
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Infinite-canvas Wayland compositor: virtual desktops are dashed frames on an unbounded zoomable canvas'
+arch=('x86_64')
+license=('Apache-2.0')
+options=('!debug')
+install=wayland-canvas.install
+depends=(
+	'cairo'
+	'glib2'
+	'libdisplay-info'
+	'libgcc'
+	'libglvnd'
+	'libinput'
+	'libstdc++'
+	'libxkbcommon'
+	'mesa'
+	'pango'
+	'pixman'
+	'seatd'
+	'systemd-libs'
+	'wayland'
+)
+makedepends=(
+	'clang'
+	'git'
+	'meson'
+	'ninja'
+	'wayland'
+	'wayland-protocols'
+	'libdrm'
+	'mesa'
+	'libinput'
+	'seatd'
+	'libxkbcommon'
+	'pixman'
+	'libdisplay-info'
+	'hwdata'
+	'cairo'
+	'pango'
+	'librsvg'
+	'glib2'
+	'systemd-libs'
+)
+source=("wayland-canvas-$pkgver.tar.xz")
+sha256sums=('SKIP')
+
+build() {
+	cd "$pkgname-$pkgver"
+	meson setup build --prefix=/usr --native-file toolchain/llvm.ini -Dbuildtype=release
+	ninja -C build
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	# wlroots is linked in statically; its own install artifacts stay out
+	DESTDIR="$pkgdir" meson install -C build --skip-subprojects=wlroots
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

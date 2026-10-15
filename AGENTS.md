@@ -133,8 +133,9 @@ the user.
 
 | Venue | Command | When |
 |---|---|---|
-| **Everything** | `tools/check.sh` | Before any commit of code. Builds and runs the `unit` and `scenarios` meson suites: the real compositor on the headless backend with real foot clients, screenshots with grim, keyboard and pointer driven through fake devices. |
+| **Everything** | `tools/check.sh` | Before any commit of code. Builds and runs the `unit`, `packaging` and `scenarios` meson suites: the default-session tool against fake roots, then the real compositor on the headless backend with real foot clients, screenshots with grim, keyboard and pointer driven through fake devices. |
 | **Unit** | `meson test -C build --suite unit` | The pure canvas math (direction choice, tiling, zoom paths) and desktop-entry parsing. |
+| **Packaging** | `meson test -C build --suite packaging` | The default-session tool against fake roots, one per supported display manager; `tools/check.sh` runs it with the unit suite |
 | **Scenarios** | `meson test -C build --suite scenarios` | Anything touching gestures, the canvas, the overview, window management or the launcher. Headless, with assertions; sources in `tests/scenarios/`. |
 | **On screen, nested** | `build/wayland-canvas -s foot` from a terminal inside another compositor | Anything drawn or felt. On-screen feel without leaving the session; the host may swallow gestures it binds itself, a lone Super tap passes through. |
 | **On screen, TTY** | `timeout 15m build/wayland-canvas -s foot` from a spare TTY | The real backend: DRM/KMS, real touchpad gestures, the 2x panel. A hung compositor holds the keyboard, so VT switching would not save you — the timeout is the safety net. |
