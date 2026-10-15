@@ -89,6 +89,15 @@ Wayland display namespace and GPU.
   sampled about every 10 ms for 10 s and must have spawned no process at
   all, because the reloads ride on change notifications, not on a poll.
 
+  The overview then takes that bar's world: Super+Tab opens it, and the
+  shell surfaces keep their input over it — a click on the bar's own
+  background stays in the overview, the network indicator opens its
+  panel inside it, a click outside the card closes the panel without
+  leaving, and the indicator's next click reopens it. The panel holds
+  the keyboard: typing reaches the Wi-Fi password field (seen as its
+  password dots), and the panel takes the first Escape while the
+  overview hears the second and closes.
+
   The same private world then proves the overview toolbar. A scratch
   user plugin sits in the scratch data dir from the start with one
   action button, one panel button and one menu button (its menu holds a
@@ -102,8 +111,9 @@ Wayland display namespace and GPU.
   the toolbar stays; the pointer's resting place shows the button's
   label beside the strip on hover. The panel button opens the scratch
   panel through the common trigger, left of the strip and level with the
-  button, and a click outside closes it. The menu button expands the
-  flyout beside the toolbar; choosing an entry runs its action with its
+  button, and Escape — the panel holds the keyboard — closes it. The
+  menu button expands the flyout beside the toolbar; choosing an entry
+  runs its action with its
   args and folds the flyout. Escape then leaves the overview — the
   toolbar never takes the keyboard — and the slide out unmaps it with
   no panel or flyout outliving it. Screenshots of the toolbar, the

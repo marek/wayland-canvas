@@ -14,6 +14,12 @@ struct TextTexture {
 TextTexture draw_text(wlr_renderer *renderer, const char *text, const char *font, uint32_t fg,
 	uint32_t bg, float scale, int pad_x, int pad_y);
 
+// An item card `width` x `height` logical px: `color` fill, a darker strip
+// along the top, `text` (nullptr or empty draws only the card) in dark ink
+// wrapped to the width and clipped to the card, rendered at `scale`.
+TextTexture draw_item_card(wlr_renderer *renderer, const char *text, uint32_t color,
+	int width, int height, float scale);
+
 // Uploads a CAIRO_FORMAT_ARGB32 image surface (premultiplied) as a texture.
 TexturePtr texture_from_cairo(wlr_renderer *renderer, cairo_surface_t *surface);
 

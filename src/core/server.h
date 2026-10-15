@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <vector>
 #include "input/bindings.h"
 #include "canvas/canvas.h"
+#include "canvas/items.h"
 #include "input/gesture.h"
 #include "input/input.h"
 #include "platform/ipc.h"
@@ -105,6 +105,7 @@ public:
 	Theme theme;
 	Decorations decorations;
 	Canvas canvas;
+	Items items;
 	Ipc ipc;
 
 private:

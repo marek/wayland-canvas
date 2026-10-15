@@ -2,10 +2,14 @@
 // compositor exports — every method, every error case (a malformed line
 // answered with the connection kept, unknown methods, bad params, a line
 // over 64 KiB answered then dropped, a slow subscriber dropped), each event
-// type triggered for real, and the `wayland-canvas msg` client with its exit
-// codes. Writes only under $CANVAS_TMP (meson passes the repo's tmp/);
-// meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
+// type triggered for real, canvas items (created, updated, removed,
+// dragged with a fake pointer, double-clicked, drawn in both views and
+// themes), and the `wayland-canvas msg` client with its exit codes. Writes
+// only under $CANVAS_TMP (meson passes the repo's tmp/); meson passes the
+// compositor binary as $WAYLAND_CANVAS_BIN.
 #include <cerrno>
+#include <cmath>
+#include <fcntl.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,12 +23,15 @@
 #include <string_view>
 #include <sys/poll.h>
 #include <sys/socket.h>
+#include <vector>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <linux/input-event-codes.h>
 #include <json-glib/json-glib.h>
+#include "canvas/items.h"
 #include "platform/output.h"
 #include "core/server.h"
 #include "core/theme.h"
@@ -39,11 +46,15 @@ uint32_t t = 90000;
 pid_t grim_pid = -1;
 pid_t raw_pid = -1;
 pid_t sub_pid = -1;
+pid_t item_sub_pid = -1;
 int raw_status = 0;
 std::string shot_dir;
 std::string socket_path;
 std::string events_path;
+std::string item_events_path; // the canvas-items subscriber's capture
 std::string output_name; // the headless output's name, for `output` params
+wlr_pointer ptr{};
+const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -130,6 +141,51 @@ int client_code(const char *name) {
 	return std::atoi(read_file(std::format("{}/{}.code", shot_dir, name)).c_str());
 }
 
+// ------------------------------------------------------ fake pointer
+
+// Pointer at output-local logical (x, y) on the single 1280x720 output.
+void move_to(double x, double y) {
+	t += 8;
+	wlr_pointer_motion_absolute_event ev = {
+		.pointer = &ptr, .time_msec = t, .x = x / 1280.0, .y = y / 720.0};
+	wl_signal_emit_mutable(&ptr.events.motion_absolute, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+void button(uint32_t code, bool pressed) {
+	t += 8;
+	wlr_pointer_button_event ev = {.pointer = &ptr, .time_msec = t, .button = code,
+		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+			: WL_POINTER_BUTTON_STATE_RELEASED};
+	wl_signal_emit_mutable(&ptr.events.button, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+void click(double x, double y) {
+	move_to(x, y);
+	button(BTN_LEFT, true);
+	button(BTN_LEFT, false);
+}
+
+void drag(double x0, double y0, double x1, double y1) {
+	move_to(x0, y0);
+	button(BTN_LEFT, true);
+	for (int i = 1; i <= 10; i++) {
+		move_to(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10);
+	}
+	button(BTN_LEFT, false);
+}
+
+// The foot window the scenario opened, whatever the canvas did around it.
+View *foot_window() {
+	for (View *v : server->views) {
+		if (v->mapped) {
+			return v;
+		}
+	}
+	return nullptr;
+}
+
 // ---------------------------------------------------------- raw clients
 
 // Connects to the control socket from a child process (the compositor runs
@@ -200,7 +256,10 @@ pid_t fork_raw(const std::string &to_send, bool half_close, const char *out) {
 	char buf[1024];
 	int idle = 0;
 	bool eof = false;
-	for (int elapsed = 0; elapsed < 10000 && !eof && idle < 2; elapsed += 400) {
+	// Read while data keeps arriving; two quiet polls of 400 ms end it, and
+	// EOF or a socket error breaks out. No read cap: a large state answer
+	// (hundreds of desktops plus the items) must still be drained whole.
+	while (!eof && idle < 2) {
 		pollfd pfd{.fd = fd, .events = POLLIN, .revents = 0};
 		if (poll(&pfd, 1, 400) == 0) {
 			idle++;
@@ -385,6 +444,188 @@ std::string state_mismatch(const std::string &text, std::string_view want_theme,
 	}
 	g_object_unref(parser);
 	return problem;
+}
+
+// ------------------------------------------------------ item checking
+
+// One item entry: from a `msg item.set` result or a state items-array slot.
+struct ItemEntry {
+	std::string id, color, text;
+	long long x = 0, y = 0, width = 0, height = 0;
+	bool placed = false; // x, y, width and height present and whole
+};
+
+// An integer member: nullopt when absent or not a whole number.
+std::optional<long long> member_int(JsonObject *object, const char *name) {
+	if (!json_object_has_member(object, name)) {
+		return std::nullopt;
+	}
+	JsonNode *node = json_object_get_member(object, name);
+	return json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_INT64
+		? std::optional{json_node_get_int(node)} : std::nullopt;
+}
+
+// A number member as a double: whole numbers and fractions alike.
+std::optional<double> member_number(JsonObject *object, const char *name) {
+	if (!json_object_has_member(object, name)) {
+		return std::nullopt;
+	}
+	JsonNode *node = json_object_get_member(object, name);
+	if (json_node_get_node_type(node) != JSON_NODE_VALUE) {
+		return std::nullopt;
+	}
+	GType type = json_node_get_value_type(node);
+	if (type == G_TYPE_INT64) {
+		return static_cast<double>(json_node_get_int(node));
+	}
+	return type == G_TYPE_DOUBLE ? std::optional{json_node_get_double(node)}
+		: std::nullopt;
+}
+
+// A string member; empty when absent or not a string.
+std::string member_string(JsonObject *object, const char *name) {
+	if (!json_object_has_member(object, name)) {
+		return {};
+	}
+	JsonNode *node = json_object_get_member(object, name);
+	return json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_STRING
+		? std::string{json_node_get_string(node)} : std::string{};
+}
+
+void fill_item(ItemEntry &entry, JsonObject *object) {
+	entry.id = member_string(object, "id");
+	entry.color = member_string(object, "color");
+	entry.text = member_string(object, "text");
+	std::optional<long long> x = member_int(object, "x");
+	std::optional<long long> y = member_int(object, "y");
+	std::optional<long long> width = member_int(object, "width");
+	std::optional<long long> height = member_int(object, "height");
+	entry.placed = x.has_value() && y.has_value() && width.has_value()
+		&& height.has_value();
+	if (entry.placed) {
+		entry.x = *x;
+		entry.y = *y;
+		entry.width = *width;
+		entry.height = *height;
+	}
+}
+
+// A `msg item.set` result parsed as one item entry.
+std::optional<ItemEntry> parse_item_result(const std::string &text) {
+	JsonParser *parser = json_parser_new();
+	std::optional<ItemEntry> out;
+	if (json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		JsonNode *root = json_parser_get_root(parser);
+		JsonObject *object = root != nullptr
+				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
+			? json_node_get_object(root) : nullptr;
+		if (object != nullptr) {
+			out = ItemEntry{};
+			fill_item(*out, object);
+		}
+	}
+	g_object_unref(parser);
+	return out;
+}
+
+// The entry with `want_id` in a `msg state` result's items array.
+std::optional<ItemEntry> parse_state_item(const std::string &text,
+		std::string_view want_id) {
+	JsonParser *parser = json_parser_new();
+	std::optional<ItemEntry> out;
+	if (json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		JsonNode *root = json_parser_get_root(parser);
+		JsonObject *object = root != nullptr
+				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
+			? json_node_get_object(root) : nullptr;
+		if (object != nullptr && json_object_has_member(object, "items")) {
+			JsonNode *items = json_object_get_member(object, "items");
+			if (json_node_get_node_type(items) == JSON_NODE_ARRAY) {
+				JsonArray *array = json_node_get_array(items);
+				for (guint i = 0; i < json_array_get_length(array); i++) {
+					JsonObject *element = json_array_get_object_element(array, i);
+					if (element == nullptr) {
+						continue;
+					}
+					ItemEntry entry;
+					fill_item(entry, element);
+					if (entry.id == want_id) {
+						out = entry;
+						break;
+					}
+				}
+			}
+		}
+	}
+	g_object_unref(parser);
+	return out;
+}
+
+// The last `kind` (item.moved / item.activated) event for `id` in the item
+// subscriber's capture: its place, and for an activation the output and the
+// box on it.
+struct ItemEventLine {
+	long long x = 0, y = 0; // item.moved
+	std::string output; // item.activated
+	double bx = 0, by = 0, bw = 0, bh = 0; // item.activated box
+};
+
+std::optional<ItemEventLine> item_event(std::string_view kind,
+		std::string_view id) {
+	std::string text = read_file(item_events_path);
+	std::optional<ItemEventLine> out;
+	// read_file() drops the final newline, so the newest event runs to the end
+	// of the text. A line still being written fails to parse; the next poll
+	// reads it whole.
+	std::size_t start = 0;
+	while (start < text.size()) {
+		std::size_t end = std::min(text.find('\n', start), text.size());
+		std::string line = text.substr(start, end - start);
+		start = end + 1;
+		JsonParser *parser = json_parser_new();
+		if (json_parser_load_from_data(parser, line.c_str(),
+				static_cast<gssize>(line.size()), nullptr)) {
+			JsonNode *root = json_parser_get_root(parser);
+			JsonObject *object = root != nullptr
+					&& json_node_get_node_type(root) == JSON_NODE_OBJECT
+				? json_node_get_object(root) : nullptr;
+			if (object != nullptr && member_string(object, "event") == kind
+					&& json_object_has_member(object, "params")) {
+				JsonNode *params_node = json_object_get_member(object, "params");
+				JsonObject *params = json_node_get_node_type(params_node) == JSON_NODE_OBJECT
+					? json_node_get_object(params_node) : nullptr;
+				if (params != nullptr && member_string(params, "id") == id) {
+					ItemEventLine event;
+					std::optional<long long> x = member_int(params, "x");
+					std::optional<long long> y = member_int(params, "y");
+					if (x.has_value() && y.has_value()) {
+						event.x = *x;
+						event.y = *y;
+					}
+					event.output = member_string(params, "output");
+					if (json_object_has_member(params, "box")) {
+						JsonNode *box_node = json_object_get_member(params, "box");
+						JsonObject *box =
+							json_node_get_node_type(box_node) == JSON_NODE_OBJECT
+							? json_node_get_object(box_node) : nullptr;
+						if (box != nullptr) {
+							event.bx = member_number(box, "x").value_or(-1);
+							event.by = member_number(box, "y").value_or(-1);
+							event.bw = member_number(box, "width").value_or(-1);
+							event.bh = member_number(box, "height").value_or(-1);
+						}
+					}
+					out = event; // the last one wins
+				}
+			}
+		}
+		g_object_unref(parser);
+	}
+	return out;
 }
 
 // Waits for a forked raw client (or any pid) to have exited.
@@ -667,6 +908,11 @@ int run_step() {
 		events_path = shot_dir + "/events.out";
 		sub_pid = fork();
 		if (sub_pid == 0) {
+			// Clear the compositor's blocked-signal mask so the later SIGINT
+			// can end this child.
+			sigset_t empty;
+			sigemptyset(&empty);
+			sigprocmask(SIG_SETMASK, &empty, nullptr);
 			FILE *f = std::fopen(events_path.c_str(), "w");
 			if (f == nullptr || dup2(fileno(f), 1) < 0) {
 				_exit(126);
@@ -780,13 +1026,15 @@ int run_step() {
 		}
 		return 300;
 	}
-	case 39: // the subscriber is interrupted, as the intent says
-		if (sub_pid > 0 && waitpid(sub_pid, &raw_status, WNOHANG) == 0
-				&& retries++ < 50) {
+	case 39: { // the subscriber is interrupted, as the intent says
+		bool exited = sub_pid > 0
+			&& waitpid(sub_pid, &raw_status, WNOHANG) == sub_pid;
+		if (!exited && retries++ < 50) {
 			return -100;
 		}
-		check(true, "`msg subscribe` runs until interrupted");
+		check(exited, "`msg subscribe` runs until interrupted");
 		return 200;
+	}
 	case 40: // a subscriber that stops reading is dropped, not waited for
 		raw_pid = fork_slow_subscriber("slow.ready", "slow.result");
 		return 300;
@@ -858,9 +1106,376 @@ int run_step() {
 				out));
 		return 200;
 	}
-	case 48: // the compositor's own exit path, through the socket
+	case 48: { // canvas items: a fake pointer, like the input scenario's
+		ptr = wlr_pointer{};
+		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
+		Output *output = server->outputs.front().get();
+		check(output != nullptr && output->width == 1280 && output->height == 720,
+			"one 1280x720 output, as the fake pointer's coordinates assume");
+		return 300;
+	}
+	case 49: // item.set creates: centred without x/y, placed with them
+		run_client("item.set",
+			R"({"id":"canvas.notes/a","color":"#ffcf5c","text":"Remember the milk","width":220,"height":220})",
+			"item-centre");
+		run_client("item.set",
+			R"({"id":"canvas.notes/b","color":"#7bd88f","text":"Green","width":220,"height":220,"x":260,"y":140})",
+			"item-xy");
+		return 300;
+	case 50: {
+		if ((!client_done("item-centre") || !client_done("item-xy"))
+				&& retries++ < 50) {
+			return -100;
+		}
+		Output *output = server->output_under_cursor();
+		Rect viewport = output->viewport();
+		int want_x = static_cast<int>(std::round(viewport.cx() - 110));
+		int want_y = static_cast<int>(std::round(viewport.cy() - 110));
+		std::optional<ItemEntry> centred = parse_item_result(client_out("item-centre"));
+		check(centred.has_value() && centred->placed && centred->id == "canvas.notes/a"
+				&& centred->x == want_x && centred->y == want_y
+				&& centred->width == 220 && centred->height == 220,
+			std::format("`msg item.set` without x/y centres on what the output shows ({})",
+				centred.has_value() ? client_out("item-centre") : "no result"));
+		check(client_code("item-centre") == 0, "`msg item.set` exits 0");
+		std::optional<ItemEntry> placed = parse_item_result(client_out("item-xy"));
+		check(placed.has_value() && placed->placed && placed->id == "canvas.notes/b"
+				&& placed->x == 260 && placed->y == 140,
+			std::format("`msg item.set` with x/y returns the given place ({})",
+				placed.has_value() ? client_out("item-xy") : "no result"));
+		return 200;
+	}
+	case 51: // an update keeps its place; bad params and unknown ids error
+		run_client("item.set",
+			R"({"id":"canvas.notes/a","color":"#ff9f0a","text":"Orange now","width":200,"height":240})",
+			"item-update");
+		run_client("item.set", R"({"color":"#ffcf5c","text":"x","width":10,"height":10})",
+			"item-no-id");
+		run_client("item.set",
+			R"({"id":"canvas.notes/a","color":"red","text":"x","width":10,"height":10})",
+			"item-bad-color");
+		run_client("item.set",
+			R"({"id":"canvas.notes/a","color":"#ffcf5c","text":"x","width":0,"height":10})",
+			"item-zero-width");
+		run_client("item.set",
+			R"({"id":"canvas.notes/a","color":"#ffcf5c","text":"x","width":10,"height":10,"x":"left"})",
+			"item-bad-x");
+		run_client("item.remove", R"({"id":"canvas.notes/zzz"})", "item-unknown");
+		return 300;
+	case 52: {
+		const char *names[] = {"item-update", "item-no-id", "item-bad-color",
+			"item-zero-width", "item-bad-x", "item-unknown"};
+		for (const char *name : names) {
+			if (!client_done(name) && retries++ < 50) {
+				return -100;
+			}
+		}
+		Output *output = server->output_under_cursor();
+		Rect viewport = output->viewport();
+		int want_x = static_cast<int>(std::round(viewport.cx() - 110));
+		int want_y = static_cast<int>(std::round(viewport.cy() - 110));
+		std::optional<ItemEntry> updated = parse_item_result(client_out("item-update"));
+		Item *a = server->items.find("canvas.notes/a");
+		check(updated.has_value() && updated->placed && a != nullptr
+				&& updated->x == want_x && updated->y == want_y
+				&& updated->width == 200 && updated->height == 240
+				&& a->x == want_x && a->y == want_y && a->color == 0xff9f0aff
+				&& a->text == "Orange now",
+			std::format("an `item.set` update keeps the item's place ({})",
+				updated.has_value() ? client_out("item-update") : "no result"));
+		check(client_code("item-no-id") == 1
+				&& client_err("item-no-id").find("id") != std::string::npos,
+			std::format("`msg item.set` without an id: exit 1 naming it ({})",
+				client_err("item-no-id")));
+		check(client_code("item-bad-color") == 1
+				&& client_err("item-bad-color").find("color") != std::string::npos,
+			std::format("a colour that is not #rrggbb: exit 1 naming it ({})",
+				client_err("item-bad-color")));
+		check(client_code("item-zero-width") == 1
+				&& client_err("item-zero-width").find("width") != std::string::npos,
+			std::format("a zero width: exit 1 naming it ({})",
+				client_err("item-zero-width")));
+		check(client_code("item-bad-x") == 1
+				&& client_err("item-bad-x").find("x") != std::string::npos,
+			std::format("an x that is not a number: exit 1 naming it ({})",
+				client_err("item-bad-x")));
+		check(client_code("item-unknown") == 1
+				&& client_err("item-unknown").find("canvas.notes/zzz") != std::string::npos,
+			std::format("`msg item.remove` of an unknown id: exit 1 naming it ({})",
+				client_err("item-unknown")));
+		return 200;
+	}
+	case 53: // the state lists the items
+		run_client("state", "", "item-state");
+		return 300;
+	case 54: {
+		if (!client_done("item-state") && retries++ < 50) {
+			return -100;
+		}
+		std::string state = client_out("item-state");
+		std::optional<ItemEntry> a = parse_state_item(state, "canvas.notes/a");
+		std::optional<ItemEntry> b = parse_state_item(state, "canvas.notes/b");
+		check(a.has_value() && a->placed && a->color == "#ff9f0a" && a->text == "Orange now"
+				&& a->width == 200 && a->height == 240,
+			std::format("the state lists the item as last set ({})",
+				a.has_value() ? "with its colour, text and size" : "missing"));
+		check(b.has_value() && b->placed && b->x == 260 && b->y == 140,
+			"the state lists the second item at its given place");
+		return 200;
+	}
+	case 55: // item.remove of a live id
+		run_client("item.remove", R"({"id":"canvas.notes/b"})", "item-remove");
+		return 300;
+	case 56: {
+		if (!client_done("item-remove") && retries++ < 50) {
+			return -100;
+		}
+		check(client_code("item-remove") == 0 && client_out("item-remove") == "true"
+				&& server->items.find("canvas.notes/b") == nullptr,
+			"`msg item.remove` removed the item and printed true");
+		return 200;
+	}
+	case 57: { // a clean canvas for the pictures, a subscriber for the item events
+		item_events_path = shot_dir + "/item-events.out";
+		item_sub_pid = fork();
+		if (item_sub_pid == 0) {
+			// The compositor blocks signals for its signalfd loop: without
+			// clearing the mask, a later SIGINT would stay pending forever.
+			sigset_t empty;
+			sigemptyset(&empty);
+			sigprocmask(SIG_SETMASK, &empty, nullptr);
+			int out = open(item_events_path.c_str(),
+				O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if (out < 0 || dup2(out, 1) < 0) {
+				_exit(126);
+			}
+			close(out);
+			execlp(std::getenv("WAYLAND_CANVAS_BIN"), "wayland-canvas", "msg",
+				"subscribe", static_cast<char *>(nullptr));
+			_exit(127);
+		}
+		// The flood desktops go: the pictures want a clean canvas.
+		std::vector<DesktopId> doomed;
+		for (const Desktop &d : server->canvas.desktops.all()) {
+			if (d.number() != 1) {
+				doomed.push_back(d.id());
+			}
+		}
+		for (DesktopId id : doomed) {
+			server->canvas.desktops.remove(id);
+		}
+		check(server->canvas.desktops.size() == 1,
+			"the flood desktops went, leaving the first");
+		View *view = foot_window();
+		check(view != nullptr, "the foot window is still there");
+	if (view != nullptr) {
+		Output *output = server->output_under_cursor();
+		Desktop *home = output->desktop_showing();
+		// The camera comes to rest at the desktop's scale, which may not
+		// be 1: the item tests below must hold at any resting zoom.
+		output->camera.animate_to(camera_for_box(view->frame_box(),
+			home != nullptr ? home->scale() : 1.0));
+	}
+		return 700; // the camera glide settles
+	}
+	case 58: { // the item over the window: it owns the pointer, the window does not
+		View *view = foot_window();
+		Output *output = server->output_under_cursor();
+		Item *a = server->items.find("canvas.notes/a");
+		// The subscriber proves itself before anything depends on it: a probe
+		// desktop appears and goes far away, and its event line must show up
+		// in the capture — only then do the drag and the double-click run.
+		if (read_file(item_events_path).find("\"event\":\"desktops\"")
+				== std::string::npos) {
+			if ((retries & 3) == 0) {
+				Desktop &probe =
+					server->canvas.desktops.create(wlr_box{12800, 12800, 1280, 720});
+				server->canvas.desktops.remove(probe.id());
+			}
+			if (retries++ < 150) {
+				return -200;
+			}
+		}
+		if ((view == nullptr || a == nullptr
+				|| output->camera.panning() || output->camera.zooming())
+				&& retries++ < 100) {
+			return -200;
+		}
+		wlr_box frame = view->frame_box();
+		wlr_box content = view->content_box();
+		server->items.set("canvas.notes/a", ItemUpdate{},
+			static_cast<int>(frame.x + frame.width / 2.0) - a->width / 2,
+			static_cast<int>(frame.y + frame.height / 2.0) - a->height / 2);
+		// A second card beside the window for the pictures, left of it and
+		// clear of the first card so the pointer tests keep hitting the first.
+		int c_x = frame.x - 240; // 220 wide with a 20 px gap
+		int c_y = static_cast<int>(frame.y + frame.height / 2.0) - 110;
+		Item *c = server->items.set("canvas.notes/c",
+			ItemUpdate{.color = 0xff7eb6ff,
+				.text = "Water the ferns by the window, and call mum back",
+				.width = 220, .height = 220},
+			c_x, c_y);
+		check(c != nullptr && c->x == c_x && c->y == c_y && c->width == 220,
+			"the second card is beside the window at its given place");
+		a = server->items.find("canvas.notes/a");
+		Rect a_box{static_cast<double>(a->x), static_cast<double>(a->y),
+			static_cast<double>(a->width), static_cast<double>(a->height)};
+		// Hover the window's surface beside the item: it takes pointer focus.
+		const double spots[3][2] = {{0.08, 0.08}, {0.92, 0.92}, {0.08, 0.92}};
+		bool window_focus = false;
+		for (const auto &spot : spots) {
+			double wx = content.x + content.width * spot[0];
+			double wy = content.y + content.height * spot[1];
+			if (a_box.contains(wx, wy)) {
+				continue;
+			}
+			Point local = output->canvas_to_local(wx, wy);
+			move_to(local.x, local.y);
+			if (server->seat->pointer_state.focused_surface != nullptr) {
+				window_focus = true;
+				break;
+			}
+		}
+		check(window_focus, "the window takes pointer focus beside the item");
+		// Then the item itself: no window keeps pointer focus under it.
+		Point centre = output->canvas_to_local(a_box.cx(), a_box.cy());
+		move_to(centre.x, centre.y);
+		check(server->seat->pointer_state.focused_surface == nullptr,
+			"hovering the item gives the window under it no pointer focus");
+		return 300;
+	}
+	case 59: { // a drag past the threshold moves the item, in the normal view
+		Output *output = server->output_under_cursor();
+		Item *a = server->items.find("canvas.notes/a");
+		int start_x = a->x, start_y = a->y;
+		Point centre = output->canvas_to_local(a->x + a->width / 2.0,
+			a->y + a->height / 2.0);
+		drag(centre.x, centre.y, centre.x + 150, centre.y + 80);
+		check(a->x == start_x + 150 && a->y == start_y + 80,
+			std::format("the drag moved the item by (150,80) -> ({},{})",
+				a->x - start_x, a->y - start_y));
+		check(!server->input.grab.active() && !server->input.grab.panning(*output),
+			"the drag ended with the release");
+		check(server->seat->pointer_state.focused_surface == nullptr,
+			"dragging the item never focused the window under it");
+		return 300;
+	}
+	case 60: { // the drag's release reported item.moved
+	std::optional<ItemEventLine> moved = item_event("item.moved", "canvas.notes/a");
+	Item *a = server->items.find("canvas.notes/a");
+	if ((!moved.has_value() || moved->x != a->x || moved->y != a->y)
+			&& retries++ < 50) {
+		return -100;
+	}
+	moved = item_event("item.moved", "canvas.notes/a");
+	check(moved.has_value() && moved->x == a->x && moved->y == a->y,
+		std::format("the drop fired item.moved with the new place ({},{})",
+			moved.has_value() ? moved->x : -999, moved.has_value() ? moved->y : -999));
+		return 300;
+	}
+	case 61: { // a double-click reports item.activated
+		Output *output = server->output_under_cursor();
+		Item *a = server->items.find("canvas.notes/a");
+		Point centre = output->canvas_to_local(a->x + a->width / 2.0,
+			a->y + a->height / 2.0);
+		wlr_surface *keyboard = server->seat->keyboard_state.focused_surface;
+		click(centre.x, centre.y);
+		click(centre.x, centre.y);
+		check(keyboard != nullptr
+				&& server->seat->keyboard_state.focused_surface == keyboard,
+			"clicking the item gave it no keyboard: the window kept it");
+		return 300;
+	}
+	case 62: { // the activation's box matches the item on screen
+		std::optional<ItemEventLine> activated =
+			item_event("item.activated", "canvas.notes/a");
+		Output *output = server->output_under_cursor();
+		Item *a = server->items.find("canvas.notes/a");
+		Point top_left = output->canvas_to_local(a->x, a->y);
+		double zoom = output->camera.drawn().zoom;
+		bool box_matches = activated.has_value() && activated->output == output_name
+			&& std::fabs(activated->bx - top_left.x) < 0.5
+			&& std::fabs(activated->by - top_left.y) < 0.5
+			&& std::fabs(activated->bw - a->width * zoom) < 0.5
+			&& std::fabs(activated->bh - a->height * zoom) < 0.5;
+		if (!box_matches && retries++ < 50) {
+			return -100;
+		}
+	check(box_matches,
+		std::format("the double-click fired item.activated with the item's box "
+			"on {} in output-local px ({})", output_name,
+			activated.has_value() ? std::format("{:.0f},{:.0f} {:.0f}x{:.0f}",
+				activated->bx, activated->by, activated->bw, activated->bh)
+				: "no event"));
+		return 200;
+	}
+	case 63: // the items on screen, normal view, dark
+		shot("item-normal-dark");
+		return 500;
+	case 64: // the overview, dark
+		run_client("overview.toggle", "", "item-overview-enter");
+		return 300;
+	case 65: {
+		Output *output = server->output_under_cursor();
+		if ((!client_done("item-overview-enter") || output == nullptr
+				|| !output->overview.active() || output->camera.zooming()
+				|| output->camera.panning()) && retries++ < 50) {
+			return -100;
+		}
+		return 600; // the settled overview re-renders the cards at its scale
+	}
+	case 66:
+		shot("item-overview-dark");
+		return 500;
+	case 67: // back to the normal view, and the light palette
+		run_client("overview.toggle", "", "item-overview-exit");
+		run_client("theme.set", R"({"mode":"light"})", "item-theme-light");
+		return 300;
+	case 68: {
+		Output *output = server->output_under_cursor();
+		if ((!client_done("item-overview-exit") || !client_done("item-theme-light")
+				|| output == nullptr || output->overview.active()
+				|| output->camera.zooming() || output->camera.panning()
+				|| server->theme.mode() != ThemeMode::light) && retries++ < 50) {
+			return -100;
+		}
+		return 600;
+	}
+	case 69:
+		shot("item-normal-light");
+		return 500;
+	case 70:
+		run_client("overview.toggle", "", "item-overview-light-enter");
+		return 300;
+	case 71: {
+		Output *output = server->output_under_cursor();
+		if ((!client_done("item-overview-light-enter") || output == nullptr
+				|| !output->overview.active() || output->camera.zooming()
+				|| output->camera.panning()) && retries++ < 50) {
+			return -100;
+		}
+		return 600;
+	}
+	case 72:
+		shot("item-overview-light");
+		return 500;
+	case 73: // leave the overview, stop the item subscriber
+		run_client("overview.toggle", "", "item-overview-light-exit");
+		if (item_sub_pid > 0) {
+			kill(item_sub_pid, SIGINT);
+		}
+		return 300;
+	case 74: {
+		bool exited = item_sub_pid > 0
+			&& waitpid(item_sub_pid, &raw_status, WNOHANG) == item_sub_pid;
+		if ((!exited || !client_done("item-overview-light-exit")) && retries++ < 50) {
+			return -100;
+		}
+		check(exited, "the item-events subscriber ended with the SIGINT");
 		run_client("quit", "", "quit");
 		return 300;
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		return -1; // `msg quit` already terminated the display
@@ -893,7 +1508,6 @@ int handle_timer() {
 } // namespace
 
 int main() {
-	wlr_log_init(WLR_ERROR, nullptr);
 	if (std::getenv("WAYLAND_CANVAS_BIN") == nullptr) {
 		std::fprintf(stderr, "ipc: $WAYLAND_CANVAS_BIN is not set (meson passes it)\n");
 		return 2;
@@ -916,6 +1530,7 @@ int main() {
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display); // `msg quit` ends it
 	wl_event_source_remove(timer);
+	wlr_pointer_finish(&ptr);
 	server.reset(); // releases the control socket
 	check(access(socket_path.c_str(), F_OK) != 0,
 		"the control socket was removed when the compositor exited");
