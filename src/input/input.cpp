@@ -10,6 +10,7 @@
 #include <span>
 #include <vector>
 #include <linux/input-event-codes.h>
+#include "canvas/items.h"
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -67,6 +68,7 @@ struct PointerHit {
 	wlr_surface *surface = nullptr; // client surface under the pointer
 	View *view = nullptr;            // view frame under the pointer (or null)
 	LayerSurface *layer = nullptr;   // layer surface's owner (or null)
+	Item *item = nullptr;            // canvas item under the pointer (or null)
 	double sx = 0, sy = 0;           // surface-local coordinates
 	DecoPart part = DecoPart::none;  // decoration part when surface == null
 	uint32_t edges = 0;              // resize edges for DecoPart::resize
@@ -90,6 +92,13 @@ PointerHit pointer_hit_test(Server &server, Output &output) {
 	}
 
 	Point p = output.local_to_canvas(ox, oy);
+
+	// Items sit above the windows, below the top and overlay layers, in
+	// every view: they win over whatever window is under them.
+	if (Item *item = server.items.at(p.x, p.y)) {
+		hit.item = item;
+		return hit;
+	}
 	std::optional<ViewHit> view_hit =
 		server.view_at(p.x, p.y, output.camera.drawn().zoom);
 	if (view_hit.has_value()) {
@@ -125,7 +134,8 @@ uint32_t quadrant_edges(View &view, double cx, double cy) {
 }
 
 // What an overview press landed on, following the render order: shelf
-// item, tab buttons, tab body, window, desktop interior, empty.
+// item, tab buttons, tab body, canvas item, window, desktop interior,
+// empty.
 PressTarget overview_press_target(Server &server, Output &output, double ox,
 		double oy, double cx, double cy, double zoom) {
 	Shelf shelf = overview_shelf_layout(output);
@@ -149,6 +159,11 @@ PressTarget overview_press_target(Server &server, Output &output, double ox,
 		if (box_contains(tab->tab, ox, oy)) {
 			return PressOnDesktop{.desktop = desktop.id()};
 		}
+	}
+
+	// Canvas items sit above windows, below the shelf and the tabs.
+	if (Item *item = server.items.at(cx, cy)) {
+		return PressOnItem{.item = item};
 	}
 
 	std::optional<ViewHit> hit = server.view_at(cx, cy, zoom);
@@ -451,7 +466,7 @@ void Input::rebase_cursor() {
 
 // ---- overview pointer interaction ----
 
-void Input::overview_press(Output &output, uint32_t button) {
+void Input::overview_press(Output &output, uint32_t time, uint32_t button) {
 	Camera cam = output.camera.drawn();
 	double ox = server_.cursor->x - output.lx;
 	double oy = server_.cursor->y - output.ly;
@@ -469,8 +484,26 @@ void Input::overview_press(Output &output, uint32_t button) {
 		return;
 	}
 
-	grab.begin_overview_press(output,
-		overview_press_target(server_, output, ox, oy, p.x, p.y, cam.zoom));
+	PressTarget target =
+		overview_press_target(server_, output, ox, oy, p.x, p.y, cam.zoom);
+	if (const auto *on_item = std::get_if<PressOnItem>(&target)) {
+		// A press on an item drags it (or activates it) like in the
+		// normal view.
+		item_press(time, *on_item->item, output);
+		return;
+	}
+	grab.begin_overview_press(output, target);
+}
+
+void Input::item_press(uint32_t time, Item &item, Output &output) {
+	if (last_item_id == item.id && time - last_item_click <= config::double_click_ms) {
+		last_item_id.clear(); // a third press starts a fresh pair
+		server_.ipc.emit_item_activated(item, output);
+		return;
+	}
+	last_item_click = time;
+	last_item_id = item.id;
+	grab.begin_item(item, output);
 }
 
 // ---- pointer buttons ----
@@ -496,12 +529,21 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 		return;
 	}
 	if (!output->interactive()) {
-		overview_press(*output, button);
+		overview_press(*output, time, button);
 		return;
 	}
 
 	bool super = seat_modifiers(server) & WLR_MODIFIER_LOGO;
 	PointerHit hit = pointer_hit_test(server, *output);
+
+	if (hit.item != nullptr) {
+		// Items take precedence over the windows under them; a press
+		// focuses no window and takes no keyboard.
+		if (button == BTN_LEFT) {
+			item_press(time, *hit.item, *output);
+		}
+		return;
+	}
 
 	if (hit.view != nullptr && super && button == BTN_LEFT) {
 		server.focus_view(hit.view);
