@@ -89,6 +89,7 @@ core_lib = static_library(
 		'src/desktop.cpp',
 		'src/draw.cpp',
 		'src/gesture.cpp',
+		'src/grab.cpp',
 		'src/icons.cpp',
 		'src/input.cpp',
 		'src/ipc.cpp',

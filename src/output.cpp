@@ -206,7 +206,7 @@ bool Output::is_panning() const {
 	if (server.gestures.panning(*this)) {
 		return true;
 	}
-	if (server.input.cursor_mode == CursorMode::pan && server.input.grab_output == this) {
+	if (server.input.grab.panning(*this)) {
 		return true;
 	}
 	return false;
@@ -381,9 +381,7 @@ void Output::handle_request_state(wlr_output_event_request_state *event) {
 void Output::handle_destroy() {
 	Server &server = this->server;
 
-	if (server.input.grab_output == this) {
-		server.input.cancel_grab();
-	}
+	server.input.grab.forget(*this);
 	server.gestures.output_gone(*this);
 	for (View *view : server.views) {
 		view->output_mask &= ~bit;

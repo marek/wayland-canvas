@@ -177,7 +177,7 @@ bool is_initialized(const View &view) {
 // window; anything else is a client trying its luck.
 bool grab_allowed(const Server &server, const View &view) {
 	return server.focused_view == &view
-		&& server.input.cursor_mode == CursorMode::passthrough
+		&& !server.input.grab.active()
 		&& server.seat->pointer_state.button_count > 0;
 }
 
@@ -647,12 +647,7 @@ void View::handle_map() {
 }
 
 void View::handle_unmap() {
-	if (server.input.grab_view == this) {
-		server.input.cancel_grab();
-	}
-	if (server.input.last_title_view == this) {
-		server.input.last_title_view = nullptr;
-	}
+	server.input.forget(*this);
 	mapped = false;
 	std::erase(server.views, this);
 	destroy_foreign();
@@ -710,9 +705,7 @@ void View::handle_commit() {
 }
 
 void View::handle_destroy() {
-	if (server.input.grab_view == this) {
-		server.input.cancel_grab();
-	}
+	server.input.forget(*this);
 	if (server.focused_view == this) {
 		server.focused_view = nullptr;
 	}
@@ -727,29 +720,20 @@ void View::handle_request_move() {
 	if (!grab_allowed(server, *this)) {
 		return;
 	}
-	server.input.cursor_mode = CursorMode::move;
-	server.input.grab_view = this;
-	server.input.grab_output = server.output_under_cursor();
-	server.input.grab_lx = server.cursor->x;
-	server.input.grab_ly = server.cursor->y;
-	server.input.grab_box = content_box();
+	Output *output = server.output_under_cursor();
+	if (output != nullptr) {
+		server.input.grab.begin_move(*this, *output);
+	}
 }
 
 void View::handle_request_resize(wlr_xdg_toplevel_resize_event *event) {
 	if (!grab_allowed(server, *this)) {
 		return;
 	}
-	server.input.cursor_mode = CursorMode::resize;
-	server.input.grab_view = this;
-	server.input.grab_output = server.output_under_cursor();
-	server.input.grab_lx = server.cursor->x;
-	server.input.grab_ly = server.cursor->y;
-	server.input.grab_box = content_box();
-	server.input.grab_edges = event->edges;
-	resize_edges = event->edges;
-	resize_end_serial = 0;
-	resize_start = content_box();
-	wlr_xdg_toplevel_set_resizing(wlr, true);
+	Output *output = server.output_under_cursor();
+	if (output != nullptr) {
+		server.input.grab.begin_resize(*this, *output, event->edges);
+	}
 }
 
 void View::handle_request_maximize() {

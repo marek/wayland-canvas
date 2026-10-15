@@ -371,7 +371,7 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 			if (std::fabs(offset) > config::abandon_distance) {
 				color = config::color_abandon;
 			}
-		} else if (server.input.drop_desktop == d.id()) {
+		} else if (server.input.grab.drop_target() == d.id()) {
 			draw_canvas_rect(ctx, frame.x, frame.y, frame.width, frame.height,
 				color_rgba(config::color_combine, 0.15f));
 			color = config::color_combine;

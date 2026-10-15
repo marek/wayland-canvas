@@ -5,34 +5,12 @@
 #include <memory>
 #include <optional>
 #include <vector>
-#include "decoration.h"
-#include "desktop.h"
-#include "geometry.h"
+#include "grab.h"
 #include "util.h"
 
 class Output;
 class Server;
 class View;
-
-enum class CursorMode {
-	passthrough,
-	move, // dragging a window
-	resize,
-	pan, // dragging empty canvas
-	deco_button, // title bar button pressed, acts on release
-	overview_press, // overview press, not yet a drag
-	desktop_drag, // overview: moving a desktop frame
-};
-
-// What an overview press landed on.
-enum class OverviewHit {
-	empty,
-	view,
-	desktop,
-	tab_tile,
-	tab_abandon,
-	shelf,
-};
 
 struct CanvasPos {
 	Output *output = nullptr;
@@ -59,7 +37,8 @@ private:
 	Listener modifiers_, key_, destroy_;
 };
 
-// Seat, cursor and keyboards: pointer focus, compositor grabs, keybindings, drag and drop.
+// Seat, cursor and keyboards: pointer focus, keybindings, drag and drop.
+// The compositor-owned pointer interaction in progress is `grab`.
 class Input {
 public:
 	explicit Input(Server &server);
@@ -74,25 +53,15 @@ public:
 	void rebase_cursor();
 	std::optional<CanvasPos> cursor_canvas_pos() const;
 	void set_cursor_image(const char *name);
-	void cancel_grab();
+	// A view was unmapped or destroyed: drop what referred to it.
+	void forget(const View &view);
 
-	// Pointer grab state.
-	CursorMode cursor_mode = CursorMode::passthrough;
-	View *grab_view = nullptr;
-	std::optional<DesktopId> grab_desktop;
-	Output *grab_output = nullptr;
-	OverviewHit grab_hit = OverviewHit::empty;
-	double grab_lx = 0, grab_ly = 0; // layout coords where the grab started
-	double grab_cx = 0, grab_cy = 0; // canvas coords where the grab started
-	wlr_box grab_box{}; // view content box / desktop box at grab start
-	Camera grab_cam;
-	uint32_t grab_edges = 0;
-	DecoPart grab_part = DecoPart::none;
-	bool grab_moved = false;
-	std::optional<DesktopId> drop_desktop; // combine target under a dragged frame
+	// Title double-click state: the last click and its view.
 	uint32_t last_title_click = 0;
 	View *last_title_view = nullptr;
 	const char *cursor_image = nullptr;
+
+	PointerGrab grab;
 
 	std::vector<std::unique_ptr<Keyboard>> keyboards;
 
@@ -110,9 +79,6 @@ private:
 	// Logo key pressed alone and nothing else happened yet: releasing it opens
 	// the launcher. Any other key, button, scroll or gesture cancels the tap.
 	bool super_tap_ = false;
-	// Maximized-window drag: where the cursor sat on the title bar when the
-	// drag started, so the restore can put it back at the same spot.
-	double move_rel_x_ = 0, move_tb_off_ = 0;
 
 	// Backend input devices.
 	void handle_new_input(wlr_input_device *device);
@@ -124,31 +90,13 @@ private:
 	// Key events.
 	void process_key(Keyboard &keyboard, wlr_keyboard_key_event *event);
 
-	// Compositor grabs.
-	void begin_move(View &view, Output &output);
-	void begin_resize(View &view, Output &output, uint32_t edges);
-	void begin_pan(Output &output);
-	void begin_deco_button(View &view, Output &output, DecoPart part);
-	void process_move_grab();
-	void process_resize_grab();
-	void process_pan_grab();
-	void process_deco_button_grab();
-	void process_desktop_drag_grab();
-	void process_overview_press_grab();
-	void process_grab_motion();
+	// Pointer motion and buttons.
 	void process_cursor_motion(uint32_t time);
-
-	// Overview pointer interaction.
-	void record_overview_hit(Output &output, double ox, double oy,
-		double cx, double cy, double zoom);
-	void overview_click();
-	void overview_press(Output &output, uint32_t button);
-
-	// Pointer buttons.
 	void forward_press(uint32_t time, uint32_t button);
 	void cursor_button_press(uint32_t time, uint32_t button);
 	void cursor_button_release(uint32_t time, uint32_t button);
-	void release_deco_button();
+	// A press while the output is in the overview.
+	void overview_press(Output &output, uint32_t button);
 
 	// Cursor events.
 	void handle_cursor_motion(wlr_pointer_motion_event *event);

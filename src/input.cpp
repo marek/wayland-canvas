@@ -1,6 +1,6 @@
-// input.cpp: seats, devices, pointer/keyboard handling, compositor grabs
-// and key bindings. Gesture recognition lives in gesture.cpp; the actions
-// it and this file trigger live in canvas.cpp/view.cpp.
+// input.cpp: seats, devices, pointer/keyboard handling and key bindings.
+// Gesture recognition lives in gesture.cpp, pointer grabs in grab.cpp; the
+// actions they trigger live in canvas.cpp/view.cpp.
 
 #include <array>
 #include <cmath>
@@ -500,22 +500,42 @@ uint32_t quadrant_edges(View &view, double cx, double cy) {
 	return edges;
 }
 
-// Target the desktop a view belongs to, or a screen-sized free spot
-// centred on the view, and leave the overview onto it.
-void overview_target_view(Server &server, Output &output, View &view) {
-	Desktop *desktop = server.canvas.desktop_of(view);
-	if (desktop != nullptr) {
-		output.overview.set_target(desktop->frame(), desktop->id(), true);
-	} else {
-		wlr_box frame = view.frame_box();
-		wlr_box box{
-			.x = frame.x + frame.width / 2 - output.width / 2,
-			.y = frame.y + frame.height / 2 - output.height / 2,
-			.width = output.width,
-			.height = output.height,
-		};
-		output.overview.set_target(box, std::nullopt, true);
+// What an overview press landed on, following the render order: shelf
+// item, tab buttons, tab body, window, desktop interior, empty.
+PressTarget overview_press_target(Server &server, Output &output, double ox,
+		double oy, double cx, double cy, double zoom) {
+	Shelf shelf = overview_shelf_layout(output);
+	for (const ShelfItem &item : shelf) {
+		if (box_contains(item.box, ox, oy)) {
+			return PressOnShelf{.view = item.view};
+		}
 	}
+
+	for (const Desktop &desktop : server.canvas.desktops.all()) {
+		std::optional<TabLayout> tab = server.painter.overview_tab_layout(output, desktop);
+		if (!tab.has_value()) {
+			continue;
+		}
+		if (box_contains(tab->tile_button, ox, oy)) {
+			return PressOnTile{.desktop = desktop.id()};
+		}
+		if (box_contains(tab->abandon_button, ox, oy)) {
+			return PressOnAbandon{.desktop = desktop.id()};
+		}
+		if (box_contains(tab->tab, ox, oy)) {
+			return PressOnDesktop{.desktop = desktop.id()};
+		}
+	}
+
+	std::optional<ViewHit> hit = server.view_at(cx, cy, zoom);
+	if (hit.has_value()) {
+		return PressOnView{.view = hit->view};
+	}
+
+	if (Desktop *desktop = server.canvas.desktops.at(cx, cy)) {
+		return PressOnDesktop{.desktop = desktop->id()};
+	}
+	return PressOnEmpty{};
 }
 
 } // namespace
@@ -570,7 +590,8 @@ void Keyboard::handle_destroy() {
 	destroy_owned(keyboards, this);
 }
 
-Input::Input(Server &server) : server_(server) {
+Input::Input(Server &server)
+	: grab(server), server_(server) {
 }
 
 Input::~Input() = default;
@@ -720,320 +741,19 @@ std::optional<CanvasPos> Input::cursor_canvas_pos() const {
 	return CanvasPos{.output = output, .cx = p.x, .cy = p.y};
 }
 
-// ---- compositor grabs ----
-
-void Input::begin_move(View &view, Output &output) {
-	cursor_mode = CursorMode::move;
-	grab_view = &view;
-	grab_output = &output;
-	grab_cam = output.camera.drawn();
-	grab_box = view.content_box();
-	grab_lx = server_.cursor->x;
-	grab_ly = server_.cursor->y;
-	Point p = output.local_to_canvas(server_.cursor->x - output.lx,
-		server_.cursor->y - output.ly);
-	grab_cx = p.x;
-	grab_cy = p.y;
-	grab_moved = false;
-	if (view.maximized) {
-		// Remember where on the title bar the grab started so that the
-		// drag-restore below can keep the cursor at the same spot.
-		wlr_box frame = view.frame_box();
-		move_rel_x_ = frame.width > 0
-			? clampd((grab_cx - frame.x) / frame.width, 0.0, 1.0) : 0.5;
-		move_tb_off_ = clampd(grab_cy - frame.y, 0.0,
-			double(view.deco.titlebar()));
+void Input::forget(const View &view) {
+	if (last_title_view == &view) {
+		last_title_view = nullptr;
 	}
-}
-
-void Input::begin_resize(View &view, Output &output, uint32_t edges) {
-	if (edges == 0) {
-		edges = WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT;
-	}
-	cursor_mode = CursorMode::resize;
-	grab_view = &view;
-	grab_output = &output;
-	grab_cam = output.camera.drawn();
-	grab_box = view.content_box();
-	grab_lx = server_.cursor->x;
-	grab_ly = server_.cursor->y;
-	grab_edges = edges;
-	grab_moved = false;
-	// view.cpp anchors the moving (left/top) edges on commit while resizing.
-	view.resize_edges = edges;
-	view.resize_end_serial = 0;
-	view.resize_start = grab_box;
-	if (view.wlr != nullptr) {
-		wlr_xdg_toplevel_set_resizing(view.wlr, true);
-	}
-	set_cursor_image(wlr_xcursor_get_resize_name(static_cast<wlr_edges>(edges)));
-}
-
-void Input::begin_pan(Output &output) {
-	cursor_mode = CursorMode::pan;
-	grab_output = &output;
-	grab_cam = output.camera.drawn();
-	grab_lx = server_.cursor->x;
-	grab_ly = server_.cursor->y;
-	grab_moved = false;
-}
-
-void Input::begin_deco_button(View &view, Output &output, DecoPart part) {
-	cursor_mode = CursorMode::deco_button;
-	grab_view = &view;
-	grab_output = &output;
-	grab_part = part;
-	grab_lx = server_.cursor->x;
-	grab_ly = server_.cursor->y;
-	grab_moved = false;
-	view.deco.pressed = part;
-	view.damage();
-}
-
-void Input::process_move_grab() {
-	View *view = grab_view;
-	Output *output = grab_output;
-	if (view == nullptr || output == nullptr) {
-		cancel_grab();
-		return;
-	}
-	double dist = std::hypot(server_.cursor->x - grab_lx,
-		server_.cursor->y - grab_ly);
-	if (view->maximized) {
-		if (dist < config::drag_threshold) {
-			return;
-		}
-		// Restore under the cursor: same relative x across the title bar,
-		// same height into it.
-		view->set_maximized(false);
-		wlr_box restored = view->saved;
-		if (restored.width <= 0 || restored.height <= 0) {
-			restored = view->content_box();
-		}
-		int border = view->deco.border();
-		int title = view->deco.titlebar();
-		Point p = output->local_to_canvas(server_.cursor->x - output->lx,
-			server_.cursor->y - output->ly);
-		double frame_w = restored.width + 2.0 * border;
-		int frame_left = static_cast<int>(std::round(p.x - move_rel_x_ * frame_w));
-		int frame_top = static_cast<int>(std::round(p.y - move_tb_off_));
-		view->move(frame_left + border, frame_top + title + border);
-		grab_box.x = view->x;
-		grab_box.y = view->y;
-		grab_box.width = restored.width;
-		grab_box.height = restored.height;
-		grab_lx = server_.cursor->x;
-		grab_ly = server_.cursor->y;
-		grab_moved = true;
-		return;
-	}
-	if (dist >= config::drag_threshold) {
-		grab_moved = true;
-	}
-	double dx = (server_.cursor->x - grab_lx) / grab_cam.zoom;
-	double dy = (server_.cursor->y - grab_ly) / grab_cam.zoom;
-	view->move(static_cast<int>(std::round(grab_box.x + dx)),
-		static_cast<int>(std::round(grab_box.y + dy)));
-}
-
-void Input::process_resize_grab() {
-	View *view = grab_view;
-	Output *output = grab_output;
-	if (view == nullptr || view->wlr == nullptr || output == nullptr) {
-		return;
-	}
-	double dx = (server_.cursor->x - grab_lx) / grab_cam.zoom;
-	double dy = (server_.cursor->y - grab_ly) / grab_cam.zoom;
-	double x1 = grab_box.x;
-	double y1 = grab_box.y;
-	double x2 = x1 + grab_box.width;
-	double y2 = y1 + grab_box.height;
-	if (grab_edges & WLR_EDGE_LEFT) {
-		x1 += dx;
-	}
-	if (grab_edges & WLR_EDGE_RIGHT) {
-		x2 += dx;
-	}
-	if (grab_edges & WLR_EDGE_TOP) {
-		y1 += dy;
-	}
-	if (grab_edges & WLR_EDGE_BOTTOM) {
-		y2 += dy;
-	}
-
-	wlr_xdg_toplevel *toplevel = view->wlr;
-	double min_w = 100, min_h = 60;
-	if (toplevel->current.min_width > min_w) {
-		min_w = toplevel->current.min_width;
-	}
-	if (toplevel->current.min_height > min_h) {
-		min_h = toplevel->current.min_height;
-	}
-	double max_w = toplevel->current.max_width > 0
-		? toplevel->current.max_width : 1e9;
-	double max_h = toplevel->current.max_height > 0
-		? toplevel->current.max_height : 1e9;
-	double w = clampd(x2 - x1, min_w, max_w);
-	double h = clampd(y2 - y1, min_h, max_h);
-	wlr_xdg_toplevel_set_size(toplevel, static_cast<int32_t>(std::round(w)),
-		static_cast<int32_t>(std::round(h)));
-}
-
-void Input::process_pan_grab() {
-	Output *output = grab_output;
-	if (output == nullptr) {
-		return;
-	}
-	// Content follows the cursor.
-	Camera cam = grab_cam;
-	cam.cx -= (server_.cursor->x - grab_lx) / cam.zoom;
-	cam.cy -= (server_.cursor->y - grab_ly) / cam.zoom;
-	output->camera.jump(cam);
-}
-
-void Input::process_deco_button_grab() {
-	View *view = grab_view;
-	if (view == nullptr) {
-		return;
-	}
-	std::optional<CanvasPos> pos = cursor_canvas_pos();
-	if (!pos.has_value()) {
-		return;
-	}
-	DecoHit hit = view->deco.hit(pos->cx, pos->cy, pos->output->camera.drawn().zoom);
-	DecoPart pressed = hit.part == grab_part ? grab_part : DecoPart::none;
-	if (view->deco.pressed != pressed) {
-		view->deco.pressed = pressed;
-		view->damage();
-	}
-}
-
-void Input::process_desktop_drag_grab() {
-	Desktop *desktop = server_.canvas.desktops.find(grab_desktop);
-	if (desktop == nullptr) {
-		// Its desktop was removed mid-drag; nothing follows the cursor.
-		return;
-	}
-	double dx = (server_.cursor->x - grab_lx) / grab_cam.zoom;
-	double dy = (server_.cursor->y - grab_ly) / grab_cam.zoom;
-	server_.canvas.desktops.move(desktop->id(),
-		static_cast<int>(std::round(grab_box.x + dx)),
-		static_cast<int>(std::round(grab_box.y + dy)));
-
-	// Combine when another desktop is overlapped by at least half of the
-	// dragged frame; largest overlap wins.
-	Rect box = desktop->rect();
-	double area = desktop->frame().width * double(desktop->frame().height);
-	std::optional<DesktopId> drop;
-	double best = 0;
-	for (const Desktop &d : server_.canvas.desktops.all()) {
-		if (d.id() == desktop->id()) {
-			continue;
-		}
-		double overlap = box.overlap_area(d.rect());
-		if (overlap >= config::combine_overlap * area && overlap > best) {
-			best = overlap;
-			drop = d.id();
-		}
-	}
-	drop_desktop = drop;
-}
-
-void Input::process_overview_press_grab() {
-	double dist = std::hypot(server_.cursor->x - grab_lx,
-		server_.cursor->y - grab_ly);
-	if (dist < config::drag_threshold) {
-		return;
-	}
-	grab_moved = true;
-	switch (grab_hit) {
-	case OverviewHit::desktop:
-		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			cursor_mode = CursorMode::desktop_drag;
-			grab_box = desktop->frame();
-			grab_lx = server_.cursor->x;
-			grab_ly = server_.cursor->y;
-			drop_desktop = std::nullopt;
-		}
-		break;
-	case OverviewHit::view:
-		if (grab_view != nullptr && grab_output != nullptr) {
-			begin_move(*grab_view, *grab_output);
-		}
-		break;
-	case OverviewHit::empty:
-		if (grab_output != nullptr) {
-			begin_pan(*grab_output);
-		}
-		break;
-	default:
-		// Tab buttons and shelf items stay clicks.
-		break;
-	}
-}
-
-void Input::process_grab_motion() {
-	// Grabs begun outside input.cpp (xdg request_move/request_resize from CSD
-	// clients) fill the grab fields but not grab_cam; capture it on the
-	// first motion. cancel_grab zeroes it, so it is never stale.
-	if (grab_output != nullptr && grab_cam.zoom <= 0) {
-		grab_cam = grab_output->camera.drawn();
-	}
-	switch (cursor_mode) {
-	case CursorMode::move:
-		process_move_grab();
-		break;
-	case CursorMode::resize:
-		process_resize_grab();
-		break;
-	case CursorMode::pan:
-		process_pan_grab();
-		break;
-	case CursorMode::deco_button:
-		process_deco_button_grab();
-		break;
-	case CursorMode::overview_press:
-		process_overview_press_grab();
-		break;
-	case CursorMode::desktop_drag:
-		process_desktop_drag_grab();
-		break;
-	default:
-		break;
-	}
-}
-
-void Input::cancel_grab() {
-	if (cursor_mode == CursorMode::passthrough) {
-		return;
-	}
-	View *view = grab_view;
-	if (view != nullptr) {
-		view->deco.pressed = DecoPart::none;
-		if (view->resize_edges != 0 && view->resize_end_serial == 0) {
-			// view.cpp keeps anchoring until the client acks this configure.
-			view->resize_end_serial =
-				wlr_xdg_toplevel_set_resizing(view->wlr, false);
-		}
-		view->damage();
-	}
-	cursor_mode = CursorMode::passthrough;
-	grab_view = nullptr;
-	grab_desktop = std::nullopt;
-	drop_desktop = std::nullopt;
-	grab_output = nullptr;
-	grab_moved = false;
-	grab_cam.zoom = 0; // invalidated; owner re-fills on next grab
-	server_.damage_all();
-	set_cursor_image("default");
+	grab.forget(view);
 }
 
 // ---- pointer motion ----
 
 void Input::process_cursor_motion(uint32_t time) {
 	Server &server = server_;
-	if (cursor_mode != CursorMode::passthrough) {
-		process_grab_motion();
+	if (grab.active()) {
+		grab.motion();
 		return;
 	}
 
@@ -1091,116 +811,12 @@ void Input::process_cursor_motion(uint32_t time) {
 }
 
 void Input::rebase_cursor() {
-	if (cursor_mode != CursorMode::passthrough) {
-		return;
+	if (!grab.active()) {
+		process_cursor_motion(static_cast<uint32_t>(now_ms()));
 	}
-	process_cursor_motion(static_cast<uint32_t>(now_ms()));
 }
 
 // ---- overview pointer interaction ----
-
-// Records what an overview press landed on, following the render order:
-// shelf item, tab buttons, tab body, window, desktop interior, empty.
-void Input::record_overview_hit(Output &output, double ox, double oy,
-		double cx, double cy, double zoom) {
-	Shelf shelf = overview_shelf_layout(output);
-	for (const ShelfItem &item : shelf) {
-		if (box_contains(item.box, ox, oy)) {
-			grab_hit = OverviewHit::shelf;
-			grab_view = item.view;
-			return;
-		}
-	}
-
-	for (const Desktop &desktop : server_.canvas.desktops.all()) {
-		std::optional<TabLayout> tab = server_.painter.overview_tab_layout(output, desktop);
-		if (!tab.has_value()) {
-			continue;
-		}
-		if (box_contains(tab->tile_button, ox, oy)) {
-			grab_hit = OverviewHit::tab_tile;
-			grab_desktop = desktop.id();
-			return;
-		}
-		if (box_contains(tab->abandon_button, ox, oy)) {
-			grab_hit = OverviewHit::tab_abandon;
-			grab_desktop = desktop.id();
-			return;
-		}
-		if (box_contains(tab->tab, ox, oy)) {
-			grab_hit = OverviewHit::desktop;
-			grab_desktop = desktop.id();
-			return;
-		}
-	}
-
-	std::optional<ViewHit> hit = server_.view_at(cx, cy, zoom);
-	if (hit.has_value()) {
-		grab_hit = OverviewHit::view;
-		grab_view = hit->view;
-		return;
-	}
-
-	if (Desktop *desktop = server_.canvas.desktops.at(cx, cy)) {
-		grab_hit = OverviewHit::desktop;
-		grab_desktop = desktop->id();
-		return;
-	}
-	grab_hit = OverviewHit::empty;
-}
-
-void Input::overview_click() {
-	Output *output = grab_output;
-	if (output == nullptr) {
-		return;
-	}
-	View *view = grab_view;
-	switch (grab_hit) {
-	case OverviewHit::shelf:
-		if (view == nullptr) {
-			break;
-		}
-		view->set_minimized(false);
-		server_.focus_view(view);
-		overview_target_view(server_, *output, *view);
-		output->overview.exit();
-		break;
-	case OverviewHit::tab_tile:
-		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			output->overview.tile(desktop->id());
-		}
-		break;
-	case OverviewHit::tab_abandon:
-		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			output->overview.abandon(desktop->id());
-		}
-		break;
-	case OverviewHit::desktop:
-		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			output->overview.set_target(desktop->frame(), desktop->id(), true);
-			output->overview.exit();
-		}
-		break;
-	case OverviewHit::view:
-		if (view == nullptr) {
-			break;
-		}
-		server_.focus_view(view);
-		overview_target_view(server_, *output, *view);
-		output->overview.exit();
-		break;
-	case OverviewHit::empty: {
-		std::optional<CanvasPos> pos = cursor_canvas_pos();
-		if (pos.has_value()) {
-			output->overview.target_point(pos->cx, pos->cy);
-			output->overview.exit();
-		}
-		break;
-	}
-	default:
-		break;
-	}
-}
 
 void Input::overview_press(Output &output, uint32_t button) {
 	Camera cam = output.camera.drawn();
@@ -1220,17 +836,8 @@ void Input::overview_press(Output &output, uint32_t button) {
 		return;
 	}
 
-	cursor_mode = CursorMode::overview_press;
-	grab_output = &output;
-	grab_cam = cam;
-	grab_lx = server_.cursor->x;
-	grab_ly = server_.cursor->y;
-	grab_cx = p.x;
-	grab_cy = p.y;
-	grab_view = nullptr;
-	grab_desktop = std::nullopt;
-	grab_moved = false;
-	record_overview_hit(output, ox, oy, p.x, p.y, cam.zoom);
+	grab.begin_overview_press(output,
+		overview_press_target(server_, output, ox, oy, p.x, p.y, cam.zoom));
 }
 
 // ---- pointer buttons ----
@@ -1244,7 +851,7 @@ void Input::forward_press(uint32_t time, uint32_t button) {
 void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	Server &server = server_;
 	super_tap_ = false;
-	if (cursor_mode != CursorMode::passthrough) {
+	if (grab.active()) {
 		return; // extra buttons during a compositor grab are swallowed
 	}
 	Output *output = server.output_at(server.cursor->x, server.cursor->y);
@@ -1265,14 +872,14 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 
 	if (hit.view != nullptr && super && button == BTN_LEFT) {
 		server.focus_view(hit.view);
-		begin_move(*hit.view, *output);
+		grab.begin_move(*hit.view, *output);
 		return;
 	}
 	if (hit.view != nullptr && super && button == BTN_RIGHT) {
 		server.focus_view(hit.view);
 		Point p = output->local_to_canvas(server.cursor->x - output->lx,
 			server.cursor->y - output->ly);
-		begin_resize(*hit.view, *output, quadrant_edges(*hit.view, p.x, p.y));
+		grab.begin_resize(*hit.view, *output, quadrant_edges(*hit.view, p.x, p.y));
 		return;
 	}
 
@@ -1301,7 +908,7 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 				} else {
 					last_title_click = time;
 					last_title_view = hit.view;
-					begin_move(*hit.view, *output);
+					grab.begin_move(*hit.view, *output);
 				}
 			}
 			return;
@@ -1309,12 +916,12 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 		case DecoPart::maximize:
 		case DecoPart::close:
 			if (button == BTN_LEFT) {
-				begin_deco_button(*hit.view, *output, hit.part);
+				grab.begin_title_button(*hit.view, *output, hit.part);
 			}
 			return;
 		case DecoPart::resize:
 			if (button == BTN_LEFT || button == BTN_RIGHT) {
-				begin_resize(*hit.view, *output, hit.edges);
+				grab.begin_resize(*hit.view, *output, hit.edges);
 			}
 			return;
 		default:
@@ -1323,43 +930,12 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	}
 
 	if (button == BTN_LEFT) {
-		begin_pan(*output);
-	}
-}
-
-void Input::release_deco_button() {
-	View *view = grab_view;
-	if (view == nullptr) {
-		return;
-	}
-	std::optional<CanvasPos> pos = cursor_canvas_pos();
-	if (pos.has_value()) {
-		DecoHit hit = view->deco.hit(pos->cx, pos->cy,
-			pos->output->camera.drawn().zoom);
-		if (hit.part == grab_part) {
-			switch (hit.part) {
-			case DecoPart::minimize:
-				view->set_minimized(true);
-				break;
-			case DecoPart::maximize:
-				view->set_maximized(!view->maximized);
-				break;
-			case DecoPart::close:
-				view->close();
-				break;
-			default:
-				break;
-			}
-		}
-	}
-	if (view->deco.pressed != DecoPart::none) {
-		view->deco.pressed = DecoPart::none;
-		view->damage();
+		grab.begin_pan(*output);
 	}
 }
 
 void Input::cursor_button_release(uint32_t time, uint32_t button) {
-	if (cursor_mode == CursorMode::passthrough) {
+	if (!grab.active()) {
 		uint32_t bit = 1u << (button & 31);
 		if (pressed_buttons_ & bit) {
 			pressed_buttons_ &= ~bit;
@@ -1376,27 +952,7 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 		}
 		return;
 	}
-	switch (cursor_mode) {
-	case CursorMode::deco_button:
-		release_deco_button();
-		break;
-	case CursorMode::overview_press:
-		overview_click();
-		break;
-	case CursorMode::desktop_drag: {
-		Desktop *drop = server_.canvas.desktops.find(drop_desktop);
-		Desktop *grabbed = server_.canvas.desktops.find(grab_desktop);
-		if (drop != nullptr && grabbed != nullptr) {
-			server_.canvas.combine(drop->id(), grabbed->id(), grab_box);
-		} else if (grabbed != nullptr) {
-			server_.canvas.desktops.raise(grabbed->id());
-		}
-		break;
-	}
-	default:
-		break;
-	}
-	cancel_grab();
+	grab.release();
 }
 
 // ---- cursor event handlers ----
@@ -1429,7 +985,7 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	Server &server = server_;
 	notify_activity(server);
 	super_tap_ = false;
-	if (cursor_mode != CursorMode::passthrough) {
+	if (grab.active()) {
 		return;
 	}
 	Output *output = server.output_at(server.cursor->x, server.cursor->y);
