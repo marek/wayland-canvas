@@ -83,8 +83,8 @@ file's current content, the user's literal words.
   file format where the XDG standard was asked for; a runtime flag
   where a compile-time constant was asked for. Name the proper
   structure and build it (see the `aim-for-ideal` skill).
-- **Magic numbers.** `titlebar_height = 32` tells the reader nothing.
-  Use a named constant in `src/config.h`.
+- **Magic numbers.** A bare `32` tells the reader nothing. Use a named
+  constant in `src/config.h`, such as `config::titlebar_height`.
 - **A giant file.** While adding substantial logic to an existing file,
   check whether it still has one responsibility. A file holding every
   binding, gesture and grab at once is a split candidate on sight.

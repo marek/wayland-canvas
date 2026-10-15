@@ -1,6 +1,6 @@
 ---
 name: code-style
-description: Comment, prose, naming and C conventions for wayland-canvas (the compositor source and the docs/intents corpus) - use before writing or reviewing comments, before writing or editing any intent doc, when choosing a name for a new file, function or type, and before checking code against the wlroots reference.
+description: Comment, prose, naming and C++ conventions for wayland-canvas (the compositor source and the docs/intents corpus) - use before writing or reviewing comments, before writing or editing any intent doc, when choosing a name for a new file, function or type, and before checking code against the wlroots reference.
 ---
 
 # Code style
@@ -20,9 +20,9 @@ what it replaced". The only place history is told is
 Add one only where the intent is not obvious from the code, as a short
 one-liner:
 
-```c
-/* quantize to the pixel grid: a half-pixel camera blurs every window */
-cam->cx = round_px(cam->cx * zoom) / zoom;
+```cpp
+// quantize to the pixel grid: a half-pixel camera blurs every window
+cam.cx = std::round(cam.cx * zoom) / zoom;
 ```
 
 No block comments, no explanation of the obvious, no banner
@@ -44,14 +44,14 @@ lives in the commit message.
 - comparing against an implementation that is no longer in the file
 - a commit reference on a line of code (the commit message says that)
 
-```c
-/* BAD - narrates history */
-/* anchoring used to stop at button release, which let left-edge
-   resizes drift; now it waits for the ack */
+```cpp
+// BAD - narrates history
+// anchoring used to stop at button release, which let left-edge
+// resizes drift; now it waits for the ack
 
-/* GOOD - states behaviour and why */
-/* anchoring lasts until the client acks the ending configure: its
-   final size commit arrives after the release event */
+// GOOD - states behaviour and why
+// anchoring lasts until the client acks the ending configure: its
+// final size commit arrives after the release event
 ```
 
 **A fix often makes the surrounding comment false.** Check comments
@@ -71,20 +71,24 @@ Before finishing a comment or a doc paragraph, cut:
   building up to it.
 - **Narrating a table before the table** — point at it.
 
-## C conventions
+## C++ conventions
 
-- The standard is C11, compiled with `-Wall -Wextra -std=c11
-  -D_POSIX_C_SOURCE=200809L -DWLR_USE_UNSTABLE`. No GNU extensions;
-  define `M_PI` yourself if used.
-- Tabs for indentation; types prefixed `cv_`; small static helpers
-  inside a module; only genuinely cross-module prototypes go in
-  `server.h`.
-- **No magic numbers.** `titlebar_height = 32` tells the reader
-  nothing; a named constant in `src/config.h` does. Gesture and
+The full rules — toolchain, class shapes, error states — live in
+[../../intents/platform/cpp-standards.md](../../intents/platform/cpp-standards.md).
+The short form:
+
+- Every wlroots signal an object handles is a `Listener` member of
+  that object (`src/util.h`); it disconnects when its owner is
+  destroyed, so listener balance is structural, not counted by hand.
+- Every compositor object has exactly one owner
+  (`std::vector<std::unique_ptr<T>>`); its destroy handler ends with
+  `destroy_owned(owner, this)`.
+- A state, kind or mode is an `enum class`; `nullptr`, never `NULL`;
+  named casts, never C casts; file-local code in an unnamed
+  namespace; no macros of our own.
+- **No magic numbers.** A raw `32` tells the reader nothing;
+  `config::titlebar_height` in `src/config.h` does. Gesture and
   animation thresholds live there too.
-- **Every `wl_signal_add` has a matching `wl_list_remove`** before its
-  object is destroyed: wlroots asserts listener lists are empty on
-  destroy.
 - **Read the wlroots headers** to verify every API called; check
   `tinywl` and `wlr_scene` in the subproject for how a request handler
   is answered (start the action, don't re-emit the request).
@@ -94,10 +98,12 @@ Before finishing a comment or a doc paragraph, cut:
 ## Naming
 
 - A name says what the thing is: `camera_zoom_path`,
-  `output_usable_canvas_box`, `desktop_nearest`.
-- **A new non-static name must not collide with an existing one.** Two
-  definitions of the same symbol in different files fail at link time
-  or misbehave at run time. Grep `server.h` and `src/` first.
+  `usable_canvas_box`, `desktop_nearest`.
+- Types and concepts are `PascalCase`; functions, variables, members,
+  enumerators, namespaces and files are `snake_case`; private data
+  members end in an underscore (`name_`). No type prefix.
+- **A new name must not collide with an existing one.** Grep `src/`
+  first — the headers are the contract.
 - Rename only when a name is actively misleading; grep every reference
   first.
 

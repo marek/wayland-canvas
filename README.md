@@ -7,15 +7,19 @@ Windows get Windows-11-style title bars with minimize, maximize/restore and clos
 
 ## Build
 
-Needs a C11 compiler, meson ≥ 1.3, ninja, and the wlroots 0.20 dependencies
+Needs clang (LLVM) — the compositor is C++26 and the wlroots subproject builds
+with it too — meson ≥ 1.3, ninja, and the wlroots 0.20 dependencies
 (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat, xkbcommon,
 pixman, libdisplay-info, hwdata) plus cairo, pango, librsvg and glib.
 
 ```sh
-meson setup build
+meson setup build --native-file toolchain/llvm.ini
 ninja -C build
 tools/check.sh             # builds, then the unit and headless scenario suites
 ```
+
+`meson.build` stops with that same setup command if a build dir is configured
+with another compiler.
 
 If `wlroots-0.20` isn't installed system-wide, meson fetches 0.20.2 into
 `subprojects/` and links it statically (no libliftoff/Xwayland needed).
@@ -123,7 +127,7 @@ the system one.
 ## Configuration
 
 dwl-style: edit `src/config.h` (sizes, colours, gesture tuning, commands) and the
-binding table in `src/input.c`, then rebuild.
+binding table in `src/input.cpp`, then rebuild.
 
 ## Protocols
 

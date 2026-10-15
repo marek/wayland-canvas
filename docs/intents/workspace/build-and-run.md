@@ -13,7 +13,9 @@ fetching: wlroots arrives by itself when the system does not have it.
 
 ### Dependencies
 
-A C11 compiler, meson ≥ 1.3 and ninja; the wlroots 0.20 dependencies
+A C++26 compiler — LLVM's clang, selected by
+`toolchain/llvm.ini` ([../platform/cpp-standards.md](../platform/cpp-standards.md))
+— meson ≥ 1.3 and ninja; the wlroots 0.20 dependencies
 (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat,
 xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
 (decorations, launcher); librsvg and glib (icons).
@@ -22,11 +24,12 @@ xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
 
 | Subject | Rule |
 |---|---|
-| Commands | `meson setup build`, `ninja -C build` |
+| Commands | `meson setup build --native-file toolchain/llvm.ini`, `ninja -C build`; `meson.build` stops with that command when another compiler is configured |
+| Compiler | `toolchain/llvm.ini` selects clang for the compositor and the wlroots subproject: `-std=c++26 -fno-exceptions -fno-rtti -Wall -Wextra -Wpedantic`; libstdc++ here, libc++ where installed; the system linker (`lld` once installed, set in the native file) |
 | venv fallback | when the system has no meson and ninja, they are pip-installed into a `.venv` at the repo root (git-ignored) and run from there |
 | wlroots | the system `wlroots-0.20` when installed; otherwise meson fetches wlroots 0.20.2 per `subprojects/wlroots.wrap` into `subprojects/wlroots/` (ignored) and links it statically with only what this compositor needs — the GLES2 renderer, the DRM and libinput backends, session on, Xwayland and libliftoff off ([../platform/wlroots.md](../platform/wlroots.md)) |
 | Protocol header | the layer-shell protocol header is generated at build time from `protocols/wlr-layer-shell-unstable-v1.xml` |
-| Unit tests | `meson test -C build`; the scenario suite and everything at once run through `tools/check.sh` |
+| Unit tests | `meson test -C build`; the scenario suite and everything at once run through `tools/check.sh`, which configures through the native file and re-creates a build dir that was configured with GCC |
 
 ### Running
 
@@ -44,6 +47,8 @@ entries run `$TERMINAL`, falling back to `foot`.
 ## Cross-links
 
 - [repos.md](repos.md) — what is committed and pushed.
+- [../platform/cpp-standards.md](../platform/cpp-standards.md) — the
+  toolchain and the C++ rules.
 - [../platform/wlroots.md](../platform/wlroots.md) — the wlroots
   version and subproject rule.
 - [../render/hidpi.md](../render/hidpi.md) — scale and crispness.

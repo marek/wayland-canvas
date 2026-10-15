@@ -51,8 +51,8 @@ a rule changed once changes for all of them with no second edit.
 The same holds outside clients:
 
 - Gestures, keys and mouse drive the same canvas actions
-  (`canvas_goto_direction`, `overview_tile`, ...) — no gesture-only
-  copy of a keyboard action.
+  (`goto_direction`, `overview_tile`, ...) — no gesture-only copy of a
+  keyboard action.
 - Every output runs the same mode state machine; there is no
   "the overview" as a global.
 - Per-window state (maximized, minimized, ssd) is kept on the view and

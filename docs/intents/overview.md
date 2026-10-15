@@ -2,7 +2,7 @@
 
 ## What wayland-canvas is
 
-A Wayland compositor (wlroots 0.20, C11) built on one idea: an
+A Wayland compositor (wlroots 0.20, C++26) built on one idea: an
 infinite canvas combined with a wide array of virtual desktops.
 Windows live anywhere on a single unbounded plane; every display shows
 that plane through its own camera; a 3-finger swipe moves the canvas

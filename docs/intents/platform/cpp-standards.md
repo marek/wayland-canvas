@@ -1,0 +1,128 @@
+# C++ standards
+
+> Owns what the source looks like and what builds it. The `code-style`
+> skill is the short form for day-to-day use.
+
+## Requirement
+
+The compositor is C++26 built by LLVM's clang. The language carries what
+a compositor gets wrong most often: every wlroots listener, texture and
+handle belongs to an object that releases it, every compositor object has
+exactly one owner, states of different kinds cannot be mixed up, and code
+sits on the object it acts on.
+
+## Design considerations
+
+- **The newest standard the toolchain implements.** A C++26 feature is
+  used once clang and the standard library it builds against both have
+  it; contracts are the one C++26 feature clang 22 lacks.
+- **LLVM builds everything**, the wlroots subproject included. clangd
+  reads `build/compile_commands.json`.
+- **wlroots stays C.** Its structs and functions are used as they are;
+  a C++ type exists only where it owns a lifetime.
+- **wlroots destroys objects on its own schedule** and aborts when one
+  still has listeners. Ownership is therefore single and explicit, and a
+  listener removes itself.
+- **Per-frame paths run 60 to 240 times a second** (rendering, pointer
+  motion, gesture updates): they do not allocate.
+
+## Behavior
+
+### Toolchain
+
+| Subject | Rule |
+|---|---|
+| Compiler | `clang++`; `clang` for the wlroots subproject. `toolchain/llvm.ini` selects them; `meson.build` stops with the command to use when another compiler is configured |
+| Standard | `-std=c++26`; no compiler extensions in our code |
+| Standard library | The one clang finds: libstdc++ here, libc++ where installed |
+| Linker | The system linker; `lld` once installed, set in `toolchain/llvm.ini` |
+| Warnings | `-Wall -Wextra -Wpedantic` clean; library headers are system headers, so the warnings cover our code |
+| Exceptions, RTTI | Off (`-fno-exceptions -fno-rtti`). Errors are values; an allocation failure aborts |
+
+### What C++ carries
+
+| Need | Form |
+|---|---|
+| A wlroots signal | A `Listener` member of the object that handles it. `connect<&Class::handler>(signal, this)` names a member function taking nothing or the signal's data pointer; destroying, reconnecting or `disconnect()` removes it |
+| A C object with a destroy function (texture, cairo surface and context, pango layout, `GKeyFile`, event source) | `Handle<T, destroy>`, a `std::unique_ptr` with that function as its deleter; `TexturePtr` and friends in `src/util.h` |
+| A compositor object (output, view, popup, layer surface, keyboard, desktop) | Owned by exactly one `std::vector<std::unique_ptr<T>>` of its owner. Its wlroots destroy handler ends with `destroy_owned(owner, this)` |
+| A reference that does not own | A raw pointer or a reference. A pointer that can outlive its target is cleared by the code that destroys the target |
+| A state, kind or mode | `enum class`, enumerators `snake_case`. Plain integers only for masks and values shared with a C API (`wlr_edges`, layer indices) |
+| A result that may be absent | `std::optional`; out-parameters are not used |
+| Several results | A small struct returned by value (`ViewHit`, `TabLayout`) |
+| A sequence passed in | `std::span` |
+| Text | `std::string` owned, `std::string_view` read; `const char *` where it goes straight to a C API that needs the terminator |
+| A list built per frame | `std::inplace_vector`, or a member vector reused with `clear()` |
+| A callback into our code | `std::function_ref` parameter. From C (iterators, timers): a captureless lambda or static member, `void *` cast back with `static_cast` |
+| A constant | `constexpr`. Tunables live in `src/config.h`, namespace `config` |
+
+### Classes
+
+| Kind | Shape |
+|---|---|
+| A value (`Rect`, `Camera`, `Point`) | `struct`, public fields with default member initialisers, `constexpr` members, defaulted `==` |
+| An object with a lifetime (`Server`, `Output`, `View`, `LayerSurface`, `Keyboard`) | `class`, neither copyable nor movable. Listeners, wlroots handles and caches are private; state other classes read or legitimately set is public, changed through the member function that keeps an invariant where one exists (`move`, `set_minimized`) |
+| One per compositor (input, gesture, hint, launcher, painter, decorations) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
+| Fallible setup | `bool init()` after construction; a constructor never fails |
+| Teardown order | `~Server` releases wlroots resources explicitly, in reverse order of creation; each subsystem's `finish()` releases its own before the display goes |
+| Inheritance | Only where something is polymorphic; not for sharing code |
+
+A class may span files by concern; its header names the file of each
+group (`Output`: lifecycle in `output.cpp`, camera and overview in
+`canvas.cpp`, layers in `layer.cpp`).
+
+### Code
+
+| Subject | Rule |
+|---|---|
+| Files | `.cpp` sources, `.h` headers with `#pragma once`; a header per class or close group |
+| wlroots | Only through `src/wlr.h`, the `extern "C"` wrapper; other C libraries directly |
+| File-local code | An unnamed namespace |
+| Null, casts | `nullptr`; named casts only |
+| Macros | None of our own; constants are `constexpr`, helpers `constexpr` functions or templates |
+| `auto` | When the type is on the same line, or for iterators and lambdas |
+| Initialisation | Designated initialisers in declaration order for C structs; default member initialisers on our types; never `memset` |
+| Loops | Range-for, `<algorithm>` and `<ranges>`. `wl_list_for_each` only on lists wlroots owns |
+| Errors | `bool`, `std::optional`, `std::expected`; reported with `wlr_log`, the log wlroots writes to |
+
+### Names
+
+| Thing | Form |
+|---|---|
+| Types, concepts | `PascalCase` |
+| Functions, variables, members, enumerators, namespaces, files | `snake_case` |
+| Private data members | `snake_case_` |
+| The wlroots object a class wraps | `wlr` |
+| Tunables | `config::snake_case` |
+
+### Hot paths
+
+Rendering, pointer motion, axis and gesture updates allocate nothing,
+format no text and create no texture unless what the texture shows
+changed; they call no `std::function`.
+
+### Comments
+
+The `code-style` rules hold: sparse one-liners stating behaviour and the
+non-obvious reason, never history.
+
+## Error states, corner cases
+
+- **A destroy handler destroys `this`** when it calls `destroy_owned`:
+  that call is its last statement.
+- **A loop whose body destroys elements of the container it walks**
+  (an output unplug destroying its layer surfaces) walks a copy of the
+  pointers.
+- **A wlroots object that dies before ours** (a decoration, a drag
+  icon): our listeners on it disconnect in its destroy handler.
+- **wlroots headers that are not C++** (`[static N]` parameters, a field
+  named `namespace`) are handled once in `src/wlr.h` and never patched.
+- **The wlroots subproject and other bundled code** keep their own style.
+
+## Cross-links
+
+- [wlroots.md](wlroots.md) - the listener-balance rule `Listener`
+  enforces.
+- [../workspace/build-and-run.md](../workspace/build-and-run.md) - the
+  toolchain and the build.
+- The `code-style` skill.

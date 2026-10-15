@@ -28,10 +28,11 @@ asked.
 - Looks for the known failure shapes: state read from another output or
   a remembered global instead of the owner's own; a special path for
   one client; a protocol-facing change without its intent doc moved; a
-  listener added without its removal; a limit or threshold changed in
-  the code but not in `src/config.h`; a removed implementation that
-  took a capability with it; magic numbers; history-narrating comments;
-  debug output left in; the same UI drawn twice.
+  wlroots signal wired outside a `Listener` member; a limit or
+  threshold changed in the code but not in `src/config.h`; a removed
+  implementation that took a capability with it; magic numbers;
+  history-narrating comments; debug output left in; the same UI drawn
+  twice.
 - For protocol handling, diffs against `tinywl` and `wlr_scene` in the
   subproject and sorts differences into deliberate (listed in
   `docs/intents/platform/wlroots.md`) and accidental.

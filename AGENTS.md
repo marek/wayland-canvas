@@ -3,7 +3,7 @@
 INTENT: docs/intents/
 
 Rules and heuristics for AI agents working on wayland-canvas: a
-Wayland compositor (wlroots 0.20, C11) that combines an infinite
+Wayland compositor (wlroots 0.20, C++26) that combines an infinite
 canvas with an array of virtual desktops. Re-read when about to do
 something expensive (an input-path change, a renderer change, a
 cross-cutting restructuring, anything a client depends on).
@@ -213,7 +213,7 @@ Skills live in `docs/skills/<name>/SKILL.md`;
 | `plan-checklists` | Any multi-step body of work — a dated, tracked checkbox plan in `docs/plans/`. |
 | `incremental-commits` | Before any `git commit` in this repo. |
 | `intent-docs` | Before writing or editing anything under `docs/intents/`. |
-| `code-style` | Comments, doc prose, naming, C11 conventions. |
+| `code-style` | Comments, doc prose, naming, C++ conventions. |
 | `verification` | Before reporting any fix or feature complete; before and after any test run. |
 | `scratch-space` | Before creating any temporary file, download or clone, and before writing a tool that writes output: everything goes under the git-ignored `tmp/` here. |
 | `debugging-discipline` | A repeated bug report, a crash or timing bug, a failure that looks like a regression. |

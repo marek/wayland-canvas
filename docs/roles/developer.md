@@ -24,11 +24,13 @@ and code agreeing with each other.
 - Updates the intent doc when the change settles or alters a contract,
   before or with the code.
 - Adds or extends a unit test or scenario so the change is covered.
-- Writes C11 in the tree's conventions (tabs, `cv_` type prefix, small
-  static helpers); names constants in `src/config.h`; keeps a file to
-  one responsibility.
-- Adds and removes wlroots listeners in pairs: every listener is gone
-  before its object is destroyed.
+- Writes C++26 in the tree's conventions
+  ([../intents/platform/cpp-standards.md](../intents/platform/cpp-standards.md)):
+  wlroots signals as `Listener` members, single ownership with
+  `destroy_owned`, constants in `src/config.h`; keeps a file to one
+  responsibility.
+- Holds every wlroots signal in a `Listener` member: it disconnects
+  when its owner is destroyed.
 - Checks `tinywl` and the `wlr_scene` code in the subproject before
   writing protocol handling, and reads the wlroots headers to verify
   every API called.

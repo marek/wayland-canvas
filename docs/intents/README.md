@@ -35,7 +35,7 @@ their values.
 | [windows/](windows/) | Title bars and window management |
 | [apps/](apps/) | The launcher and desktop entries |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
-| [platform/](platform/) | wlroots, protocols, outputs |
+| [platform/](platform/) | wlroots, protocols, outputs, the C++ standard |
 | [bugs/](bugs/) | Bug case studies — the one place history is told |
 
 ## Docs
@@ -60,6 +60,7 @@ their values.
 | [platform/wlroots.md](platform/wlroots.md) | wlroots as the reference, version, subproject, the listener-balance rule, request_* handlers start the action |
 | [platform/protocols.md](platform/protocols.md) | The supported protocols table: protocol → what it enables / policy |
 | [platform/outputs.md](platform/outputs.md) | Outputs, layout, per-output camera, hotplug, layer-shell usable area |
+| [platform/cpp-standards.md](platform/cpp-standards.md) | What the source looks like: C++26 on clang, listeners and ownership, classes, names |
 | [bugs/screencopy-never-returned.md](bugs/screencopy-never-returned.md) | grim hung forever: a frame rendered only on own damage, never on needs_frame |
 | [bugs/resize-anchor-lost-on-release.md](bugs/resize-anchor-lost-on-release.md) | Left/top resizes drifting: the client's final commit arrives after the button release |
 | [bugs/grabs-that-never-ended.md](bugs/grabs-that-never-ended.md) | Fake-device tests found pointer grabs that never ended and canvas shortcuts bound without Super |
@@ -67,7 +68,8 @@ their values.
 ## Reading paths
 
 - **New here**: this README → overview → glossary → workspace/repos →
-  workspace/build-and-run → platform/wlroots.
+  workspace/build-and-run → platform/wlroots →
+  platform/cpp-standards.
 - **Changing gestures or the canvas**: canvas/infinite-canvas →
   canvas/desktops → canvas/overview → input/gestures →
   input/keyboard-and-pointer.
