@@ -57,6 +57,7 @@ is hard-coded where a palette can follow the mode.
 The compositor's palette adds what only it draws (title and button
 colours, frames, the dim over wallpapers, launcher surfaces), each with
 its own light value, and the same on-accent rule: the target tab's label
+and glyphs — the Tile switch's wash and glyph included when it is lit —
 and the launcher's selected row are drawn in the contrasting accent text
 colour, which near-black on the dark mode's mid-blue and white on the
 light mode's dark blue is.

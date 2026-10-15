@@ -495,17 +495,25 @@ void draw_tabs(const RenderCtx &ctx) {
 				layout->tab.y + (layout->tab.height - label.h) / 2,
 				label.w, label.h, 1.0);
 		}
-		wlr_render_color fg = color_rgba(server.theme.colors().panel_text);
+		// The tab's glyphs follow the same rule as the label: on the target
+		// tab they sit on the accent fill, so they take the accent-text
+		// colour — a contrast in both modes — including the lit Tile
+		// switch's wash and glyph. Non-target tabs keep the panel-text
+		// glyphs and the accent-lit switch.
+		uint32_t ink = target ? server.theme.colors().accent_text
+			: server.theme.colors().panel_text;
+		uint32_t lit = target ? server.theme.colors().accent_text
+			: server.theme.colors().accent;
+		wlr_render_color fg = color_rgba(ink);
 		if (d.tiling()) {
 			// The Tile switch, lit while tiling is on.
 			draw_logical_rect(ctx, layout->tile_button.x, layout->tile_button.y,
 				layout->tile_button.width, layout->tile_button.height,
-				color_rgba(server.theme.colors().accent, 0.25f));
-			fg = color_rgba(server.theme.colors().accent);
+				color_rgba(lit, 0.25f));
+			fg = color_rgba(lit);
 		}
 		draw_tile_glyph(ctx, layout->tile_button, fg);
-		draw_abandon_glyph(ctx, layout->abandon_button,
-			color_rgba(server.theme.colors().panel_text));
+		draw_abandon_glyph(ctx, layout->abandon_button, color_rgba(ink));
 	}
 }
 
