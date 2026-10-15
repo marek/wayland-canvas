@@ -59,8 +59,8 @@ is hard-coded where a palette can follow the mode.
 | muted | `#565f89` | `#8489a3` | details, section headers, placeholders |
 | accent | `#7aa2f7` | `#2e7de9` | selection fills, sliders' fills, today |
 | on accent | `#1a1b26` | `#ffffff` | text on an accent fill |
-| panel | `#1a1b26` | `#f4f5f8` | panel cards, overview labels |
-| border | white 10 % | black 12 % | a card's hairline |
+| panel | `#1a1b26` | `#f4f5f8` | panel cards, the overview toolbar and its flyout, overview labels |
+| border | white 10 % | black 12 % | a card's hairline, the toolbar's and its flyout's included |
 | selected | accent at 22 % | accent at 16 % | the chosen row |
 | hover / fill / track | white 8 / 6 / 14 % | black 8 / 6 / 14 % | hovered rows, fields' fills, off switches |
 

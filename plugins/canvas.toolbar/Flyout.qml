@@ -15,7 +15,9 @@ Rectangle {
 	property var api: null // its api, for running the entries' actions
 	property var button: null // the menu button this flyout hangs from
 
-	color: UiTheme.background
+	color: UiTheme.panel // a card, like the strip it hangs from
+	border.width: 1
+	border.color: UiTheme.border
 	width: surface != null ? surface.flyoutWidth : 0
 	height: column.implicitHeight + 2 * UiTheme.panelPadding
 

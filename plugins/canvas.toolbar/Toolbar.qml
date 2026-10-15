@@ -133,9 +133,13 @@ PanelWindow {
 		width: root.buttonSize
 		height: column.implicitHeight
 
+		// A card like the panels: on the light canvas, which is the
+		// background colour, a background-coloured strip would vanish.
 		Rectangle {
 			anchors.fill: parent
-			color: UiTheme.background
+			color: UiTheme.panel
+			border.width: 1
+			border.color: UiTheme.border
 		}
 
 		Column {
