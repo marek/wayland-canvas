@@ -18,15 +18,18 @@ to a free area of the canvas is as easy as going to a desktop.
 - **One plane, not a grid of desktops.** A desktop is a marked
   rectangle ([desktops.md](desktops.md)), not a container; that is
   what makes free areas, combining and abandoning cheap.
-- **Clients are authored for 1:1.** A client surface is laid out for
-  its output's scale; input delivered through a zoomed camera would be
-  wrong in both position and size. So zoom exactly 1 is the only mode
-  clients get input in, and any other zoom is the compositor's own
-  view ([overview.md](overview.md)).
-- **A resting camera sits on the pixel grid.** At 1:1 the camera
-  position is quantised to the output's pixel grid so a window never
-  renders subpixel-blurry. Rendering and hit testing use the same
-  snapped camera.
+- **Each desktop has its own scale, and windows stay usable at it.** A
+  desktop shown at 80 % holds more windows and one at 125 % reads larger,
+  the way display scaling does, but per desktop. Clients are told the
+  scale they are shown at (the output's scale times their desktop's) and
+  render for it, and input reaches them through the same camera, so a
+  scaled desktop is as usable as one at 100 %. Any other zoom (the
+  overview, a transition) is the compositor's own view
+  ([overview.md](overview.md)).
+- **A resting camera sits on the pixel grid.** At rest the camera
+  position is quantised to the output's pixel grid at its zoom, so a
+  window never renders subpixel-blurry. Rendering and hit testing use the
+  same snapped camera.
 
 ## Behavior
 
@@ -36,9 +39,9 @@ to a free area of the canvas is as easy as going to a desktop.
 |---|---|
 | Canvas units | Logical pixels at zoom 1; the plane is unbounded in every direction |
 | Camera | One per output: the canvas point at the output's centre, plus a zoom |
-| Normal mode | Zoom exactly 1; clients get input |
+| Normal mode | The camera rests at the zoom of what it shows: the scale of the desktop it is on, else 1; clients get input |
 | Zoomed mode | Any other zoom; the compositor owns the pointer and keyboard ([overview.md](overview.md)) |
-| Interaction gate | An output forwards pointer and gesture events to clients only in normal mode, at exactly zoom 1, with no zoom transition in progress |
+| Interaction gate | An output forwards pointer and gesture events to clients only in normal mode, resting at that zoom, with no zoom transition in progress |
 | Scale of the output itself | [../render/hidpi.md](../render/hidpi.md) |
 
 ### Panning
@@ -56,8 +59,8 @@ to a free area of the canvas is as easy as going to a desktop.
   (decay time constant and minimum coasting speed are compile-time
   constants in `src/core/config.h`).
 - A pan that lands close to a desktop (a compile-time fraction of the
-  screen) snaps onto it; any other landing spot stays wherever the
-  pan stopped.
+  screen) snaps onto it, its zoom easing to that desktop's scale; any
+  other landing spot stays wherever the pan stopped, at zoom 1.
 
 ### Free areas and orientation
 
@@ -76,8 +79,8 @@ to a free area of the canvas is as easy as going to a desktop.
   feedback enough) and stays in the zoomed-out view.
 - **Windows lying off every desktop**: they belong to no desktop
   ([desktops.md](desktops.md)) and keep their canvas positions.
-- **Camera passing through zoom 1 mid-transition**: still not
-  interactive; input returns only when the camera rests at exactly 1.
+- **Camera passing through a resting zoom mid-transition**: still not
+  interactive; input returns only when the camera rests.
 
 ## Cross-links
 

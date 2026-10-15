@@ -51,11 +51,11 @@ reach the client. A lone tap of Super opens the app launcher.
 | Super+Alt+Arrows | Pan a third of a screen ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Ctrl+D | Pin the current view as a new desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+Ctrl+F4 | Abandon the current desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
-| Super+T | Tile the current desktop, or the current view if it is no desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
+| Super+T | Switch tiling on or off for the current desktop; a free view is pinned as a desktop first ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+1..9 | Go to desktop N ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+Shift+E, Ctrl+Alt+Backspace | Quit the compositor |
 | Ctrl+Alt+F1..F12 | Switch virtual terminal |
-| Overview keys | Arrows hop, Return go, Esc back, Delete/BackSpace abandon, `t` tile, `m` combine, `n` new desktop, `+`/`−` zoom ([../canvas/overview.md](../canvas/overview.md)) |
+| Overview keys | Arrows hop, Return go, Esc back, Delete/BackSpace abandon, `t` switch tiling, `m` combine, `n` new desktop, `+`/`−` zoom ([../canvas/overview.md](../canvas/overview.md)) |
 
 - Super+Ctrl+arrows and its kin are Windows' own virtual-desktop keys.
 - Alt+F4 is the one close binding without Super, for Windows parity.

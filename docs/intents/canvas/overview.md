@@ -35,11 +35,10 @@ or free area, is one gesture away.
 
 | Subject | Rule |
 |---|---|
-| Enter | 4-finger swipe up, following the fingers; release early to cancel ([../input/gestures.md](../input/gestures.md)). Also Super+Tab / Super+W, and Super + 2-finger pinch in, which zooms out from the normal view around the cursor |
+| Enter | 4-finger swipe up, following the fingers; release early to cancel ([../input/gestures.md](../input/gestures.md)). Also Super+Tab / Super+W |
 | Fit | The zoom fits everything on the canvas — desktops and windows — with a margin (compile-time, `src/core/config.h`); the current screen is kept centred when that still fits |
 | Zoom further | 4-finger swipe up again zooms out further; 2-finger pinch zooms around the cursor; scroll pans; Ctrl+scroll zooms; `+`/`−` zoom about the screen centre. Clamped to compile-time zoom bounds |
-| Leave into the target | 4-finger swipe down zooms into the target, following the fingers; release early to cancel |
-| Leave under the cursor | Super + 2-finger spread zooms in around the cursor, on past the overview's zoom ceiling; released above the ceiling it lands 1:1 with the point under the cursor kept there |
+| Leave into the target | 4-finger swipe down zooms into the target, following the fingers, ending at the target desktop's scale (1 for a free spot); release early to cancel |
 | Leave on choice | Return, or a click, zooms into the target and exits; Esc goes back to the view before entering |
 
 ### The target
@@ -70,12 +69,12 @@ or free area, is one gesture away.
 | Click a window | Focus it; target its desktop, or a spot centred on it; go there |
 | Click empty canvas | Target that free spot and go there |
 | Click a shelf item | Restore that window and go to it |
-| Drag a frame by its tab or empty interior | Reposition the desktop — never its windows ([desktops.md](desktops.md)); dropping it onto another frame combines them (past a compile-time overlap fraction); the drop target is highlighted while it would combine |
+| Drag a frame by its tab or empty interior | Reposition the desktop — never its windows, unless it is tiled ([desktops.md](desktops.md)); dropping it onto another frame combines them (past a compile-time overlap fraction); the drop target is highlighted while it would combine |
 | Drag a window | Move it on the canvas |
 | Drag empty canvas | Pan the overview camera |
 | Two-finger tap (right click) on empty canvas or a desktop interior | New desktop at that spot ([desktops.md](desktops.md)) |
-| Tab buttons | Tile, Abandon ([desktops.md](desktops.md)) |
-| Keys | Esc back; Return go; arrows hop; Delete/BackSpace abandon the target desktop; `t` tile; `m` combine; `n` new desktop; `+`/`−` zoom. Super+Tab / Super+W toggle |
+| Tab buttons | The Tile switch, Abandon ([desktops.md](desktops.md)) |
+| Keys | Esc back; Return go; arrows hop; Delete/BackSpace abandon the target desktop; `t` switch tiling on the target; `m` combine; `n` new desktop; `+`/`−` zoom. Super+Tab / Super+W toggle |
 
 A press becomes a drag only past a small travel; under it, the release
 is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)).
@@ -84,11 +83,11 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
 
 | Element | Rule |
 |---|---|
-| Tabs | Each desktop has a tab: its name and Tile / Abandon buttons |
+| Tabs | Each desktop has a tab: its name, its scale when not 100 %, the Tile switch (lit while tiling is on) and Abandon |
 | Shelf | Minimized windows along the bottom; clicking one restores it and goes there ([../windows/window-management.md](../windows/window-management.md)) |
 | Help line | Along the bottom, naming the gestures |
-| Hints | Transient messages for completed actions (e.g. "Tiled 2 windows") |
-| Previews | While a pinch is in tile or combine range, what release will do (e.g. "Release to combine Desktop 2 into Desktop 3"); backing out of range clears it |
+| Hints | Transient messages for completed actions (e.g. "Tiling on for Desktop 2", "Desktop 2 at 80 %") |
+| Previews | While a pinch is in tiling or combine range, what release will do (e.g. "Release to combine Desktop 2 into Desktop 3"); backing out of range clears it |
 
 ## Error states, corner cases
 

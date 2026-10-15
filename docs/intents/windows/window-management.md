@@ -65,15 +65,17 @@ and the camera moves to it.
 | Activation | an xdg-activation request carrying a token granted for real input |
 | Foreign-toplevel | an activate request from a foreign-toplevel-management client |
 
-Tiling contract — which windows a desktop's Tile takes is decided in
-[../canvas/desktops.md](../canvas/desktops.md); what tiling does to
-each of them is:
+Tiling contract — when a desktop's tiling is on and which windows it takes
+is decided in [../canvas/desktops.md](../canvas/desktops.md); what tiling
+does to each of them is:
 
 | Rule | Behaviour |
 |---|---|
-| Layout | a grid inside the desktop's area inset by the bars, with gaps (`TILE_GAP`) |
-| Client | each tiled window is told it is tiled |
-| States | tiling a maximized or fullscreen window clears that state |
+| Layout | a grid inside the desktop's area inset by the bars, with gaps (`TILE_GAP`), re-flowed whenever the desktop's tiled set changes |
+| Placement | a window opened on a tiled desktop is placed into the grid, not at the usual new-window spot |
+| Client | each tiled window is told it is tiled; told it no longer is when it leaves the grid or tiling goes off |
+| Move, resize | allowed; on release a window still inside the desktop goes back into the grid, at the slot nearest where it was dropped |
+| States | maximize and fullscreen take a window out of the grid while in that state; leaving the state returns it |
 
 Resizing:
 
