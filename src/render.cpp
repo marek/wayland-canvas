@@ -718,7 +718,7 @@ DesktopLabel Painter::desktop_label(DesktopId id, int number, float scale) {
 
 std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 		const Desktop &desktop) const {
-	Camera cam = o.camera();
+	Camera cam = o.camera.drawn();
 	double left = cam.cx - o.width / (2.0 * cam.zoom);
 	double top = cam.cy - o.height / (2.0 * cam.zoom);
 	double offset = server_.gesture.abandon_offset(desktop.id());
@@ -848,7 +848,7 @@ void Painter::render(Output &output) {
 	RenderCtx ctx{};
 	ctx.output = &output;
 	ctx.pass = pass;
-	ctx.cam = output.camera();
+	ctx.cam = output.camera.drawn();
 	ctx.viewport = ctx.cam.viewport(output.width, output.height);
 	ctx.left = ctx.cam.cx - output.width / (2.0 * ctx.cam.zoom);
 	ctx.top = ctx.cam.cy - output.height / (2.0 * ctx.cam.zoom);

@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include "camera.h"
 #include "desktop.h"
 #include "geometry.h"
 #include "layer.h"
@@ -12,26 +13,10 @@
 
 class Server;
 
-enum class AnimKind {
-	none,
-	lerp, // a -> b
-	zoom, // camera_zoom_path(a = near, b = far, p0 -> p1)
-};
-
-struct Anim {
-	AnimKind kind = AnimKind::none;
-	Camera a, b;
-	double p0 = 0, p1 = 0;
-	double start = 0, duration = 0; // ms
-};
-
 enum class Mode {
 	normal,
 	overview,
 };
-
-// Camera that shows a desktop-sized box at zoom 1.
-Camera camera_for_box(wlr_box box);
 
 // A monitor: its own camera onto the canvas, its overview state and its layer surfaces.
 class Output {
@@ -44,17 +29,10 @@ public:
 	// output.cpp
 	void damage();
 	Rect viewport() const;
-	Camera camera() const; // quantized: what is drawn and hit-tested
 	Point local_to_canvas(double ox, double oy) const;
 	Point canvas_to_local(double cx, double cy) const;
 	wlr_box usable_canvas_box(wlr_box area) const;
-
-	// canvas.cpp: camera motion
-	void set_camera(const Camera &cam);
-	void animate_camera(const Camera &to);
-	void animate_zoom(const Camera &near, const Camera &far, double p0, double p1);
-	void stop_camera();
-	bool tick(double now); // advances animation and momentum; true while still moving
+	bool tick(double now); // advances camera motion and the frame fade; true while still moving
 	bool is_panning() const;
 	bool interactive() const; // false while the compositor owns the pointer (overview, animation)
 	Desktop *desktop_showing() const;
@@ -95,11 +73,7 @@ public:
 	uint32_t bit = 0;
 	int lx = 0, ly = 0, width = 0, height = 0; // layout position and logical size
 
-	Camera cam;
-	Anim anim;
-	double vel_x = 0, vel_y = 0; // momentum, canvas units per ms
-	bool coasting = false;
-	double last_tick = 0;
+	CameraMotion camera;
 	double frames_alpha = 0; // desktop outlines faded in while panning
 
 	Mode mode = Mode::normal;
@@ -121,6 +95,7 @@ private:
 	void handle_needs_frame();
 	void handle_request_state(wlr_output_event_request_state *event);
 	void handle_destroy();
+	double fade_last_ = 0; // clock for the desktop-frame fade
 
 	Listener frame_, needs_frame_, request_state_, destroy_;
 };

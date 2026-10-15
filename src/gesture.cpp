@@ -14,7 +14,7 @@ constexpr double decide_threshold = 12.0;
 // Touchpad delta -> canvas delta, natural pan sign, scaled by the zoom.
 Point pan_deltas(const Output &output, double dx, double dy) {
 	double sign = config::natural_pan ? -1.0 : 1.0;
-	double zoom = output.cam.zoom > 0 ? output.cam.zoom : 1.0;
+	double zoom = output.camera.current().zoom > 0 ? output.camera.current().zoom : 1.0;
 	return {sign * dx * config::pan_speed / zoom, sign * dy * config::pan_speed / zoom};
 }
 
@@ -89,10 +89,10 @@ void Gesture::decide() {
 		if (vertical && ay > 0) {
 			kind = GestureKind::zoom_in;
 			near = camera_for_box(o->target);
-			far = o->cam;
+			far = o->camera.current();
 		} else if (vertical && ay < 0) {
 			kind = GestureKind::zoom_further;
-			start_zoom = o->cam.zoom;
+			start_zoom = o->camera.current().zoom;
 		} else {
 			std::optional<DesktopId> d = desktop_under(*o);
 			if (!d.has_value()) {
@@ -175,23 +175,23 @@ void Gesture::swipe_update(uint32_t time, double dx, double dy) {
 			vy = 0.8 * vy + 0.2 * (dy / dt);
 		}
 		progress = clampd(-ay / config::overview_swipe_distance, 0, 1);
-		o->set_camera(camera_zoom_path(near, far, progress));
+		o->camera.jump(camera_zoom_path(near, far, progress));
 		break;
 	case GestureKind::zoom_in:
 		if (dt > 0) {
 			vy = 0.8 * vy + 0.2 * (dy / dt);
 		}
 		progress = clampd(ay / config::overview_swipe_distance, 0, 1);
-		o->set_camera(camera_zoom_path(near, far, 1 - progress));
+		o->camera.jump(camera_zoom_path(near, far, 1 - progress));
 		break;
 	case GestureKind::zoom_further: {
 		if (dt > 0) {
 			vy = 0.8 * vy + 0.2 * (dy / dt);
 		}
-		Camera cam = o->cam;
+		Camera cam = o->camera.current();
 		cam.zoom = clampd(start_zoom * std::exp(ay / 400),
 			config::overview_min_zoom, 0.75);
-		o->set_camera(cam);
+		o->camera.jump(cam);
 		break;
 	}
 	case GestureKind::abandon:
@@ -217,7 +217,7 @@ void Gesture::swipe_end(uint32_t time, bool cancelled) {
 		switch (kind) {
 		case GestureKind::pan: {
 			// Where the momentum would leave the camera.
-			Camera cam = o->camera();
+			Camera cam = o->camera.drawn();
 			double lx = cam.cx + vx * config::inertia_tau_ms;
 			double ly = cam.cy + vy * config::inertia_tau_ms;
 			double snap = config::snap_radius * std::fmin(o->width, o->height);
@@ -232,13 +232,9 @@ void Gesture::swipe_end(uint32_t time, bool cancelled) {
 				}
 			}
 			if (best != nullptr && best_dist <= snap) {
-				o->animate_camera(camera_for_box(best->frame()));
+				o->camera.animate_to(camera_for_box(best->frame()));
 			} else if (!cancelled && std::hypot(vx, vy) > config::inertia_min_speed) {
-				o->vel_x = vx;
-				o->vel_y = vy;
-				o->coasting = true;
-				o->last_tick = now_ms();
-				o->damage();
+				o->camera.coast(vx, vy);
 			}
 			break;
 		}
@@ -246,18 +242,18 @@ void Gesture::swipe_end(uint32_t time, bool cancelled) {
 			if (!cancelled && (progress > config::overview_commit || vy < -0.5)) {
 				o->overview_finish_enter(far, progress);
 			} else {
-				o->animate_zoom(near, far, progress, 0);
+				o->camera.animate_zoom(near, far, progress, 0);
 			}
 			break;
 		case GestureKind::zoom_in:
 			if (!cancelled && (progress > config::overview_commit || vy > 0.5)) {
 				o->overview_finish_exit(near, far, 1 - progress);
 			} else {
-				o->animate_zoom(near, far, 1 - progress, 1);
+				o->camera.animate_zoom(near, far, 1 - progress, 1);
 			}
 			break;
 		case GestureKind::zoom_further:
-			o->overview_zoom = o->cam.zoom;
+			o->overview_zoom = o->camera.current().zoom;
 			break;
 		case GestureKind::abandon:
 			if (Desktop *swiped = server_.canvas.desktops.find(desktop);
@@ -443,9 +439,7 @@ void Gesture::hold_begin(uint32_t time, uint32_t fingers) {
 		return;
 	}
 	// Touching the pad halts any coasting momentum.
-	out->coasting = false;
-	out->vel_x = 0;
-	out->vel_y = 0;
+	out->camera.halt();
 	if (out->interactive()) {
 		wlr_pointer_gestures_v1_send_hold_begin(server_.pointer_gestures,
 			server_.seat, time, fingers);

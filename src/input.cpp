@@ -465,7 +465,7 @@ PointerHit pointer_hit_test(Server &server, Output &output) {
 
 	Point p = output.local_to_canvas(ox, oy);
 	std::optional<ViewHit> view_hit =
-		server.view_at(p.x, p.y, output.camera().zoom);
+		server.view_at(p.x, p.y, output.camera.drawn().zoom);
 	if (view_hit.has_value()) {
 		hit.view = view_hit->view;
 		hit.surface = view_hit->surface;
@@ -724,7 +724,7 @@ void Input::begin_move(View &view, Output &output) {
 	cursor_mode = CursorMode::move;
 	grab_view = &view;
 	grab_output = &output;
-	grab_cam = output.camera();
+	grab_cam = output.camera.drawn();
 	grab_box = view.content_box();
 	grab_lx = server_.cursor->x;
 	grab_ly = server_.cursor->y;
@@ -751,7 +751,7 @@ void Input::begin_resize(View &view, Output &output, uint32_t edges) {
 	cursor_mode = CursorMode::resize;
 	grab_view = &view;
 	grab_output = &output;
-	grab_cam = output.camera();
+	grab_cam = output.camera.drawn();
 	grab_box = view.content_box();
 	grab_lx = server_.cursor->x;
 	grab_ly = server_.cursor->y;
@@ -770,7 +770,7 @@ void Input::begin_resize(View &view, Output &output, uint32_t edges) {
 void Input::begin_pan(Output &output) {
 	cursor_mode = CursorMode::pan;
 	grab_output = &output;
-	grab_cam = output.camera();
+	grab_cam = output.camera.drawn();
 	grab_lx = server_.cursor->x;
 	grab_ly = server_.cursor->y;
 	grab_moved = false;
@@ -886,7 +886,7 @@ void Input::process_pan_grab() {
 	Camera cam = grab_cam;
 	cam.cx -= (server_.cursor->x - grab_lx) / cam.zoom;
 	cam.cy -= (server_.cursor->y - grab_ly) / cam.zoom;
-	output->set_camera(cam);
+	output->camera.jump(cam);
 }
 
 void Input::process_deco_button_grab() {
@@ -898,7 +898,7 @@ void Input::process_deco_button_grab() {
 	if (!pos.has_value()) {
 		return;
 	}
-	DecoHit hit = view->deco.hit(pos->cx, pos->cy, pos->output->camera().zoom);
+	DecoHit hit = view->deco.hit(pos->cx, pos->cy, pos->output->camera.drawn().zoom);
 	DecoPart pressed = hit.part == grab_part ? grab_part : DecoPart::none;
 	if (view->deco.pressed != pressed) {
 		view->deco.pressed = pressed;
@@ -975,7 +975,7 @@ void Input::process_grab_motion() {
 	// clients) fill the grab fields but not grab_cam; capture it on the
 	// first motion. cancel_grab zeroes it, so it is never stale.
 	if (grab_output != nullptr && grab_cam.zoom <= 0) {
-		grab_cam = grab_output->camera();
+		grab_cam = grab_output->camera.drawn();
 	}
 	switch (cursor_mode) {
 	case CursorMode::move:
@@ -1054,7 +1054,7 @@ void Input::process_cursor_motion(uint32_t time) {
 		// title bar hover state of the view under the cursor alive so the
 		// buttons light up, but no client sees any event.
 		wlr_seat_pointer_notify_clear_focus(server.seat);
-		Camera cam = output->camera();
+		Camera cam = output->camera.drawn();
 		Point p = output->local_to_canvas(server.cursor->x - output->lx,
 			server.cursor->y - output->ly);
 		std::optional<ViewHit> hit = server.view_at(p.x, p.y, cam.zoom);
@@ -1201,7 +1201,7 @@ void Input::overview_click() {
 }
 
 void Input::overview_press(Output &output, uint32_t button) {
-	Camera cam = output.camera();
+	Camera cam = output.camera.drawn();
 	double ox = server_.cursor->x - output.lx;
 	double oy = server_.cursor->y - output.ly;
 	Point p = output.local_to_canvas(ox, oy);
@@ -1333,7 +1333,7 @@ void Input::release_deco_button() {
 	std::optional<CanvasPos> pos = cursor_canvas_pos();
 	if (pos.has_value()) {
 		DecoHit hit = view->deco.hit(pos->cx, pos->cy,
-			pos->output->camera().zoom);
+			pos->output->camera.drawn().zoom);
 		if (hit.part == grab_part) {
 			switch (hit.part) {
 			case DecoPart::minimize:
@@ -1445,13 +1445,13 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 				server.cursor->x - output->lx, server.cursor->y - output->ly);
 		} else {
 			double delta = event->delta * config::scroll_pan_speed;
-			Camera cam = output->camera();
+			Camera cam = output->camera.drawn();
 			if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
 				cam.cy += delta / cam.zoom;
 			} else {
 				cam.cx += delta / cam.zoom;
 			}
-			output->set_camera(cam);
+			output->camera.jump(cam);
 		}
 		return;
 	}

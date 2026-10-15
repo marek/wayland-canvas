@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <format>
 
 #include "layer.h"
 #include "server.h"
@@ -78,9 +79,42 @@ void view_update_outputs(View &view, uint32_t mask) {
 	}
 }
 
+Point box_centre(wlr_box box) {
+	return Point{
+		.x = box.x + box.width / 2.0,
+		.y = box.y + box.height / 2.0,
+	};
+}
+
+// Screen-sized canvas box centred on (cx, cy), edges rounded to integers.
+wlr_box centred_box(const Output &output, double cx, double cy) {
+	int w = output.width, h = output.height;
+	return wlr_box{
+		static_cast<int>(std::round(cx - w / 2.0)),
+		static_cast<int>(std::round(cy - h / 2.0)),
+		w,
+		h,
+	};
+}
+
+wlr_box rect_to_box(Rect r) {
+	return wlr_box{
+		static_cast<int>(std::round(r.x)),
+		static_cast<int>(std::round(r.y)),
+		static_cast<int>(std::round(r.w)),
+		static_cast<int>(std::round(r.h)),
+	};
+}
+
+// A desktop's name, or nullopt for no desktop.
+std::optional<DesktopId> id_of(const Desktop *desktop) {
+	return desktop != nullptr ? std::optional<DesktopId>{desktop->id()} : std::nullopt;
+}
+
 } // namespace
 
-Output::Output(Server &server, wlr_output *wlr) : server(server), wlr(wlr) {
+Output::Output(Server &server, wlr_output *wlr)
+	: server(server), wlr(wlr), camera(*this) {
 	uint32_t used = 0;
 	for (const std::unique_ptr<Output> &existing : server.outputs) {
 		used |= existing->bit;
@@ -103,25 +137,12 @@ void Output::damage() {
 	wlr_output_schedule_frame(wlr);
 }
 
-Camera Output::camera() const {
-	Camera cam = this->cam;
-	if (cam.zoom == 1) {
-		// At 1:1 keep window pixels on the output's pixel grid: no blur.
-		double scale = wlr->scale;
-		double left = std::round((cam.cx - width / 2.0) * scale) / scale;
-		double top = std::round((cam.cy - height / 2.0) * scale) / scale;
-		cam.cx = left + width / 2.0;
-		cam.cy = top + height / 2.0;
-	}
-	return cam;
-}
-
 Rect Output::viewport() const {
-	return camera().viewport(width, height);
+	return camera.drawn().viewport(width, height);
 }
 
 Point Output::local_to_canvas(double ox, double oy) const {
-	Camera cam = camera();
+	Camera cam = camera.drawn();
 	return Point{
 		.x = cam.cx + (ox - width / 2.0) / cam.zoom,
 		.y = cam.cy + (oy - height / 2.0) / cam.zoom,
@@ -129,7 +150,7 @@ Point Output::local_to_canvas(double ox, double oy) const {
 }
 
 Point Output::canvas_to_local(double cx, double cy) const {
-	Camera cam = camera();
+	Camera cam = camera.drawn();
 	return Point{
 		.x = (cx - cam.cx) * cam.zoom + width / 2.0,
 		.y = (cy - cam.cy) * cam.zoom + height / 2.0,
@@ -145,6 +166,164 @@ wlr_box Output::usable_canvas_box(wlr_box area) const {
 	area.width -= left + right;
 	area.height -= top + bottom;
 	return area;
+}
+
+bool Output::tick(double now) {
+	bool moving = camera.tick(now);
+
+	double dt = now - fade_last_;
+	if (!(dt >= 0)) {
+		dt = 0;
+	}
+	if (dt > 50) {
+		dt = 50;
+	}
+	fade_last_ = now;
+
+	double alpha_target = is_panning() ? 1.0 : 0.0;
+	double alpha = frames_alpha;
+	if (alpha < alpha_target) {
+		alpha = std::fmin(alpha_target, alpha + dt / 150.0);
+	} else if (alpha > alpha_target) {
+		alpha = std::fmax(alpha_target, alpha - dt / 150.0);
+	}
+	bool alpha_changed = alpha != frames_alpha;
+	frames_alpha = alpha;
+	if (alpha_changed) {
+		damage();
+	}
+
+	return moving || alpha != alpha_target;
+}
+
+bool Output::is_panning() const {
+	if (mode != Mode::normal) {
+		return false;
+	}
+	if (camera.panning()) {
+		return true;
+	}
+	if (server.gesture.kind == GestureKind::pan && server.gesture.output == this) {
+		return true;
+	}
+	if (server.input.cursor_mode == CursorMode::pan && server.input.grab_output == this) {
+		return true;
+	}
+	return false;
+}
+
+bool Output::interactive() const {
+	if (mode != Mode::normal) {
+		return false;
+	}
+	if (camera.current().zoom != 1) {
+		return false;
+	}
+	if (camera.zooming()) {
+		return false;
+	}
+	if (server.gesture.output == this) {
+		switch (server.gesture.kind) {
+		case GestureKind::zoom_out:
+		case GestureKind::zoom_in:
+		case GestureKind::zoom_further:
+		case GestureKind::overview_zoom:
+			return false;
+		default:
+			break;
+		}
+	}
+	return true;
+}
+
+Desktop *Output::desktop_showing() const {
+	Camera c = mode == Mode::overview ? home : camera.current();
+	Rect viewport = c.viewport(width, height);
+	return server.canvas.desktops.best_overlap(viewport);
+}
+
+void Output::pan(double dx, double dy) {
+	Camera next = camera.current();
+	next.cx += dx;
+	next.cy += dy;
+	camera.jump(next);
+}
+
+void Output::goto_box(wlr_box box) {
+	if (mode == Mode::overview) {
+		Point centre = box_centre(box);
+		overview_set_target(box, id_of(server.canvas.desktops.at(centre.x, centre.y)),
+			false);
+		overview_exit();
+		return;
+	}
+	camera.animate_to(camera_for_box(box));
+}
+
+void Output::goto_direction(double dx, double dy) {
+	if (mode != Mode::normal) {
+		return;
+	}
+	Desktop *found = server.canvas.desktops.in_direction(camera.current().cx,
+		camera.current().cy, dx, dy, id_of(desktop_showing()));
+	if (found != nullptr) {
+		camera.animate_to(camera_for_box(found->frame()));
+		return;
+	}
+	Compass q = nav_quantize_direction(dx, dy);
+	Camera to = camera.current();
+	to.cx += q.x * static_cast<double>(width);
+	to.cy += q.y * static_cast<double>(height);
+	to.zoom = 1;
+	camera.animate_to(to);
+}
+
+void Output::pin_desktop() {
+	if (mode == Mode::overview) {
+		if (server.canvas.desktops.find(target_desktop) != nullptr) {
+			server.hint.set("Already a desktop");
+			return;
+		}
+		Desktop &desktop = server.canvas.desktops.create(target);
+		target_desktop = desktop.id();
+		server.hint.set(std::format("New Desktop {}", desktop.number()));
+		return;
+	}
+	Rect vp = viewport();
+	Desktop *desktop = server.canvas.desktops.best_overlap(vp);
+	if (desktop != nullptr
+			&& desktop->rect().overlap_area(vp) >= 0.9 * vp.w * vp.h) {
+		server.hint.set("Already a desktop");
+		return;
+	}
+	Desktop &created = server.canvas.desktops.create(rect_to_box(vp));
+	server.hint.set(std::format("New Desktop {}", created.number()));
+}
+
+void Server::reveal_view(View &view) {
+	Output *output = output_under_cursor();
+	if (output == nullptr) {
+		return;
+	}
+	wlr_box frame = view.frame_box();
+	Point centre = box_centre(frame);
+	if (output->mode == Mode::normal) {
+		Rect vp = output->viewport();
+		if (frame.x >= vp.x && frame.y >= vp.y
+				&& frame.x + frame.width <= vp.x + vp.w
+				&& frame.y + frame.height <= vp.y + vp.h) {
+			return;
+		}
+	}
+	Desktop *desktop = canvas.desktop_of(view);
+	wlr_box box = desktop != nullptr ? desktop->frame()
+		: centred_box(*output, centre.x, centre.y);
+	if (output->mode == Mode::overview) {
+		output->overview_set_target(box, id_of(desktop), false);
+		output->overview_exit();
+		return;
+	}
+	output->camera.animate_to(camera_for_box(box));
 }
 
 void Server::damage_all() {
@@ -285,11 +464,11 @@ void Server::handle_new_output(wlr_output *wlr) {
 	wlr_output_layout_add_auto(output_layout, wlr);
 	update_output_geometry(output);
 	// The canvas starts out aligned with the output layout.
-	output.cam = Camera{
+	output.camera.jump(Camera{
 		.cx = output.lx + output.width / 2.0,
 		.cy = output.ly + output.height / 2.0,
 		.zoom = 1,
-	};
+	});
 	if (canvas.desktops.empty()) {
 		canvas.desktops.create(
 			wlr_box{output.lx, output.ly, output.width, output.height});

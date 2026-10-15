@@ -166,14 +166,16 @@ int run_step() {
 	}
 	case 4:
 		three->set_maximized(false);
-		cam0 = o->cam;
+		cam0 = o->camera.current();
 		swipe(3, -600, 0, 30); // fingers left: canvas follows, camera moves right
 		return 1600;
 	case 5:
-		check(o->mode == Mode::normal && o->cam.zoom == 1, "still normal mode after pan");
-		check(o->cam.cx > cam0.cx + 550,
-			std::format("3-finger swipe panned + coasted (dx={:.0f})", o->cam.cx - cam0.cx));
-		check(!o->coasting, "momentum settled");
+		check(o->mode == Mode::normal && o->camera.current().zoom == 1,
+			"still normal mode after pan");
+		check(o->camera.current().cx > cam0.cx + 550,
+			std::format("3-finger swipe panned + coasted (dx={:.0f})",
+				o->camera.current().cx - cam0.cx));
+		check(!o->camera.coasting(), "momentum settled");
 		shot("03-panned-free-area");
 		return 400;
 	case 6: {
@@ -193,7 +195,9 @@ int run_step() {
 		return 700;
 	case 8:
 		check(o->mode == Mode::overview, "4-finger swipe up opened the overview");
-		check(o->cam.zoom < 0.5, std::format("overview is zoomed out (zoom {:.3f})", o->cam.zoom));
+		check(o->camera.current().zoom < 0.5,
+			std::format("overview is zoomed out (zoom {:.3f})",
+				o->camera.current().zoom));
 		check(o->target_desktop == d2, "overview target starts at the current desktop");
 		shot("04-overview");
 		return 400;
@@ -287,9 +291,11 @@ int run_step() {
 		swipe(4, 0, 300, 20); // 4 fingers down: zoom into the target
 		return 700;
 	case 20: {
-		check(o->mode == Mode::normal && o->cam.zoom == 1, "4-finger down returned to normal mode");
+		check(o->mode == Mode::normal && o->camera.current().zoom == 1,
+			"4-finger down returned to normal mode");
 		Camera want = camera_for_box(desk(d1)->frame());
-		check(std::fabs(o->cam.cx - want.cx) < 1 && std::fabs(o->cam.cy - want.cy) < 1,
+		check(std::fabs(o->camera.current().cx - want.cx) < 1
+			&& std::fabs(o->camera.current().cy - want.cy) < 1,
 			"landed on Desktop 1");
 		shot("10-desktop1");
 		return 400;
@@ -311,7 +317,7 @@ int run_step() {
 		return 700;
 	case 24: {
 		check(o->mode == Mode::normal && !o->target_desktop.has_value() &&
-			std::fabs(o->cam.cx - (desk(d1)->frame().x - 3000)) < 1,
+			std::fabs(o->camera.current().cx - (desk(d1)->frame().x - 3000)) < 1,
 			"clicking empty overview canvas lands on a free area");
 		shot("12-free-area");
 		return 400;
@@ -321,7 +327,8 @@ int run_step() {
 		return 600;
 	case 26: {
 		Camera want = camera_for_box(desk(d1)->frame());
-		check(std::fabs(o->cam.cx - want.cx) < 1 && std::fabs(o->cam.cy - want.cy) < 1,
+		check(std::fabs(o->camera.current().cx - want.cx) < 1
+			&& std::fabs(o->camera.current().cy - want.cy) < 1,
 			"keyboard jump to the desktop in that direction");
 		return 0;
 	}

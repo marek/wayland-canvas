@@ -270,7 +270,8 @@ int run_step() {
 		key(KEY_ESC, false);
 		return 500;
 	case 15:
-		check(o->mode == Mode::normal && o->cam.zoom == 1, "Escape went back");
+		check(o->mode == Mode::normal && o->camera.current().zoom == 1,
+			"Escape went back");
 		for (int i = 0; i < 3; i++) chord(KEY_RIGHT, SUPER_ALT);
 		return 600;
 	case 16:
@@ -283,10 +284,11 @@ int run_step() {
 		Desktop *d1 = server->canvas.desktops.by_number(1);
 		check(d1 && o->desktop_showing() == d1, "Super+Ctrl+Left jumped back to Desktop 1");
 		move_to(640, 360);
-		double cx0 = o->cam.cx;
+		double cx0 = o->camera.current().cx;
 		swipe(3, 300, 0); // fingers right: canvas follows, camera moves left
-		check(o->cam.cx < cx0 - 250,
-			std::format("3-finger swipe events from the device panned ({:.0f})", o->cam.cx - cx0));
+		check(o->camera.current().cx < cx0 - 250,
+			std::format("3-finger swipe events from the device panned ({:.0f})",
+				o->camera.current().cx - cx0));
 		return 1200;
 	}
 	case 18:

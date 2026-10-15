@@ -83,6 +83,7 @@ core_lib = static_library(
 	'canvas-core',
 	files(
 		'src/apps.cpp',
+		'src/camera.cpp',
 		'src/canvas.cpp',
 		'src/decoration.cpp',
 		'src/desktop.cpp',
