@@ -14,17 +14,24 @@ Wayland display namespace and GPU.
   foot windows, title-bar button hit-testing, maximize, 3-finger panning with
   momentum, pinning a free area as a desktop, moving a window between
   desktops, 4-finger overview open/exit, 3-finger hops (including onto a free
-  spot), pinch-out tiling, pinch-in combining, overview desktop
-  create/abandon, minimize/restore via the shelf, landing on empty canvas,
-  and the keyboard desktop-direction jump.
+  spot), 3-finger spread tiling (on: the windows grid and are told they are
+  tiled; off: they keep the grid's positions and are told they are not; back
+  on: a pinch-in combine then joins the incoming window into the grid),
+  overview desktop create/abandon, minimize/restore via the shelf, landing on
+  empty canvas, and the keyboard desktop-direction jump.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
   buttons (incl. hover highlighting), anchored corner resize, Super+Return
   terminal launch, Super+Tab overview + Escape, desktop pin/jump chords,
   swipe events delivered by a device, right-click desktop creation, tab-drag
-  combining, frame-vs-window drag, the tab Tile button, and clicking empty
-  canvas to land on a free area.
+  combining, frame-vs-window drag, and clicking empty canvas to land on a
+  free area — then the per-desktop tiling switch end to end: the tab's Tile
+  button and `t` toggling it, windows opened while it is on joining the grid
+  and closing or minimizing re-flowing it, maximize and fullscreen taking a
+  window out and restore putting it back, a drag onto another slot reordering
+  the grid, Super+T pinning a free view with tiling on, and abandoning or
+  combining a tiled desktop keeping positions and telling the windows.
 - **`launcher.cpp`** — the app launcher: logo-key tap opens, panel renders,
   search filters, Enter and result-click launch foot and close the launcher,
   logo-as-modifier does not open it, Escape and outside-click close it,

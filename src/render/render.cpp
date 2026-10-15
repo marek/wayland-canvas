@@ -488,8 +488,16 @@ void draw_tabs(const RenderCtx &ctx) {
 				label.w, label.h, 1.0);
 		}
 		wlr_render_color fg = color_rgba(server.theme.colors().panel_text);
+		if (d.tiling()) {
+			// The Tile switch, lit while tiling is on.
+			draw_logical_rect(ctx, layout->tile_button.x, layout->tile_button.y,
+				layout->tile_button.width, layout->tile_button.height,
+				color_rgba(server.theme.colors().accent, 0.25f));
+			fg = color_rgba(server.theme.colors().accent);
+		}
 		draw_tile_glyph(ctx, layout->tile_button, fg);
-		draw_abandon_glyph(ctx, layout->abandon_button, fg);
+		draw_abandon_glyph(ctx, layout->abandon_button,
+			color_rgba(server.theme.colors().panel_text));
 	}
 }
 

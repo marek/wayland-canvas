@@ -147,13 +147,6 @@ inline constexpr int launcher_max_rows = 10;
 inline constexpr int launcher_icon = 28;
 inline constexpr const char *launcher_font = "Sans 11";
 inline constexpr const char *launcher_search_font = "Sans 13";
-inline constexpr uint32_t color_launcher = 0x1f1f1ff5;
-inline constexpr uint32_t color_launcher_search = 0x2b2b2bff;
-inline constexpr uint32_t color_launcher_selected = 0x0078d4ff;
-inline constexpr uint32_t color_launcher_hover = 0xffffff14;
-inline constexpr uint32_t color_launcher_text = 0xffffffff;
-inline constexpr uint32_t color_launcher_dim_text = 0x9a9a9aff;
-inline constexpr uint32_t color_launcher_backdrop = 0x00000060;
 
 // Top bar: a Quickshell client autostarted by Server::start() when qs is on
 // PATH. Its config is found beside the compositor binary at one of the two

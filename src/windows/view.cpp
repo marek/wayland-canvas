@@ -345,6 +345,7 @@ void View::set_minimized(bool want) {
 	}
 	damage();
 	server.visibility_dirty = true;
+	server.canvas.settle(*this);
 }
 
 void View::set_maximized(bool want) {
@@ -393,6 +394,13 @@ void View::set_maximized(bool want) {
 	}
 	damage();
 	server.visibility_dirty = true;
+	if (want || !is_initialized(*this)) {
+		server.canvas.settle(*this);
+	} else {
+		// The restored size arrives with the client's next commit; settling on
+		// the stale maximized geometry would drop the window from the grid.
+		settle_pending = true;
+	}
 }
 
 void View::set_fullscreen(bool want) {
@@ -445,9 +453,16 @@ void View::set_fullscreen(bool want) {
 	}
 	damage();
 	server.visibility_dirty = true;
+	if (want || !is_initialized(*this)) {
+		server.canvas.settle(*this);
+	} else {
+		// As with unmaximize: the grid return waits for the size commit.
+		settle_pending = true;
+	}
 }
 
-void View::set_frame(wlr_box frame, bool tiled) {
+// Grid placement: sized to the cell and told it is tiled.
+void View::set_frame(wlr_box frame) {
 	int tb = deco.titlebar();
 	resize_edges = 0;
 	resize_end_serial = 0;
@@ -475,9 +490,8 @@ void View::set_frame(wlr_box frame, bool tiled) {
 		if (was_fullscreen) {
 			wlr_xdg_toplevel_set_fullscreen(wlr, false);
 		}
-		wlr_xdg_toplevel_set_tiled(wlr, tiled
-			? WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT | WLR_EDGE_RIGHT
-			: 0);
+		wlr_xdg_toplevel_set_tiled(wlr,
+			WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT | WLR_EDGE_RIGHT);
 		wlr_xdg_toplevel_set_size(wlr, content.width, content.height);
 	}
 	if (foreign_) {
@@ -490,8 +504,21 @@ void View::set_frame(wlr_box frame, bool tiled) {
 	}
 	x = content.x;
 	y = content.y;
+	tiled = true;
 	damage();
 	server.visibility_dirty = true;
+}
+
+void View::set_tiled(bool want) {
+	if (tiled == want) {
+		return;
+	}
+	tiled = want;
+	if (is_initialized(*this)) {
+		wlr_xdg_toplevel_set_tiled(wlr, want
+			? WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT | WLR_EDGE_RIGHT
+			: 0);
+	}
 }
 
 // ---- lookup ----
@@ -640,6 +667,8 @@ void View::handle_map() {
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
 	place(*this);
+	// A window opened on a tiled desktop joins the grid.
+	server.canvas.settle(*this);
 	create_foreign();
 	server.focus_view(this);
 	server.visibility_dirty = true;
@@ -648,6 +677,8 @@ void View::handle_map() {
 
 void View::handle_unmap() {
 	server.input.forget(*this);
+	Desktop *home = server.canvas.desktop_of(*this);
+	bool in_grid = home != nullptr && home->tiling() && !maximized && !fullscreen;
 	mapped = false;
 	std::erase(server.views, this);
 	destroy_foreign();
@@ -655,9 +686,14 @@ void View::handle_unmap() {
 		server.focused_view = nullptr;
 		server.focus_view(server.top_visible_view(server.output_under_cursor()));
 	}
+	if (in_grid) {
+		server.canvas.reflow(home->id());
+	}
 	// Reset state the client renegotiates when it remaps.
 	maximized = false;
 	fullscreen = false;
+	tiled = false;
+	settle_pending = false;
 	saved = wlr_box{0, 0, 0, 0};
 	resize_edges = 0;
 	deco.hover = DecoPart::none;
@@ -700,6 +736,10 @@ void View::handle_commit() {
 			resize_edges = 0;
 			resize_end_serial = 0;
 		}
+	}
+	if (settle_pending) {
+		settle_pending = false;
+		server.canvas.settle(*this);
 	}
 	damage();
 }
