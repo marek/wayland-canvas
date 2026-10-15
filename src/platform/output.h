@@ -31,7 +31,8 @@ public:
 	bool is_panning() const;
 	bool interactive() const; // false while the compositor owns the pointer (overview, animation)
 	Desktop *desktop_showing() const;
-	void goto_box(wlr_box box);
+	double resting_zoom() const; // the zoom the camera rests at: the filling desktop's scale, else 1
+	void goto_desktop(const Desktop &desktop); // eases onto it at its scale
 	void goto_direction(double dx, double dy);
 	void pan(double dx, double dy);
 	void pin_desktop();

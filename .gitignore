@@ -1,6 +1,7 @@
 /build/
 /.venv/
-/subprojects/*/
+/subprojects/*
+!/subprojects/*.wrap
 .claude/*
 !.claude/settings.json
 tmp/

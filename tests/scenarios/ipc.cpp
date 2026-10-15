@@ -1266,9 +1266,14 @@ int run_step() {
 			"the flood desktops went, leaving the first");
 		View *view = foot_window();
 		check(view != nullptr, "the foot window is still there");
-		if (view != nullptr) {
-			server->output_under_cursor()->goto_box(view->frame_box());
-		}
+	if (view != nullptr) {
+		Output *output = server->output_under_cursor();
+		Desktop *home = output->desktop_showing();
+		// The camera comes to rest at the desktop's scale, which may not
+		// be 1: the item tests below must hold at any resting zoom.
+		output->camera.animate_to(camera_for_box(view->frame_box(),
+			home != nullptr ? home->scale() : 1.0));
+	}
 		return 700; // the camera glide settles
 	}
 	case 58: { // the item over the window: it owns the pointer, the window does not

@@ -1,13 +1,16 @@
 #include <cmath>
 #include <optional>
 
+#include "canvas/canvas.h"
 #include "core/config.h"
 #include "canvas/desktop.h"
 #include "core/geometry.h"
 #include "core/server.h"
+#include "windows/view.h"
 
 Desktop::Desktop(DesktopId id, int number, wlr_box frame)
-	: id_(id), number_(number), frame_(frame) {
+	: id_(id), number_(number), base_w_(frame.width), base_h_(frame.height),
+		frame_(frame) {
 }
 
 DesktopId Desktop::id() const {
@@ -38,8 +41,33 @@ Point Desktop::centre() const {
 	};
 }
 
+bool Desktop::tiling() const {
+	return tiling_;
+}
+
 bool Desktop::contains(double cx, double cy) const {
 	return wlr_box_contains_point(&frame_, cx, cy);
+}
+
+double Desktop::scale() const {
+	return scale_;
+}
+
+void Desktop::set_scale(double scale) {
+	// The frame fills the screen at the desktop's scale: the base size
+	// (the output's logical size when the desktop was made) divided by
+	// the scale, resized around the centre. Windows never move.
+	double cx = frame_.x + frame_.width / 2.0;
+	double cy = frame_.y + frame_.height / 2.0;
+	int w = static_cast<int>(std::lround(base_w_ / scale));
+	int h = static_cast<int>(std::lround(base_h_ / scale));
+	frame_ = wlr_box{
+		static_cast<int>(std::lround(cx - w / 2.0)),
+		static_cast<int>(std::lround(cy - h / 2.0)),
+		w,
+		h,
+	};
+	scale_ = scale;
 }
 
 Desktops::Desktops(Server &server)
@@ -60,7 +88,15 @@ Desktop &Desktops::create(wlr_box frame) {
 }
 
 void Desktops::remove(DesktopId id) {
-	destroy_owned(stack_, find(id));
+	Desktop *desktop = find(id);
+	if (desktop != nullptr && desktop->tiling()) {
+		// Abandoning a tiled desktop leaves its windows where they are,
+		// no longer tiled.
+		for (View *view : server_.canvas.views_in(desktop->frame())) {
+			view->set_tiled(false);
+		}
+	}
+	destroy_owned(stack_, desktop);
 	server_.damage_all();
 	server_.ipc.emit_desktops();
 }
@@ -76,15 +112,60 @@ void Desktops::raise(DesktopId id) {
 	stack_.insert(stack_.begin(), std::move(owned));
 }
 
+namespace {
+
+// The frame centre of a view.
+Point view_centre(const View &view) {
+	wlr_box frame = view.frame_box();
+	return Point{frame.x + frame.width / 2.0, frame.y + frame.height / 2.0};
+}
+
+} // namespace
+
 void Desktops::move(DesktopId id, int x, int y) {
 	Desktop *desktop = find(id);
 	if (desktop == nullptr) {
 		return;
 	}
+	if (desktop->tiling()) {
+		// The one case a frame carries its windows: a tiled desktop keeps
+		// its grid wherever the frame goes.
+		int dx = x - desktop->frame_.x;
+		int dy = y - desktop->frame_.y;
+		for (View *view : server_.views) {
+			if (!view->mapped || view->minimized) {
+				continue;
+			}
+			Point centre = view_centre(*view);
+			if (desktop->contains(centre.x, centre.y)) {
+				view->move(view->x + dx, view->y + dy);
+			}
+		}
+	}
 	desktop->frame_.x = x;
 	desktop->frame_.y = y;
+	// A moved frame takes windows in with it: their desktop may change.
+	server_.visibility_dirty = true;
+	server_.damage_all();
+}
+
+void Desktops::set_scale(DesktopId id, double scale) {
+	Desktop *desktop = find(id);
+	if (desktop == nullptr) {
+		return;
+	}
+	desktop->set_scale(scale);
 	server_.damage_all();
 	server_.ipc.emit_desktops();
+}
+
+void Desktops::set_tiling(DesktopId id, bool on) {
+	Desktop *desktop = find(id);
+	if (desktop == nullptr || desktop->tiling_ == on) {
+		return;
+	}
+	desktop->tiling_ = on;
+	server_.damage_all(); // the tab's Tile switch lights up
 }
 
 Desktop *Desktops::find(DesktopId id) {

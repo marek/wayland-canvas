@@ -27,7 +27,9 @@ public:
 	void set_minimized(bool minimized);
 	void set_maximized(bool maximized);
 	void set_fullscreen(bool fullscreen);
-	void set_frame(wlr_box frame, bool tiled);
+	void set_tiled(bool tiled); // the xdg tiled state only, no move or resize
+	// Grid placement: sized to the cell and told it is tiled.
+	void set_frame(wlr_box frame);
 	void move(int x, int y);
 	void activate();
 	void damage();
@@ -42,14 +44,19 @@ public:
 
 	// Canvas position of the window geometry's top-left corner.
 	int x = 0, y = 0;
-	bool mapped = false, minimized = false, maximized = false, fullscreen = false;
+	bool mapped = false, minimized = false, maximized = false, fullscreen = false,
+		tiled = false;
 	wlr_box saved{}; // content box to restore after maximize/fullscreen
+	// Leaving maximize/fullscreen restores the size through a configure: the
+	// grid return waits for the commit that carries it.
+	bool settle_pending = false;
 	uint32_t resize_edges = 0; // edges being dragged; the opposite ones stay put
 	// Configure that ended the resize: anchoring continues until the client acks it, since
 	// its final resized commit arrives after the release.
 	uint32_t resize_end_serial = 0;
 	wlr_box resize_start{};
 	uint32_t output_mask = 0; // outputs the view is visible on
+	double told_scale = 0; // the scale its surfaces were last told they are shown at
 	uint64_t minimize_seq = 0;
 
 	Decoration deco;

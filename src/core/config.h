@@ -119,6 +119,14 @@ inline constexpr double inertia_min_speed = 0.25; // px/ms to keep coasting afte
 inline constexpr double snap_radius = 0.10; // landing this close (fraction of screen) to a desktop snaps onto it
 inline constexpr double scroll_pan_speed = 1.5; // 2-finger scroll over empty canvas
 
+// Per-desktop scale (Super + 2-finger pinch): a desktop's frame is its
+// base size divided by its scale, and its windows are shown at it.
+inline constexpr double desktop_scale_min = 0.5;
+inline constexpr double desktop_scale_max = 2.0;
+// Released pinches settle on this step of scale; 100 % is one of the steps,
+// so a near-100 pinch catches it exactly.
+inline constexpr double desktop_scale_step = 0.05;
+
 // Overview (zoomed-out view).
 inline constexpr double overview_swipe_distance = 260.0; // 4-finger travel for a full zoom transition
 inline constexpr double overview_commit = 0.25; // progress past which a released zoom gesture completes
@@ -156,13 +164,6 @@ inline constexpr int launcher_max_rows = 10;
 inline constexpr int launcher_icon = 28;
 inline constexpr const char *launcher_font = "Sans 11";
 inline constexpr const char *launcher_search_font = "Sans 13";
-inline constexpr uint32_t color_launcher = 0x1f1f1ff5;
-inline constexpr uint32_t color_launcher_search = 0x2b2b2bff;
-inline constexpr uint32_t color_launcher_selected = 0x0078d4ff;
-inline constexpr uint32_t color_launcher_hover = 0xffffff14;
-inline constexpr uint32_t color_launcher_text = 0xffffffff;
-inline constexpr uint32_t color_launcher_dim_text = 0x9a9a9aff;
-inline constexpr uint32_t color_launcher_backdrop = 0x00000060;
 
 // Top bar: a Quickshell client autostarted by Server::start() when qs is on
 // PATH. Its config is found beside the compositor binary at one of the two

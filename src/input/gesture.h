@@ -24,8 +24,17 @@ public:
 	struct Abandon { Output *output; DesktopId desktop; double offset; };
 	struct Pinch { Output *output; std::optional<DesktopId> desktop, merge_from; double scale; bool hinted; };
 	struct OverviewZoom { Output *output; double scale; };
+	// Super + 2-finger pinch: scales a desktop, following the fingers.
+	struct DesktopScale {
+		Output *output;
+		DesktopId desktop;  // the desktop being scaled
+		Camera start;       // the camera when the pinch began (normal view)
+		double start_scale; // the desktop's scale then
+		double scale;       // the pinch scale since begin
+		bool overview;      // the pinch began in the overview
+	};
 	using State = std::variant<Idle, Ignored, Forwarded, Pending, Pan, ZoomOut, ZoomIn,
-		ZoomFurther, Hop, Abandon, Pinch, OverviewZoom>;
+		ZoomFurther, Hop, Abandon, Pinch, OverviewZoom, DesktopScale>;
 
 	explicit Gestures(Server &server);
 	Gestures(const Gestures &) = delete;
