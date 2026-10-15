@@ -25,6 +25,13 @@ Point pan_deltas(const Output &output, double dx, double dy) {
 	return {sign * dx * config::pan_speed / zoom, sign * dy * config::pan_speed / zoom};
 }
 
+// Super held right now (the same query seat_modifiers makes for buttons).
+bool super_held(Server &server) {
+	wlr_keyboard *keyboard = wlr_seat_get_keyboard(server.seat);
+	return keyboard != nullptr
+		&& (wlr_keyboard_get_modifiers(keyboard) & WLR_MODIFIER_LOGO) != 0;
+}
+
 // The output a gesture state acts on, or null for the states without one.
 Output *state_output(const Gestures::State &state) {
 	return std::visit(overloaded{
@@ -35,6 +42,7 @@ Output *state_output(const Gestures::State &state) {
 		[](const Gestures::ZoomFurther &s) -> Output * { return s.output; },
 		[](const Gestures::Hop &s) -> Output * { return s.output; },
 		[](const Gestures::Abandon &s) -> Output * { return s.output; },
+		[](const Gestures::DesktopScale &s) -> Output * { return s.output; },
 		[](const Gestures::Pinch &s) -> Output * { return s.output; },
 		[](const Gestures::OverviewZoom &s) -> Output * { return s.output; },
 		[](const auto &) -> Output * { return nullptr; },
@@ -74,6 +82,7 @@ bool Gestures::zooming(const Output &output) const {
 		[&](const ZoomIn &s) { return s.output == &output; },
 		[&](const ZoomFurther &s) { return s.output == &output; },
 		[&](const OverviewZoom &s) { return s.output == &output; },
+		[&](const DesktopScale &s) { return s.output == &output; },
 		[](const auto &) { return false; },
 	}, state_);
 }
@@ -126,7 +135,7 @@ void Gestures::decide(Pending &pending) {
 		state_ = Hop{o, ax, ay, false};
 	} else if (fingers == 4) {
 		if (vertical && ay > 0) {
-			Camera near = camera_for_box(o->overview.target().box);
+			Camera near = o->overview.target_camera();
 			state_ = ZoomIn{o, near, o->camera.current(), ay, 0, 0};
 		} else if (vertical && ay < 0) {
 			state_ = ZoomFurther{o, o->camera.current().zoom, ay, 0};
@@ -285,12 +294,23 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 					best = &d;
 				}
 			}
-			if (best != nullptr && best_dist <= snap) {
-				o.camera.animate_to(camera_for_box(best->frame()));
-			} else if (!cancelled && std::hypot(pan.vx, pan.vy) > config::inertia_min_speed) {
+		if (best != nullptr && best_dist <= snap) {
+			// A landing close to a desktop snaps onto it, its zoom easing
+			// to the desktop's scale.
+			o.camera.animate_to(camera_for_box(best->frame(), best->scale()));
+		} else {
+			if (!cancelled && std::hypot(pan.vx, pan.vy) > config::inertia_min_speed) {
 				o.camera.coast(pan.vx, pan.vy);
 			}
-			o.damage();
+			if (cam.zoom != 1) {
+				// Any other landing spot is a free view, at zoom 1: the
+				// camera eases its zoom there while the momentum runs.
+				Camera free = cam;
+				free.zoom = 1;
+				o.camera.animate_zoom(free, cam, 1, 0);
+			}
+		}
+		o.damage();
 		},
 		[&](ZoomOut &z) {
 			Output &o = *z.output;
@@ -345,6 +365,45 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 		return;
 	}
 	last_time_ = time;
+
+	if (fingers == 2 && super_held(server_)) {
+		// Super decides a 2-finger pinch at its start: it scales a
+		// desktop and never reaches a client. A free view — and, in the
+		// overview, a free-spot target — is pinned as a desktop first.
+		bool overview = out->overview.active();
+		Desktop *desktop = nullptr;
+		if (overview) {
+			// The desktop under the cursor, else the target.
+			if (std::optional<CanvasPos> pos = server_.input.cursor_canvas_pos();
+					pos.has_value() && pos->output == out) {
+				desktop = server_.canvas.desktops.at(pos->cx, pos->cy);
+			}
+			if (desktop == nullptr) {
+				if (Desktop *target =
+						server_.canvas.desktops.find(out->overview.target().desktop);
+						target != nullptr) {
+					desktop = target;
+				} else {
+					out->overview.pin_target();
+					desktop = server_.canvas.desktops.find(out->overview.target().desktop);
+				}
+			}
+		} else {
+			desktop = out->desktop_showing();
+			if (desktop == nullptr) {
+				out->pin_desktop();
+				desktop = out->desktop_showing();
+			}
+		}
+		if (desktop == nullptr) {
+			state_ = Ignored{};
+			return;
+		}
+		out->camera.stop();
+		state_ = DesktopScale{out, desktop->id(), out->camera.current(),
+			desktop->scale(), 1, overview};
+		return;
+	}
 
 	if (out->overview.active()) {
 		switch (fingers) {
@@ -416,6 +475,26 @@ void Gestures::pinch_update(uint32_t time, double dx, double dy,
 		last_time_ = time;
 		return;
 	}
+	if (auto *z = std::get_if<DesktopScale>(&state_)) {
+		// The scale follows the fingers: the frame grows or shrinks around
+		// its centre, and in the normal view the camera zoom follows it.
+		z->scale = scale > 0 ? scale : 1;
+		double live = clampd(z->start_scale * z->scale,
+			config::desktop_scale_min, config::desktop_scale_max);
+		if (server_.canvas.desktops.find(z->desktop) == nullptr) {
+			// The desktop was abandoned mid-pinch: the gesture is over.
+			state_ = Idle{};
+			return;
+		}
+		server_.canvas.desktops.set_scale(z->desktop, live);
+		if (!z->overview) {
+			Camera next = z->start;
+			next.zoom = live;
+			z->output->camera.jump(next);
+		}
+		last_time_ = time;
+		return;
+	}
 	if (auto *pinch = std::get_if<Pinch>(&state_)) {
 		pinch->scale = scale;
 		Desktop *pinched = server_.canvas.desktops.find(pinch->desktop);
@@ -480,6 +559,34 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 			o->damage();
 		}
 		pinch_clear_preview(*pinch, true);
+		state_ = Idle{};
+		return;
+	}
+	if (auto *z = std::get_if<DesktopScale>(&state_)) {
+		Output &o = *z->output;
+		Desktop *desktop = server_.canvas.desktops.find(z->desktop);
+		if (desktop != nullptr) {
+			// Released, the scale settles on the nearest step; 100 % is
+			// one of the steps, so a near-100 pinch catches it exactly. A
+			// cancelled pinch springs back to where it began.
+			double settled = z->start_scale;
+			if (!cancelled) {
+				settled = clampd(
+					std::round(z->start_scale * z->scale / config::desktop_scale_step)
+						* config::desktop_scale_step,
+					config::desktop_scale_min, config::desktop_scale_max);
+			}
+			server_.canvas.desktops.set_scale(z->desktop, settled);
+			if (!z->overview) {
+				// The camera comes to rest on the desktop, at its scale.
+				Camera next = camera_for_box(desktop->frame(), settled);
+				o.camera.animate_to(next);
+			}
+			// The desktop's windows are told the settled scale — and only
+			// now, on release.
+			server_.canvas.scale_settled(*desktop);
+		}
+		o.damage();
 		state_ = Idle{};
 		return;
 	}
