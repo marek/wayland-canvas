@@ -126,10 +126,15 @@ wayland_canvas = executable(
 	install: true,
 )
 
-# The top bar's Quickshell config: found beside the binary in the build tree,
-# and under <prefix>/share/wayland-canvas once installed.
+# The shell (the plugin host and its UI kit) and the built-in plugins, both
+# found beside the binary in the build tree, and under
+# <prefix>/share/wayland-canvas once installed.
 install_subdir(
 	'shell',
+	install_dir: get_option('datadir') / 'wayland-canvas',
+)
+install_subdir(
+	'plugins',
 	install_dir: get_option('datadir') / 'wayland-canvas',
 )
 

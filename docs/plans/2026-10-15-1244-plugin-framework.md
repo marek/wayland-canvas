@@ -24,11 +24,11 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 
 ## Plugin host
 
-- [ ] Discovery in the built-in, user and configured directories, manifests, `apiVersion`, enabling, settings, storage, reload on change
-- [ ] The API object: plugin, storage, panels (the common trigger), actions, theme, compositor
-- [ ] The UI kit as the `WaylandCanvas.Ui` module the plugins import
-- [ ] The bar, every widget and every panel moved into plugins, behaviour unchanged
-- [ ] Reload by change notifications: no timer or process runs while the shell sits idle
+- [x] Discovery in the built-in, user and configured directories, manifests, `apiVersion`, enabling, settings, storage, reload on change
+- [x] The API object: plugin, storage, panels (the common trigger), actions, theme, compositor
+- [x] The UI kit as the `WaylandCanvas.Ui` module the plugins import
+- [x] The bar, every widget and every panel moved into plugins, behaviour unchanged
+- [x] Reload by change notifications: no timer or process runs while the shell sits idle
 
 ## Plugins
 

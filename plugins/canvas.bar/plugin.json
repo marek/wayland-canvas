@@ -1,0 +1,16 @@
+{
+	"id": "canvas.bar",
+	"name": "Bar",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The top bar surface, one per output, hosting every bar widget by section and order",
+	"contributes": {
+		"surfaces": [
+			{
+				"id": "bar",
+				"entry": "Bar.qml",
+				"perOutput": true
+			}
+		]
+	}
+}

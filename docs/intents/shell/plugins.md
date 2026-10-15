@@ -44,7 +44,7 @@ What `contributes` may hold:
 |---|---|---|
 | `surfaces` | `id`, `entry`, `perOutput` | Top-level windows the plugin owns (the bar, the overview toolbar, note windows) |
 | `barWidgets` | `id`, `entry`, `section` (`left`, `center`, `right`), `order`, optional `panel` | In the bar, whichever plugin provides it |
-| `panels` | `id`, `entry` | Through the common trigger |
+| `panels` | `id`, `entry` | Through the common trigger; the id names the panel's layer surface, `wayland-canvas-panel-<id>` |
 | `toolbarButtons` | `id`, `icon`, `label`, and one of `action`, `panel`, `menu` ([toolbar.md](toolbar.md)) | In the overview toolbar |
 | `actions` | `id`, `entry` (a component whose `run(args)` performs it) | Wherever a button, a menu entry or the control socket names it |
 
@@ -56,8 +56,8 @@ offers is not loaded.
 In this order; a plugin in a later directory replaces one with the same id
 in an earlier one:
 
-1. Built in: `<datadir>/wayland-canvas/plugins` (`plugins/` in the build
-   tree when the compositor runs from it).
+1. Built in: beside the shell — `<shell dir>/../plugins`, which is `plugins/`
+   in the source tree and `<datadir>/wayland-canvas/plugins` when installed.
 2. The user's: `$XDG_DATA_HOME/wayland-canvas/plugins` (default
    `~/.local/share/wayland-canvas/plugins`).
 3. Each path in the config's `pluginPaths`.
@@ -96,10 +96,14 @@ Every component a plugin contributes receives `api`:
 |---|---|
 | `api.plugin` | The manifest; `settings`, the defaults merged with the config; `setSetting(key, value)`, which writes the config |
 | `api.storage` | A directory of the plugin's own under `$XDG_STATE_HOME/wayland-canvas/plugins/<id>/`; `read(name)` and `write(name, value)` for JSON |
-| `api.panels` | `toggle`, `open`, `close`, and the name of the open panel |
+| `api.panels` | `toggle`, `toggle`'s anchor re-aims an already-open panel (another tray icon's menu), `open`, `close`, and the name of the open panel |
 | `api.actions` | `run(<action name>, args)` |
 | `api.theme` | `mode` (`light` or `dark`), `colors` for that mode, `setMode(mode)` ([theme.md](theme.md)) |
-| `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops, canvas items), `call(method, params)` with its result or error, and its events ([../platform/ipc.md](../platform/ipc.md)) |
+| `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops, canvas items), `call(method, params, callback)` with its result or error, and its events ([../platform/ipc.md](../platform/ipc.md)) |
+
+A surface component is also handed the registry of everything loaded — the
+ordered bar widgets and toolbar buttons with their components — because a
+surface (the bar, the toolbar) hosts other plugins' contributions.
 
 Plugins draw with the shell's UI kit, a QML module they import as
 `WaylandCanvas.Ui`: the bar button, the panel card and its rows, sliders,

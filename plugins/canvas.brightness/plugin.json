@@ -1,0 +1,24 @@
+{
+	"id": "canvas.brightness",
+	"name": "Brightness",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The brightness indicator: the display glyph, with the backlight slider panel",
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "brightness",
+				"entry": "Brightness.qml",
+				"section": "right",
+				"order": 4,
+				"panel": "brightness"
+			}
+		],
+		"panels": [
+			{
+				"id": "brightness",
+				"entry": "BrightnessPanel.qml"
+			}
+		]
+	}
+}
