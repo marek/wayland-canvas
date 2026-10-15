@@ -96,10 +96,7 @@ std::size_t current = 0;
 int phase = 0;
 wlr_box popup_box{}; // the open panel's card, from the walk's phase 1
 wlr_box field_box{}; // where the Wi-Fi password field ended up
-double clock_x = 0, network_x = 0;
-double action_x = 0, action_y = 0; // an action row's click point: a click
-// can be lost while the bar's render loop is stalled on a screenshot, so
-// the proof phases re-issue it until the mock records the call
+double clock_x = 0, network_x = 0; // where the walk found the clock, network
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -551,6 +548,57 @@ std::vector<Band> panel_rows(const char *name) {
 	return rows;
 }
 
+// ---- waiting for a panel to stop changing ----
+
+// The panel's shape: each band's extent and a coarse lit count. The caret
+// blinking in the password field lights a few pixels inside one band; the
+// shape stays put, and a stable shape means the rows the flows aim at are
+// where the screenshot says.
+std::string band_shape(cairo_surface_t *panel) {
+	std::string shape;
+	for (const Band &b : text_bands(panel, popup_box)) {
+		shape += std::format("{}:{}:{},", b.top, b.bottom, b.lit / 16);
+	}
+	return shape;
+}
+
+int settle_stage = 0; // 0: idle, 1: first shot taken, 2: sampling pairs
+int settle_retries = 0;
+std::string settle_bytes; // the previous shot's shape
+
+// Shots `name` on each call and reports whether two consecutive shots
+// showed the same shape. Call it on successive ticks (a tick is enough
+// time for grim to finish: handle_timer waits for it first) and click
+// only once it says yes — the shot on disk is then current, so the aim
+// comes from it. Under load the bar renders late; clicking at a stale
+// screenshot lands wrong or out of order, and a re-issued click can
+// toggle a row twice, so the flows wait instead of retrying.
+bool settle_advance(const char *name) {
+	if (settle_stage == 0) {
+		shot(name);
+		settle_stage = 1;
+		settle_retries = 0;
+		return false;
+	}
+	cairo_surface_t *panel = load_png(name); // the previous call's shot
+	std::string shape = panel != nullptr ? band_shape(panel) : std::string();
+	if (panel != nullptr) {
+		cairo_surface_destroy(panel);
+	}
+	bool same = shape == settle_bytes;
+	settle_bytes = shape;
+	if (settle_stage == 1) {
+		settle_stage = 2;
+		shot(name);
+		return false;
+	}
+	if (!same && ++settle_retries < 25) { // a changing panel; keep watching
+		shot(name);
+		return false;
+	}
+	settle_stage = 0; // matched (or given up waiting): the shot is stable
+	return true;
+}
 // ---- the stand-ins' own record: what the mocks received ----
 
 constexpr const char *NM_NAME = "org.freedesktop.NetworkManager";
@@ -856,32 +904,30 @@ int walk() {
 		phase = 17; // on to Connect: the flow continues against the mock
 		return 300;
 	}
-	case 17: { // submit the typed password: Connect is the bottom band
-		cairo_surface_t *panel = load_png("network-typed");
-		std::vector<Band> bands = text_bands(panel, popup_box);
-		cairo_surface_destroy(panel);
+	case 17: { // submit the typed password: Connect is the bottom band —
+		// but only once the panel has stopped changing, and exactly once
+		if (!settle_advance("network-typed")) {
+			return 400; // the panel is still settling under load
+		}
+		std::vector<Band> bands = panel_bands("network-typed");
 		if (bands.size() < 8) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = bands.back().centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, bands.back().centre());
 		phase = 18;
 		return 400;
 	}
 	case 18: { // the mock NetworkManager received the activation with the PSK
 		bool sent = mock_called(NM_NAME, NM_MANAGER, "AddAndActivateConnection",
 			"correctbattery");
-		if (!sent && retries++ < 100) { // the click's round trip takes its time
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!sent && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(sent, "Connect sent CafeGuest's activation with the typed password "
-			"to the stand-in NetworkManager");
+		check(sent, sent ? "Connect sent CafeGuest's activation with the "
+			"typed password to the stand-in NetworkManager"
+			: "the Connect click was lost under load");
 		shot("network-connected");
 		phase = 19;
 		return 400;
@@ -906,33 +952,27 @@ int walk() {
 		phase = 21;
 		return 400;
 	case 21: { // a connected network's action row is Disconnect
-		std::vector<Band> bands = panel_bands("network-home");
-		if (bands.size() < 5 && retries++ < 10) {
-			shot("network-home");
-			return 400;
+		if (!settle_advance("network-home")) {
+			return 400; // the panel is still settling under load
 		}
-		retries = 0;
-		if (bands.size() < 5) {
+		std::vector<Band> bands = panel_bands("network-home");
+		if (bands.size() < 5) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = bands.back().centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, bands.back().centre());
 		phase = 22;
 		return 400;
 	}
 	case 22: {
 		bool dropped = mock_called(NM_NAME, NM_DEVICE, "Disconnect");
-		if (!dropped && retries++ < 100) {
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!dropped && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(dropped, "Disconnect deactivated the connection on the "
-			"stand-in's Wi-Fi device");
+		check(dropped, dropped ? "Disconnect deactivated the connection on "
+			"the stand-in's Wi-Fi device"
+			: "the Disconnect click was lost under load");
 		phase = 2;
 		return 300;
 	}
@@ -941,11 +981,10 @@ int walk() {
 		phase = 31;
 		return 400;
 	case 31: { // the paired device's row: Scenario Headphones, the first one
-		std::vector<Band> rows = panel_rows("bluetooth-devices");
-		if (rows.size() < 4 && retries++ < 15) {
-			shot("bluetooth-devices");
-			return 400;
+		if (!settle_advance("bluetooth-devices")) {
+			return 400; // the rows are still settling after the scan
 		}
+		std::vector<Band> rows = panel_rows("bluetooth-devices");
 		retries = 0;
 		check(rows.size() >= 4, std::format("the bluetooth panel lists the "
 			"stand-in's two devices ({} rows: switch, scan, 2 devices)",
@@ -956,9 +995,7 @@ int walk() {
 		}
 		// known devices come first, so the paired one is the second row
 		// from the bottom; the found one is last
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[rows.size() - 2].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[rows.size() - 2].centre());
 		phase = 32;
 		return 400;
 	}
@@ -966,33 +1003,28 @@ int walk() {
 		bool connected = mock_property(BT_NAME, BT_HEADPHONES, "org.bluez.Device1",
 			"Connected").find("true") != std::string::npos;
 		bool called = mock_called(BT_NAME, BT_HEADPHONES, "Connect");
-		if (!(called && connected) && retries++ < 100) {
-			if (!called && retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!(called && connected) && retries++ < 150) { // in flight, not lost
+			return 400;
 		}
 		retries = 0;
-		check(called && connected, "clicking the paired device connected it on "
-			"the stand-in (Connect called, Connected reported)");
+		check(called && connected, called || connected
+			? "clicking the paired device connected it on the stand-in "
+			"(Connect called, Connected reported)"
+			: "the paired-device click was lost under load");
 		shot("bluetooth-connected");
 		phase = 33;
 		return 400;
 	}
 	case 33: { // the same row again: a connected device disconnects
-		std::vector<Band> rows = panel_rows("bluetooth-connected");
-		if (rows.size() < 4 && retries++ < 10) {
-			shot("bluetooth-connected");
-			return 400;
+		if (!settle_advance("bluetooth-connected")) {
+			return 400; // the row is still settling after the connect
 		}
-		retries = 0;
-		if (rows.size() < 4) {
+		std::vector<Band> rows = panel_rows("bluetooth-connected");
+		if (rows.size() < 4) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[rows.size() - 2].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[rows.size() - 2].centre());
 		phase = 34;
 		return 400;
 	}
@@ -1000,47 +1032,38 @@ int walk() {
 		bool off = mock_called(BT_NAME, BT_HEADPHONES, "Disconnect")
 			&& mock_property(BT_NAME, BT_HEADPHONES, "org.bluez.Device1",
 				"Connected").find("false") != std::string::npos;
-		if (!off && retries++ < 100) {
-			if (retries % 10 == 3
-				&& !mock_called(BT_NAME, BT_HEADPHONES, "Disconnect")) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!off && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(off, "clicking the connected device disconnected it on the stand-in "
-			"(Disconnect called, Connected false)");
+		check(off, off ? "clicking the connected device disconnected it on "
+			"the stand-in (Disconnect called, Connected false)"
+			: "the disconnect click was lost under load");
 		shot("bluetooth-after");
 		phase = 35;
 		return 400;
 	}
 	case 35: { // the found device's row: Scenario Speaker, the last one
-		std::vector<Band> rows = panel_rows("bluetooth-after");
-		if (rows.size() < 4 && retries++ < 10) {
-			shot("bluetooth-after");
-			return 400;
+		if (!settle_advance("bluetooth-after")) {
+			return 400; // the rows are still settling after the scan
 		}
-		retries = 0;
-		if (rows.size() < 4) {
+		std::vector<Band> rows = panel_rows("bluetooth-after");
+		if (rows.size() < 4) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[rows.size() - 1].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[rows.size() - 1].centre());
 		phase = 36;
 		return 400;
 	}
 	case 36: {
 		bool paired = mock_called(BT_NAME, BT_SPEAKER, "Pair");
-		if (!paired && retries++ < 100) {
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!paired && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(paired, "clicking the found device called Pair on the stand-in");
+		check(paired, paired ? "clicking the found device called Pair on "
+			"the stand-in" : "the found-device click was lost under load");
 		phase = 2;
 		return 300;
 	}
@@ -1051,30 +1074,23 @@ int walk() {
 	case 41: { // "Power saver" is the second row: the battery block above it
 		// and nothing below it is ever clicked — the Session rows (Suspend,
 		// Restart, Power off, Log out) sit below the other two profiles.
-		std::vector<Band> rows = panel_rows("power-profiles");
-		if (rows.size() < 8 && retries++ < 10) {
-			shot("power-profiles");
-			return 400;
+		if (!settle_advance("power-profiles")) {
+			return 400; // the rows are still settling under load
 		}
-		retries = 0;
-		if (rows.size() < 8) {
+		std::vector<Band> rows = panel_rows("power-profiles");
+		if (rows.size() < 8) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
 		// rows: battery, Power saver, Balanced, Performance, 4 session rows
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[1].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[1].centre());
 		phase = 42;
 		return 400;
 	}
 	case 42: {
 		std::string profile = mock_property(PPD_NAME, PPD_PATH, PPD_IFACE, "ActiveProfile");
-		if (profile.find("power-saver") == std::string::npos && retries++ < 100) {
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (profile.find("power-saver") == std::string::npos && retries++ < 150) {
+			return 400; // in flight under load, not lost
 		}
 		retries = 0;
 		check(profile.find("power-saver") != std::string::npos,
@@ -1279,8 +1295,165 @@ int run_step() {
 			return -100;
 		}
 		check(panel_layers() == 0, "the last panel closed on a click outside");
+		step = 20; // on to the overview: shell surfaces take input over it
+		return -100; // without the advance: every other step moves on alone
+	// ---- the overview: shell surfaces take input over it ----
+	// A step range of its own, appended after the walk: nothing above
+	// moves, so merges with other additions stay mechanical.
+	case 20: // Super+Tab, the overview's chord, over the bar's world
+		key(KEY_LEFTMETA, true);
+		key(KEY_TAB, true);
+		key(KEY_TAB, false);
+		key(KEY_LEFTMETA, false);
+		return 400;
+	case 21: {
+		Output &o = *server->outputs.front();
+		check(o.overview.active(), "Super+Tab opened the overview over the bar");
+		shot("overview");
+		return 400;
+	}
+	case 22: // a click on the bar's own background: not the logo, which
+		// sends launcher.toggle over the control socket
+		click(300.0, 13);
+		return 400;
+	case 23:
+		check(server->outputs.front()->overview.active(),
+			"a click on the bar did not leave the overview");
+		return 300;
+	case 24:
+		// Panel.close() does not tell Panels (a forced hide does), so
+		// Panels.open still names the walk's last panel after its
+		// outside-click close: a re-click of that indicator would only
+		// toggle the stale entry. Click another indicator first, which
+		// moves Panels.open aside and opens that panel instead.
+		click(clock_x, 13);
+		return 400;
+	case 25: { // the clock panel proves panels map inside the overview
+		LayerSurface *clock_panel = panel_layer("clock");
+		if (clock_panel == nullptr && retries++ < 150) { // in flight under load
+			return -100;
+		}
+		retries = 0;
+		check(clock_panel != nullptr,
+			"the bar opens a panel inside the overview");
+		if (clock_panel == nullptr) {
+			step = 99;
+			return 100;
+		}
+		shot("overview-clock");
+		return 500;
+	}
+	case 26: // the network indicator: closes the clock, opens the network
+		click(network_x, 13);
+		return 400;
+	case 27: {
+		LayerSurface *panel = panel_layer("network");
+		if (panel == nullptr && retries++ < 150) { // in flight under load
+			return -100;
+		}
+		retries = 0;
+		check(panel != nullptr,
+			"the network panel opened inside the overview");
+		if (panel == nullptr) {
+			step = 99;
+			return 100;
+		}
+		check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
+			"the overview's network panel belongs to the bar client");
+		if (server->seat->keyboard_state.focused_surface != panel->wlr->surface
+				&& retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(server->seat->keyboard_state.focused_surface == panel->wlr->surface,
+			"the panel holds the keyboard while the overview is active");
+		popup_box = card_box(network_x, network_panel);
+		shot("overview-network");
+		return 700;
+	}
+	case 28: { // select CafeGuest: the first row, band 2 on the raw scan
+		if (!settle_advance("overview-network")) {
+			return -400; // the rows are still settling under load
+		}
+		std::vector<Band> bands = panel_bands("overview-network");
+		if (bands.size() < 5) { // the panel moved on without us
+			step = 99;
+			return 100;
+		}
+		check(bands.size() >= 5,
+			"the panel lists the stand-in's networks in the overview");
+		click(popup_box.x + popup_box.width / 2.0, bands[2].centre());
+		return 500;
+	}
+	case 29: // the shot must come a tick after the selection click
+		shot("overview-selected");
+		return 400;
+	case 30: {
+		if (!settle_advance("overview-selected")) {
+			return -400; // the panel is still settling under load
+		}
+		std::vector<Band> bands = panel_bands("overview-selected");
+		if (bands.size() < 8) { // the panel moved on without us
+			step = 99;
+			return 100;
+		}
+		check(bands.size() >= 8, "selecting the network armed its password "
+			"field in the overview");
+		const Band &field = bands[bands.size() - 2];
+		field_box = {popup_box.x, field.top, popup_box.width, field.bottom - field.top};
+		click(popup_box.x + popup_box.width / 2.0, field.centre());
+		return 500;
+	}
+	case 31: // type only once the click has focused the field
+		type("correctbattery"); // never Enter: nothing is submitted
+		return 400;
+	case 32:
+		shot("overview-typed");
+		return 400;
+	case 33: {
+		cairo_surface_t *typed = load_png("overview-typed");
+		wlr_box rect{
+			field_box.x, field_box.y - 10,
+			field_box.width, field_box.height + 20,
+		};
+		int dots = bright_count(typed, rect);
+		cairo_surface_destroy(typed);
+		if (dots < 80 && retries++ < 10) { // the panel may render the dots late
+			shot("overview-typed");
+			return -400;
+		}
+		retries = 0;
+		// each of the 14 dots lights ~9 px; a bare cursor lights under 40
+		check(dots >= 80, std::format("typing reached the Wi-Fi password "
+			"field inside the overview ({} bright pixels in it)", dots));
+		return 300;
+	}
+	case 34: // the panel holds the keyboard: it takes the Escape
+		tap(KEY_ESC);
+		return 400;
+	case 35: {
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0,
+			"Escape closed the panel while the overview stayed");
+		check(server->outputs.front()->overview.active(),
+			"the panel took Escape: the overview is still active");
+		return 300;
+	}
+	case 36: // with the panel gone, the overview hears the next Escape
+		tap(KEY_ESC);
+		return 400;
+	case 37: {
+		Output &o = *server->outputs.front();
+		if (o.overview.active() && retries++ < 20) {
+			return -100;
+		}
+		check(!o.overview.active(), "the second Escape left the overview");
 		step = 99;
 		return 100;
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
