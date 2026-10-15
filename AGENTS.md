@@ -212,6 +212,7 @@ Skills live in `docs/skills/<name>/SKILL.md`;
 | Skill | Use for |
 |---|---|
 | `plan-checklists` | Any multi-step body of work — a dated, tracked checkbox plan in `docs/plans/`. |
+| `writing-context` | Before writing a plan's Context, an intent's requirement, a commit body or a brief for another agent: the goal and its constraints in plain words, never a transcript of the session. |
 | `incremental-commits` | Before any `git commit` in this repo. |
 | `intent-docs` | Before writing or editing anything under `docs/intents/`. |
 | `code-style` | Comments, doc prose, naming, C++ conventions. |

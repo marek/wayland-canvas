@@ -49,9 +49,9 @@ file name.
 ## Context
 
 A plan's `## Context` says what the plan is for: the goal and its
-constraints, in plain words. It is not a transcript of the session: no
-quoted messages, no remarks on how a request was phrased, no side
-questions that were asked and answered along the way.
+constraints, in plain words, never a transcript of the session. The
+`writing-context` skill is the rule; `tools/check-plans.sh` fails a
+plan whose Context quotes the conversation.
 
 ## A plan that started outside the repo
 

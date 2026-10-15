@@ -12,7 +12,9 @@ code and not a diary.
 
 ## What an intent doc is written from
 
-1. What the users said and decided, in the working sessions.
+1. What the users said and decided, in the working sessions, distilled
+   into requirements as the `writing-context` skill describes; an
+   intent never quotes the conversation.
 2. The plans in `docs/plans/` (their design prose and decisions).
 3. The plan-time design prose for the build.
 4. The user-facing README, where it states behaviour.
