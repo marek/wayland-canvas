@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
+#include "desktop.h"
 #include "geometry.h"
 
-struct Desktop;
 class Output;
 class Server;
 
@@ -39,6 +40,9 @@ public:
 	void hold_begin(uint32_t time, uint32_t fingers);
 	void hold_end(uint32_t time, bool cancelled);
 
+	// 0 unless that desktop is being swiped away.
+	double abandon_offset(DesktopId desktop) const;
+
 	GestureKind kind = GestureKind::none;
 	bool pinch = false; // began as a pinch (matters for forwarding)
 	uint32_t fingers = 0;
@@ -51,18 +55,21 @@ public:
 	double start_zoom = 0;
 	Camera near; // zoom gestures: close-up end of the path
 	Camera far; // zoom gestures: zoomed-out end
-	Desktop *desktop = nullptr; // acted on by abandon / pinch
-	Desktop *merge_from = nullptr; // pinch-in preview: absorbed desktop
+	std::optional<DesktopId> desktop; // acted on by abandon / pinch
+	std::optional<DesktopId> merge_from; // pinch-in preview: absorbed desktop
 
 private:
 	void reset();
 	// Classifies a pending gesture now that enough travel has accumulated.
 	void decide();
-	// Desktop under the cursor (canvas coords); falls back to the overview
-	// target desktop when the cursor is not over any desktop.
-	Desktop *desktop_under(Output &output);
+	// The desktop under the cursor (canvas coords), or the overview target
+	// desktop; nullopt once it is gone.
+	std::optional<DesktopId> desktop_under(Output &output);
 	void pinch_preview(std::string_view text);
 	void pinch_clear_preview(bool clear_merge);
+
+	double abandon_offset_ = 0; // abandon swipe: sideways travel of the swiped frame
+
 
 	bool hop_done_ = false; // one hop per 3-finger gesture
 	bool hold_forwarded_ = false; // whether the current hold gesture was forwarded to a client

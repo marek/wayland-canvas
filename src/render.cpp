@@ -144,10 +144,11 @@ void draw_dashed_logical_rect(const RenderCtx &ctx, double x, double y, double w
 void draw_dashed_desktop(const RenderCtx &ctx, const Desktop &desktop, double screen_dx,
 		double thickness, wlr_render_color color) {
 	double zoom = ctx.cam.zoom;
+	const wlr_box &frame = desktop.frame();
 	draw_dashed_logical_rect(ctx,
-		canvas_x(ctx, desktop.box.x) + screen_dx,
-		canvas_y(ctx, desktop.box.y),
-		desktop.box.width * zoom, desktop.box.height * zoom,
+		canvas_x(ctx, frame.x) + screen_dx,
+		canvas_y(ctx, frame.y),
+		frame.width * zoom, frame.height * zoom,
 		thickness, color);
 }
 
@@ -348,44 +349,46 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 	if (ctx.overview) {
 		if (std::optional<CanvasPos> pos = server.input.cursor_canvas_pos();
 				pos && pos->output == &o) {
-			hovered = server.desktop_at(pos->cx, pos->cy);
+			hovered = server.canvas.desktops.at(pos->cx, pos->cy);
 		}
 	}
 
-	for (const auto &dp : std::views::reverse(server.desktops)) {
-		Desktop &d = *dp;
-		Rect dr = box_rect(d.box);
+	for (const Desktop &d : std::views::reverse(server.canvas.desktops.all())) {
+		const wlr_box &frame = d.frame();
+		Rect dr = d.rect();
 		if (!dr.intersects(ctx.viewport)) {
 			continue;
 		}
 
+		double offset = server.gesture.abandon_offset(d.id());
 		uint32_t color = config::color_frame;
 		double alpha = 1.0;
 		double thickness = 2.0;
-		if (d.swipe_offset != 0) {
+		if (offset != 0) {
 			// Abandon gesture: slide + fade; red past the threshold.
 			alpha = std::fmax(0.0,
-				1.0 - std::fabs(d.swipe_offset) / (2.0 * config::abandon_distance));
-			if (std::fabs(d.swipe_offset) > config::abandon_distance) {
+				1.0 - std::fabs(offset) / (2.0 * config::abandon_distance));
+			if (std::fabs(offset) > config::abandon_distance) {
 				color = config::color_abandon;
 			}
-		} else if (server.input.drop_desktop == &d) {
-			draw_canvas_rect(ctx, d.box.x, d.box.y, d.box.width, d.box.height,
+		} else if (server.input.drop_desktop == d.id()) {
+			draw_canvas_rect(ctx, frame.x, frame.y, frame.width, frame.height,
 				color_rgba(config::color_combine, 0.15f));
 			color = config::color_combine;
-		} else if (o.target_desktop == &d) {
+		} else if (o.target_desktop == d.id()) {
 			color = config::color_accent;
 			thickness = 3.0;
 		} else if (hovered == &d) {
-			draw_canvas_rect(ctx, d.box.x, d.box.y, d.box.width, d.box.height,
+			draw_canvas_rect(ctx, frame.x, frame.y, frame.width, frame.height,
 				color_rgba(config::color_frame, 0.15f));
 			color = 0xffffffff; // brighter than the faint base frames
 		}
-		draw_dashed_desktop(ctx, d, d.swipe_offset, thickness,
+		draw_dashed_desktop(ctx, d, offset, thickness,
 			color_rgba(color, static_cast<float>(alpha)));
 	}
 
-	if (o.target_desktop == nullptr && !wlr_box_empty(&o.target)) {
+	if (server.canvas.desktops.find(o.target_desktop) == nullptr
+			&& !wlr_box_empty(&o.target)) {
 		Rect tr = box_rect(o.target);
 		if (tr.intersects(ctx.viewport)) {
 			double zoom = ctx.cam.zoom;
@@ -400,9 +403,9 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 void draw_desktops_normal(const RenderCtx &ctx) {
 	wlr_render_color color = color_rgba(config::color_frame,
 		0.5f * static_cast<float>(ctx.output->frames_alpha));
-	for (const auto &dp : std::views::reverse(ctx.output->server.desktops)) {
-		Desktop &d = *dp;
-		Rect dr = box_rect(d.box);
+	for (const Desktop &d :
+			std::views::reverse(ctx.output->server.canvas.desktops.all())) {
+		Rect dr = d.rect();
 		if (!dr.intersects(ctx.viewport)) {
 			continue;
 		}
@@ -414,11 +417,13 @@ void draw_desktops_normal(const RenderCtx &ctx) {
 // for combine.
 void draw_pinch_preview(const RenderCtx &ctx) {
 	Output &o = *ctx.output;
-	Gesture &g = o.server.gesture;
+	const Gesture &g = o.server.gesture;
 	if (g.kind != GestureKind::pinch) {
 		return;
 	}
-	const wlr_box &box = g.desktop != nullptr ? g.desktop->box : o.target;
+	Desktop *desktop = o.server.canvas.desktops.find(g.desktop);
+	Desktop *merge_from = o.server.canvas.desktops.find(g.merge_from);
+	const wlr_box &box = desktop != nullptr ? desktop->frame() : o.target;
 	Rect br = box_rect(box);
 	bool box_visible = br.intersects(ctx.viewport);
 
@@ -426,11 +431,11 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 		draw_canvas_rect(ctx, box.x, box.y, box.width, box.height,
 			color_rgba(config::color_accent, 0.12f));
 	}
-	if (g.merge_from != nullptr) {
-		const wlr_box &m = g.merge_from->box;
+	if (merge_from != nullptr) {
+		const wlr_box &m = merge_from->frame();
 		Rect mr = box_rect(m);
 		if (mr.intersects(ctx.viewport)) {
-			draw_dashed_desktop(ctx, *g.merge_from, 0, 3.0,
+			draw_dashed_desktop(ctx, *merge_from, 0, 3.0,
 				color_rgba(config::color_combine));
 			if (box_visible) {
 				double x0 = canvas_x(ctx, m.x + m.width / 2.0);
@@ -445,31 +450,6 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 }
 
 // ---------------------------------------------------------------- tabs
-
-// Label texture cached in the desktop; regenerated on id/scale change.
-wlr_texture *desktop_label(Server &server, Desktop &d, float scale) {
-	if (d.label != nullptr && d.label_id == d.id && d.label_scale == scale) {
-		return d.label.get();
-	}
-	d.label.reset();
-	char buf[32];
-	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", d.id);
-	int w = 0, h = 0;
-	TexturePtr texture;
-	if (len > 0) {
-		TextTexture t = draw_text(server.renderer, buf, config::ui_font_bold,
-			config::color_panel_text, 0x00000000u, scale, 0, 0);
-		texture = std::move(t.texture);
-		w = t.width;
-		h = t.height;
-	}
-	d.label = std::move(texture);
-	d.label_id = d.id;
-	d.label_scale = scale;
-	d.label_w = w;
-	d.label_h = h;
-	return d.label.get();
-}
 
 void draw_tile_glyph(const RenderCtx &ctx, const wlr_box &button, wlr_render_color color) {
 	constexpr int off[4][2] = {{4, 4}, {13, 4}, {4, 13}, {13, 13}};
@@ -488,22 +468,22 @@ void draw_abandon_glyph(const RenderCtx &ctx, const wlr_box &button, wlr_render_
 void draw_tabs(const RenderCtx &ctx) {
 	Output &o = *ctx.output;
 	Server &server = o.server;
-	for (const auto &dp : server.desktops) {
-		Desktop &d = *dp;
+	for (const Desktop &d : server.canvas.desktops.all()) {
 		// Make sure the cached label matches this output's scale before
 		// the layout measures it.
-		desktop_label(server, d, ctx.scale);
-		std::optional<TabLayout> layout = overview_tab_layout(o, d);
+		DesktopLabel label = server.painter.desktop_label(d.id(), d.number(), ctx.scale);
+		std::optional<TabLayout> layout = server.painter.overview_tab_layout(o, d);
 		if (!layout) {
 			continue;
 		}
-		uint32_t bg = o.target_desktop == &d ? config::color_accent : config::color_panel;
+		uint32_t bg = o.target_desktop == d.id()
+			? config::color_accent : config::color_panel;
 		draw_logical_rect(ctx, layout->tab.x, layout->tab.y, layout->tab.width,
 			layout->tab.height, color_rgba(bg));
-		if (d.label != nullptr && d.label_w > 0 && d.label_h > 0) {
-			draw_ui_texture(ctx, d.label.get(), layout->tab.x + 12,
-				layout->tab.y + (layout->tab.height - d.label_h) / 2,
-				d.label_w, d.label_h, 1.0);
+		if (label.texture != nullptr && label.w > 0 && label.h > 0) {
+			draw_ui_texture(ctx, label.texture, layout->tab.x + 12,
+				layout->tab.y + (layout->tab.height - label.h) / 2,
+				label.w, label.h, 1.0);
 		}
 		wlr_render_color fg = color_rgba(config::color_panel_text);
 		draw_tile_glyph(ctx, layout->tile_button, fg);
@@ -689,18 +669,67 @@ void send_surface_feedback(const RenderCtx &ctx) {
 
 // ------------------------------------------------------------- public
 
-std::optional<TabLayout> overview_tab_layout(const Output &o, const Desktop &desktop) {
+Painter::LabelSlot *Painter::label_slot(DesktopId id) {
+	for (LabelSlot &slot : label_cache_) {
+		if (slot.id == id) {
+			return &slot;
+		}
+	}
+	return nullptr;
+}
+
+const Painter::LabelSlot *Painter::label_slot(DesktopId id) const {
+	for (const LabelSlot &slot : label_cache_) {
+		if (slot.id == id) {
+			return &slot;
+		}
+	}
+	return nullptr;
+}
+
+DesktopLabel Painter::desktop_label(DesktopId id, int number, float scale) {
+	LabelSlot *slot = label_slot(id);
+	if (slot == nullptr) {
+		label_cache_.push_back(LabelSlot{.id = id});
+		slot = label_slot(id);
+	}
+	if (slot->texture != nullptr && slot->number == number && slot->scale == scale) {
+		return {slot->texture.get(), slot->w, slot->h};
+	}
+	slot->texture.reset();
+	char buf[32];
+	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", number);
+	int w = 0, h = 0;
+	TexturePtr texture;
+	if (len > 0) {
+		TextTexture t = draw_text(server_.renderer, buf, config::ui_font_bold,
+			config::color_panel_text, 0x00000000u, scale, 0, 0);
+		texture = std::move(t.texture);
+		w = t.width;
+		h = t.height;
+	}
+	slot->texture = std::move(texture);
+	slot->number = number;
+	slot->scale = scale;
+	slot->w = w;
+	slot->h = h;
+	return {slot->texture.get(), slot->w, slot->h};
+}
+
+std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
+		const Desktop &desktop) const {
 	Camera cam = o.camera();
 	double left = cam.cx - o.width / (2.0 * cam.zoom);
 	double top = cam.cy - o.height / (2.0 * cam.zoom);
-	double frame_left = (desktop.box.x - left) * cam.zoom + desktop.swipe_offset;
-	double frame_top = (desktop.box.y - top) * cam.zoom;
+	double offset = server_.gesture.abandon_offset(desktop.id());
+	double frame_left = (desktop.frame().x - left) * cam.zoom + offset;
+	double frame_top = (desktop.frame().y - top) * cam.zoom;
 
 	char buf[32];
-	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.id);
-	int label_w = desktop.label != nullptr
-		&& desktop.label_scale == o.wlr->scale
-		? desktop.label_w : 9 * (len > 0 ? len : 0);
+	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.number());
+	const LabelSlot *slot = label_slot(desktop.id());
+	int label_w = slot != nullptr && slot->scale == o.wlr->scale
+		? slot->w : 9 * (len > 0 ? len : 0);
 
 	TabLayout layout;
 	layout.tab.x = static_cast<int>(std::round(frame_left));
@@ -831,6 +860,10 @@ void Painter::render(Output &output) {
 	ctx.help_cache = help_cache_;
 	ctx.help_clock = &help_clock_;
 	drawn_.clear();
+	// Drop the labels of desktops that are gone.
+	std::erase_if(label_cache_, [this](const LabelSlot &slot) {
+		return server_.canvas.desktops.find(slot.id) == nullptr;
+	});
 
 	// clear
 	draw_logical_rect(ctx, 0, 0, output.width, output.height,
@@ -901,4 +934,5 @@ void Painter::finish() {
 	for (HelpSlot &slot : help_cache_) {
 		slot.texture.reset();
 	}
+	label_cache_.clear();
 }

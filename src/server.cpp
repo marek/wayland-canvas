@@ -114,21 +114,12 @@ struct Server::Inhibitor {
 
 Server::Server()
 	: input(*this), gesture(*this), hint(*this), launcher(*this),
-	painter(*this), decorations(*this) {
+	painter(*this), decorations(*this), canvas(*this) {
 }
 
 Server::~Server() {
 	if (display != nullptr) {
 		wl_display_destroy_clients(display);
-	}
-	// The bodies destroy entries of the container being walked.
-	std::vector<Desktop *> doomed;
-	doomed.reserve(desktops.size());
-	for (const auto &d : desktops) {
-		doomed.push_back(d.get());
-	}
-	for (Desktop *d : doomed) {
-		destroy_desktop(*d);
 	}
 	launcher.finish();
 	painter.finish();

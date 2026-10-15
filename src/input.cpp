@@ -25,11 +25,6 @@ void notify_activity(Server &server) {
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
 }
 
-Rect box_rect(wlr_box box) {
-	return Rect{double(box.x), double(box.y), double(box.width),
-		double(box.height)};
-}
-
 bool box_contains(const wlr_box &box, double x, double y) {
 	return x >= box.x && x < box.x + box.width &&
 		y >= box.y && y < box.y + box.height;
@@ -147,44 +142,26 @@ void act_move_dir(Server &server, Output *output, KeyArg arg) {
 	if (view == nullptr || !view->mapped || output == nullptr) {
 		return;
 	}
-	Desktop *cur = server.desktop_of(*view);
+	Desktop *cur = server.canvas.desktop_of(*view);
 	double ox, oy;
 	if (cur != nullptr) {
-		ox = cur->box.x + cur->box.width / 2.0;
-		oy = cur->box.y + cur->box.height / 2.0;
+		Point centre = cur->centre();
+		ox = centre.x;
+		oy = centre.y;
 	} else {
 		Rect vp = output->viewport();
 		ox = vp.cx();
 		oy = vp.cy();
 	}
 
-	Desktop *target = nullptr;
-	if (!server.desktops.empty()) {
-		std::vector<Rect> cands;
-		std::vector<Desktop *> ids;
-		cands.reserve(server.desktops.size());
-		ids.reserve(server.desktops.size());
-		std::optional<std::size_t> exclude;
-		for (const std::unique_ptr<Desktop> &d : server.desktops) {
-			ids.push_back(d.get());
-			cands.push_back(box_rect(d->box));
-			if (d.get() == cur) {
-				exclude = cands.size() - 1;
-			}
-		}
-		std::optional<std::size_t> pick = nav_pick_direction(ox, oy,
-			dir.dx, dir.dy, cands, exclude, config::hop_cone_deg);
-		if (pick.has_value()) {
-			target = ids[*pick];
-		}
-	}
+	Desktop *target = server.canvas.desktops.in_direction(ox, oy, dir.dx, dir.dy,
+		cur != nullptr ? std::optional<DesktopId>{cur->id()} : std::nullopt);
 
 	if (target != nullptr) {
-		double tx = target->box.x + target->box.width / 2.0;
-		double ty = target->box.y + target->box.height / 2.0;
-		view->move(static_cast<int>(std::round(view->x + tx - ox)),
-			static_cast<int>(std::round(view->y + ty - oy)));
-		output->goto_box(target->box);
+		Point centre = target->centre();
+		view->move(static_cast<int>(std::round(view->x + centre.x - ox)),
+			static_cast<int>(std::round(view->y + centre.y - oy)));
+		output->goto_box(target->frame());
 	} else {
 		view->move(static_cast<int>(std::round(view->x + dir.dx * output->width)),
 			static_cast<int>(std::round(view->y + dir.dy * output->height)));
@@ -207,9 +184,14 @@ void act_pin(Server &, Output *output, KeyArg) {
 }
 
 void act_abandon_current(Server &, Output *output, KeyArg) {
-	if (output != nullptr) {
-		output->overview_abandon(output->desktop_showing());
+	if (output == nullptr) {
+		return;
 	}
+	std::optional<DesktopId> desktop;
+	if (Desktop *showing = output->desktop_showing()) {
+		desktop = showing->id();
+	}
+	output->overview_abandon(desktop);
 }
 
 void act_tile_current(Server &server, Output *output, KeyArg) {
@@ -219,7 +201,7 @@ void act_tile_current(Server &server, Output *output, KeyArg) {
 	Desktop *desktop = output->desktop_showing();
 	wlr_box box;
 	if (desktop != nullptr) {
-		box = desktop->box;
+		box = desktop->frame();
 	} else {
 		Rect vp = output->viewport();
 		box.x = static_cast<int>(std::round(vp.x));
@@ -227,16 +209,16 @@ void act_tile_current(Server &server, Output *output, KeyArg) {
 		box.width = static_cast<int>(std::round(vp.w));
 		box.height = static_cast<int>(std::round(vp.h));
 	}
-	server.tile(box, output);
+	server.canvas.tile(box, *output);
 }
 
 void act_goto_desktop(Server &server, Output *output, KeyArg arg) {
 	if (output == nullptr) {
 		return;
 	}
-	Desktop *desktop = server.desktop_by_id(std::get<int>(arg));
+	Desktop *desktop = server.canvas.desktops.find(DesktopId{std::get<int>(arg)});
 	if (desktop != nullptr) {
-		output->goto_box(desktop->box);
+		output->goto_box(desktop->frame());
 	}
 }
 
@@ -367,7 +349,7 @@ bool handle_global_keys(Server &server, Output *output,
 }
 
 void overview_new_desktop_at(Server &server, Output &output) {
-	if (output.target_desktop == nullptr) {
+	if (server.canvas.desktops.find(output.target_desktop) == nullptr) {
 		// Free spot: plant the new desktop on the target's centre.
 		output.overview_new_desktop(output.target.x + output.target.width / 2.0,
 			output.target.y + output.target.height / 2.0);
@@ -410,8 +392,8 @@ void handle_overview_keys(Server &server, Output &output,
 			return;
 		case XKB_KEY_Delete:
 		case XKB_KEY_BackSpace:
-			if (output.target_desktop != nullptr) {
-				output.overview_abandon(output.target_desktop);
+			if (Desktop *desktop = server.canvas.desktops.find(output.target_desktop)) {
+				output.overview_abandon(desktop->id());
 			}
 			return;
 		case XKB_KEY_t:
@@ -519,9 +501,9 @@ uint32_t quadrant_edges(View &view, double cx, double cy) {
 // Target the desktop a view belongs to, or a screen-sized free spot
 // centred on the view, and leave the overview onto it.
 void overview_target_view(Server &server, Output &output, View &view) {
-	Desktop *desktop = server.desktop_of(view);
+	Desktop *desktop = server.canvas.desktop_of(view);
 	if (desktop != nullptr) {
-		output.overview_set_target(desktop->box, desktop, true);
+		output.overview_set_target(desktop->frame(), desktop->id(), true);
 	} else {
 		wlr_box frame = view.frame_box();
 		wlr_box box{
@@ -530,7 +512,7 @@ void overview_target_view(Server &server, Output &output, View &view) {
 			.width = output.width,
 			.height = output.height,
 		};
-		output.overview_set_target(box, nullptr, true);
+		output.overview_set_target(box, std::nullopt, true);
 	}
 }
 
@@ -925,33 +907,34 @@ void Input::process_deco_button_grab() {
 }
 
 void Input::process_desktop_drag_grab() {
-	Desktop *desktop = grab_desktop;
+	Desktop *desktop = server_.canvas.desktops.find(grab_desktop);
 	if (desktop == nullptr) {
+		// Its desktop was removed mid-drag; nothing follows the cursor.
 		return;
 	}
 	double dx = (server_.cursor->x - grab_lx) / grab_cam.zoom;
 	double dy = (server_.cursor->y - grab_ly) / grab_cam.zoom;
-	desktop->box.x = static_cast<int>(std::round(grab_box.x + dx));
-	desktop->box.y = static_cast<int>(std::round(grab_box.y + dy));
+	server_.canvas.desktops.move(desktop->id(),
+		static_cast<int>(std::round(grab_box.x + dx)),
+		static_cast<int>(std::round(grab_box.y + dy)));
 
 	// Combine when another desktop is overlapped by at least half of the
 	// dragged frame; largest overlap wins.
-	Rect box = box_rect(desktop->box);
-	double area = desktop->box.width * double(desktop->box.height);
-	Desktop *drop = nullptr;
+	Rect box = desktop->rect();
+	double area = desktop->frame().width * double(desktop->frame().height);
+	std::optional<DesktopId> drop;
 	double best = 0;
-	for (const std::unique_ptr<Desktop> &d : server_.desktops) {
-		if (d.get() == desktop) {
+	for (const Desktop &d : server_.canvas.desktops.all()) {
+		if (d.id() == desktop->id()) {
 			continue;
 		}
-		double overlap = box.overlap_area(box_rect(d->box));
+		double overlap = box.overlap_area(d.rect());
 		if (overlap >= config::combine_overlap * area && overlap > best) {
 			best = overlap;
-			drop = d.get();
+			drop = d.id();
 		}
 	}
 	drop_desktop = drop;
-	server_.damage_all();
 }
 
 void Input::process_overview_press_grab() {
@@ -963,14 +946,13 @@ void Input::process_overview_press_grab() {
 	grab_moved = true;
 	switch (grab_hit) {
 	case OverviewHit::desktop:
-		if (grab_desktop == nullptr) {
-			break;
+		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
+			cursor_mode = CursorMode::desktop_drag;
+			grab_box = desktop->frame();
+			grab_lx = server_.cursor->x;
+			grab_ly = server_.cursor->y;
+			drop_desktop = std::nullopt;
 		}
-		cursor_mode = CursorMode::desktop_drag;
-		grab_box = grab_desktop->box;
-		grab_lx = server_.cursor->x;
-		grab_ly = server_.cursor->y;
-		drop_desktop = nullptr;
 		break;
 	case OverviewHit::view:
 		if (grab_view != nullptr && grab_output != nullptr) {
@@ -1035,8 +1017,8 @@ void Input::cancel_grab() {
 	}
 	cursor_mode = CursorMode::passthrough;
 	grab_view = nullptr;
-	grab_desktop = nullptr;
-	drop_desktop = nullptr;
+	grab_desktop = std::nullopt;
+	drop_desktop = std::nullopt;
 	grab_output = nullptr;
 	grab_moved = false;
 	grab_cam.zoom = 0; // invalidated; owner re-fills on next grab
@@ -1128,24 +1110,24 @@ void Input::record_overview_hit(Output &output, double ox, double oy,
 		}
 	}
 
-	for (const std::unique_ptr<Desktop> &desktop : server_.desktops) {
-		std::optional<TabLayout> tab = overview_tab_layout(output, *desktop);
+	for (const Desktop &desktop : server_.canvas.desktops.all()) {
+		std::optional<TabLayout> tab = server_.painter.overview_tab_layout(output, desktop);
 		if (!tab.has_value()) {
 			continue;
 		}
 		if (box_contains(tab->tile_button, ox, oy)) {
 			grab_hit = OverviewHit::tab_tile;
-			grab_desktop = desktop.get();
+			grab_desktop = desktop.id();
 			return;
 		}
 		if (box_contains(tab->abandon_button, ox, oy)) {
 			grab_hit = OverviewHit::tab_abandon;
-			grab_desktop = desktop.get();
+			grab_desktop = desktop.id();
 			return;
 		}
 		if (box_contains(tab->tab, ox, oy)) {
 			grab_hit = OverviewHit::desktop;
-			grab_desktop = desktop.get();
+			grab_desktop = desktop.id();
 			return;
 		}
 	}
@@ -1157,10 +1139,9 @@ void Input::record_overview_hit(Output &output, double ox, double oy,
 		return;
 	}
 
-	Desktop *desktop = server_.desktop_at(cx, cy);
-	if (desktop != nullptr) {
+	if (Desktop *desktop = server_.canvas.desktops.at(cx, cy)) {
 		grab_hit = OverviewHit::desktop;
-		grab_desktop = desktop;
+		grab_desktop = desktop->id();
 		return;
 	}
 	grab_hit = OverviewHit::empty;
@@ -1172,7 +1153,6 @@ void Input::overview_click() {
 		return;
 	}
 	View *view = grab_view;
-	Desktop *desktop = grab_desktop;
 	switch (grab_hit) {
 	case OverviewHit::shelf:
 		if (view == nullptr) {
@@ -1184,21 +1164,20 @@ void Input::overview_click() {
 		output->overview_exit();
 		break;
 	case OverviewHit::tab_tile:
-		if (desktop != nullptr) {
-			output->overview_tile(desktop);
+		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
+			output->overview_tile(desktop->id());
 		}
 		break;
 	case OverviewHit::tab_abandon:
-		if (desktop != nullptr) {
-			output->overview_abandon(desktop);
+		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
+			output->overview_abandon(desktop->id());
 		}
 		break;
 	case OverviewHit::desktop:
-		if (desktop == nullptr) {
-			break;
+		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
+			output->overview_set_target(desktop->frame(), desktop->id(), true);
+			output->overview_exit();
 		}
-		output->overview_set_target(desktop->box, desktop, true);
-		output->overview_exit();
 		break;
 	case OverviewHit::view:
 		if (view == nullptr) {
@@ -1247,7 +1226,7 @@ void Input::overview_press(Output &output, uint32_t button) {
 	grab_cx = p.x;
 	grab_cy = p.y;
 	grab_view = nullptr;
-	grab_desktop = nullptr;
+	grab_desktop = std::nullopt;
 	grab_moved = false;
 	record_overview_hit(output, ox, oy, p.x, p.y, cam.zoom);
 }
@@ -1402,13 +1381,16 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 	case CursorMode::overview_press:
 		overview_click();
 		break;
-	case CursorMode::desktop_drag:
-		if (drop_desktop != nullptr && grab_desktop != nullptr) {
-			server_.combine(*drop_desktop, *grab_desktop, grab_box);
-		} else if (grab_desktop != nullptr) {
-			server_.raise_desktop(*grab_desktop);
+	case CursorMode::desktop_drag: {
+		Desktop *drop = server_.canvas.desktops.find(drop_desktop);
+		Desktop *grabbed = server_.canvas.desktops.find(grab_desktop);
+		if (drop != nullptr && grabbed != nullptr) {
+			server_.canvas.combine(drop->id(), grabbed->id(), grab_box);
+		} else if (grabbed != nullptr) {
+			server_.canvas.desktops.raise(grabbed->id());
 		}
 		break;
+	}
 	default:
 		break;
 	}

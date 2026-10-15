@@ -6,10 +6,10 @@
 #include <optional>
 #include <vector>
 #include "decoration.h"
+#include "desktop.h"
 #include "geometry.h"
 #include "util.h"
 
-struct Desktop;
 class Output;
 class Server;
 class View;
@@ -79,7 +79,7 @@ public:
 	// Pointer grab state.
 	CursorMode cursor_mode = CursorMode::passthrough;
 	View *grab_view = nullptr;
-	Desktop *grab_desktop = nullptr;
+	std::optional<DesktopId> grab_desktop;
 	Output *grab_output = nullptr;
 	OverviewHit grab_hit = OverviewHit::empty;
 	double grab_lx = 0, grab_ly = 0; // layout coords where the grab started
@@ -89,7 +89,7 @@ public:
 	uint32_t grab_edges = 0;
 	DecoPart grab_part = DecoPart::none;
 	bool grab_moved = false;
-	Desktop *drop_desktop = nullptr; // combine target under a dragged frame
+	std::optional<DesktopId> drop_desktop; // combine target under a dragged frame
 	uint32_t last_title_click = 0;
 	View *last_title_view = nullptr;
 	const char *cursor_image = nullptr;

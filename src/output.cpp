@@ -223,10 +223,6 @@ void Output::handle_destroy() {
 		server.gesture.output = nullptr;
 		// A forwarded gesture still owes its client the end event.
 		if (server.gesture.kind != GestureKind::forward) {
-			if (server.gesture.kind == GestureKind::abandon &&
-					server.gesture.desktop != nullptr) {
-				server.gesture.desktop->swipe_offset = 0;
-			}
 			server.gesture.kind = GestureKind::ignored;
 		}
 	}
@@ -294,8 +290,9 @@ void Server::handle_new_output(wlr_output *wlr) {
 		.cy = output.ly + output.height / 2.0,
 		.zoom = 1,
 	};
-	if (desktops.empty()) {
-		create_desktop(wlr_box{output.lx, output.ly, output.width, output.height});
+	if (canvas.desktops.empty()) {
+		canvas.desktops.create(
+			wlr_box{output.lx, output.ly, output.width, output.height});
 	}
 	wlr_log(WLR_INFO, "output %s: %dx%d logical at scale %.2f", wlr->name,
 		output.width, output.height, wlr->scale);

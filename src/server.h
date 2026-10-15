@@ -4,8 +4,8 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include "canvas.h"
 #include "decoration.h"
-#include "desktop.h"
 #include "geometry.h"
 #include "gesture.h"
 #include "input.h"
@@ -46,18 +46,7 @@ public:
 	Output *output_under_cursor();
 	void update_visibility();
 
-	// canvas.cpp: desktops
-	Desktop &create_desktop(wlr_box box);
-	void destroy_desktop(Desktop &desktop);
-	Desktop *desktop_at(double cx, double cy);
-	Desktop *desktop_of(const View &view);
-	Desktop *desktop_by_id(int id);
-	Desktop *desktop_best_overlap(const Rect &area);
-	Desktop *desktop_nearest(const Desktop &to);
-	void raise_desktop(Desktop &desktop);
-	void tile(wlr_box area, Output *output);
-	void combine(Desktop &into, Desktop &from, wlr_box from_box);
-	std::vector<View *> views_in_box(wlr_box box);
+	// canvas.cpp
 	void reveal_view(View &view);
 
 	// view.cpp
@@ -95,7 +84,6 @@ public:
 	std::vector<std::unique_ptr<View>> toplevels; // every view, mapped or not
 	std::vector<View *> views; // mapped views in stacking order, front is topmost
 	std::vector<std::unique_ptr<Popup>> popups;
-	std::vector<std::unique_ptr<Desktop>> desktops; // front is topmost
 
 	View *focused_view = nullptr;
 	LayerSurface *focused_layer = nullptr; // keyboard-interactive layer surface
@@ -109,6 +97,7 @@ public:
 	Launcher launcher;
 	Painter painter;
 	Decorations decorations;
+	Canvas canvas;
 
 private:
 	// output.cpp

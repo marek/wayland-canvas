@@ -85,6 +85,7 @@ core_lib = static_library(
 		'src/apps.cpp',
 		'src/canvas.cpp',
 		'src/decoration.cpp',
+		'src/desktop.cpp',
 		'src/draw.cpp',
 		'src/gesture.cpp',
 		'src/icons.cpp',

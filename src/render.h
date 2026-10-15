@@ -11,9 +11,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "desktop.h"
 #include "util.h"
 
-struct Desktop;
 class Output;
 class Server;
 class View;
@@ -21,12 +21,11 @@ class View;
 // Overview UI geometry in output-local logical coordinates; input.cpp hit-tests the same
 // boxes render.cpp draws.
 
-// The tab above a desktop frame and its Tile and Abandon buttons; nullopt when the frame
-// shows no tab.
+// The tab above a desktop frame and its Tile and Abandon buttons; nullopt when the tab
+// is off-screen.
 struct TabLayout {
 	wlr_box tab{}, tile_button{}, abandon_button{};
 };
-std::optional<TabLayout> overview_tab_layout(const Output &output, const Desktop &desktop);
 
 inline constexpr std::size_t shelf_max = 64;
 
@@ -51,6 +50,12 @@ struct HelpSlot {
 	TexturePtr texture;
 	int w = 0, h = 0;
 	float scale = 0;
+};
+
+// A desktop tab's label texture and its size, drawn at `scale`.
+struct DesktopLabel {
+	wlr_texture *texture = nullptr; // null when the text failed to render
+	int w = 0, h = 0; // logical px
 };
 
 // Transient banner at the bottom of every output.
@@ -88,11 +93,30 @@ public:
 	void render(Output &output);
 	void finish(); // releases cached textures before the renderer goes
 
+	// Regenerates the cached label when its desktop's number or the scale changed.
+	DesktopLabel desktop_label(DesktopId id, int number, float scale);
+	// The tab above a desktop frame and its Tile and Abandon buttons; nullopt when the
+	// tab is off-screen.
+	std::optional<TabLayout> overview_tab_layout(const Output &output,
+		const Desktop &desktop) const;
+
 private:
 	static constexpr std::size_t help_slots = 4;
+
+	// One slot of the desktop-label cache.
+	struct LabelSlot {
+		DesktopId id{};
+		TexturePtr texture;
+		int number = 0, w = 0, h = 0;
+		float scale = 0;
+	};
+
+	LabelSlot *label_slot(DesktopId id);
+	const LabelSlot *label_slot(DesktopId id) const;
 
 	Server &server_;
 	std::vector<DrawnSurface> drawn_; // surfaces drawn this frame, reused
 	std::array<HelpSlot, help_slots> help_cache_{}; // help-line texture, one per scale
+	std::vector<LabelSlot> label_cache_; // desktop tab labels, dropped with their desktops
 	unsigned help_clock_ = 0; // round-robin over help_cache_
 };

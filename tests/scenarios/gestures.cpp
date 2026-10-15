@@ -31,7 +31,7 @@ wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
 uint32_t t_ms = 10000;
 pid_t grim_pid = -1;
-Desktop *d1 = nullptr, *d2 = nullptr, *d3 = nullptr;
+std::optional<DesktopId> d1, d2, d3;
 Camera cam0{};
 std::string shot_dir;
 
@@ -60,6 +60,11 @@ void mkdir_p(const std::string &path) {
 
 Output *out() {
 	return server->outputs.front().get();
+}
+
+// The desktop a stored id names; null once it is gone.
+Desktop *desk(std::optional<DesktopId> id) {
+	return server->canvas.desktops.find(id);
 }
 
 View *view_titled(const char *title) {
@@ -127,8 +132,8 @@ int run_step() {
 			return -100; // retry
 		}
 		check(mapped_views() == 3, std::format("three foot windows mapped ({})", mapped_views()));
-		check(server->desktops.size() == 1, "Desktop 1 exists at start");
-		d1 = server->desktops.front().get();
+		check(server->canvas.desktops.size() == 1, "Desktop 1 exists at start");
+		d1 = server->canvas.desktops.all().front().id();
 		check(three && one && two && three->deco.ssd, "foot negotiated server-side decorations");
 		shot("01-three-windows");
 		return 400;
@@ -171,14 +176,18 @@ int run_step() {
 		check(!o->coasting, "momentum settled");
 		shot("03-panned-free-area");
 		return 400;
-	case 6:
+	case 6: {
 		o->pin_desktop();
-		check(server->desktops.size() == 2, "pinned the free area as Desktop 2");
-		d2 = o->desktop_showing();
-		check(d2 && d2 != d1 && d2->id == 2, "Desktop 2 is what we're looking at");
-		three->move(d2->box.x + 200, d2->box.y + 150);
-		check(server->desktop_of(*three) == d2, "window three now belongs to Desktop 2");
+		check(server->canvas.desktops.size() == 2, "pinned the free area as Desktop 2");
+		Desktop *showing = o->desktop_showing();
+		d2 = showing->id();
+		check(showing && showing != desk(d1) && showing->number() == 2,
+			"Desktop 2 is what we're looking at");
+		three->move(showing->frame().x + 200, showing->frame().y + 150);
+		check(server->canvas.desktop_of(*three) == showing,
+			"window three now belongs to Desktop 2");
 		return 300;
+	}
 	case 7:
 		swipe(4, 0, -300, 20); // 4 fingers up: overview
 		return 700;
@@ -199,7 +208,7 @@ int run_step() {
 		swipe(3, 0, -80, 8); // up: no desktop that way -> free spot one screen up
 		return 400;
 	case 12:
-		check(o->target_desktop == nullptr && o->target.y == d1->box.y - o->height,
+		check(!o->target_desktop.has_value() && o->target.y == desk(d1)->frame().y - o->height,
 			"no desktop above: target moved one screen up to a free spot");
 		shot("06-free-spot-target");
 		return 600;
@@ -210,37 +219,45 @@ int run_step() {
 		return 500;
 	case 14: {
 		Rect a = one->frame_rect(), b = two->frame_rect();
-		check(inside(a, d1->box) && inside(b, d1->box), "tiled windows stay inside Desktop 1");
+		check(inside(a, desk(d1)->frame()) && inside(b, desk(d1)->frame()),
+			"tiled windows stay inside Desktop 1");
 		check(!a.intersects(b), "tiled windows do not overlap");
 		check(std::fabs(a.w - b.w) < 2 && std::fabs(a.y - b.y) < 2, "two windows tiled side by side");
 		shot("07-tiled");
 		return 400;
 	}
 	case 15: {
-		int before_x = three->x - d2->box.x;
+		int before_x = three->x - desk(d2)->frame().x;
 		pinch(3, 0.6, 10); // gather: combine nearest desktop (2) into Desktop 1
-		check(server->desktops.size() == 1, "pinch-in combined Desktop 2 into Desktop 1");
-		check(server->desktop_of(*three) == d1 && three->x - d1->box.x == before_x,
+		check(server->canvas.desktops.size() == 1,
+			"pinch-in combined Desktop 2 into Desktop 1");
+		check(server->canvas.desktop_of(*three) == desk(d1)
+			&& three->x - desk(d1)->frame().x == before_x,
 			"window three moved into Desktop 1 keeping its relative position");
-		d2 = nullptr;
+		d2 = std::nullopt;
 		return 500;
 	}
-	case 16:
+	case 16: {
 		shot("08-combined");
-		o->overview_new_desktop(d1->box.x + d1->box.width * 1.8, d1->box.y + d1->box.height / 2.0);
+		const wlr_box &frame = desk(d1)->frame();
+		o->overview_new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
 		d3 = o->target_desktop;
-		check(d3 && server->desktops.size() == 2, "new desktop created in the overview");
+		check(d3.has_value() && server->canvas.desktops.size() == 2,
+			"new desktop created in the overview");
 		return 400;
+	}
 	case 17:
 		shot("09-new-desktop");
 		swipe(4, 320, 0, 20); // 4 fingers sideways: abandon the target desktop
 		return 400;
-	case 18:
-		check(server->desktops.size() == 1 && o->target_desktop == nullptr,
+	case 18: {
+		check(server->canvas.desktops.size() == 1
+			&& server->canvas.desktops.find(o->target_desktop) == nullptr,
 			"4-finger sideways swipe abandoned the desktop");
 		check(mapped_views() == 3, "abandoning kept every window");
 		// Abandoning (by key) the desktop a swipe is sliding away must end that swipe cleanly.
-		o->overview_new_desktop(d1->box.x + d1->box.width * 1.8, d1->box.y + d1->box.height / 2.0);
+		const wlr_box &frame = desk(d1)->frame();
+		o->overview_new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
 		server->gesture.swipe_begin(t_ms += 8, 4);
 		for (int i = 0; i < 6; i++) {
 			server->gesture.swipe_update(t_ms += 8, 20, 0);
@@ -252,16 +269,17 @@ int run_step() {
 			server->gesture.swipe_update(t_ms += 8, 20, 0);
 		}
 		server->gesture.swipe_end(t_ms += 8, false);
-		check(server->desktops.size() == 1 && server->gesture.kind == GestureKind::none,
+		check(server->canvas.desktops.size() == 1 && server->gesture.kind == GestureKind::none,
 			"abandoning the swiped desktop mid-swipe ends the swipe cleanly");
-		o->overview_set_target(d1->box, d1, true);
+		o->overview_set_target(desk(d1)->frame(), d1, true);
 		return 400;
+	}
 	case 19:
 		swipe(4, 0, 300, 20); // 4 fingers down: zoom into the target
 		return 700;
 	case 20: {
 		check(o->mode == Mode::normal && o->cam.zoom == 1, "4-finger down returned to normal mode");
-		Camera want = camera_for_box(d1->box);
+		Camera want = camera_for_box(desk(d1)->frame());
 		check(std::fabs(o->cam.cx - want.cx) < 1 && std::fabs(o->cam.cy - want.cy) < 1,
 			"landed on Desktop 1");
 		shot("10-desktop1");
@@ -279,12 +297,12 @@ int run_step() {
 	case 23:
 		one->activate();
 		check(!one->minimized, "restore from minimized");
-		o->overview_target_point(d1->box.x - 3000, d1->box.y + 2000);
+		o->overview_target_point(desk(d1)->frame().x - 3000, desk(d1)->frame().y + 2000);
 		o->overview_exit();
 		return 700;
 	case 24: {
-		check(o->mode == Mode::normal && o->target_desktop == nullptr &&
-			std::fabs(o->cam.cx - (d1->box.x - 3000)) < 1,
+		check(o->mode == Mode::normal && !o->target_desktop.has_value() &&
+			std::fabs(o->cam.cx - (desk(d1)->frame().x - 3000)) < 1,
 			"clicking empty overview canvas lands on a free area");
 		shot("12-free-area");
 		return 400;
@@ -293,7 +311,7 @@ int run_step() {
 		o->goto_direction(1, 0); // Super+Ctrl+Right: nearest desktop to the right
 		return 600;
 	case 26: {
-		Camera want = camera_for_box(d1->box);
+		Camera want = camera_for_box(desk(d1)->frame());
 		check(std::fabs(o->cam.cx - want.cx) < 1 && std::fabs(o->cam.cy - want.cy) < 1,
 			"keyboard jump to the desktop in that direction");
 		return 0;

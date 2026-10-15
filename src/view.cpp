@@ -50,9 +50,9 @@ wlr_box maximize_area(View &view) {
 	if (picked != nullptr) {
 		return inset_usable(picked, box_of_viewport(picked->viewport()));
 	}
-	Desktop *desktop = view.server.desktop_of(view);
+	Desktop *desktop = view.server.canvas.desktop_of(view);
 	if (desktop != nullptr) {
-		return inset_usable(view.server.output_under_cursor(), desktop->box);
+		return inset_usable(view.server.output_under_cursor(), desktop->frame());
 	}
 	Output *any = view.server.output_under_cursor();
 	int w = any != nullptr ? any->width : 1280;

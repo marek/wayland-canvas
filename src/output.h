@@ -5,11 +5,11 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include "desktop.h"
 #include "geometry.h"
 #include "layer.h"
 #include "util.h"
 
-struct Desktop;
 class Server;
 
 enum class AnimKind {
@@ -77,14 +77,13 @@ public:
 	void overview_exit();
 	void overview_cancel();
 	void overview_hop(double dx, double dy);
-	void overview_set_target(wlr_box box, Desktop *desktop, bool center);
+	void overview_set_target(wlr_box box, std::optional<DesktopId> desktop, bool center);
 	void overview_target_point(double cx, double cy);
 	void overview_zoom_by(double factor, double ox, double oy);
-	void overview_abandon(Desktop *desktop);
-	void overview_tile(Desktop *desktop);
-	void overview_combine(Desktop *into);
+	void overview_abandon(std::optional<DesktopId> desktop);
+	void overview_tile(std::optional<DesktopId> desktop);
+	void overview_combine(std::optional<DesktopId> into);
 	void overview_new_desktop(double cx, double cy);
-	wlr_box target_box_at(double cx, double cy) const;
 
 	// layer.cpp
 	void arrange_layers();
@@ -107,9 +106,9 @@ public:
 	Camera home; // camera before entering the overview
 	double overview_zoom = 0;
 	// Overview target: where entering will take you. A desktop, or a free screen-sized
-	// spot on the canvas when target_desktop is nullptr.
+	// spot on the canvas when the target desktop resolves to nothing.
 	wlr_box target{};
-	Desktop *target_desktop = nullptr;
+	std::optional<DesktopId> target_desktop;
 
 	// By zwlr_layer_shell_v1_layer; each in the order the C wl_list kept.
 	std::array<std::vector<std::unique_ptr<LayerSurface>>, 4> layers;

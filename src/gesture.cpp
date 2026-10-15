@@ -36,19 +36,30 @@ void Gesture::reset() {
 	vy = 0;
 	progress = 0;
 	start_zoom = 0;
-	desktop = nullptr;
-	merge_from = nullptr;
+	desktop = std::nullopt;
+	merge_from = std::nullopt;
+	abandon_offset_ = 0;
 	hop_done_ = false;
 	pinch_hinted_ = false;
 }
 
-Desktop *Gesture::desktop_under(Output &out) {
+std::optional<DesktopId> Gesture::desktop_under(Output &out) {
 	if (std::optional<CanvasPos> pos = server_.input.cursor_canvas_pos()) {
-		if (Desktop *desktop = server_.desktop_at(pos->cx, pos->cy)) {
-			return desktop;
+		if (Desktop *desktop = server_.canvas.desktops.at(pos->cx, pos->cy)) {
+			return desktop->id();
 		}
 	}
-	return out.target_desktop;
+	if (Desktop *target = server_.canvas.desktops.find(out.target_desktop)) {
+		return target->id();
+	}
+	return std::nullopt;
+}
+
+double Gesture::abandon_offset(DesktopId id) const {
+	if (kind == GestureKind::abandon && desktop == id) {
+		return abandon_offset_;
+	}
+	return 0;
 }
 
 void Gesture::decide() {
@@ -83,8 +94,8 @@ void Gesture::decide() {
 			kind = GestureKind::zoom_further;
 			start_zoom = o->cam.zoom;
 		} else {
-			Desktop *d = desktop_under(*o);
-			if (d == nullptr) {
+			std::optional<DesktopId> d = desktop_under(*o);
+			if (!d.has_value()) {
 				kind = GestureKind::ignored;
 			} else {
 				kind = GestureKind::abandon;
@@ -184,8 +195,10 @@ void Gesture::swipe_update(uint32_t time, double dx, double dy) {
 		break;
 	}
 	case GestureKind::abandon:
-		desktop->swipe_offset = ax;
-		o->damage();
+		if (Desktop *swiped = server_.canvas.desktops.find(desktop); swiped != nullptr) {
+			abandon_offset_ = ax;
+			o->damage();
+		}
 		break;
 	default:
 		break;
@@ -208,19 +221,18 @@ void Gesture::swipe_end(uint32_t time, bool cancelled) {
 			double lx = cam.cx + vx * config::inertia_tau_ms;
 			double ly = cam.cy + vy * config::inertia_tau_ms;
 			double snap = config::snap_radius * std::fmin(o->width, o->height);
-			Desktop *best = nullptr;
+			const Desktop *best = nullptr;
 			double best_dist = HUGE_VAL;
-			for (const auto &d : server_.desktops) {
-				double dcx = d->box.x + d->box.width / 2.0;
-				double dcy = d->box.y + d->box.height / 2.0;
-				double dist = std::hypot(lx - dcx, ly - dcy);
+			for (const Desktop &d : server_.canvas.desktops.all()) {
+				Point centre = d.centre();
+				double dist = std::hypot(lx - centre.x, ly - centre.y);
 				if (dist < best_dist) {
 					best_dist = dist;
-					best = d.get();
+					best = &d;
 				}
 			}
 			if (best != nullptr && best_dist <= snap) {
-				o->animate_camera(camera_for_box(best->box));
+				o->animate_camera(camera_for_box(best->frame()));
 			} else if (!cancelled && std::hypot(vx, vy) > config::inertia_min_speed) {
 				o->vel_x = vx;
 				o->vel_y = vy;
@@ -248,11 +260,12 @@ void Gesture::swipe_end(uint32_t time, bool cancelled) {
 			o->overview_zoom = o->cam.zoom;
 			break;
 		case GestureKind::abandon:
-			if (desktop != nullptr) {
-				if (std::fabs(desktop->swipe_offset) > config::abandon_distance && !cancelled) {
-					o->overview_abandon(desktop);
+			if (Desktop *swiped = server_.canvas.desktops.find(desktop);
+					swiped != nullptr) {
+				if (std::fabs(abandon_offset_) > config::abandon_distance && !cancelled) {
+					o->overview_abandon(swiped->id());
 				} else {
-					desktop->swipe_offset = 0;
+					abandon_offset_ = 0;
 					o->damage();
 				}
 			}
@@ -321,7 +334,7 @@ void Gesture::pinch_preview(std::string_view text) {
 
 void Gesture::pinch_clear_preview(bool clear_merge) {
 	if (clear_merge) {
-		merge_from = nullptr;
+		merge_from = std::nullopt;
 	}
 	if (pinch_hinted_) {
 		server_.hint.set({});
@@ -351,29 +364,32 @@ void Gesture::pinch_update(uint32_t time, double dx, double dy,
 		this->scale = scale;
 		break;
 	}
-	case GestureKind::pinch:
+	case GestureKind::pinch: {
 		this->scale = scale;
+		Desktop *pinched = server_.canvas.desktops.find(desktop);
 		if (scale > config::pinch_tile_scale) {
-			merge_from = nullptr;
-			if (desktop != nullptr) {
+			merge_from = std::nullopt;
+			if (pinched != nullptr) {
 				char buf[64];
 				std::snprintf(buf, sizeof(buf), "Release to tile Desktop %d",
-					desktop->id);
+					pinched->number());
 				pinch_preview(buf);
 			} else {
 				pinch_preview("Release to tile windows here");
 			}
 		} else if (scale < config::pinch_combine_scale) {
-			if (desktop == nullptr) {
-				merge_from = nullptr;
+			if (pinched == nullptr) {
+				merge_from = std::nullopt;
 				pinch_preview("Pinch over a desktop to combine");
 			} else {
-				merge_from = server_.desktop_nearest(*desktop);
-				if (merge_from != nullptr) {
+				Desktop *merge = server_.canvas.desktops.nearest(pinched->id());
+				merge_from = merge != nullptr ? std::optional<DesktopId>{merge->id()}
+					: std::nullopt;
+				if (merge != nullptr) {
 					char buf[80];
 					std::snprintf(buf, sizeof(buf),
 						"Release to combine Desktop %d into Desktop %d",
-						merge_from->id, desktop->id);
+						merge->number(), pinched->number());
 					pinch_preview(buf);
 				} else {
 					pinch_clear_preview(false);
@@ -385,6 +401,7 @@ void Gesture::pinch_update(uint32_t time, double dx, double dy,
 		}
 		o->damage();
 		break;
+	}
 	default:
 		// Pending / decided swipe-like gestures: treat the travel of the
 		// pinch as swipe motion. swipe_update updates last_time.
@@ -405,7 +422,7 @@ void Gesture::pinch_end(uint32_t time, bool cancelled) {
 		if (Output *o = output) {
 			if (!cancelled && scale > config::pinch_tile_scale) {
 				o->overview_tile(desktop);
-			} else if (!cancelled && merge_from != nullptr) {
+			} else if (!cancelled && server_.canvas.desktops.find(merge_from) != nullptr) {
 				o->overview_combine(desktop);
 			}
 			o->damage();

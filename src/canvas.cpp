@@ -7,6 +7,7 @@
 #include <optional>
 #include <vector>
 
+#include "canvas.h"
 #include "config.h"
 #include "desktop.h"
 #include "server.h"
@@ -55,6 +56,11 @@ wlr_box rect_to_box(Rect r) {
 		static_cast<int>(std::round(r.w)),
 		static_cast<int>(std::round(r.h)),
 	};
+}
+
+// A desktop's name, or nullopt for no desktop.
+std::optional<DesktopId> id_of(const Desktop *desktop) {
+	return desktop != nullptr ? std::optional<DesktopId>{desktop->id()} : std::nullopt;
 }
 
 } // namespace
@@ -224,129 +230,15 @@ bool Output::interactive() const {
 	return true;
 }
 
-// ---- desktops ----
+// ---- canvas ----
 
-Desktop &Server::create_desktop(wlr_box box) {
-	int id = 1;
-	while (desktop_by_id(id) != nullptr) {
-		id++;
-	}
-	std::unique_ptr<Desktop> owned = std::make_unique<Desktop>();
-	Desktop &desktop = *owned;
-	desktop.id = id;
-	desktop.box = box;
-	desktops.insert(desktops.begin(), std::move(owned));
-	damage_all();
-	return desktop;
+Canvas::Canvas(Server &server)
+	: desktops(server), server_(server) {
 }
 
-void Server::destroy_desktop(Desktop &desktop) {
-	for (const std::unique_ptr<Output> &output : outputs) {
-		if (output->target_desktop == &desktop) {
-			output->target_desktop = nullptr;
-		}
-	}
-	if (input.grab_desktop == &desktop) {
-		input.cancel_grab();
-		input.grab_desktop = nullptr;
-	}
-	if (input.drop_desktop == &desktop) {
-		input.drop_desktop = nullptr;
-	}
-	if (gesture.desktop == &desktop) {
-		gesture.desktop = nullptr;
-		// An abandon swipe has nothing left to slide; tile and combine fall back to the target.
-		if (gesture.kind == GestureKind::abandon) {
-			gesture.kind = GestureKind::ignored;
-		}
-	}
-	if (gesture.merge_from == &desktop) {
-		gesture.merge_from = nullptr;
-	}
-	destroy_owned(desktops, &desktop); // releases the label texture
-	damage_all();
-}
-
-Desktop *Server::desktop_at(double cx, double cy) {
-	for (const std::unique_ptr<Desktop> &desktop : desktops) {
-		if (wlr_box_contains_point(&desktop->box, cx, cy)) {
-			return desktop.get();
-		}
-	}
-	return nullptr;
-}
-
-Desktop *Server::desktop_of(const View &view) {
-	Point centre = box_centre(view.frame_box());
-	return desktop_at(centre.x, centre.y);
-}
-
-Desktop *Server::desktop_by_id(int id) {
-	for (const std::unique_ptr<Desktop> &desktop : desktops) {
-		if (desktop->id == id) {
-			return desktop.get();
-		}
-	}
-	return nullptr;
-}
-
-Desktop *Server::desktop_best_overlap(const Rect &area) {
-	Desktop *best = nullptr;
-	double best_overlap = area.w * area.h * 0.5;
-	for (const std::unique_ptr<Desktop> &desktop : desktops) {
-		double overlap = box_to_rect(desktop->box).overlap_area(area);
-		if (overlap < area.w * area.h * 0.5) {
-			continue;
-		}
-		if (best == nullptr || overlap > best_overlap) {
-			best = desktop.get();
-			best_overlap = overlap;
-		}
-	}
-	return best;
-}
-
-Desktop *Output::desktop_showing() const {
-	Camera c = mode == Mode::overview ? home : cam;
-	Rect viewport = c.viewport(width, height);
-	return server.desktop_best_overlap(viewport);
-}
-
-Desktop *Server::desktop_nearest(const Desktop &to) {
-	Point origin = box_centre(to.box);
-	Desktop *best = nullptr;
-	double best_dist = INFINITY;
-	for (const std::unique_ptr<Desktop> &desktop : desktops) {
-		if (desktop.get() == &to) {
-			continue;
-		}
-		Point centre = box_centre(desktop->box);
-		double dx = centre.x - origin.x, dy = centre.y - origin.y;
-		double dist = dx * dx + dy * dy;
-		if (dist < best_dist) {
-			best_dist = dist;
-			best = desktop.get();
-		}
-	}
-	return best;
-}
-
-void Server::raise_desktop(Desktop &desktop) {
-	auto it = std::ranges::find_if(desktops,
-		[&desktop](const std::unique_ptr<Desktop> &p) { return p.get() == &desktop; });
-	if (it == desktops.end()) {
-		return;
-	}
-	std::unique_ptr<Desktop> owned = std::move(*it);
-	desktops.erase(it);
-	desktops.insert(desktops.begin(), std::move(owned));
-}
-
-// ---- window actions ----
-
-std::vector<View *> Server::views_in_box(wlr_box box) {
+std::vector<View *> Canvas::views_in(wlr_box box) const {
 	std::vector<View *> out;
-	for (View *view : views) {
+	for (View *view : server_.views) {
 		if (out.size() == box_views_max) {
 			break;
 		}
@@ -362,20 +254,25 @@ std::vector<View *> Server::views_in_box(wlr_box box) {
 	return out;
 }
 
-void Server::tile(wlr_box area, Output *output) {
-	std::vector<View *> in_box = views_in_box(area);
-	if (in_box.empty()) {
-		hint.set("No windows to tile here");
+Desktop *Canvas::desktop_of(const View &view) {
+	Point centre = box_centre(view.frame_box());
+	return desktops.at(centre.x, centre.y);
+}
+
+void Canvas::tile(wlr_box area, const Output &output) {
+	std::vector<View *> in_area = views_in(area);
+	if (in_area.empty()) {
+		server_.hint.set("No windows to tile here");
 		return;
 	}
-	Rect usable = box_to_rect(output->usable_canvas_box(area));
-	std::size_t n = in_box.size();
+	Rect usable = box_to_rect(output.usable_canvas_box(area));
+	std::size_t n = in_area.size();
 	auto cols = static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(n))));
 	std::size_t rows = (n + cols - 1) / cols;
 	double band = usable.h / static_cast<double>(rows);
 	std::vector<Rect> frames;
 	frames.reserve(n);
-	for (View *view : in_box) {
+	for (View *view : in_area) {
 		frames.push_back(view->frame_rect());
 	}
 	std::vector<std::size_t> order = tile_order(frames, band);
@@ -387,26 +284,38 @@ void Server::tile(wlr_box area, Output *output) {
 			static_cast<int>(std::round(cells[i].w)),
 			static_cast<int>(std::round(cells[i].h)),
 		};
-		in_box[order[i]]->set_frame(cell, true);
+		in_area[order[i]]->set_frame(cell, true);
 	}
-	hint.set(std::format("Tiled {} window{}", n, n == 1 ? "" : "s"));
+	server_.hint.set(std::format("Tiled {} window{}", n, n == 1 ? "" : "s"));
 }
 
-void Server::combine(Desktop &into, Desktop &from, wlr_box from_box) {
-	if (&into == &from) {
+void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
+	if (into == from) {
 		return;
 	}
-	int dx = into.box.x - from_box.x;
-	int dy = into.box.y - from_box.y;
-	std::vector<View *> in_box = views_in_box(from_box);
-	for (View *view : in_box) {
+	Desktop *into_desktop = desktops.find(into);
+	Desktop *from_desktop = desktops.find(from);
+	if (into_desktop == nullptr || from_desktop == nullptr) {
+		return;
+	}
+	int dx = into_desktop->frame().x - from_area.x;
+	int dy = into_desktop->frame().y - from_area.y;
+	for (View *view : views_in(from_area)) {
 		view->move(view->x + dx, view->y + dy);
 		view->saved.x += dx;
 		view->saved.y += dy;
 	}
-	int from_id = from.id, into_id = into.id;
-	destroy_desktop(from);
-	hint.set(std::format("Combined Desktop {} into Desktop {}", from_id, into_id));
+	int from_number = from_desktop->number(), into_number = into_desktop->number();
+	desktops.remove(from);
+	server_.hint.set(std::format("Combined Desktop {} into Desktop {}",
+		from_number, into_number));
+}
+
+wlr_box Canvas::spot_at(double cx, double cy, const Output &output) {
+	if (Desktop *desktop = desktops.at(cx, cy)) {
+		return desktop->frame();
+	}
+	return centred_box(output, cx, cy);
 }
 
 // ---- navigation ----
@@ -421,7 +330,8 @@ void Output::pan(double dx, double dy) {
 void Output::goto_box(wlr_box box) {
 	if (mode == Mode::overview) {
 		Point centre = box_centre(box);
-		overview_set_target(box, server.desktop_at(centre.x, centre.y), false);
+		overview_set_target(box, id_of(server.canvas.desktops.at(centre.x, centre.y)),
+			false);
 		overview_exit();
 		return;
 	}
@@ -432,28 +342,10 @@ void Output::goto_direction(double dx, double dy) {
 	if (mode != Mode::normal) {
 		return;
 	}
-	Desktop *found = nullptr;
-	std::vector<Rect> cands;
-	cands.reserve(server.desktops.size());
-	for (const std::unique_ptr<Desktop> &desktop : server.desktops) {
-		cands.push_back(box_to_rect(desktop->box));
-	}
-	if (!cands.empty()) {
-		Desktop *showing = desktop_showing();
-		std::optional<std::size_t> exclude;
-		for (std::size_t i = 0; i < server.desktops.size(); i++) {
-			if (server.desktops[i].get() == showing) {
-				exclude = i;
-			}
-		}
-		std::optional<std::size_t> best = nav_pick_direction(cam.cx, cam.cy, dx, dy,
-			cands, exclude, config::hop_cone_deg);
-		if (best.has_value()) {
-			found = server.desktops[*best].get();
-		}
-	}
+	Desktop *found = server.canvas.desktops.in_direction(cam.cx, cam.cy, dx, dy,
+		id_of(desktop_showing()));
 	if (found != nullptr) {
-		animate_camera(camera_for_box(found->box));
+		animate_camera(camera_for_box(found->frame()));
 		return;
 	}
 	Compass q = nav_quantize_direction(dx, dy);
@@ -479,10 +371,11 @@ void Server::reveal_view(View &view) {
 			return;
 		}
 	}
-	Desktop *desktop = desktop_of(view);
-	wlr_box box = desktop != nullptr ? desktop->box : centred_box(*output, centre.x, centre.y);
+	Desktop *desktop = canvas.desktop_of(view);
+	wlr_box box = desktop != nullptr ? desktop->frame()
+		: centred_box(*output, centre.x, centre.y);
 	if (output->mode == Mode::overview) {
-		output->overview_set_target(box, desktop, false);
+		output->overview_set_target(box, id_of(desktop), false);
 		output->overview_exit();
 		return;
 	}
@@ -491,24 +384,24 @@ void Server::reveal_view(View &view) {
 
 void Output::pin_desktop() {
 	if (mode == Mode::overview) {
-		if (target_desktop != nullptr) {
+		if (server.canvas.desktops.find(target_desktop) != nullptr) {
 			server.hint.set("Already a desktop");
 			return;
 		}
-		Desktop &desktop = server.create_desktop(target);
-		target_desktop = &desktop;
-		server.hint.set(std::format("New Desktop {}", desktop.id));
+		Desktop &desktop = server.canvas.desktops.create(target);
+		target_desktop = desktop.id();
+		server.hint.set(std::format("New Desktop {}", desktop.number()));
 		return;
 	}
 	Rect vp = viewport();
-	Desktop *desktop = server.desktop_best_overlap(vp);
+	Desktop *desktop = server.canvas.desktops.best_overlap(vp);
 	if (desktop != nullptr
-			&& box_to_rect(desktop->box).overlap_area(vp) >= 0.9 * vp.w * vp.h) {
+			&& desktop->rect().overlap_area(vp) >= 0.9 * vp.w * vp.h) {
 		server.hint.set("Already a desktop");
 		return;
 	}
-	desktop = &server.create_desktop(rect_to_box(vp));
-	server.hint.set(std::format("New Desktop {}", desktop->id));
+	Desktop &created = server.canvas.desktops.create(rect_to_box(vp));
+	server.hint.set(std::format("New Desktop {}", created.number()));
 }
 
 // ---- overview ----
@@ -516,8 +409,8 @@ void Output::pin_desktop() {
 Camera Output::overview_camera(const Camera &home) const {
 	double vw = width, vh = height;
 	Rect content = home.viewport(vw, vh);
-	for (const std::unique_ptr<Desktop> &desktop : server.desktops) {
-		content = content.united(box_to_rect(desktop->box));
+	for (const Desktop &desktop : server.canvas.desktops.all()) {
+		content = content.united(desktop.rect());
 	}
 	// Every window on the canvas, so the overview shows what's out there.
 	for (const View *view : server.views) {
@@ -546,18 +439,23 @@ Camera Output::overview_camera(const Camera &home) const {
 	};
 }
 
+Desktop *Output::desktop_showing() const {
+	Camera c = mode == Mode::overview ? home : cam;
+	Rect viewport = c.viewport(width, height);
+	return server.canvas.desktops.best_overlap(viewport);
+}
+
 Camera Output::overview_prepare() {
 	stop_camera();
 	Camera home = cam;
 	home.zoom = 1;
 	this->home = home;
-	Desktop *desktop = desktop_showing();
-	if (desktop != nullptr) {
-		target = desktop->box;
-		target_desktop = desktop;
+	if (Desktop *desktop = desktop_showing()) {
+		target = desktop->frame();
+		target_desktop = desktop->id();
 	} else {
 		target = rect_to_box(home.viewport(width, height));
-		target_desktop = nullptr;
+		target_desktop = std::nullopt;
 	}
 	Camera far = overview_camera(home);
 	overview_zoom = far.zoom;
@@ -598,7 +496,7 @@ void Output::overview_finish_exit(const Camera &near, const Camera &far, double 
 		inside = wlr_box_contains_point(&target, centre.x, centre.y);
 	}
 	if (!inside) {
-		std::vector<View *> in_target = server.views_in_box(target);
+		std::vector<View *> in_target = server.canvas.views_in(target);
 		if (!in_target.empty()) {
 			server.focus_view(in_target.front());
 		}
@@ -610,49 +508,33 @@ void Output::overview_cancel() {
 	if (mode != Mode::overview) {
 		return;
 	}
-	Desktop *desktop = desktop_showing();
-	if (desktop != nullptr) {
-		target = desktop->box;
-		target_desktop = desktop;
+	if (Desktop *desktop = desktop_showing()) {
+		target = desktop->frame();
+		target_desktop = desktop->id();
 	} else {
 		target = rect_to_box(home.viewport(width, height));
-		target_desktop = nullptr;
+		target_desktop = std::nullopt;
 	}
 	overview_finish_exit(home, cam, 1);
 }
 
 void Output::overview_hop(double dx, double dy) {
 	Point origin = box_centre(target);
-	Desktop *found = nullptr;
-	std::vector<Rect> cands;
-	cands.reserve(server.desktops.size());
-	for (const std::unique_ptr<Desktop> &desktop : server.desktops) {
-		cands.push_back(box_to_rect(desktop->box));
-	}
-	if (!cands.empty()) {
-		std::optional<std::size_t> exclude;
-		for (std::size_t i = 0; i < server.desktops.size(); i++) {
-			if (server.desktops[i].get() == target_desktop) {
-				exclude = i;
-			}
-		}
-		std::optional<std::size_t> best = nav_pick_direction(origin.x, origin.y, dx, dy,
-			cands, exclude, config::hop_cone_deg);
-		if (best.has_value()) {
-			found = server.desktops[*best].get();
-		}
-	}
+	Desktop *found = server.canvas.desktops.in_direction(origin.x, origin.y, dx, dy,
+		target_desktop);
 	if (found != nullptr) {
-		overview_set_target(found->box, found, true);
+		overview_set_target(found->frame(), found->id(), true);
 		return;
 	}
 	Compass q = nav_quantize_direction(dx, dy);
 	double cx = origin.x + q.x * static_cast<double>(width);
 	double cy = origin.y + q.y * static_cast<double>(height);
-	overview_set_target(target_box_at(cx, cy), server.desktop_at(cx, cy), true);
+	Desktop *spot = server.canvas.desktops.at(cx, cy);
+	overview_set_target(server.canvas.spot_at(cx, cy, *this), id_of(spot), true);
 }
 
-void Output::overview_set_target(wlr_box box, Desktop *desktop, bool center) {
+void Output::overview_set_target(wlr_box box, std::optional<DesktopId> desktop,
+		bool center) {
 	target = box;
 	target_desktop = desktop;
 	damage();
@@ -666,7 +548,8 @@ void Output::overview_set_target(wlr_box box, Desktop *desktop, bool center) {
 }
 
 void Output::overview_target_point(double cx, double cy) {
-	overview_set_target(target_box_at(cx, cy), server.desktop_at(cx, cy), false);
+	Desktop *desktop = server.canvas.desktops.at(cx, cy);
+	overview_set_target(server.canvas.spot_at(cx, cy, *this), id_of(desktop), false);
 }
 
 void Output::overview_zoom_by(double factor, double ox, double oy) {
@@ -681,47 +564,41 @@ void Output::overview_zoom_by(double factor, double ox, double oy) {
 	overview_zoom = zoom;
 }
 
-void Output::overview_abandon(Desktop *desktop) {
-	if (desktop == nullptr) {
+void Output::overview_abandon(std::optional<DesktopId> desktop) {
+	Desktop *found = server.canvas.desktops.find(desktop);
+	if (found == nullptr) {
 		server.hint.set("Nothing to abandon here");
 		return;
 	}
-	int id = desktop->id;
-	// destroy_desktop clears target_desktop if it was this one; the target
-	// box stays put and becomes a free spot.
-	server.destroy_desktop(*desktop);
+	int number = found->number();
+	// The target box stays put and becomes a free spot.
+	server.canvas.desktops.remove(found->id());
 	server.hint.set(
-		std::format("Abandoned Desktop {} — its windows stay on the canvas", id));
+		std::format("Abandoned Desktop {} — its windows stay on the canvas", number));
 }
 
-void Output::overview_tile(Desktop *desktop) {
-	server.tile(desktop != nullptr ? desktop->box : target, this);
+void Output::overview_tile(std::optional<DesktopId> desktop) {
+	Desktop *found = server.canvas.desktops.find(desktop);
+	server.canvas.tile(found != nullptr ? found->frame() : target, *this);
 }
 
-void Output::overview_combine(Desktop *into) {
-	if (into == nullptr) {
+void Output::overview_combine(std::optional<DesktopId> into) {
+	Desktop *into_desktop = server.canvas.desktops.find(into);
+	if (into_desktop == nullptr) {
 		server.hint.set("Nothing to combine here");
 		return;
 	}
-	Desktop *from = server.desktop_nearest(*into);
+	Desktop *from = server.canvas.desktops.nearest(into_desktop->id());
 	if (from == nullptr) {
 		server.hint.set("No other desktop to combine");
 		return;
 	}
-	server.combine(*into, *from, from->box);
+	server.canvas.combine(into_desktop->id(), from->id(), from->frame());
 }
 
 void Output::overview_new_desktop(double cx, double cy) {
 	wlr_box box = centred_box(*this, cx, cy);
-	Desktop &desktop = server.create_desktop(box);
-	overview_set_target(box, &desktop, false);
-	server.hint.set(std::format("New Desktop {}", desktop.id));
-}
-
-wlr_box Output::target_box_at(double cx, double cy) const {
-	Desktop *desktop = server.desktop_at(cx, cy);
-	if (desktop != nullptr) {
-		return desktop->box;
-	}
-	return centred_box(*this, cx, cy);
+	Desktop &desktop = server.canvas.desktops.create(box);
+	overview_set_target(box, desktop.id(), false);
+	server.hint.set(std::format("New Desktop {}", desktop.number()));
 }
