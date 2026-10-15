@@ -82,6 +82,12 @@ private:
 		JsonObject *params);
 	std::expected<std::string, std::string> m_item_remove(Client &client,
 		JsonObject *params);
+	std::expected<std::string, std::string> m_item_activate(Client &client,
+		JsonObject *params);
+	std::expected<std::string, std::string> m_action_run(Client &client,
+		JsonObject *params);
+	// An `action` event: `args_json` is a whole JSON object's text.
+	void emit_action(std::string_view name, std::string_view args_json);
 	// An `output` param by name; nullptr when absent and none is under the
 	// cursor. An error names a bad or unknown param.
 	std::expected<Output *, std::string> resolve_output(JsonObject *params) const;
