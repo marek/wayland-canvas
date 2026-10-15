@@ -119,6 +119,8 @@ struct NoteEntry {
 
 NoteEntry note; // the note under test
 int note_retries = 0; // the notes phase's retry counter
+double note_button_y = 0; // the note button's band centre, on the strip
+wlr_box note_flyout{}; // its menu's card: left of the strip, centred on it
 LayerSurface *bar_before_reload = nullptr;
 std::vector<pid_t> msg_children; // `wayland-canvas msg` runs, swept when done
 
@@ -165,6 +167,20 @@ constexpr int toolbar_margin = 8;
 constexpr int strip_left = screen_w - toolbar_margin - toolbar_button;
 constexpr int beside_gap = toolbar_margin;
 constexpr int scratch_card = 200;
+// The note menu's card, the theme's metrics (shell/ui/.../UiTheme.qml):
+// six rows of 32 px with 6 px between them, in 10 px padding; the 1 px
+// border hairline draws inside, so this is the card's height.
+constexpr int note_menu_rows = 6;
+constexpr int note_menu_height = note_menu_rows * 32
+	+ (note_menu_rows - 1) * 6 + 2 * 10;
+// A row's swatch centre: the card's padding (10), the row's left margin
+// (8) and half the swatch (16 / 2) from the card's left edge.
+constexpr int note_menu_swatch_x = 10 + 8 + 16 / 2;
+// The card hangs from the button's top (the flyout anchors itself
+// there), so its rows are read from a region that starts a margin above
+// the button's band and runs the card's height, with a margin's slack
+// on either side.
+constexpr int note_menu_margin = 16;
 
 enum CloseMode { close_outside, close_escape, close_icon };
 
@@ -3554,6 +3570,169 @@ int run_step() {
 		note_retries = 0;
 		check(notes.empty(), "a note closed with no text was removed from the canvas");
 		check(stored_notes().empty(), "nothing is left in the plugin's storage");
+		step = 138; // on to the note button: the feature's own entry point
+		return -100; // without the advance: every other step moves on alone
+	}
+	// ---- the note button: the feature's own entry point ----
+	// The whole feature by its toolbar button, in the overview, after the
+	// phases that built the world it lives in.
+	case 138: // the overview again: the note button lives on its toolbar
+		chord(KEY_TAB, KEY_LEFTMETA);
+		return 400;
+	case 139: { // the toolbar maps with the overview
+		if (toolbar_layer() == nullptr && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(toolbar_layer() != nullptr, "the toolbar mapped with the overview");
+		shot("note-toolbar");
+		return 700;
+	}
+	case 140: { // the strip's bands: the note button is the last of them
+		cairo_surface_t *s = load_png("note-toolbar");
+		std::vector<Band> all = bands_in(s, {strip_left, 0, toolbar_button, screen_h});
+		cairo_surface_destroy(s);
+		std::vector<Band> best;
+		double best_distance = screen_h;
+		for (std::size_t i = 0; i < all.size();) {
+			std::vector<Band> cluster{all[i]};
+			for (std::size_t j = i + 1; j < all.size()
+					&& all[j].top - cluster.back().bottom <= toolbar_button; j++) {
+				cluster.push_back(all[j]);
+			}
+			double distance = std::abs((cluster.front().top + cluster.back().bottom) / 2.0
+				- screen_h / 2.0);
+			if (cluster.size() > best.size()
+					|| (cluster.size() == best.size() && distance < best_distance)) {
+				best = cluster;
+				best_distance = distance;
+			}
+			i += cluster.size();
+		}
+		if (best.size() < 4 && note_retries++ < 20) { // the slide-in may still finish
+			shot("note-toolbar");
+			return -700;
+		}
+		note_retries = 0;
+		check(best.size() >= 4, std::format("the strip holds the scratch "
+			"plugin's three buttons and the note button below them ({} bands)",
+			best.size()));
+		if (best.size() < 4) {
+			step = 99; // nothing to click; the run ends at its checks
+			return 300;
+		}
+		// The note button is the last band (order 3) and its menu hangs a
+		// card left of the strip, from the button's top (the toolbar's
+		// geometry).
+		note_button_y = best.back().centre();
+		note_flyout = {strip_left - beside_gap - scratch_card,
+			int(best.back().top) - note_menu_margin, scratch_card,
+			note_menu_height + 2 * note_menu_margin};
+		click(strip_left + toolbar_button / 2.0, note_button_y);
+		return 400;
+	}
+	case 141: // the note menu unfolds beside the button
+		shot("note-menu");
+		return 700;
+	case 142: { // six colour rows, in the manifest's order
+		cairo_surface_t *s = load_png("note-menu");
+		std::vector<Band> rows = bands_in(s, note_flyout);
+		if (rows.size() != note_menu_rows && note_retries++ < 10) {
+			cairo_surface_destroy(s);
+			shot("note-menu");
+			return -700;
+		}
+		note_retries = 0;
+		check(rows.size() == note_menu_rows, std::format("the note button "
+			"expanded a flyout of six colour rows ({} rows)", rows.size()));
+		// Each row's swatch, at the row's left: the manifest's colours, in
+		// its order, top to bottom.
+		bool menu_order = rows.size() == note_menu_rows;
+		for (int i = 0; i < note_menu_rows && i < int(rows.size()); i++) {
+			unsigned char rgb[3];
+			hex_colour(note_palette[i], rgb);
+			uint32_t want = uint32_t(rgb[0]) << 24 | uint32_t(rgb[1]) << 16
+				| uint32_t(rgb[2]) << 8 | 0xff;
+			if (!pixel_is(s, note_flyout.x + note_menu_swatch_x,
+					int(rows[i].centre()), want)) {
+				menu_order = false;
+			}
+		}
+		cairo_surface_destroy(s);
+		check(menu_order, "the flyout's rows are the manifest's colours in its "
+			"order (yellow, green, blue, pink, purple, orange)");
+		if (rows.size() < 3) { // no Blue row to choose: nothing more can be trusted
+			step = 99;
+			return 300;
+		}
+		// Choose Blue, the third row: its action creates the note.
+		tb_x = note_flyout.x + note_flyout.width / 2.0;
+		tb_y = rows[2].centre();
+		click(tb_x, tb_y);
+		run_msg("state", "", "note-menu-state");
+		return 400;
+	}
+	case 143: { // the choice created a blue note, its editor over it
+		sweep_children();
+		if (!msg_done("note-menu-state") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-menu-state");
+		if ((notes.size() != 1 || notes.front().color != note_blue)
+				&& note_retries++ < 80) {
+			if (note_retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			run_msg("state", "", "note-menu-state");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().color == note_blue,
+			std::format("choosing Blue on the note menu created a note in that "
+				"colour ({})", notes.size() == 1 ? notes.front().color.c_str() : "none"));
+		if (!editor_open_with_keyboard() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(editor_open_with_keyboard(),
+			"the created note's editor opened over it, holding the keyboard");
+		note = notes.front();
+		shot("note-menu-folded");
+		return 700;
+	}
+	case 144: { // the flyout folded; closing the editor keeps nothing
+		cairo_surface_t *s = load_png("note-menu-folded");
+		std::vector<Band> rows = bands_in(s, note_flyout);
+		cairo_surface_destroy(s);
+		check(rows.empty(), "choosing a colour folded the flyout");
+		tap(KEY_ESC); // the editor's Escape: no text, so the note goes too
+		run_msg("state", "", "note-menu-closed");
+		return 400;
+	}
+	case 145: { // nothing left: the closed-empty note removed itself
+		sweep_children();
+		if (!msg_done("note-menu-closed") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-menu-closed");
+		if (!notes.empty() && note_retries++ < 80) {
+			run_msg("state", "", "note-menu-closed");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.empty(), "the note closed with no text was removed");
+		check(stored_notes().empty(), "nothing is left in the plugin's storage");
+		tap(KEY_ESC); // Escape leaves the overview, folding everything
+		return 400;
+	}
+	case 146: { // the run's end: the overview closed, nothing left over
+		if (!overview_settled(false) && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(overview_settled(false), "the overview closed behind the notes");
+		check(editor_layer() == nullptr, "no editor outlived the overview");
+		check(toolbar_layer() == nullptr, "the toolbar slid out with the overview");
 		return 100; // done: the summary prints and the run ends
 	}
 	default:
