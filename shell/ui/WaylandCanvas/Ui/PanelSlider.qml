@@ -1,4 +1,5 @@
 import QtQuick
+import "."
 
 // A slider: a track, an accent fill and a knob. Press-drag and wheel steps
 // emit `moved` with the new value (0..1). The caller owns the value: bind it
@@ -8,12 +9,11 @@ import QtQuick
 Item {
 	id: root
 
-	property var theme: null
 	property real value: 0
 	signal moved(real value)
 
 	width: parent ? parent.width : 0
-	height: theme ? theme.rowHeight : 32
+	height: UiTheme.rowHeight
 
 	property real live: value
 	onValueChanged: if (!mouse.pressed) live = value
@@ -33,7 +33,7 @@ Item {
 		anchors.verticalCenter: parent.verticalCenter
 		height: 4
 		radius: 2
-		color: root.theme ? root.theme.muted : "#565f89"
+		color: UiTheme.muted
 
 		Rectangle {
 			anchors.left: parent.left
@@ -41,7 +41,7 @@ Item {
 			height: parent.height
 			radius: parent.radius
 			width: parent.width * root.clamp(root.live)
-			color: root.theme ? root.theme.accent : "#7aa2f7"
+			color: UiTheme.accent
 		}
 	}
 
@@ -53,7 +53,7 @@ Item {
 		anchors.verticalCenter: parent.verticalCenter
 		x: Math.max(0, Math.min(parent.width - width,
 			track.width * root.clamp(root.live) - width / 2))
-		color: root.theme ? root.theme.text : "#a9b1d6"
+		color: UiTheme.text
 	}
 
 	MouseArea {

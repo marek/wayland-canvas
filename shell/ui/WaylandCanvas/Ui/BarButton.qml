@@ -1,11 +1,16 @@
 import QtQuick
+import "."
 
 // One bar button: a text label, or an icon glyph in a fixed slot. Buttons
 // have no hover chrome — the bar paints glyphs only, colour telling state.
+// A widget whose manifest names a panel opens it on click without code of
+// its own: the bar sets `panel` to the panel's global name and `api` to the
+// plugin's, and a left click toggles it.
 Item {
 	id: root
 
-	property var theme: null
+	property var api: null
+	property string panel: "" // the panel a left click opens, "" for none
 	property string text: ""
 	property bool icon: false // fixed icon slot instead of text padding
 	property real textMargin: 8.5 // px of padding either side of a text label
@@ -16,9 +21,9 @@ Item {
 
 	visible: text !== ""
 	implicitWidth: icon
-		? (theme ? theme.iconSlot : 27)
+		? UiTheme.iconSlot
 		: Math.max(12, label.implicitWidth + textMargin * 2)
-	implicitHeight: theme ? theme.barHeight : 26
+	implicitHeight: UiTheme.barHeight
 	width: visible ? implicitWidth : 0
 	height: visible ? implicitHeight : 0
 
@@ -26,12 +31,10 @@ Item {
 		id: label
 		anchors.centerIn: parent
 		text: root.text
-		color: root.active ? (root.theme ? root.theme.attention : "#f7768e")
-			: (root.theme ? root.theme.text : "#a9b1d6")
+		color: root.active ? UiTheme.attention : UiTheme.text
 		font {
-			family: root.theme ? root.theme.fontFamily : "monospace"
-			pixelSize: root.icon ? (root.theme ? root.theme.fontIcon : 13)
-				: (root.theme ? root.theme.fontBody : 12)
+			family: UiTheme.fontFamily
+			pixelSize: root.icon ? UiTheme.fontIcon : UiTheme.fontBody
 		}
 		renderType: Text.NativeRendering
 		horizontalAlignment: Text.AlignHCenter
@@ -44,6 +47,9 @@ Item {
 		cursorShape: Qt.PointingHandCursor
 		acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
 		onClicked: function(mouse) {
+			if (mouse.button === Qt.LeftButton && root.panel !== "" && root.api != null) {
+				root.api.panels.toggle(root.panel, root)
+			}
 			root.pressed(mouse.button)
 		}
 		onWheel: function(wheel) {

@@ -4,21 +4,25 @@ import QtQuick
 import "."
 
 // One indicator panel: a full-output overlay layer surface holding a card
-// centred under its indicator and clamped inside the output. A click
-// outside the card closes the panel (the overlay below the bar strip), so
-// does Escape and a second click of its indicator (the bar strip is masked
-// out of the surface, so those clicks reach the bar); Panels owns the
-// one-at-a-time rule. The card is a layer surface rather than an xdg
-// popup: the Qt platform refuses to attach a popup to a layer-shell
-// parent. It asks for the keyboard on demand, which the compositor gives a
-// surface above the windows as it maps, so a text field in a panel
-// receives typing without a click first and Escape is caught here before
-// any field sees it.
+// centred under its indicator and clamped inside the output. The host's
+// panel manager instantiates one per manifest panel entry, hidden, hands it
+// the api, and on open the anchor item and the widget to read state from
+// (`model`); it owns the one-at-a-time rule and the second-toggle close. A
+// click outside the card (the overlay below the bar strip) and Escape close
+// the panel here — `dismissed` tells the manager it went; the bar strip is
+// masked out of the surface, so a second click of the icon reaches the bar
+// and closes the panel through the manager's toggle. The card is a layer
+// surface rather than an xdg popup: the Qt platform refuses to attach a
+// popup to a layer-shell parent. It asks for the keyboard on demand, which
+// the compositor gives a surface above the windows as it maps, so a text
+// field in a panel receives typing without a click first and Escape is
+// caught here before any field sees it.
 PanelWindow {
 	id: root
 
-	property var theme: null
+	property var api: null
 	property var anchorItem: null // the bar widget the panel hangs from
+	property var model: null // the widget the panel reads its state from
 	// Names the surface so the scenario suite can tell the panels apart;
 	// the fixed width per panel is the other distinguishing mark.
 	property string panelName: ""
@@ -27,6 +31,10 @@ PanelWindow {
 	default property alias content: column.data
 	property alias spacing: column.spacing
 	property bool open: false
+
+	// The panel closed itself (a click outside, or Escape); the panel
+	// manager forgets it.
+	signal dismissed()
 
 	visible: open
 	color: "transparent"
@@ -60,14 +68,17 @@ PanelWindow {
 	}
 
 	function close() {
-		open = false
+		if (open) {
+			open = false
+			dismissed()
+		}
 	}
 
 	// The compositor hides the surface behind `open`'s back if it is ever
-	// forced off the screen: resync, and let Panels forget this panel.
+	// forced off the screen: resync, and tell the manager this panel went.
 	onVisibleChanged: if (!visible && open) {
 		open = false
-		Panels.released(root)
+		dismissed()
 	}
 
 	readonly property real screenW: anchorWindow && anchorWindow.screen
@@ -88,10 +99,9 @@ PanelWindow {
 
 	readonly property real cardX: {
 		anchorWatcher.transform
-		var margin = theme ? theme.edgeMargin : 8
 		var centre = anchorItem ? anchorItem.mapToItem(null, anchorItem.width / 2, 0).x : 0
-		return Math.round(Math.max(margin, Math.min(centre - panelWidth / 2,
-			screenW - panelWidth - margin)))
+		return Math.round(Math.max(UiTheme.edgeMargin, Math.min(centre - panelWidth / 2,
+			screenW - panelWidth - UiTheme.edgeMargin)))
 	}
 	readonly property real cardY: barH
 
@@ -110,8 +120,8 @@ PanelWindow {
 			x: root.cardX
 			y: root.cardY
 			width: root.panelWidth
-			height: column.implicitHeight + 2 * (root.theme ? root.theme.panelPadding : 10)
-			color: root.theme ? root.theme.background : "#1a1b26"
+			height: column.implicitHeight + 2 * UiTheme.panelPadding
+			color: UiTheme.background
 
 			// Swallows clicks on the card's own padding so only clicks
 			// truly outside close the panel.
@@ -124,10 +134,10 @@ PanelWindow {
 				focus: true
 				Keys.priority: Keys.BeforeItem
 				Keys.onEscapePressed: root.close()
-				x: root.theme ? root.theme.panelPadding : 10
-				y: root.theme ? root.theme.panelPadding : 10
+				x: UiTheme.panelPadding
+				y: UiTheme.panelPadding
 				width: parent.width - 2 * x
-				spacing: root.theme ? root.theme.panelSpacing : 6
+				spacing: UiTheme.panelSpacing
 			}
 		}
 	}

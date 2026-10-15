@@ -1,4 +1,5 @@
 import QtQuick
+import "."
 
 // One panel row: an optional leading glyph, a label, an optional smaller
 // detail under it, hover, a click. A control the caller parks on the row (a
@@ -7,7 +8,6 @@ import QtQuick
 Item {
 	id: root
 
-	property var theme: null
 	property string glyph: ""
 	property string label: ""
 	property string detail: ""
@@ -17,14 +17,14 @@ Item {
 
 	width: parent ? parent.width : 0
 	height: detail !== ""
-		? (theme ? theme.rowHeight + theme.detailHeight : 46)
-		: (theme ? theme.rowHeight : 32)
+		? UiTheme.rowHeight + UiTheme.detailHeight
+		: UiTheme.rowHeight
 
 	Rectangle {
 		anchors.fill: parent
 		radius: 4
 		visible: mouse.containsMouse && root.enabled
-		color: root.theme ? root.theme.hover : Qt.rgba(1, 1, 1, 0.08)
+		color: UiTheme.hover
 	}
 
 	Row {
@@ -36,12 +36,10 @@ Item {
 		Text {
 			visible: root.glyph !== ""
 			text: root.glyph
-			color: root.marked
-				? (root.theme ? root.theme.attention : "#f7768e")
-				: (root.theme ? root.theme.text : "#a9b1d6")
+			color: root.marked ? UiTheme.attention : UiTheme.text
 			font {
-				family: root.theme ? root.theme.fontFamily : "monospace"
-				pixelSize: root.theme ? root.theme.fontIcon : 13
+				family: UiTheme.fontFamily
+				pixelSize: UiTheme.fontIcon
 			}
 			renderType: Text.NativeRendering
 		}
@@ -50,18 +48,14 @@ Item {
 			spacing: 0
 
 			PanelText {
-				theme: root.theme
 				text: root.label
 				color: !root.enabled
-					? (root.theme ? root.theme.muted : "#565f89")
-					: (root.marked
-						? (root.theme ? root.theme.attention : "#f7768e")
-						: (root.theme ? root.theme.text : "#a9b1d6"))
+					? UiTheme.muted
+					: (root.marked ? UiTheme.attention : UiTheme.text)
 			}
 
 			PanelText {
 				visible: root.detail !== ""
-				theme: root.theme
 				dim: true
 				text: root.detail
 			}

@@ -1,29 +1,27 @@
 import QtQuick
 import QtQuick.Controls
+import "."
 
 // A single-line field with the panel's own look; `password` masks the text.
 // Enter is the caller's to interpret (the inherited `accepted` signal).
 TextField {
 	id: root
 
-	property var theme: null
 	property bool password: false
 
 	echoMode: password ? TextInput.Password : TextInput.Normal
-	color: theme ? theme.text : "#a9b1d6"
-	selectionColor: theme ? theme.accent : "#7aa2f7"
+	color: UiTheme.text
+	selectionColor: UiTheme.accent
 	selectedTextColor: color
-	placeholderTextColor: theme ? theme.muted : "#565f89"
+	placeholderTextColor: UiTheme.muted
 	font {
-		family: theme ? theme.fontFamily : "monospace"
-		pixelSize: theme ? theme.fontBody : 12
+		family: UiTheme.fontFamily
+		pixelSize: UiTheme.fontBody
 	}
 	background: Rectangle {
 		radius: 4
-		color: Qt.rgba(1, 1, 1, 0.06)
+		color: UiTheme.fill
 		border.width: 1
-		border.color: root.activeFocus
-			? (root.theme ? root.theme.accent : "#7aa2f7")
-			: "transparent"
+		border.color: root.activeFocus ? UiTheme.accent : "transparent"
 	}
 }
