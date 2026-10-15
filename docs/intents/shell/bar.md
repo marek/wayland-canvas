@@ -8,8 +8,9 @@
 ## Requirement
 
 Every output has a top system bar drawn by a separate Quickshell client
-(`shell/`, one layer-shell panel per output with an exclusive zone), styled
-after the bar of the user's previous desktop minus the workspace numbers.
+(`shell/`, the plugin host, whose `canvas.bar` plugin opens one layer-shell
+panel per output with an exclusive zone), styled after the bar of the
+user's previous desktop minus the workspace numbers.
 Each indicator opens a panel below it with that indicator's controls — no
 indicator launches a terminal program. The compositor stays free of widget
 code: the bar is a client like any other, driving the compositor only
@@ -23,10 +24,11 @@ through the control IPC and standard system services.
   for power actions); the only compositor-specific actions (opening the
   launcher, ending the session) go through the control socket
   ([../platform/ipc.md](../platform/ipc.md)).
-- **Own theme.** The palette, font, glyphs and panel metrics live in
-  `shell/`: a dark theme — background `#1a1b26`, text `#a9b1d6`, attention
-  `#f7768e` — with the bar 26 logical px high. The bar never reads another
-  shell's configuration.
+- **Own theme.** The palette, font, glyphs and panel metrics live in the
+  shell's UI kit (`shell/ui/WaylandCanvas/Ui/`, the `WaylandCanvas.Ui`
+  module every plugin imports): a dark theme — background `#1a1b26`, text
+  `#a9b1d6`, attention `#f7768e` — with the bar 26 logical px high. The
+  bar never reads another shell's configuration.
 - **Icons are font glyphs**, not images: the bar renders in the fontconfig
   `monospace` family (12 px text, 13 px icons) so it follows the system
   font, and the icon shapes come from that font's icon ranges.
@@ -94,12 +96,15 @@ tooling, no standard source to read).
 
 ## Autostart
 
-`Server::start()` launches the bar when `qs` is on `PATH` (constants in
-`src/core/config.h`). The bar's config is found beside the compositor binary —
-`../shell` in the build tree, `../share/wayland-canvas/shell` when
-installed (meson installs `shell/` under the data dir) — or at
-`$WAYLAND_CANVAS_SHELL_DIR` when set. `-B` (and `Options::start_bar`)
-starts the compositor without it.
+`Server::start()` launches the shell when `qs` is on `PATH` (constants in
+`src/core/config.h`). The shell's config is found beside the compositor
+binary — `../shell` in the build tree, `../share/wayland-canvas/shell` when
+installed (meson installs `shell/` and the built-in `plugins/` under the
+data dir, the plugins beside the shell where the host finds them) — or at
+`$WAYLAND_CANVAS_SHELL_DIR` when set. It is started with `QML_IMPORT_PATH`
+prefixed by the shell's `ui/` dir, so every plugin, wherever the host found
+it, can `import WaylandCanvas.Ui`. `-B` (and `Options::start_bar`) starts
+the compositor without it.
 
 ## Cross-links
 
