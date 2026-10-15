@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <linux/input-event-codes.h>
 #include <optional>
 #include <print>
 #include <source_location>
@@ -18,7 +19,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <variant>
 #include "core/config.h"
 #include "platform/output.h"
 #include "render/render.h"
@@ -33,7 +33,12 @@ int step = 0, failures = 0, retries = 0;
 uint32_t t_ms = 10000;
 pid_t grim_pid = -1;
 std::optional<DesktopId> d1, d2, d3;
-Camera cam0{};
+Camera cam0{}, super_start{};
+std::string tmp_root;
+wlr_pointer ptr{};
+wlr_keyboard kbd{};
+const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
+const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
 std::string shot_dir;
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -112,6 +117,61 @@ void pinch(uint32_t fingers, double scale, int steps) {
 	}
 	t_ms += 8;
 	server->gestures.pinch_end(t_ms, false);
+}
+
+// Fake-device helpers: a keyboard press (the scenario's way of holding
+// Super), pointer motion, buttons and pinch events, all through the
+// paths real devices take — so a held Super is a real modifier and a
+// pinch release is a real gesture end, not a direct call into Gestures.
+void key(uint32_t code, bool pressed) {
+	t_ms += 8;
+	wlr_keyboard_key_event ev = {.time_msec = t_ms, .keycode = code,
+		.update_state = true,
+		.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+			: WL_KEYBOARD_KEY_STATE_RELEASED};
+	wlr_keyboard_notify_key(&kbd, &ev);
+}
+
+// Pointer at output-local logical (x, y) on the single 1280x720 output.
+void move_to(double x, double y) {
+	t_ms += 8;
+	wlr_pointer_motion_absolute_event ev = {
+		.pointer = &ptr, .time_msec = t_ms, .x = x / 1280.0, .y = y / 720.0};
+	wl_signal_emit_mutable(&ptr.events.motion_absolute, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+// A button press or release through the device path.
+void click(uint32_t button, bool pressed) {
+	t_ms += 8;
+	wlr_pointer_button_event ev = {.pointer = &ptr, .time_msec = t_ms,
+		.button = button,
+		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+			: WL_POINTER_BUTTON_STATE_RELEASED};
+	wl_signal_emit_mutable(&ptr.events.button, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+// A 2-finger pinch driven through the device path.
+void pinch_down(uint32_t fingers) {
+	t_ms += 8;
+	wlr_pointer_pinch_begin_event ev = {
+		.pointer = &ptr, .time_msec = t_ms, .fingers = fingers};
+	wl_signal_emit_mutable(&ptr.events.pinch_begin, &ev);
+}
+
+void pinch_move(double scale) {
+	t_ms += 8;
+	wlr_pointer_pinch_update_event ev = {.pointer = &ptr, .time_msec = t_ms,
+		.fingers = 2, .dx = 0, .dy = 0, .scale = scale, .rotation = 0};
+	wl_signal_emit_mutable(&ptr.events.pinch_update, &ev);
+}
+
+void pinch_up(bool cancelled) {
+	t_ms += 8;
+	wlr_pointer_pinch_end_event ev = {
+		.pointer = &ptr, .time_msec = t_ms, .cancelled = cancelled};
+	wl_signal_emit_mutable(&ptr.events.pinch_end, &ev);
 }
 
 bool inside(const Rect &r, const wlr_box &b) {
@@ -334,6 +394,212 @@ int run_step() {
 		check(std::fabs(o->camera.current().cx - want.cx) < 1
 			&& std::fabs(o->camera.current().cy - want.cy) < 1,
 			"keyboard jump to the desktop in that direction");
+		return 400; // the scale scenario continues from here
+	}
+	case 27:
+		// Fake devices for the Super pinch: a keyboard that can hold
+		// Super, a pointer that parks the cursor off-centre.
+		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
+		wlr_keyboard_init(&kbd, &kbd_impl, "fake-keyboard");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
+		move_to(900, 300);
+		check(std::fabs(server->cursor->x - 900) < 0.5
+			&& std::fabs(server->cursor->y - 300) < 0.5,
+			"the fake pointer placed the cursor");
+		super_start = o->camera.current();
+		return 300;
+	case 28: {
+		// Super + 2-finger pinch from the normal view: the shown desktop
+		// scales with the fingers. Held open a step for a mid-pinch shot.
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		check(std::holds_alternative<Gestures::DesktopScale>(server->gestures.state()),
+			"Super + 2-finger pinch begins scaling the shown desktop");
+		pinch_move(0.8);
+		Camera cam = o->camera.current();
+		check(std::fabs(cam.zoom - 0.8) < 1e-9
+			&& std::fabs(cam.cx - super_start.cx) < 1e-9,
+			std::format("the live zoom follows the fingers ({:.2f})",
+				cam.zoom));
+		check(desk(d1)->frame().width == std::lround(o->width / 0.8)
+			&& desk(d1)->frame().height == std::lround(o->height / 0.8),
+			"the frame is the base size divided by the scale");
+		check(!o->overview.active(), "the pinch stays in the normal view");
+		shot("13-super-pinch-mid");
+		return 400;
+	}
+	case 29: {
+		// Released just off a step: the scale settles on the nearest
+		// 5 % step (a pinch to 0.78 settles at 0.80).
+		pinch_move(0.78);
+		pinch_up(false);
+		check(std::fabs(desk(d1)->scale() - 0.8) < 1e-9,
+			"released, the scale settles on the nearest step (0.80)");
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(),
+			"releasing Super after a Super pinch does not open the launcher");
+		return 400;
+	}
+	case 30: {
+		Camera want = camera_for_box(desk(d1)->frame(), desk(d1)->scale());
+		check(std::fabs(o->camera.current().zoom - want.zoom) < 1e-9
+			&& std::fabs(o->camera.current().cx - want.cx) < 1
+			&& std::fabs(o->camera.current().cy - want.cy) < 1,
+			"the camera came to rest on the desktop at its scale");
+		check(o->interactive(), "the resting zoom is interactive");
+		check(one && two && three
+			&& std::fabs(one->told_scale - 0.8) < 1e-9
+			&& std::fabs(two->told_scale - 0.8) < 1e-9
+			&& std::fabs(three->told_scale - 0.8) < 1e-9,
+			"the desktop's windows were told the settled scale (0.8)");
+		check(server->hint.text == "Desktop 1 · 80 %",
+			"the settle is named like a completed action");
+		shot("14-desktop-80");
+		return 400;
+	}
+	case 31:
+		spawn(std::format("foot -T marker sh -c 'cat > {}/scenarios/gestures/marker'",
+			tmp_root).c_str());
+		return 300;
+	case 32: {
+		// A window opened on the 80 % desktop: the pointer reaches it
+		// through the camera, landing where it points.
+		View *marker = view_titled("marker");
+		if ((marker == nullptr || !marker->mapped) && retries++ < 100) {
+			return -100; // retry until mapped
+		}
+		Camera cam = o->camera.drawn();
+		double z = cam.zoom;
+		double left = cam.cx - o->width / (2.0 * z);
+		double top = cam.cy - o->height / (2.0 * z);
+		wlr_box f = marker->frame_box();
+		double sx = (f.x + f.width / 2.0 - left) * z;
+		double sy = (f.y + f.height / 2.0 - top) * z;
+		move_to(sx, sy);
+		// Where the click lands, computed the way the camera does it.
+		double cx = left + sx / z, cy = top + sy / z;
+		check(std::fabs(server->seat->pointer_state.sx - (cx - marker->x)) < 1.0
+			&& std::fabs(server->seat->pointer_state.sy - (cy - marker->y)) < 1.0,
+			std::format("the pointer lands where it points ({:.1f},{:.1f} surface-local)",
+				server->seat->pointer_state.sx, server->seat->pointer_state.sy));
+		check(server->seat->pointer_state.focused_surface == marker->wlr->base->surface,
+			"the pointer focuses the window through the camera");
+		click(BTN_LEFT, true);
+		click(BTN_LEFT, false);
+		check(server->focused_view == marker, "the click focused the window");
+		shot("15-click-80");
+		return 300;
+	}
+	case 33:
+		key(KEY_O, true);
+		key(KEY_O, false);
+		key(KEY_K, true);
+		key(KEY_K, false);
+		key(KEY_ENTER, true);
+		key(KEY_ENTER, false);
+		return 400;
+	case 34: {
+		// What was typed reached the client through the camera.
+		std::string path = std::format("{}/scenarios/gestures/marker", tmp_root);
+		FILE *f = std::fopen(path.c_str(), "r");
+		char buf[16] = {};
+		bool got = f != nullptr && std::fgets(buf, sizeof(buf), f) != nullptr;
+		if (f != nullptr) {
+			std::fclose(f);
+		}
+		check(got && std::string_view(buf) == "ok\n",
+			std::format("typing on the 80 % desktop reached the client ({})", buf));
+		// Near 100 % catches 100 % exactly: 100 is one of the steps.
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		pinch_move(1.27); // raw 0.8 x 1.27 = 1.016: nearest step is 1.00
+		pinch_up(false);
+		check(desk(d1)->scale() == 1.0,
+			"a pinch settling near 100 % catches 100 % exactly");
+		key(KEY_LEFTMETA, false);
+		return 400;
+	}
+	case 35: {
+		check(o->camera.current().zoom == 1 && o->interactive()
+			&& std::fabs(one->told_scale - 1.0) < 1e-9,
+			"back at 100 %: zoom 1, interactive, clients told 1.0");
+		// Spread past 100 % for the 125 % frame.
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		pinch_move(1.25);
+		pinch_up(false);
+		check(std::fabs(desk(d1)->scale() - 1.25) < 1e-9,
+			"spreading further settles at 125 %");
+		key(KEY_LEFTMETA, false);
+		return 400;
+	}
+	case 36: {
+		check(std::fabs(o->camera.current().zoom - 1.25) < 1e-9 && o->interactive()
+			&& std::fabs(one->told_scale - 1.25) < 1e-9
+			&& desk(d1)->frame().width == std::lround(o->width / 1.25),
+			"the desktop rests at 125 %, its windows told 1.25");
+		shot("16-desktop-125");
+		return 400;
+	}
+	case 37:
+		// The overview from a scaled desktop: its tab names the scale.
+		o->overview.enter();
+		return 600;
+	case 38:
+		check(o->overview.active(), "the overview opened over the 125 % desktop");
+		shot("17-overview-125");
+		o->overview.exit();
+		return 700;
+	case 39:
+		swipe(3, 0, -900, 30); // pan down off the desktop into a free area
+		return 700;
+	case 40: {
+		// A free landing spot stays wherever the pan stopped, at zoom 1.
+		if (o->camera.coasting() && retries++ < 100) {
+			return -100; // retry until the momentum settles
+		}
+		check(o->desktop_showing() == nullptr && o->camera.current().zoom == 1,
+			"the free landing spot rests at zoom 1");
+		// Super + pinch on a free view: it is pinned as a desktop first.
+		std::size_t before = server->canvas.desktops.size();
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		check(server->canvas.desktops.size() == before + 1
+			&& std::holds_alternative<Gestures::DesktopScale>(
+				server->gestures.state()),
+			"a Super pinch on a free view pins it as a desktop first");
+		pinch_move(0.9);
+		check(std::fabs(o->camera.current().zoom - 0.9) < 1e-9,
+			"the pinned desktop scales with the fingers");
+		shot("18-free-view-pinned");
+		return 400;
+	}
+	case 41: {
+		pinch_up(false);
+		check(o->desktop_showing() != nullptr
+			&& std::fabs(o->desktop_showing()->scale() - 0.9) < 1e-9,
+			"the pinned desktop settled at 90 %");
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(),
+			"no launcher from a Super pinch on a free view");
+		return 400;
+	}
+	case 42: {
+		// Without Super a 2-finger pinch still belongs to the client.
+		Camera start = o->camera.current();
+		pinch_down(2);
+		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+			"2-finger pinch without Super forwards to the client");
+		pinch_move(1.5);
+		pinch_move(0.6);
+		pinch_up(false);
+		check(std::holds_alternative<Gestures::Idle>(server->gestures.state()),
+			"the forwarded pinch ended cleanly");
+		check(std::fabs(o->camera.current().zoom - start.zoom) < 1e-9
+			&& std::fabs(o->camera.current().cx - start.cx) < 1e-9,
+			"without Super the canvas did not scale");
+		shot("19-pinch-without-super");
 		return 0;
 	}
 	default:
@@ -372,6 +638,7 @@ int main() {
 	const char *env = std::getenv("CANVAS_TMP");
 	std::string root = env && *env ? env : "tmp"; // meson passes the repo's tmp/ via env
 	shot_dir = std::format("{}/scenarios/gestures", root);
+	tmp_root = root;
 	mkdir_p(shot_dir);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
@@ -387,6 +654,8 @@ int main() {
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display);
 	wl_event_source_remove(timer);
+	wlr_pointer_finish(&ptr);
+	wlr_keyboard_finish(&kbd);
 	server.reset();
 	return failures != 0;
 }
