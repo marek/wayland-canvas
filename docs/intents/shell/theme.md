@@ -18,6 +18,13 @@ choice is kept across restarts.
 - **One mode for the desktop, owned by the shell**: the shell keeps it in
   its config and tells the compositor when it starts and on every change,
   so the two never disagree for longer than a message.
+- **The applications' preference is the compositor's to write**: every
+  `theme.set` — the shell's switch, the shell's start push, an outside
+  client's call — makes the compositor set `org.gnome.desktop.interface`
+  `color-scheme` to match, but only when it is the real session (the DRM
+  backend, started from a TTY). The compositor alone knows its own
+  backend, so the shell needs to know nothing; a nested or headless run
+  never writes the setting.
 - **The switch is a plugin** (`canvas.theme`, the right-most bar widget)
   like every bar widget, so another plugin can read the mode, follow it or
   offer its own switch.
@@ -33,8 +40,7 @@ choice is kept across restarts.
 | The compositor | Title bars, the canvas background and grid, the overview UI, the launcher and hints switch palettes on `theme.set` |
 | Contrast | Text on an accent fill — the overview's target tab, the launcher's selected row, the calendar's today, a field's selection — is the palette's contrasting on-accent colour in both modes |
 | Kept | The mode is written to `shell.json` as `theme.mode` and applied when the shell starts; the compositor starts dark until told |
-
-### The palettes
+| Applications | Every applied mode sets the applications' preference (`color-scheme` `prefer-light` / `prefer-dark`) — the real session only; see Design considerations |
 
 The UI kit's `UiTheme` carries the shell's; the compositor's (title bars,
 canvas, overview, launcher) mirrors it in `src/core/config.h`. Every
@@ -66,6 +72,11 @@ light mode's dark blue is.
 
 - No control socket: the shell switches alone.
 - An unknown `theme.mode` in the config: dark, logged.
+- No `org.gnome.desktop.interface` schema, or `color-scheme` not writable
+  (a real session without the desktop's schemas): the preference is not
+  set, logged; the mode itself is unaffected.
+- A compositor `theme` event with an unknown mode: ignored, like an
+  unknown `theme.mode` in the config.
 
 ## Cross-links
 

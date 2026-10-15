@@ -58,6 +58,7 @@ libinput = dependency('libinput', include_type: 'system')
 libdrm = dependency('libdrm', include_type: 'system').partial_dependency(compile_args: true, includes: true)
 librsvg = dependency('librsvg-2.0', include_type: 'system')
 glib = dependency('glib-2.0', include_type: 'system')
+gio = dependency('gio-2.0', include_type: 'system')
 json_glib = dependency('json-glib-1.0', include_type: 'system')
 
 protocol_headers = []
@@ -83,6 +84,13 @@ desktop_entry_lib = static_library(
 	'canvas-desktop-entry',
 	'src/apps/desktop_entry.cpp',
 	include_directories: src_inc,
+)
+
+theme_prefs_lib = static_library(
+	'canvas-theme-prefs',
+	'src/core/theme_prefs.cpp',
+	include_directories: src_inc,
+	dependencies: [glib, gio],
 )
 
 core_lib = static_library(
@@ -111,7 +119,7 @@ core_lib = static_library(
 	),
 	protocol_headers,
 	include_directories: src_inc,
-	link_with: [geometry_lib, desktop_entry_lib],
+	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
 		glib, json_glib, libinput, libdrm],
 )
@@ -179,6 +187,21 @@ test(
 		include_directories: src_inc,
 		link_with: desktop_entry_lib,
 	),
+	suite: 'unit',
+)
+
+theme_prefs_env = environment()
+theme_prefs_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
+test(
+	'theme-prefs',
+	executable(
+		'test-theme-prefs',
+		'tests/test_theme_prefs.cpp',
+		include_directories: src_inc,
+		link_with: theme_prefs_lib,
+		dependencies: [glib, gio],
+	),
+	env: theme_prefs_env,
 	suite: 'unit',
 )
 

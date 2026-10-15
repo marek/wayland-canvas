@@ -19,6 +19,8 @@
 #include "canvas/items.h"
 #include "core/config.h"
 #include "core/theme.h"
+#include "core/theme_prefs.h"
+#include "core/wlr.h"
 #include "platform/ipc.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -638,14 +640,17 @@ std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *p
 	if (mode == nullptr) {
 		return std::unexpected(std::string{usage});
 	}
-	if (strcmp(mode, "light") == 0) {
-		server_.set_theme(ThemeMode::light);
-	} else if (strcmp(mode, "dark") == 0) {
-		server_.set_theme(ThemeMode::dark);
-	} else {
+	if (strcmp(mode, "light") != 0 && strcmp(mode, "dark") != 0) {
 		return std::unexpected(std::format(
 			"params: mode must be \"light\" or \"dark\", not '{}'", mode));
 	}
+	ThemeMode resolved = strcmp(mode, "light") == 0 ? ThemeMode::light : ThemeMode::dark;
+	server_.set_theme(resolved);
+	// Every theme.set — the shell's switch, the shell's start push, an
+	// outside client's call — also sets the applications' preference, but
+	// only when this compositor is the real session (docs/intents/shell/
+	// theme.md): it alone knows its own backend.
+	theme_prefs::apply(resolved, wlr_backend_is_drm(server_.backend));
 	return std::string{"true"};
 }
 

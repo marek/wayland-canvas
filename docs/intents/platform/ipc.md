@@ -56,7 +56,7 @@ request; responses come in request order.
 | `launcher.toggle` | `output` (optional; default the output under the cursor) | `true` |
 | `overview.toggle` | `output` (optional, as above) | `true`; an error without an output |
 | `quit` | — | `true`, then the session ends |
-| `theme.set` | `mode`: `light` or `dark` | `true` |
+| `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (the DRM backend) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
 | `item.set` | `id`; `color` (`#rrggbb`); `text`; `width`, `height` (canvas px); `x`, `y` (canvas, the top-left) | The item as placed: `{"id", "x", "y", "width", "height"}` |
 | `item.remove` | `id` | `true`; an error for an unknown id |
 
@@ -81,7 +81,7 @@ update keeps its place. Ids are the plugin's own strings, named
 | `overview` | `output`, `active` | An output enters or leaves the overview |
 | `outputs` | `outputs`, as in the state | An output appears, goes, or changes size or scale |
 | `desktops` | `desktops`, as in the state | A desktop is created, moved, combined or abandoned |
-| `theme` | `mode` | The mode changes, by any client |
+| `theme` | `mode` | The mode changes, by any client; the shell adopts it — [../shell/theme.md](../shell/theme.md) |
 | `item.moved` | `id`, `x`, `y` | The user dropped a dragged item |
 | `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item |
 
