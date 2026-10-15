@@ -72,21 +72,45 @@ struct PointerHit {
 	uint32_t edges = 0;              // resize edges for DecoPart::resize
 };
 
+// The shell surface (top or overlay layer: the bar, panels, the toolbar)
+// under the cursor, if any.
+std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
+	double ox = server.cursor->x - output.lx;
+	double oy = server.cursor->y - output.ly;
+	for (int l = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+			l >= ZWLR_LAYER_SHELL_V1_LAYER_TOP; l--) {
+		if (std::optional<LayerHit> hit = output.layer_surface_at(l, ox, oy)) {
+			return hit;
+		}
+	}
+	return std::nullopt;
+}
+
+// A click on a shell surface that takes the keyboard gives it the keyboard,
+// recorded as the holder so the keyboard goes back to the window when the
+// surface goes; an exclusive holder elsewhere keeps it.
+void focus_layer_on_click(Server &server, LayerSurface &layer, wlr_surface *surface) {
+	if (!layer.wants_keyboard()) {
+		return;
+	}
+	LayerSurface *holder = server.focused_layer;
+	if (holder == nullptr || holder == &layer || !holder->holds_keyboard_exclusively()) {
+		server.focused_layer = &layer;
+		server.focus_keyboard(surface);
+	}
+}
+
 PointerHit pointer_hit_test(Server &server, Output &output) {
 	PointerHit hit;
 	double ox = server.cursor->x - output.lx;
 	double oy = server.cursor->y - output.ly;
 
-	for (int l = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
-			l >= ZWLR_LAYER_SHELL_V1_LAYER_TOP; l--) {
-		std::optional<LayerHit> layer_hit = output.layer_surface_at(l, ox, oy);
-		if (layer_hit.has_value()) {
-			hit.surface = layer_hit->surface;
-			hit.layer = layer_hit->layer;
-			hit.sx = layer_hit->sx;
-			hit.sy = layer_hit->sy;
-			return hit;
-		}
+	if (std::optional<LayerHit> shell = shell_surface_at(server, output)) {
+		hit.surface = shell->surface;
+		hit.layer = shell->layer;
+		hit.sx = shell->sx;
+		hit.sy = shell->sy;
+		return hit;
 	}
 
 	Point p = output.local_to_canvas(ox, oy);
@@ -313,12 +337,20 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			}
 			handled = true;
 		} else if (output != nullptr && output->overview.active()) {
-			for (xkb_keysym_t sym : sym_list) {
-				if (server.bindings.handle_overview(sym, mods, *output)) {
-					break;
+			// A shell surface holding the keyboard (a panel, the note editor)
+			// takes the keys; Super chords stay the overview's, so Super+Tab
+			// still leaves it.
+			LayerSurface *holder = server.focused_layer;
+			bool shell_types = holder != nullptr && holder->mapped
+				&& (mods & WLR_MODIFIER_LOGO) == 0;
+			if (!shell_types) {
+				for (xkb_keysym_t sym : sym_list) {
+					if (server.bindings.handle_overview(sym, mods, *output)) {
+						break;
+					}
 				}
+				handled = true; // the overview owns every other key
 			}
-			handled = true; // every key is compositor-owned in the overview
 		} else {
 			for (xkb_keysym_t sym : sym_list) {
 				if (server.bindings.handle(sym, mods, output)) {
@@ -405,6 +437,16 @@ void Input::process_cursor_motion(uint32_t time) {
 	}
 
 	if (!output->interactive()) {
+		// Shell surfaces (the bar, panels, the toolbar) keep the pointer in
+		// the overview and during transitions.
+		if (std::optional<LayerHit> shell = shell_surface_at(server, *output)) {
+			if (set_view_hover(server, nullptr, DecoPart::none)) {
+				output->damage();
+			}
+			wlr_seat_pointer_notify_enter(server.seat, shell->surface, shell->sx, shell->sy);
+			wlr_seat_pointer_notify_motion(server.seat, time, shell->sx, shell->sy);
+			return;
+		}
 		// Overview / animating: the compositor owns the pointer. Keep the
 		// title bar hover state of the view under the cursor alive so the
 		// buttons light up, but no client sees any event.
@@ -496,6 +538,14 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 		return;
 	}
 	if (!output->interactive()) {
+		if (std::optional<LayerHit> shell = shell_surface_at(server, *output)) {
+			// Pointer focus is unset if the cursor has not moved since the
+			// overview opened.
+			wlr_seat_pointer_notify_enter(server.seat, shell->surface, shell->sx, shell->sy);
+			focus_layer_on_click(server, *shell->layer, shell->surface);
+			forward_press(time, button);
+			return;
+		}
 		overview_press(*output, button);
 		return;
 	}
@@ -519,16 +569,8 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	if (hit.surface != nullptr) {
 		if (hit.view != nullptr) {
 			server.focus_view(hit.view);
-		} else if (hit.layer != nullptr && hit.layer->wants_keyboard()) {
-			// Recorded as the holder, so the keyboard goes back to the
-			// window when the surface goes; an exclusive holder elsewhere
-			// keeps it.
-			LayerSurface *holder = server.focused_layer;
-			if (holder == nullptr || holder == hit.layer
-					|| !holder->holds_keyboard_exclusively()) {
-				server.focused_layer = hit.layer;
-				server.focus_keyboard(hit.surface);
-			}
+		} else if (hit.layer != nullptr) {
+			focus_layer_on_click(server, *hit.layer, hit.surface);
 		}
 		forward_press(time, button);
 		return;
@@ -636,7 +678,8 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 				server.cursor->y - output->ly, event->delta)) {
 		return;
 	}
-	if (output->overview.active()) {
+	// A shell surface under the pointer scrolls, in the overview too.
+	if (output->overview.active() && !shell_surface_at(server, *output)) {
 		if (seat_modifiers(server) & WLR_MODIFIER_CTRL) {
 			output->overview.zoom_by(std::exp(-event->delta / 200.0),
 				server.cursor->x - output->lx, server.cursor->y - output->ly);
