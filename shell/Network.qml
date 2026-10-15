@@ -1,5 +1,5 @@
+import Quickshell.Io
 import Quickshell.Networking
-import QtQuick
 
 // Network: connection type and Wi-Fi strength. Left opens nmtui (the
 // NetworkManager terminal UI).
