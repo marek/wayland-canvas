@@ -97,7 +97,9 @@ cmd_install() {
 	echo "install.sh: installing $artifact"
 	case $f in
 		arch) pacman -U "$artifact" ;;
-		debian) apt-get install -y "$artifact" ;;
+		# apt/dpkg may drain stdin even with -y: keep it away from the
+		# terminal the default-session question reads from
+		debian) apt-get install -y "$artifact" </dev/null ;;
 	esac
 
 	if ask_default; then
@@ -148,7 +150,7 @@ cmd_uninstall() {
 	echo "install.sh: removing the package"
 	case $f in
 		arch) pacman -R wayland-canvas ;;
-		debian) apt-get remove -y wayland-canvas ;;
+		debian) apt-get remove -y wayland-canvas </dev/null ;;
 	esac
 	echo "install.sh: done — the login points at its previous default again"
 }

@@ -158,7 +158,8 @@ stage_in_rootfs() { # $1 rootfs dir; sets staged_version
 		echo "package-deb.sh: no version found in meson.build" >&2
 		return 2
 	}
-	rm -rf "$rootfs/stage"
+	# a previous in-root run may have left files owned through the uid map
+	unshare --map-auto --map-root-user rm -rf "$rootfs/stage"
 	mkdir -p "$rootfs/stage/packages"
 	"$P/make-source-tarball.sh" "$rootfs/stage/wayland-canvas-$staged_version.tar.xz"
 	cp "$P/debian/control" "$P/debian/prerm" "$P/debian/postrm" "$P/debian/build-deb.sh" "$rootfs/stage/"

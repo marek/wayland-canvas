@@ -1,0 +1,12 @@
+#!/bin/sh
+# Maintainer script for wayland-canvas (Debian). It never prompts; the
+# interactive default-session question belongs to tools/install.sh.
+
+# Restore any default session this package set before its own files (the
+# session tool included) disappear, so the login never points at a session
+# that no longer exists.
+if [ "$1" = "remove" ] && command -v wayland-canvas-session >/dev/null 2>&1; then
+	wayland-canvas-session restore || true
+fi
+
+exit 0

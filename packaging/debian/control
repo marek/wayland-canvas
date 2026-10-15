@@ -1,0 +1,13 @@
+Package: wayland-canvas
+Version: 0.1.0-1
+Section: x11
+Priority: optional
+Architecture: amd64
+Maintainer: Marek Kudlacz <marek@kudlacz.com>
+Depends: ${shlibs:Depends}
+Description: Infinite-canvas Wayland compositor with virtual desktops
+ Windows live anywhere on an unbounded zoomable canvas; virtual desktops are
+ screen-sized dashed frames you drag over the windows however you like.
+ Windows get Windows-11-style title bars with minimize, maximize/restore and
+ close. Ships the session file for display managers and wayland-canvas-session
+ to set and restore the default session.

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Maintainer script for wayland-canvas (Debian). It never prompts; the
+# interactive default-session question belongs to tools/install.sh.
+
+# Purge: drop the session tool's state directory. It holds nothing but the
+# change journal of a default that was already restored on removal.
+if [ "$1" = "purge" ]; then
+	rm -rf /var/lib/wayland-canvas
+fi
+
+exit 0
