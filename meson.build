@@ -92,6 +92,7 @@ core_lib = static_library(
 		'src/icons.cpp',
 		'src/input.cpp',
 		'src/launcher.cpp',
+		'src/overview.cpp',
 		'src/layer.cpp',
 		'src/output.cpp',
 		'src/render.cpp',

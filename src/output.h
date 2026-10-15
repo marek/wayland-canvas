@@ -3,22 +3,17 @@
 #include <array>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <vector>
 #include "camera.h"
 #include "desktop.h"
 #include "geometry.h"
 #include "layer.h"
+#include "overview.h"
 #include "util.h"
 
 class Server;
 
-enum class Mode {
-	normal,
-	overview,
-};
-
-// A monitor: its own camera onto the canvas, its overview state and its layer surfaces.
+// A monitor: its own camera onto the canvas, its overview and its layer surfaces.
 class Output {
 public:
 	Output(Server &server, wlr_output *wlr);
@@ -41,28 +36,6 @@ public:
 	void pan(double dx, double dy);
 	void pin_desktop();
 
-	// canvas.cpp: overview
-	Camera overview_camera(const Camera &home) const;
-	void overview_enter();
-	// Records home (the current zoom-1 camera) and the initial target; returns the overview
-	// camera to zoom out to. Does not change the mode.
-	Camera overview_prepare();
-	// Gesture release: switch to overview and animate path parameter t -> 1.
-	void overview_finish_enter(const Camera &far, double t);
-	// Gesture release: switch to normal and animate path parameter t -> 0, landing on
-	// `near` (camera_for_box(target)).
-	void overview_finish_exit(const Camera &near, const Camera &far, double t);
-	void overview_exit();
-	void overview_cancel();
-	void overview_hop(double dx, double dy);
-	void overview_set_target(wlr_box box, std::optional<DesktopId> desktop, bool center);
-	void overview_target_point(double cx, double cy);
-	void overview_zoom_by(double factor, double ox, double oy);
-	void overview_abandon(std::optional<DesktopId> desktop);
-	void overview_tile(std::optional<DesktopId> desktop);
-	void overview_combine(std::optional<DesktopId> into);
-	void overview_new_desktop(double cx, double cy);
-
 	// layer.cpp
 	void arrange_layers();
 	std::optional<LayerHit> layer_surface_at(int layer, double ox, double oy) const;
@@ -74,15 +47,8 @@ public:
 	int lx = 0, ly = 0, width = 0, height = 0; // layout position and logical size
 
 	CameraMotion camera;
+	Overview overview;
 	double frames_alpha = 0; // desktop outlines faded in while panning
-
-	Mode mode = Mode::normal;
-	Camera home; // camera before entering the overview
-	double overview_zoom = 0;
-	// Overview target: where entering will take you. A desktop, or a free screen-sized
-	// spot on the canvas when the target desktop resolves to nothing.
-	wlr_box target{};
-	std::optional<DesktopId> target_desktop;
 
 	// By zwlr_layer_shell_v1_layer; each in the order the C wl_list kept.
 	std::array<std::vector<std::unique_ptr<LayerSurface>>, 4> layers;

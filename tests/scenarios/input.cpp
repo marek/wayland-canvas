@@ -265,12 +265,12 @@ int run_step() {
 		chord(KEY_TAB, SUPER);
 		return 500;
 	case 14:
-		check(o->mode == Mode::overview, "Super+Tab opened the overview");
+		check(o->overview.active(), "Super+Tab opened the overview");
 		key(KEY_ESC, true);
 		key(KEY_ESC, false);
 		return 500;
 	case 15:
-		check(o->mode == Mode::normal && o->camera.current().zoom == 1,
+		check(!o->overview.active() && o->camera.current().zoom == 1,
 			"Escape went back");
 		for (int i = 0; i < 3; i++) chord(KEY_RIGHT, SUPER_ALT);
 		return 600;
@@ -295,7 +295,7 @@ int run_step() {
 		swipe(4, 0, -300);
 		return 600;
 	case 19:
-		check(o->mode == Mode::overview, "4-finger swipe events opened the overview");
+		check(o->overview.active(), "4-finger swipe events opened the overview");
 		shot("overview");
 		return 300;
 	case 20: { // right-click on empty canvas below the desktops: new desktop
@@ -351,7 +351,7 @@ int run_step() {
 		click(40, 300, BTN_LEFT);
 		return 700;
 	case 26:
-		check(o->mode == Mode::normal && !o->target_desktop.has_value() &&
+		check(!o->overview.active() && !o->overview.target().desktop.has_value() &&
 			o->desktop_showing() == nullptr, "click on empty canvas landed on a free area");
 		return 0;
 	default:

@@ -375,7 +375,7 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 			draw_canvas_rect(ctx, frame.x, frame.y, frame.width, frame.height,
 				color_rgba(config::color_combine, 0.15f));
 			color = config::color_combine;
-		} else if (o.target_desktop == d.id()) {
+		} else if (o.overview.target().desktop == d.id()) {
 			color = config::color_accent;
 			thickness = 3.0;
 		} else if (hovered == &d) {
@@ -387,14 +387,15 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 			color_rgba(color, static_cast<float>(alpha)));
 	}
 
-	if (server.canvas.desktops.find(o.target_desktop) == nullptr
-			&& !wlr_box_empty(&o.target)) {
-		Rect tr = box_rect(o.target);
+	if (server.canvas.desktops.find(o.overview.target().desktop) == nullptr
+			&& !wlr_box_empty(&o.overview.target().box)) {
+		const wlr_box &t = o.overview.target().box;
+		Rect tr = box_rect(t);
 		if (tr.intersects(ctx.viewport)) {
 			double zoom = ctx.cam.zoom;
-			draw_dashed_logical_rect(ctx, canvas_x(ctx, o.target.x),
-				canvas_y(ctx, o.target.y), o.target.width * zoom,
-				o.target.height * zoom, 2.0,
+			draw_dashed_logical_rect(ctx, canvas_x(ctx, t.x),
+				canvas_y(ctx, t.y), t.width * zoom,
+				t.height * zoom, 2.0,
 				color_rgba(config::color_accent, 0.7f));
 		}
 	}
@@ -423,7 +424,7 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 	}
 	Desktop *desktop = o.server.canvas.desktops.find(g.desktop);
 	Desktop *merge_from = o.server.canvas.desktops.find(g.merge_from);
-	const wlr_box &box = desktop != nullptr ? desktop->frame() : o.target;
+	const wlr_box &box = desktop != nullptr ? desktop->frame() : o.overview.target().box;
 	Rect br = box_rect(box);
 	bool box_visible = br.intersects(ctx.viewport);
 
@@ -476,7 +477,7 @@ void draw_tabs(const RenderCtx &ctx) {
 		if (!layout) {
 			continue;
 		}
-		uint32_t bg = o.target_desktop == d.id()
+		uint32_t bg = o.overview.target().desktop == d.id()
 			? config::color_accent : config::color_panel;
 		draw_logical_rect(ctx, layout->tab.x, layout->tab.y, layout->tab.width,
 			layout->tab.height, color_rgba(bg));
@@ -855,7 +856,7 @@ void Painter::render(Output &output) {
 	ctx.scale = wlr_output->scale;
 	ctx.transform = wlr_output_transform_invert(wlr_output->transform);
 	wlr_output_transformed_resolution(wlr_output, &ctx.tw, &ctx.th);
-	ctx.overview = output.mode == Mode::overview;
+	ctx.overview = output.overview.active();
 	ctx.drawn = &drawn_;
 	ctx.help_cache = help_cache_;
 	ctx.help_clock = &help_clock_;

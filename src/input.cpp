@@ -120,10 +120,10 @@ void act_overview(Server &, Output *output, KeyArg) {
 	if (output == nullptr) {
 		return;
 	}
-	if (output->mode == Mode::overview) {
-		output->overview_exit();
+	if (output->overview.active()) {
+		output->overview.exit();
 	} else {
-		output->overview_enter();
+		output->overview.enter();
 	}
 }
 
@@ -191,7 +191,7 @@ void act_abandon_current(Server &, Output *output, KeyArg) {
 	if (Desktop *showing = output->desktop_showing()) {
 		desktop = showing->id();
 	}
-	output->overview_abandon(desktop);
+	output->overview.abandon(desktop);
 }
 
 void act_tile_current(Server &server, Output *output, KeyArg) {
@@ -349,18 +349,19 @@ bool handle_global_keys(Server &server, Output *output,
 }
 
 void overview_new_desktop_at(Server &server, Output &output) {
-	if (server.canvas.desktops.find(output.target_desktop) == nullptr) {
+	const OverviewTarget &target = output.overview.target();
+	if (server.canvas.desktops.find(target.desktop) == nullptr) {
 		// Free spot: plant the new desktop on the target's centre.
-		output.overview_new_desktop(output.target.x + output.target.width / 2.0,
-			output.target.y + output.target.height / 2.0);
+		output.overview.new_desktop(target.box.x + target.box.width / 2.0,
+			target.box.y + target.box.height / 2.0);
 		return;
 	}
 	std::optional<CanvasPos> pos = server.input.cursor_canvas_pos();
 	if (pos.has_value()) {
-		output.overview_new_desktop(pos->cx, pos->cy);
+		output.overview.new_desktop(pos->cx, pos->cy);
 	} else {
-		output.overview_new_desktop(output.target.x + output.target.width / 2.0,
-			output.target.y + output.target.height / 2.0);
+		output.overview.new_desktop(target.box.x + target.box.width / 2.0,
+			target.box.y + target.box.height / 2.0);
 	}
 }
 
@@ -372,52 +373,53 @@ void handle_overview_keys(Server &server, Output &output,
 		xkb_keysym_t sym = xkb_keysym_to_lower(raw);
 		switch (sym) {
 		case XKB_KEY_Escape:
-			output.overview_cancel();
+			output.overview.cancel();
 			return;
 		case XKB_KEY_Return:
 		case XKB_KEY_KP_Enter:
-			output.overview_exit();
+			output.overview.exit();
 			return;
 		case XKB_KEY_Left:
-			output.overview_hop(-1, 0);
+			output.overview.hop(-1, 0);
 			return;
 		case XKB_KEY_Right:
-			output.overview_hop(1, 0);
+			output.overview.hop(1, 0);
 			return;
 		case XKB_KEY_Up:
-			output.overview_hop(0, -1);
+			output.overview.hop(0, -1);
 			return;
 		case XKB_KEY_Down:
-			output.overview_hop(0, 1);
+			output.overview.hop(0, 1);
 			return;
 		case XKB_KEY_Delete:
 		case XKB_KEY_BackSpace:
-			if (Desktop *desktop = server.canvas.desktops.find(output.target_desktop)) {
-				output.overview_abandon(desktop->id());
+			if (Desktop *desktop =
+					server.canvas.desktops.find(output.overview.target().desktop)) {
+				output.overview.abandon(desktop->id());
 			}
 			return;
 		case XKB_KEY_t:
-			output.overview_tile(output.target_desktop);
+			output.overview.tile(output.overview.target().desktop);
 			return;
 		case XKB_KEY_m:
-			output.overview_combine(output.target_desktop);
+			output.overview.combine(output.overview.target().desktop);
 			return;
 		case XKB_KEY_n:
 			overview_new_desktop_at(server, output);
 			return;
 		case XKB_KEY_plus:
 		case XKB_KEY_equal:
-			output.overview_zoom_by(1.25, output.width / 2.0,
+			output.overview.zoom_by(1.25, output.width / 2.0,
 				output.height / 2.0);
 			return;
 		case XKB_KEY_minus:
-			output.overview_zoom_by(0.8, output.width / 2.0,
+			output.overview.zoom_by(0.8, output.width / 2.0,
 				output.height / 2.0);
 			return;
 		case XKB_KEY_Tab:
 		case XKB_KEY_w:
 			if (mods & WLR_MODIFIER_LOGO) {
-				output.overview_exit();
+				output.overview.exit();
 			}
 			return;
 		default:
@@ -503,7 +505,7 @@ uint32_t quadrant_edges(View &view, double cx, double cy) {
 void overview_target_view(Server &server, Output &output, View &view) {
 	Desktop *desktop = server.canvas.desktop_of(view);
 	if (desktop != nullptr) {
-		output.overview_set_target(desktop->frame(), desktop->id(), true);
+		output.overview.set_target(desktop->frame(), desktop->id(), true);
 	} else {
 		wlr_box frame = view.frame_box();
 		wlr_box box{
@@ -512,7 +514,7 @@ void overview_target_view(Server &server, Output &output, View &view) {
 			.width = output.width,
 			.height = output.height,
 		};
-		output.overview_set_target(box, std::nullopt, true);
+		output.overview.set_target(box, std::nullopt, true);
 	}
 }
 
@@ -665,7 +667,7 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 				}
 			}
 			handled = true;
-		} else if (output != nullptr && output->mode == Mode::overview) {
+		} else if (output != nullptr && output->overview.active()) {
 			handle_overview_keys(server, *output, sym_list, mods);
 			handled = true;
 		} else if (nsyms > 0) {
@@ -1161,22 +1163,22 @@ void Input::overview_click() {
 		view->set_minimized(false);
 		server_.focus_view(view);
 		overview_target_view(server_, *output, *view);
-		output->overview_exit();
+		output->overview.exit();
 		break;
 	case OverviewHit::tab_tile:
 		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			output->overview_tile(desktop->id());
+			output->overview.tile(desktop->id());
 		}
 		break;
 	case OverviewHit::tab_abandon:
 		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			output->overview_abandon(desktop->id());
+			output->overview.abandon(desktop->id());
 		}
 		break;
 	case OverviewHit::desktop:
 		if (Desktop *desktop = server_.canvas.desktops.find(grab_desktop)) {
-			output->overview_set_target(desktop->frame(), desktop->id(), true);
-			output->overview_exit();
+			output->overview.set_target(desktop->frame(), desktop->id(), true);
+			output->overview.exit();
 		}
 		break;
 	case OverviewHit::view:
@@ -1185,13 +1187,13 @@ void Input::overview_click() {
 		}
 		server_.focus_view(view);
 		overview_target_view(server_, *output, *view);
-		output->overview_exit();
+		output->overview.exit();
 		break;
 	case OverviewHit::empty: {
 		std::optional<CanvasPos> pos = cursor_canvas_pos();
 		if (pos.has_value()) {
-			output->overview_target_point(pos->cx, pos->cy);
-			output->overview_exit();
+			output->overview.target_point(pos->cx, pos->cy);
+			output->overview.exit();
 		}
 		break;
 	}
@@ -1210,7 +1212,7 @@ void Input::overview_press(Output &output, uint32_t button) {
 		// Right click on the empty canvas or a desktop's interior (not
 		// over a window) creates a desktop there.
 		if (!server_.view_at(p.x, p.y, cam.zoom).has_value()) {
-			output.overview_new_desktop(p.x, p.y);
+			output.overview.new_desktop(p.x, p.y);
 		}
 		return;
 	}
@@ -1439,9 +1441,9 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 				server.cursor->y - output->ly, event->delta)) {
 		return;
 	}
-	if (output->mode == Mode::overview) {
+	if (output->overview.active()) {
 		if (seat_modifiers(server) & WLR_MODIFIER_CTRL) {
-			output->overview_zoom_by(std::exp(-event->delta / 200.0),
+			output->overview.zoom_by(std::exp(-event->delta / 200.0),
 				server.cursor->x - output->lx, server.cursor->y - output->ly);
 		} else {
 			double delta = event->delta * config::scroll_pan_speed;

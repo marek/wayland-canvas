@@ -114,7 +114,7 @@ std::optional<DesktopId> id_of(const Desktop *desktop) {
 } // namespace
 
 Output::Output(Server &server, wlr_output *wlr)
-	: server(server), wlr(wlr), camera(*this) {
+	: server(server), wlr(wlr), camera(*this), overview(*this) {
 	uint32_t used = 0;
 	for (const std::unique_ptr<Output> &existing : server.outputs) {
 		used |= existing->bit;
@@ -197,7 +197,7 @@ bool Output::tick(double now) {
 }
 
 bool Output::is_panning() const {
-	if (mode != Mode::normal) {
+	if (overview.active()) {
 		return false;
 	}
 	if (camera.panning()) {
@@ -213,7 +213,7 @@ bool Output::is_panning() const {
 }
 
 bool Output::interactive() const {
-	if (mode != Mode::normal) {
+	if (overview.active()) {
 		return false;
 	}
 	if (camera.current().zoom != 1) {
@@ -237,7 +237,7 @@ bool Output::interactive() const {
 }
 
 Desktop *Output::desktop_showing() const {
-	Camera c = mode == Mode::overview ? home : camera.current();
+	Camera c = overview.active() ? overview.home() : camera.current();
 	Rect viewport = c.viewport(width, height);
 	return server.canvas.desktops.best_overlap(viewport);
 }
@@ -250,18 +250,18 @@ void Output::pan(double dx, double dy) {
 }
 
 void Output::goto_box(wlr_box box) {
-	if (mode == Mode::overview) {
+	if (overview.active()) {
 		Point centre = box_centre(box);
-		overview_set_target(box, id_of(server.canvas.desktops.at(centre.x, centre.y)),
-			false);
-		overview_exit();
+		overview.set_target(box,
+			id_of(server.canvas.desktops.at(centre.x, centre.y)), false);
+		overview.exit();
 		return;
 	}
 	camera.animate_to(camera_for_box(box));
 }
 
 void Output::goto_direction(double dx, double dy) {
-	if (mode != Mode::normal) {
+	if (overview.active()) {
 		return;
 	}
 	Desktop *found = server.canvas.desktops.in_direction(camera.current().cx,
@@ -279,14 +279,8 @@ void Output::goto_direction(double dx, double dy) {
 }
 
 void Output::pin_desktop() {
-	if (mode == Mode::overview) {
-		if (server.canvas.desktops.find(target_desktop) != nullptr) {
-			server.hint.set("Already a desktop");
-			return;
-		}
-		Desktop &desktop = server.canvas.desktops.create(target);
-		target_desktop = desktop.id();
-		server.hint.set(std::format("New Desktop {}", desktop.number()));
+	if (overview.active()) {
+		overview.pin_target();
 		return;
 	}
 	Rect vp = viewport();
@@ -307,7 +301,7 @@ void Server::reveal_view(View &view) {
 	}
 	wlr_box frame = view.frame_box();
 	Point centre = box_centre(frame);
-	if (output->mode == Mode::normal) {
+	if (!output->overview.active()) {
 		Rect vp = output->viewport();
 		if (frame.x >= vp.x && frame.y >= vp.y
 				&& frame.x + frame.width <= vp.x + vp.w
@@ -318,9 +312,9 @@ void Server::reveal_view(View &view) {
 	Desktop *desktop = canvas.desktop_of(view);
 	wlr_box box = desktop != nullptr ? desktop->frame()
 		: centred_box(*output, centre.x, centre.y);
-	if (output->mode == Mode::overview) {
-		output->overview_set_target(box, id_of(desktop), false);
-		output->overview_exit();
+	if (output->overview.active()) {
+		output->overview.set_target(box, id_of(desktop), false);
+		output->overview.exit();
 		return;
 	}
 	output->camera.animate_to(camera_for_box(box));

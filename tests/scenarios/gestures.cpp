@@ -170,7 +170,7 @@ int run_step() {
 		swipe(3, -600, 0, 30); // fingers left: canvas follows, camera moves right
 		return 1600;
 	case 5:
-		check(o->mode == Mode::normal && o->camera.current().zoom == 1,
+		check(!o->overview.active() && o->camera.current().zoom == 1,
 			"still normal mode after pan");
 		check(o->camera.current().cx > cam0.cx + 550,
 			std::format("3-finger swipe panned + coasted (dx={:.0f})",
@@ -194,31 +194,33 @@ int run_step() {
 		swipe(4, 0, -300, 20); // 4 fingers up: overview
 		return 700;
 	case 8:
-		check(o->mode == Mode::overview, "4-finger swipe up opened the overview");
+		check(o->overview.active(), "4-finger swipe up opened the overview");
 		check(o->camera.current().zoom < 0.5,
 			std::format("overview is zoomed out (zoom {:.3f})",
 				o->camera.current().zoom));
-		check(o->target_desktop == d2, "overview target starts at the current desktop");
+		check(o->overview.target().desktop == d2,
+			"overview target starts at the current desktop");
 		shot("04-overview");
 		return 400;
 	case 9:
 		swipe(3, -80, 0, 8); // 3 fingers left: jump to the desktop on the left
 		return 500;
 	case 10:
-		check(o->target_desktop == d1, "3-finger left jumped to Desktop 1");
+		check(o->overview.target().desktop == d1, "3-finger left jumped to Desktop 1");
 		shot("05-hop-left");
 		return 400;
 	case 11:
 		swipe(3, 0, -80, 8); // up: no desktop that way -> free spot one screen up
 		return 400;
 	case 12:
-		check(!o->target_desktop.has_value() && o->target.y == desk(d1)->frame().y - o->height,
+		check(!o->overview.target().desktop.has_value()
+			&& o->overview.target().box.y == desk(d1)->frame().y - o->height,
 			"no desktop above: target moved one screen up to a free spot");
 		shot("06-free-spot-target");
 		return 600;
 	case 13:
 		swipe(3, 0, 80, 8); // back down onto Desktop 1
-		check(o->target_desktop == d1, "3-finger down returned to Desktop 1");
+		check(o->overview.target().desktop == d1, "3-finger down returned to Desktop 1");
 		pinch(3, 1.5, 10); // spread: tile Desktop 1
 		return 500;
 	case 14: {
@@ -244,8 +246,8 @@ int run_step() {
 	case 16: {
 		shot("08-combined");
 		const wlr_box &frame = desk(d1)->frame();
-		o->overview_new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
-		d3 = o->target_desktop;
+		o->overview.new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
+		d3 = o->overview.target().desktop;
 		check(d3.has_value() && server->canvas.desktops.size() == 2,
 			"new desktop created in the overview");
 		return 400;
@@ -256,19 +258,19 @@ int run_step() {
 		return 400;
 	case 18: {
 		check(server->canvas.desktops.size() == 1
-			&& server->canvas.desktops.find(o->target_desktop) == nullptr,
+			&& server->canvas.desktops.find(o->overview.target().desktop) == nullptr,
 			"4-finger sideways swipe abandoned the desktop");
 		check(mapped_views() == 3, "abandoning kept every window");
 		// Abandoning (by key) the desktop a swipe is sliding away must end that swipe cleanly.
 		const wlr_box &frame = desk(d1)->frame();
-		o->overview_new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
+		o->overview.new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
 		server->gesture.swipe_begin(t_ms += 8, 4);
 		for (int i = 0; i < 6; i++) {
 			server->gesture.swipe_update(t_ms += 8, 20, 0);
 		}
 		check(server->gesture.kind == GestureKind::abandon,
 			"4-finger sideways swipe is sliding a desktop away");
-		o->overview_abandon(o->target_desktop);
+		o->overview.abandon(o->overview.target().desktop);
 		for (int i = 0; i < 6; i++) {
 			server->gesture.swipe_update(t_ms += 8, 20, 0);
 		}
@@ -277,21 +279,21 @@ int run_step() {
 			"abandoning the swiped desktop mid-swipe ends the swipe cleanly");
 		// A desktop created after an abandon reuses the freed number, never
 		// the abandoned identity.
-		std::optional<DesktopId> abandoned = o->target_desktop;
-		o->overview_new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
+		std::optional<DesktopId> abandoned = o->overview.target().desktop;
+		o->overview.new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
 		Desktop *reused = server->canvas.desktops.by_number(2);
 		check(abandoned.has_value()
 			&& server->canvas.desktops.find(abandoned) == nullptr
 			&& reused != nullptr && reused->id() != *abandoned && reused->number() == 2,
 			"the freed number is reused, the abandoned id is not");
-		o->overview_set_target(desk(d1)->frame(), d1, true);
+		o->overview.set_target(desk(d1)->frame(), d1, true);
 		return 400;
 	}
 	case 19:
 		swipe(4, 0, 300, 20); // 4 fingers down: zoom into the target
 		return 700;
 	case 20: {
-		check(o->mode == Mode::normal && o->camera.current().zoom == 1,
+		check(!o->overview.active() && o->camera.current().zoom == 1,
 			"4-finger down returned to normal mode");
 		Camera want = camera_for_box(desk(d1)->frame());
 		check(std::fabs(o->camera.current().cx - want.cx) < 1
@@ -304,7 +306,7 @@ int run_step() {
 		one->set_minimized(true);
 		check(one->minimized && server->focused_view != one,
 			"minimize hides the window and moves focus");
-		o->overview_enter();
+		o->overview.enter();
 		return 600;
 	case 22:
 		shot("11-overview-shelf");
@@ -312,11 +314,11 @@ int run_step() {
 	case 23:
 		one->activate();
 		check(!one->minimized, "restore from minimized");
-		o->overview_target_point(desk(d1)->frame().x - 3000, desk(d1)->frame().y + 2000);
-		o->overview_exit();
+		o->overview.target_point(desk(d1)->frame().x - 3000, desk(d1)->frame().y + 2000);
+		o->overview.exit();
 		return 700;
 	case 24: {
-		check(o->mode == Mode::normal && !o->target_desktop.has_value() &&
+		check(!o->overview.active() && !o->overview.target().desktop.has_value() &&
 			std::fabs(o->camera.current().cx - (desk(d1)->frame().x - 3000)) < 1,
 			"clicking empty overview canvas lands on a free area");
 		shot("12-free-area");

@@ -39,7 +39,7 @@ wlr_box maximize_area(View &view) {
 	Rect frame = view.frame_rect();
 	Output *picked = nullptr;
 	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if (output->mode != Mode::normal) {
+		if (output->overview.active()) {
 			continue;
 		}
 		if (output->viewport().contains(frame.cx(), frame.cy())) {
@@ -117,7 +117,7 @@ void place(View &view) {
 	}
 
 	// Inside the screen minus bars (exclusive zones), or the overview target.
-	wlr_box screen = output->mode == Mode::overview ? output->target
+	wlr_box screen = output->overview.active() ? output->overview.target().box
 		: box_of_viewport(output->viewport());
 	Rect area = rect_of_box(output->usable_canvas_box(screen));
 	double px = area.x + (area.w - fw) / 2.0;
