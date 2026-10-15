@@ -121,7 +121,9 @@ PanelWindow {
 			y: root.cardY
 			width: root.panelWidth
 			height: column.implicitHeight + 2 * UiTheme.panelPadding
-			color: UiTheme.background
+			color: UiTheme.panel
+			border.width: 1
+			border.color: UiTheme.border
 
 			// Swallows clicks on the card's own padding so only clicks
 			// truly outside close the panel.

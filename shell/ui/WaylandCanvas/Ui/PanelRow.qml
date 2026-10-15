@@ -2,9 +2,10 @@ import QtQuick
 import "."
 
 // One panel row: an optional leading glyph, a label, an optional smaller
-// detail under it, hover, a click. A control the caller parks on the row (a
-// switch, a right-edge label) sits above the row's own mouse area, so it
-// keeps its clicks; plain text parked there does not take clicks at all.
+// detail under it, selection, hover, a click. A control the caller parks on
+// the row (a switch, a right-edge label) sits above the row's own mouse
+// area, so it keeps its clicks; plain text parked there does not take
+// clicks at all.
 Item {
 	id: root
 
@@ -12,6 +13,7 @@ Item {
 	property string label: ""
 	property string detail: ""
 	property bool marked: false // the label in the attention colour
+	property bool selected: false // the accent-tinted fill of the chosen row
 	property bool clickable: true
 	signal clicked()
 
@@ -19,6 +21,14 @@ Item {
 	height: detail !== ""
 		? UiTheme.rowHeight + UiTheme.detailHeight
 		: UiTheme.rowHeight
+
+	// The chosen row's tint, with hover drawn over it.
+	Rectangle {
+		anchors.fill: parent
+		radius: 4
+		visible: root.selected && root.enabled
+		color: UiTheme.selected
+	}
 
 	Rectangle {
 		anchors.fill: parent

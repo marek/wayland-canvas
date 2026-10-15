@@ -13,14 +13,31 @@ QtObject {
 
 	readonly property bool light: mode === "light"
 
+	// The five named colours of each mode. Text and detail greys stay
+	// readable on both backgrounds; the accent is the one saturated fill,
+	// and onAccent is the text that sits on it (light text on the light
+	// mode's dark blue, near-black on the dark mode's light blue).
 	readonly property color background: light ? "#e1e2e7" : "#1a1b26"
 	readonly property color text: light ? "#3760bf" : "#a9b1d6"
 	readonly property color attention: light ? "#f52a65" : "#f7768e"
 	readonly property color muted: light ? "#8489a3" : "#565f89"
 	readonly property color accent: light ? "#2e7de9" : "#7aa2f7"
+	readonly property color onAccent: light ? "#ffffff" : "#1a1b26"
 
-	// Subtle overlays on the background: a hovered row, a field's fill, an
-	// off switch's track.
+	// Panel surfaces: the card a panel floats above whatever is under it —
+	// the background's own colour in dark, one step lighter in light so a
+	// card reads as raised over the bar and the windows. The border is the
+	// hairline that keeps a light card off a light window and a dark card
+	// off a dark wallpaper.
+	readonly property color panel: light ? "#f4f5f8" : "#1a1b26"
+	readonly property color border: light ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(1, 1, 1, 0.10)
+
+	// A selected row or day: the accent held back to a tint, so selection
+	// reads as the accent's family without shouting like a fill.
+	readonly property color selected: Qt.rgba(accent.r, accent.g, accent.b, light ? 0.16 : 0.22)
+
+	// Subtle overlays on the surface below: a hovered row, a field's fill,
+	// an off switch's track.
 	readonly property color hover: light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.08)
 	readonly property color fill: light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.06)
 	readonly property color track: light ? Qt.rgba(0, 0, 0, 0.14) : Qt.rgba(1, 1, 1, 0.14)

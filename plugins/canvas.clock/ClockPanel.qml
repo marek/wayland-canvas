@@ -147,7 +147,7 @@ PanelCard {
 					text: cell.date.getDate()
 					color: {
 						if (root.isToday(cell.date)) {
-							return UiTheme.background
+							return UiTheme.onAccent
 						}
 						return cell.date.getMonth() === root.viewMonth
 							? UiTheme.text

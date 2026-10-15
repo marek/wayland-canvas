@@ -12,7 +12,7 @@ TextField {
 	echoMode: password ? TextInput.Password : TextInput.Normal
 	color: UiTheme.text
 	selectionColor: UiTheme.accent
-	selectedTextColor: color
+	selectedTextColor: UiTheme.onAccent
 	placeholderTextColor: UiTheme.muted
 	font {
 		family: UiTheme.fontFamily
