@@ -1,0 +1,17 @@
+{
+	"id": "canvas.launcher",
+	"name": "Launcher",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The logo widget: a left click opens the compositor's own launcher, a right click opens a terminal",
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "logo",
+				"entry": "Logo.qml",
+				"section": "left",
+				"order": 0
+			}
+		]
+	}
+}

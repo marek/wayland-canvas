@@ -20,15 +20,15 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 - [x] Methods and events as the IPC intent lists them (the canvas items' aside), the state report, and `wayland-canvas msg <method> [params]` with `msg subscribe`
 - [x] Canvas items: drawn above windows in canvas space, dragged in the normal view and the overview, double-click reported; their methods, events and state
 - [x] The compositor's two palettes (title bars, canvas, overview UI, launcher, hints), switched by `theme.set`
-- [ ] In the overview, shell surfaces above the windows (the bar, the toolbar, panels, the note editor) take the pointer, and one holding the keyboard takes the keys before the overview's own
+- [x] In the overview, shell surfaces above the windows (the bar, the toolbar, panels, the note editor) take the pointer, and one holding the keyboard takes the keys before the overview's own
 
 ## Plugin host
 
-- [ ] Discovery in the built-in, user and configured directories, manifests, `apiVersion`, enabling, settings, storage, reload on change
-- [ ] The API object: plugin, storage, panels (the common trigger), actions, theme, compositor
-- [ ] The UI kit as the `WaylandCanvas.Ui` module the plugins import
-- [ ] The bar, every widget and every panel moved into plugins, behaviour unchanged
-- [ ] Reload by change notifications: no timer or process runs while the shell sits idle
+- [x] Discovery in the built-in, user and configured directories, manifests, `apiVersion`, enabling, settings, storage, reload on change
+- [x] The API object: plugin, storage, panels (the common trigger), actions, theme, compositor
+- [x] The UI kit as the `WaylandCanvas.Ui` module the plugins import
+- [x] The bar, every widget and every panel moved into plugins, behaviour unchanged
+- [x] Reload by change notifications: no timer or process runs while the shell sits idle
 
 ## Plugins
 
