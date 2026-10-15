@@ -634,6 +634,33 @@ void draw_drag_icon(const RenderCtx &ctx) {
 		screen_surface_iter, &it);
 }
 
+// ------------------------------------------------------- canvas items
+
+// Plugin-owned cards above the windows and their title bars, in canvas
+// space, below the top and overlay layers.
+void draw_items(const RenderCtx &ctx) {
+	Output &o = *ctx.output;
+	bool settled = !o.camera.panning() && !o.camera.zooming();
+	for (const Item &item : o.server.items.all()) {
+		Rect box{
+			.x = static_cast<double>(item.x),
+			.y = static_cast<double>(item.y),
+			.w = static_cast<double>(item.width),
+			.h = static_cast<double>(item.height),
+		};
+		if (!box.intersects(ctx.viewport)) {
+			continue;
+		}
+		float shown = ctx.scale * static_cast<float>(ctx.cam.zoom);
+		ItemTexture card = o.server.painter.item_texture(item, shown, settled);
+		if (card.texture == nullptr || card.w <= 0 || card.h <= 0) {
+			continue;
+		}
+		draw_ui_texture(ctx, card.texture, canvas_x(ctx, item.x), canvas_y(ctx, item.y),
+			item.width * ctx.cam.zoom, item.height * ctx.cam.zoom, 1.0);
+	}
+}
+
 // ------------------------------------------------- frame done/enter/present
 
 void send_surface_feedback(const RenderCtx &ctx) {
@@ -717,6 +744,35 @@ DesktopLabel Painter::desktop_label(DesktopId id, int number, float scale) {
 	slot->scale = scale;
 	slot->w = w;
 	slot->h = h;
+	return {slot->texture.get(), slot->w, slot->h};
+}
+
+ItemTexture Painter::item_texture(const Item &item, float scale, bool settled) {
+	ItemSlot *slot = nullptr;
+	for (ItemSlot &s : item_cache_) {
+		if (s.id == item.id) {
+			slot = &s;
+			break;
+		}
+	}
+	if (slot == nullptr) {
+		item_cache_.push_back(ItemSlot{.id = item.id});
+		slot = &item_cache_.back();
+	}
+	bool stale = slot->texture == nullptr || slot->text != item.text
+		|| slot->color != item.color || slot->w != item.width
+		|| slot->h != item.height;
+	if (stale || (settled && slot->scale != scale)) {
+		slot->texture.reset();
+		TextTexture card = draw_item_card(server_.renderer, item.text.c_str(),
+			item.color, item.width, item.height, scale);
+		slot->texture = std::move(card.texture);
+		slot->text = item.text;
+		slot->color = item.color;
+		slot->w = item.width;
+		slot->h = item.height;
+		slot->scale = scale;
+	}
 	return {slot->texture.get(), slot->w, slot->h};
 }
 
@@ -878,6 +934,10 @@ void Painter::render(Output &output) {
 	draw_logical_rect(ctx, 0, 0, output.width, output.height,
 		color_rgba(server_.theme.colors().canvas));
 
+	std::erase_if(item_cache_, [this](const ItemSlot &slot) {
+		return server_.items.find(slot.id) == nullptr;
+	});
+
 	// background + bottom layers, screen space
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
 		ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM);
@@ -903,6 +963,9 @@ void Painter::render(Output &output) {
 	} else if (output.frames_alpha > 0) {
 		draw_desktops_normal(ctx);
 	}
+
+	// canvas items, above the windows and their title bars
+	draw_items(ctx);
 
 	// top layer, unless a fullscreen view covers the output
 	if (!fullscreen_covers(ctx)) {
@@ -953,4 +1016,5 @@ void Painter::finish() {
 		slot.texture.reset();
 	}
 	label_cache_.clear();
+	item_cache_.clear();
 }
