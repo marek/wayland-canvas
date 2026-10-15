@@ -299,7 +299,13 @@ void draw_view(const RenderCtx &ctx, View &view) {
 		// full frame width from the frame's top edge; the border runs
 		// below it and around the content.
 		if (tb > 0) {
-			view.deco.update(ctx.output->wlr->scale);
+			// Decorations are drawn at the scale the client is told: the
+			// output's scale times the desktop's.
+			double desktop_scale = 1;
+			if (const Desktop *desktop = server.canvas.desktop_of(view)) {
+				desktop_scale = desktop->scale();
+			}
+			view.deco.update(ctx.output->wlr->scale * desktop_scale);
 			if (view.deco.texture() != nullptr) {
 				draw_ui_texture(ctx, view.deco.texture(),
 					canvas_x(ctx, frame.x), canvas_y(ctx, frame.y),
@@ -472,7 +478,7 @@ void draw_tabs(const RenderCtx &ctx) {
 	for (const Desktop &d : server.canvas.desktops.all()) {
 		// Make sure the cached label matches this output's scale before
 		// the layout measures it.
-		DesktopLabel label = server.painter.desktop_label(d.id(), d.number(), ctx.scale);
+		DesktopLabel label = server.painter.desktop_label(d, ctx.scale);
 		std::optional<TabLayout> layout = server.painter.overview_tab_layout(o, d);
 		if (!layout) {
 			continue;
@@ -688,18 +694,25 @@ const Painter::LabelSlot *Painter::label_slot(DesktopId id) const {
 	return nullptr;
 }
 
-DesktopLabel Painter::desktop_label(DesktopId id, int number, float scale) {
-	LabelSlot *slot = label_slot(id);
+DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale) {
+	LabelSlot *slot = label_slot(desktop.id());
 	if (slot == nullptr) {
-		label_cache_.push_back(LabelSlot{.id = id});
-		slot = label_slot(id);
+		label_cache_.push_back(LabelSlot{.id = desktop.id()});
+		slot = label_slot(desktop.id());
 	}
-	if (slot->texture != nullptr && slot->number == number && slot->scale == scale) {
+	if (slot->texture != nullptr && slot->number == desktop.number()
+			&& slot->desktop_scale == desktop.scale() && slot->scale == scale) {
 		return {slot->texture.get(), slot->w, slot->h};
 	}
 	slot->texture.reset();
-	char buf[32];
-	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", number);
+	char buf[48];
+	int len;
+	if (desktop.scale() == 1.0) {
+		len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.number());
+	} else {
+		len = std::snprintf(buf, sizeof(buf), "Desktop %d · %d %%",
+			desktop.number(), static_cast<int>(std::lround(desktop.scale() * 100)));
+	}
 	int w = 0, h = 0;
 	TexturePtr texture;
 	if (len > 0) {
@@ -710,7 +723,8 @@ DesktopLabel Painter::desktop_label(DesktopId id, int number, float scale) {
 		h = t.height;
 	}
 	slot->texture = std::move(texture);
-	slot->number = number;
+	slot->number = desktop.number();
+	slot->desktop_scale = desktop.scale();
 	slot->scale = scale;
 	slot->w = w;
 	slot->h = h;
@@ -730,6 +744,7 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.number());
 	const LabelSlot *slot = label_slot(desktop.id());
 	int label_w = slot != nullptr && slot->scale == o.wlr->scale
+		&& slot->desktop_scale == desktop.scale()
 		? slot->w : 9 * (len > 0 ? len : 0);
 
 	TabLayout layout;
@@ -874,7 +889,9 @@ void Painter::render(Output &output) {
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
 		ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM);
 
-	bool zoomed = ctx.cam.zoom != 1.0;
+	// A camera resting on a scaled desktop is a normal view; only a zoom
+	// away from its resting zoom shows the free-canvas chrome.
+	bool zoomed = ctx.cam.zoom != ctx.output->resting_zoom();
 	bool wallpaper = output.has_wallpaper();
 	if (zoomed && wallpaper) {
 		draw_logical_rect(ctx, 0, 0, output.width, output.height,

@@ -93,8 +93,9 @@ public:
 	void render(Output &output);
 	void finish(); // releases cached textures before the renderer goes
 
-	// Regenerates the cached label when its desktop's number or the scale changed.
-	DesktopLabel desktop_label(DesktopId id, int number, float scale);
+	// Regenerates the cached label when the desktop's number or scale, or
+	// the output scale, changed.
+	DesktopLabel desktop_label(const Desktop &desktop, float scale);
 	// The tab above a desktop frame and its Tile and Abandon buttons; nullopt when the
 	// tab is off-screen.
 	std::optional<TabLayout> overview_tab_layout(const Output &output,
@@ -108,6 +109,7 @@ private:
 		DesktopId id{};
 		TexturePtr texture;
 		int number = 0, w = 0, h = 0;
+		double desktop_scale = 1; // the scale the label names
 		float scale = 0;
 	};
 
