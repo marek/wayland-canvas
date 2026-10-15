@@ -25,6 +25,7 @@ depends=(
 	'systemd-libs'
 	'wayland'
 )
+optdepends=('quickshell: the top bar (started automatically when qs is on PATH)')
 makedepends=(
 	'clang'
 	'git'
