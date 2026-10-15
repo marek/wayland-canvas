@@ -145,7 +145,7 @@ suspend/restart/power-off/log-out menu. The bar's colours and metrics live in
 ## Configuration
 
 dwl-style: edit `src/config.h` (sizes, colours, gesture tuning, commands) and the
-binding table in `src/input.cpp`, then rebuild.
+binding table in `src/bindings.cpp`, then rebuild.
 
 ## Protocols
 

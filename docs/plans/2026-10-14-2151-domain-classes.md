@@ -16,14 +16,15 @@ scenario suites green after each, behaviour unchanged.
 
 ## Concepts
 
-- [ ] Desktops: `Desktop` with behaviour, `Desktops` as the only owner, `DesktopId` everywhere else; `Canvas` for window arrangements over canvas regions
-- [ ] Camera: `CameraMotion` per output (jumps, eased pans, zoom transitions, momentum)
-- [ ] Overview: `Overview` per output (home, zoom, target, the overview actions)
-- [ ] Gestures: one state type per gesture in a `std::variant`; other code asks `Gestures`
-- [ ] Pointer grabs: `PointerGrab`, one state type per grab in a `std::variant`; client move/resize requests begin grabs through it
-- [ ] Bindings: the key table, its actions and the overview keys out of `Input`
+- [x] Desktops: `Desktop` with behaviour, `Desktops` as the only owner, `DesktopId` everywhere else; `Canvas` for window arrangements over canvas regions
+- [x] Desktops: `DesktopId` is an identity never reused, separate from the displayed number (a stale reference cannot re-attach to a later desktop)
+- [x] Camera: `CameraMotion` per output (jumps, eased pans, zoom transitions, momentum); a hold on the touchpad stops only the coast
+- [x] Overview: `Overview` per output (home, zoom, target, the overview actions)
+- [x] Gestures: one state type per gesture in a `std::variant`; other code asks `Gestures`
+- [x] Pointer grabs: `PointerGrab`, one state type per grab in a `std::variant`; client move/resize requests begin grabs through it
+- [x] Bindings: the key table, its actions and the overview keys out of `Input`
 
 ## Verification
 
-- [ ] After each concept: a warning-free build, the unit and scenario suites green, one commit
-- [ ] At the end: a headless run with real clients and a clean shutdown; the intents and skills name the new classes
+- [x] After each concept: a warning-free build, the unit and scenario suites green, one commit
+- [x] At the end: a headless run with real clients and a clean shutdown; the intents and skills name the new classes

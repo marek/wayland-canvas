@@ -63,7 +63,7 @@ sits on the object it acts on.
 |---|---|
 | A value (`Rect`, `Camera`, `Point`) | `struct`, public fields with default member initialisers, `constexpr` members, defaulted `==` |
 | An object with a lifetime (`Server`, `Output`, `View`, `LayerSurface`, `Keyboard`) | `class`, neither copyable nor movable. Listeners, wlroots handles and caches are private; state other classes read or legitimately set is public, changed through the member function that keeps an invariant where one exists (`move`, `set_minimized`) |
-| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
+| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations, ipc) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
 | Fallible setup | `bool init()` after construction; a constructor never fails |
 | Teardown order | `~Server` releases wlroots resources explicitly, in reverse order of creation; each subsystem's `finish()` releases its own before the display goes |
 | Inheritance | Only where something is polymorphic; not for sharing code |

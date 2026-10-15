@@ -98,7 +98,7 @@ The short form:
 ## Naming
 
 - A name says what the thing is: `camera_zoom_path`,
-  `usable_canvas_box`, `desktop_nearest`.
+  `usable_canvas_box`, `Desktops::nearest`.
 - Types and concepts are `PascalCase`; functions, variables, members,
   enumerators, namespaces and files are `snake_case`; private data
   members end in an underscore (`name_`). No type prefix.
@@ -110,8 +110,9 @@ The short form:
 ## Structure
 
 - A file mixing distinct responsibilities is a split candidate — check
-  while writing, not when asked. A file holding every binding, gesture
-  and grab at once is that case.
+  while writing, not when asked. One file holding every binding, gesture
+  and grab at once would be that case; they are `bindings.cpp`,
+  `gesture.cpp` and `grab.cpp`.
 - Two features that need the same behaviour share the implementation;
   the gesture path, the key path and the pointer path drive the same
   canvas actions.
