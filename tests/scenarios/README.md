@@ -89,6 +89,26 @@ Wayland display namespace and GPU.
   sampled about every 10 ms for 10 s and must have spawned no process at
   all, because the reloads ride on change notifications, not on a poll.
 
+  The same private world then proves the overview toolbar. A scratch
+  user plugin sits in the scratch data dir from the start with one
+  action button, one panel button and one menu button (its menu holds a
+  glyph row and a colour-swatch row), and its one action appends its args
+  to its storage — the read-back is the proof any click ran what it
+  should. The toolbar must be unmapped out of the overview; entering it
+  (Super+Tab) maps the toolbar as a `wayland-canvas-toolbar` layer
+  surface of the shell client, its buttons read off the screenshot (the
+  strip's opaque column holds nothing but its own glyphs) and its
+  centring checked. The action button runs its action with its args and
+  the toolbar stays; the pointer's resting place shows the button's
+  label beside the strip on hover. The panel button opens the scratch
+  panel through the common trigger, left of the strip and level with the
+  button, and a click outside closes it. The menu button expands the
+  flyout beside the toolbar; choosing an entry runs its action with its
+  args and folds the flyout. Escape then leaves the overview — the
+  toolbar never takes the keyboard — and the slide out unmaps it with
+  no panel or flyout outliving it. Screenshots of the toolbar, the
+  flyout and the panel beside it are inspected on the way.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only

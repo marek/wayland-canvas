@@ -86,9 +86,21 @@ constexpr int brightness_panel = 240;
 constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
+constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
 
 // Output geometry the headless backend gives: 1280x720, one output.
 constexpr int screen_w = 1280, screen_h = 720;
+
+// The toolbar strip's geometry the plugin commits (docs/intents/shell/
+// toolbar.md): a 44 px square per button, 8 px from the right edge,
+// vertically centred on the output. The flyout and a toolbar-opened
+// panel hang a further 8 px left of the strip, and both the scratch
+// panel and the flyout are 200 px wide.
+constexpr int toolbar_button = 44;
+constexpr int toolbar_margin = 8;
+constexpr int strip_left = screen_w - toolbar_margin - toolbar_button;
+constexpr int beside_gap = toolbar_margin;
+constexpr int scratch_card = 200;
 
 enum CloseMode { close_outside, close_escape, close_icon };
 
@@ -112,6 +124,7 @@ double clock_x = 0, network_x = 0;
 double action_x = 0, action_y = 0; // an action row's click point: a click
 // can be lost while the bar's render loop is stalled on a screenshot, so
 // the proof phases re-issue it until the mock records the call
+double tb_x = 0, tb_y = 0; // the toolbar's own re-issued click point
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -426,6 +439,13 @@ void tap(uint32_t code) {
 	key(code, false);
 }
 
+// A key with modifiers held: Super+Tab toggles the overview.
+void chord(uint32_t code, uint32_t mod) {
+	key(mod, true);
+	tap(code);
+	key(mod, false);
+}
+
 // Letters and digits, enough for a password-shaped string.
 void type(std::string_view s) {
 	struct KeyMap {
@@ -464,6 +484,26 @@ void click(double x, double y, int button = BTN_LEFT) {
 	}
 }
 
+// The scratch plugin's storage file, read back as text: the proof an
+// action ran is what it wrote (api.storage writes JSON under the
+// scratch state dir).
+std::string read_storage(const char *name) {
+	std::string path = std::format(
+		"{}/xdg/state/wayland-canvas/plugins/canvas.scratch/{}", shot_dir, name);
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return {};
+	}
+	std::string out;
+	char buf[512];
+	std::size_t n = 0;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	return out;
+}
+
 void shot(const char *name) {
 	std::string path = std::format("{}/{}.png", shot_dir, name);
 	grim_pid = fork();
@@ -475,18 +515,24 @@ void shot(const char *name) {
 
 // ---- the bar client and its surfaces ----
 
-LayerSurface *bar_layer() {
+// The mapped layer surface with this namespace: the shell client's
+// surfaces are told apart by name (the bar, each panel, the toolbar).
+LayerSurface *named_layer(const char *ns) {
 	for (const std::unique_ptr<Output> &output : server->outputs) {
 		for (auto &vec : output->layers) {
 			for (const std::unique_ptr<LayerSurface> &l : vec) {
 				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& std::strcmp(l->wlr->namespace_, bar_namespace) == 0) {
+						&& std::strcmp(l->wlr->namespace_, ns) == 0) {
 					return l.get();
 				}
 			}
 		}
 	}
 	return nullptr;
+}
+
+LayerSurface *bar_layer() {
+	return named_layer(bar_namespace);
 }
 
 wl_client *bar_client() {
@@ -505,17 +551,13 @@ int bar_h() {
 // names its surface; the shell and this suite agree on the names).
 LayerSurface *panel_layer(const char *name) {
 	std::string ns = std::format("wayland-canvas-panel-{}", name);
-	for (const std::unique_ptr<Output> &output : server->outputs) {
-		for (auto &vec : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &l : vec) {
-				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& ns == l->wlr->namespace_) {
-					return l.get();
-				}
-			}
-		}
-	}
-	return nullptr;
+	return named_layer(ns.c_str());
+}
+
+// The overview toolbar surface, shown only while its output is in the
+// overview.
+LayerSurface *toolbar_layer() {
+	return named_layer(toolbar_namespace);
 }
 
 // Mapped panels of any name: the one-at-a-time rule counts them.
@@ -553,17 +595,23 @@ struct Band {
 	double centre() const { return (top + bottom - 1) / 2.0; }
 };
 
-std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+std::vector<Band> tb_buttons; // the toolbar's button bands, from the shot
+
+// The lit row bands inside a rectangle of the screen, top to bottom: one
+// per line of glyphs or text, so positions are read off the screenshot
+// instead of assumed from the layout. Clamped to the image on every side.
+std::vector<Band> bands_in(cairo_surface_t *s, const wlr_box &rect) {
 	std::vector<Band> bands;
 	if (s == nullptr) {
 		return bands;
 	}
 	unsigned char *data = cairo_image_surface_get_data(s);
 	int stride = cairo_image_surface_get_stride(s);
-	int x0 = card.x + 8, x1 = card.x + card.width - 8;
+	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
+	int x0 = std::max(0, rect.x), x1 = std::min(w, rect.x + rect.width);
 	bool in_band = false;
 	int band_top = 0, band_lit = 0;
-	for (int y = card.y; y < screen_h; y++) {
+	for (int y = std::max(0, rect.y); y < std::min(h, rect.y + rect.height); y++) {
 		int lit = 0;
 		for (int x = x0; x < x1; x++) {
 			unsigned char *p = data + y * stride + x * 4;
@@ -583,9 +631,15 @@ std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
 		}
 	}
 	if (in_band) { // a band running to the scan's end
-		bands.push_back({band_top, screen_h, band_lit});
+		bands.push_back({band_top, std::min(h, rect.y + rect.height), band_lit});
 	}
 	return bands;
+}
+
+// The lit text bands inside a card's column, top to bottom: one per row,
+// header or field of the panel's content.
+std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+	return bands_in(s, {card.x + 8, card.y, card.width - 16, screen_h - card.y});
 }
 
 cairo_surface_t *load_png(const char *name); // defined with the screenshots
@@ -1481,7 +1535,218 @@ int run_step() {
 		check(!idle_spawned && bar_pid > 0, std::format("an idle shell spawned no "
 			"processes ({} samples over {} s)", idle_sample_count,
 			idle_sample_count * idle_sample_ms / 1000));
+		return 100; // on to the toolbar phase: the same world, in the overview
+	case 19: // the toolbar shows only in the overview: none yet
+		check(toolbar_layer() == nullptr,
+			"the toolbar is not mapped while the output is out of the overview");
+		chord(KEY_TAB, KEY_LEFTMETA); // Super+Tab enters the overview
+		return 400;
+	case 20: {
+		LayerSurface *toolbar = toolbar_layer();
+		if (toolbar == nullptr && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(toolbar != nullptr, "entering the overview mapped the toolbar "
+			"(a layer surface of the shell client)");
+		if (toolbar != nullptr) {
+			check(wl_resource_get_client(toolbar->wlr->surface->resource) == bar_client(),
+				"the toolbar belongs to the shell client");
+		}
+		shot("toolbar");
+		return 700;
+	}
+	case 21: { // the buttons, read off the screenshot: the strip's column
+		// is opaque — its own glyphs are the only lit pixels in it — and
+		// the strip is the cluster of bands closest to the output's
+		// vertical centre, so stray lit pixels cannot pose as buttons.
+		cairo_surface_t *s = load_png("toolbar");
+		std::vector<Band> all = bands_in(s, {strip_left, 0, toolbar_button, screen_h});
+		cairo_surface_destroy(s);
+		std::vector<Band> best;
+		double best_distance = screen_h;
+		for (std::size_t i = 0; i < all.size();) {
+			std::vector<Band> cluster{all[i]};
+			for (std::size_t j = i + 1; j < all.size()
+					&& all[j].top - cluster.back().bottom <= toolbar_button; j++) {
+				cluster.push_back(all[j]);
+			}
+			double distance = std::abs((cluster.front().top + cluster.back().bottom) / 2.0
+				- screen_h / 2.0);
+			if (cluster.size() > best.size()
+					|| (cluster.size() == best.size() && distance < best_distance)) {
+				best = cluster;
+				best_distance = distance;
+			}
+			i += cluster.size();
+		}
+		if (best.size() < 3 && retries++ < 20) { // the slide-in may still finish
+			shot("toolbar");
+			return -700;
+		}
+		retries = 0;
+		check(best.size() >= 3, std::format("the toolbar holds every registered "
+			"button ({} glyph bands in its column: act, panel, menu)", best.size()));
+		if (best.size() < 3) {
+			step = 99; // positions cannot be trusted; nothing more to check
+			return 300;
+		}
+		check(std::abs((best.front().top + best.back().bottom) / 2.0
+				- screen_h / 2.0) <= toolbar_button,
+			"the strip is vertically centred on the output");
+		tb_buttons = best;
+		// The action button is the first (order 0): click it.
+		tb_x = strip_left + toolbar_button / 2.0;
+		tb_y = tb_buttons[0].centre();
+		click(tb_x, tb_y);
+		return 400;
+	}
+	case 22: { // the proof the action ran: its storage, read back
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"button\"") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			return -300;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"button\"") != std::string::npos,
+			"the action button ran its action with its args (the plugin's "
+			"storage says so)");
+		check(toolbar_layer() != nullptr, "the toolbar stays after an action");
+		// The pointer rests on the action button: its label shows beside
+		// it, left of the strip.
+		shot("toolbar-hover");
+		return 700;
+	}
+	case 23: { // the label, beside the strip on hover
+		cairo_surface_t *s = load_png("toolbar-hover");
+		std::vector<Band> labels = bands_in(s,
+			{strip_left - 160, int(tb_buttons[0].top) - 20, 160 - beside_gap, 40});
+		cairo_surface_destroy(s);
+		check(!labels.empty(), "hovering a button shows its label beside the strip");
+		// The panel button is the second (order 1).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[1].centre());
+		return 400;
+	}
+	case 24: {
+		LayerSurface *panel = panel_layer("scratch");
+		if (panel == nullptr && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel != nullptr, "the panel button opened the panel through the "
+			"common trigger");
+		if (panel != nullptr) {
+			check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
+				"the toolbar's panel belongs to the shell client");
+		}
+		shot("toolbar-panel");
+		return 700;
+	}
+	case 25: { // the panel card: left of the strip, level with the button
+		// The card sits left of the strip, centred on the panel button;
+		// scan that window, so overview content elsewhere cannot pose as
+		// rows.
+		cairo_surface_t *s = load_png("toolbar-panel");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[1].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		if (rows.size() < 2 && retries++ < 10) {
+			shot("toolbar-panel");
+			return -700;
+		}
+		retries = 0;
+		check(rows.size() >= 2, "the panel opened beside the toolbar (its two rows "
+			"are left of the strip)");
+		if (!rows.empty()) {
+			double level = (rows.front().top + rows.back().bottom) / 2.0;
+			check(std::abs(level - tb_buttons[1].centre()) <= 32,
+				"the panel is level with the panel button");
+		}
+		// Escape closes the panel itself (it holds the keyboard); a click
+		// on the empty canvas would instead leave the overview.
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 26: {
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0, "the toolbar's panel closed on Escape");
+		// The menu button is the third (order 2).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[2].centre());
+		return 400;
+	}
+	case 27: // the flyout, out of the toolbar to the left of the button
+		shot("toolbar-flyout");
+		return 700;
+	case 28: { // its rows: a glyph row and a colour-swatch row
+		// The flyout sits left of the strip, centred on the menu button.
+		cairo_surface_t *s = load_png("toolbar-flyout");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[2].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		if (rows.size() < 2 && retries++ < 10) {
+			shot("toolbar-flyout");
+			return -700;
+		}
+		retries = 0;
+		check(rows.size() >= 2, "the menu button expanded a flyout beside the "
+			"toolbar (a glyph row and a swatch row)");
+		if (rows.size() < 2) {
+			// Nothing was clicked: the fold shot still happens, the
+			// choice proof is skipped.
+			shot("toolbar-folded");
+			step = 29;
+			return 700;
+		}
+		// Choose the first entry: its action runs and the flyout folds.
+		tb_x = strip_left - beside_gap - scratch_card / 2.0;
+		tb_y = rows[0].centre();
+		click(tb_x, tb_y);
+		return 400;
+	}
+	case 29: { // the choice's proof, and the fold
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"menu-one\"") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			return -300;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"menu-one\"") != std::string::npos,
+			"choosing a flyout entry ran its action with its args (the "
+			"plugin's storage says so)");
+		shot("toolbar-folded");
+		return 700;
+	}
+	case 30: { // the flyout must have folded; leaving the overview ends it
+		cairo_surface_t *s = load_png("toolbar-folded");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[2].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		check(rows.empty(), "choosing an entry folded the flyout");
+		check(toolbar_layer() != nullptr, "the toolbar stays after a menu choice");
+		tap(KEY_ESC); // Escape leaves the overview, folding everything
+		return 400;
+	}
+	case 31: { // the slide out unmaps the toolbar, panel and flyout with it
+		bool gone = toolbar_layer() == nullptr && panel_layers() == 0;
+		if (!gone && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(toolbar_layer() == nullptr, "leaving the overview slid the toolbar "
+			"out (unmapped)");
+		check(panel_layers() == 0, "no panel and no flyout outlived the toolbar");
 		return 100; // done: the summary prints and the run ends
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
@@ -1565,6 +1830,57 @@ int main() {
 	write_file(plugins_dir + "/bad.plugin/Bad.qml",
 		"import QtQuick\nimport WaylandCanvas.Ui\nBarButton {\n"
 		"\ticon: true\n\ttext: \"\\uf00d\"\n}\n");
+	// The toolbar scenario's own scratch plugin (there from the start; it
+	// contributes no bar widget, so the run accounting keeps holding):
+	// one action button, one panel button and one menu button, whose
+	// action appends its args to the plugin's storage — the read-back is
+	// the proof a click ran what it should. The menu's second row names a
+	// colour, the first a glyph, so the flyout draws both kinds.
+	std::string scratch_plugin = plugins_dir + "/canvas.scratch";
+	mkdir_p(scratch_plugin);
+	write_file(scratch_plugin + "/plugin.json",
+		"{\n\t\"id\": \"canvas.scratch\",\n\t\"name\": \"Scratch\",\n"
+		"\t\"version\": \"1.0.0\",\n\t\"apiVersion\": 1,\n"
+		"\t\"description\": \"The toolbar scenario's plugin: an action, a panel and a menu button\",\n"
+		"\t\"contributes\": {\n"
+		"\t\t\"toolbarButtons\": [\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"act\",\n\t\t\t\t\"icon\": \"A\",\n"
+		"\t\t\t\t\"label\": \"Act\",\n\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\"args\": {\"kind\": \"button\"},\n\t\t\t\t\"order\": 0\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n\t\t\t\t\"icon\": \"P\",\n"
+		"\t\t\t\t\"label\": \"Panel\",\n\t\t\t\t\"panel\": \"panel\",\n"
+		"\t\t\t\t\"order\": 1\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"menu\",\n\t\t\t\t\"icon\": \"M\",\n"
+		"\t\t\t\t\"label\": \"Menu\",\n\t\t\t\t\"menu\": [\n"
+		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"One\",\n\t\t\t\t\t\t\"icon\": \"1\",\n"
+		"\t\t\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-one\"}\n\t\t\t\t\t},\n"
+		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"Yellow\",\n\t\t\t\t\t\t\"color\": \"#e0af68\",\n"
+		"\t\t\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-yellow\"}\n\t\t\t\t\t}\n"
+		"\t\t\t\t],\n\t\t\t\t\"order\": 2\n\t\t\t}\n"
+		"\t\t],\n"
+		"\t\t\"panels\": [\n\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n"
+		"\t\t\t\t\"entry\": \"ScratchPanel.qml\"\n\t\t\t}\n\t\t],\n"
+		"\t\t\"actions\": [\n\t\t\t{\n\t\t\t\t\"id\": \"mark\",\n"
+		"\t\t\t\t\"entry\": \"Mark.qml\"\n\t\t\t}\n\t\t]\n\t}\n}\n");
+	write_file(scratch_plugin + "/Mark.qml",
+		"import QtQuick\n// The scratch action: appends its args to the plugin's\n"
+		"// storage, so the scenario reads back that it ran and what with.\n"
+		"Item {\n\tproperty var api: null\n"
+	"\tfunction run(args) {\n"
+		"\t\tvar marks = api.storage.read(\"marks\")\n"
+		"\t\tif (marks == null) {\n\t\t\tmarks = []\n\t\t}\n"
+		"\t\tmarks.push(args == null ? {} : args)\n"
+		"\t\tapi.storage.write(\"marks\", marks)\n\t}\n}\n");
+	write_file(scratch_plugin + "/ScratchPanel.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\n"
+		"// The scratch panel: two labelled rows, so the scenario finds the\n"
+		"// card where it should be on the screenshot.\n"
+		"PanelCard {\n\tpanelWidth: 200\n\tpanelName: \"scratch\"\n"
+		"\tPanelRow { glyph: \"1\"; label: \"Scratch one\"; clickable: false }\n"
+		"\tPanelRow { glyph: \"2\"; label: \"Scratch two\"; clickable: false }\n}\n");
+
 	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
 	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);
 	setenv("XDG_STATE_HOME", (xdg + "/state").c_str(), 1);
