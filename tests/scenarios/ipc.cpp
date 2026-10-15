@@ -578,11 +578,14 @@ std::optional<ItemEventLine> item_event(std::string_view kind,
 		std::string_view id) {
 	std::string text = read_file(item_events_path);
 	std::optional<ItemEventLine> out;
+	// read_file() drops the final newline, so the newest event runs to the end
+	// of the text. A line still being written fails to parse; the next poll
+	// reads it whole.
 	std::size_t start = 0;
-	for (std::size_t nl = text.find('\n'); nl != std::string::npos;
-			nl = text.find('\n', start)) {
-		std::string line = text.substr(start, nl - start);
-		start = nl + 1;
+	while (start < text.size()) {
+		std::size_t end = std::min(text.find('\n', start), text.size());
+		std::string line = text.substr(start, end - start);
+		start = end + 1;
 		JsonParser *parser = json_parser_new();
 		if (json_parser_load_from_data(parser, line.c_str(),
 				static_cast<gssize>(line.size()), nullptr)) {
