@@ -22,7 +22,7 @@ BarButton {
 		if (button === Qt.RightButton) {
 			terminal.running = true
 		} else {
-			ipc.send("launcher")
+			ipc.send("launcher.toggle")
 		}
 	}
 }

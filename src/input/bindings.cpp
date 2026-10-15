@@ -126,6 +126,8 @@ void act_move_dir(Server &server, Output *output, KeyArg arg) {
 			static_cast<int>(std::round(view->y + dir.dy * output->height)));
 		server.reveal_view(*view);
 	}
+	// The move may have taken the view in or out of a grid.
+	server.canvas.settle(*view);
 }
 
 void act_pan(Server &, Output *output, KeyArg arg) {
@@ -156,22 +158,18 @@ void act_abandon_current(Server &, Output *output, KeyArg) {
 	output->overview.abandon(desktop);
 }
 
+// Super+T: switch tiling for the desktop shown; a free view is pinned as a
+// desktop first, like Super+Ctrl+D.
 void act_tile_current(Server &server, Output *output, KeyArg) {
 	if (output == nullptr) {
 		return;
 	}
-	Desktop *desktop = output->desktop_showing();
-	wlr_box box;
-	if (desktop != nullptr) {
-		box = desktop->frame();
-	} else {
-		Rect vp = output->viewport();
-		box.x = static_cast<int>(std::round(vp.x));
-		box.y = static_cast<int>(std::round(vp.y));
-		box.width = static_cast<int>(std::round(vp.w));
-		box.height = static_cast<int>(std::round(vp.h));
+	if (output->desktop_showing() == nullptr) {
+		output->pin_desktop();
 	}
-	server.canvas.tile(box, *output);
+	if (Desktop *desktop = output->desktop_showing()) {
+		server.canvas.toggle_tiling(desktop->id());
+	}
 }
 
 void act_goto_desktop(Server &server, Output *output, KeyArg arg) {

@@ -14,17 +14,24 @@ Wayland display namespace and GPU.
   foot windows, title-bar button hit-testing, maximize, 3-finger panning with
   momentum, pinning a free area as a desktop, moving a window between
   desktops, 4-finger overview open/exit, 3-finger hops (including onto a free
-  spot), pinch-out tiling, pinch-in combining, overview desktop
-  create/abandon, minimize/restore via the shelf, landing on empty canvas,
-  and the keyboard desktop-direction jump.
+  spot), 3-finger spread tiling (on: the windows grid and are told they are
+  tiled; off: they keep the grid's positions and are told they are not; back
+  on: a pinch-in combine then joins the incoming window into the grid),
+  overview desktop create/abandon, minimize/restore via the shelf, landing on
+  empty canvas, and the keyboard desktop-direction jump.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
   buttons (incl. hover highlighting), anchored corner resize, Super+Return
   terminal launch, Super+Tab overview + Escape, desktop pin/jump chords,
   swipe events delivered by a device, right-click desktop creation, tab-drag
-  combining, frame-vs-window drag, the tab Tile button, and clicking empty
-  canvas to land on a free area.
+  combining, frame-vs-window drag, and clicking empty canvas to land on a
+  free area — then the per-desktop tiling switch end to end: the tab's Tile
+  button and `t` toggling it, windows opened while it is on joining the grid
+  and closing or minimizing re-flowing it, maximize and fullscreen taking a
+  window out and restore putting it back, a drag onto another slot reordering
+  the grid, Super+T pinning a free view with tiling on, and abandoning or
+  combining a tiled desktop keeping positions and telling the windows.
 - **`launcher.cpp`** — the app launcher: logo-key tap opens, panel renders,
   search filters, Enter and result-click launch foot and close the launcher,
   logo-as-modifier does not open it, Escape and outside-click close it,
@@ -49,13 +56,22 @@ Wayland display namespace and GPU.
   and its panel must map as a layer surface of the bar client (panels are
   told apart by their layer namespace, `wayland-canvas-panel-<name>`), hold
   the keyboard on its own surface while open, and close
-  again — by an outside click, by Escape, or by a second click of the icon;
-  opening one panel closes the last. The typing check selects `CafeGuest`,
-  focuses its password field, types into it, and verifies password dots on
-  the screenshot — the Connect row is never clicked and no Enter is ever
-  sent, so nothing is ever submitted. Indicator positions are read off the
-  bar screenshot itself; brightness stays the one machine-read widget (the
-  bar hides it without a sysfs backlight, and the scenario follows that rule).
+  again — by an outside click, by Escape, or by a second click of the icon.
+  The typing check selects `CafeGuest`, focuses its password field, types
+  into it, and verifies password dots on the screenshot. The panels'
+  actions are then exercised against the stand-ins and proven by what the
+  mocks recorded (their `org.freedesktop.DBus.Mock` call log, read with
+  `busctl --address=` against the private bus): Connect sends CafeGuest's
+  activation with the typed password, selecting the connected `HomeNet` and
+  clicking its action row deactivates the stand-in's Wi-Fi device, the
+  paired Bluetooth device's row click calls Connect (Disconnect on the
+  second click), the found device's row click calls Pair, and clicking
+  "Power saver" makes the stand-in's active profile `power-saver`. No
+  Enter is ever sent from the password field, and the Session rows
+  (Suspend, Restart, Power off, Log out) are never clicked. Indicator
+  positions are read off the bar screenshot itself; brightness stays the
+  one machine-read widget (the bar hides it without a sysfs backlight, and
+  the scenario follows that rule).
   Weather is not required: its widget hides until a first successful fetch,
   and the scenario skips it with a note when it did not load.
 
@@ -67,6 +83,8 @@ Wayland display namespace and GPU.
   configure time `tests/scenarios/ensure-bar-standins.sh` provisions a
   python-dbusmock venv under the git-ignored `tmp/bar-standins/` (or finds
   one already there); without them the bar scenario is skipped, not failed.
+  Its panel-action proofs additionally need `busctl` on `$PATH` to read
+  what the stand-ins recorded.
 - A GPU render node at run time (the headless backend still renders with
   GLES2); CI containers without `/dev/dri` cannot run them.
 - Nothing else: they write only under `$CANVAS_TMP` (default: the repo's

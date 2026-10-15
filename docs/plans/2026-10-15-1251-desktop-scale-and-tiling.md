@@ -25,15 +25,15 @@ pointer. The rules: [canvas/desktops.md](../intents/canvas/desktops.md),
 
 ## Tiling
 
-- [ ] Tiling is a switch per desktop: the tab's Tile switch, lit while on; `t`; Super+T, a free view pinned first; the 3-finger spread
-- [ ] While on, the grid re-flows when a window opens, closes, is minimized or restored, or moves in or out, and when the scale or the frame changes; new windows are placed into it
-- [ ] A dropped tiled window takes the nearest slot; maximize and fullscreen leave the grid while in that state; switching off keeps positions and tells the windows
-- [ ] Combining into or from a tiled desktop, and abandoning one, follow the desktop rules
+- [x] Tiling is a switch per desktop: the tab's Tile switch, lit while on; `t`; Super+T, a free view pinned first; the 3-finger spread
+- [x] While on, the grid re-flows when a window opens, closes, is minimized or restored, or moves in or out, and when the scale or the frame changes; new windows are placed into it
+- [x] A dropped tiled window takes the nearest slot; maximize and fullscreen leave the grid while in that state; switching off keeps positions and tells the windows
+- [x] Combining into or from a tiled desktop, and abandoning one, follow the desktop rules
 
 ## Verification
 
 - [x] The gestures scenario covers the Super pinch: scaling, settling, a free view pinned, no launcher on Super's release, plain pinches still forwarded
 - [x] A scenario clicks and types into a window on a desktop at 80 %, landing exactly where the pointer is
-- [ ] A scenario opens windows on a tiled desktop and sees each join the grid; closing one re-flows it; switching off keeps the positions
-- [ ] Screenshots of desktops at 80 % and 125 %, a tiled desktop, and the overview's tabs, inspected
-- [ ] Warning-free build, every suite green
+- [x] A scenario opens windows on a tiled desktop and sees each join the grid; closing one re-flows it; switching off keeps the positions
+- [x] Screenshots of desktops at 80 % and 125 %, a tiled desktop, and the overview's tabs, inspected
+- [x] Warning-free build, every suite green

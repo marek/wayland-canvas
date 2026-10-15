@@ -68,6 +68,8 @@ public:
 
 	// Shows `text` for about 2 s; empty clears.
 	void set(std::string_view text);
+	// Drops the cached texture so the next frame redraws it in the new palette.
+	void theme_changed();
 	void finish(); // releases the timer and texture before the display and renderer go
 
 	std::string text;
@@ -91,6 +93,7 @@ public:
 	Painter &operator=(const Painter &) = delete;
 
 	void render(Output &output);
+	void theme_changed(); // drops the help-line and tab-label textures
 	void finish(); // releases cached textures before the renderer goes
 
 	// Regenerates the cached label when the desktop's number or scale, or

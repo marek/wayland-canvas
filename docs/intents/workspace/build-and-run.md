@@ -16,11 +16,11 @@ fetching: wlroots arrives by itself when the system does not have it.
 A C++26 compiler — LLVM's clang, selected by
 `toolchain/llvm.ini` ([../platform/cpp-standards.md](../platform/cpp-standards.md))
 — meson ≥ 1.3 and ninja; the wlroots 0.20 dependencies
-(wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat,
-xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
-(decorations, launcher); librsvg and glib (icons). Optional: `qs`
-(Quickshell) for the autostarted top bar
-([../shell/bar.md](../shell/bar.md)).
+   (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat,
+   xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
+   (decorations, launcher); librsvg and glib (icons); json-glib
+   (the control socket). Optional: `qs` (Quickshell) for the autostarted
+   top bar ([../shell/bar.md](../shell/bar.md)).
 
 ### Build
 
@@ -44,7 +44,7 @@ xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
 | Scale | `-S <scale>`, or `$WAYLAND_CANVAS_SCALE` | default by the dpi rule: 2 on dense panels, else 1 ([../render/hidpi.md](../render/hidpi.md)) |
 | Debug | `-d` | debug logging |
 | Without the bar | `-B` | start without the autostarted top bar; the scenario suites always do |
-| Control commands | `wayland-canvas msg <command>` | `launcher`, `overview`, `quit` over `$WAYLAND_CANVAS_SOCKET`
+| Control socket | `wayland-canvas msg <method> [<params as JSON>]` | the methods, events and errors [../platform/ipc.md](../platform/ipc.md) lists, over `$WAYLAND_CANVAS_SOCKET`; `msg subscribe` prints each event as one line |
 | Install | `meson install` | the binary and `shell/` (under `share/wayland-canvas/`) |
 
 The terminal binding (`Super+Return`) and `Terminal=true` desktop

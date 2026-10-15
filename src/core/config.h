@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 // Compile-time configuration (dwl-style): edit and rebuild. Keybindings live in input.cpp
@@ -16,26 +17,90 @@ inline constexpr int title_padding = 12;
 inline constexpr const char *ui_font = "Sans 10";
 inline constexpr const char *ui_font_bold = "Sans Bold 10";
 
-// Colours, 0xRRGGBBAA.
-inline constexpr uint32_t color_canvas = 0x14161bff;
-inline constexpr uint32_t color_grid = 0xffffff0c;
-inline constexpr uint32_t color_title_active = 0x202020ff;
-inline constexpr uint32_t color_title_inactive = 0x2b2b2bff;
-inline constexpr uint32_t color_text_active = 0xffffffff;
-inline constexpr uint32_t color_text_inactive = 0x8c8c8cff;
-inline constexpr uint32_t color_button_hover = 0xffffff1a;
-inline constexpr uint32_t color_button_press = 0xffffff0f;
-inline constexpr uint32_t color_close_hover = 0xc42b1cff;
-inline constexpr uint32_t color_close_press = 0xa52618ff;
-inline constexpr uint32_t color_border_active = 0x0078d4ff;
-inline constexpr uint32_t color_border_inactive = 0x3c3c3cff;
-inline constexpr uint32_t color_frame = 0xc8ccd4d0; // virtual desktop dashed outline
-inline constexpr uint32_t color_accent = 0x4c9bffff; // overview target
-inline constexpr uint32_t color_combine = 0x3ddc84ff;
-inline constexpr uint32_t color_abandon = 0xff6b5bff;
-inline constexpr uint32_t color_dim = 0x000000a0; // over wallpapers while zoomed out
-inline constexpr uint32_t color_panel = 0x101216e0; // overview labels, hints, shelf
-inline constexpr uint32_t color_panel_text = 0xe8eaedff;
+// The compositor's palette, 0xRRGGBBAA: one entry per thing it draws. The
+// active one is Theme::colors() (core/theme.h); the compositor starts dark.
+struct Palette {
+	uint32_t canvas;
+	uint32_t grid;
+	uint32_t title_active, title_inactive;
+	uint32_t text_active, text_inactive;
+	uint32_t button_hover, button_press;
+	uint32_t close_hover, close_press, close_text;
+	uint32_t border_active, border_inactive;
+	uint32_t frame, frame_hover; // desktop outlines; hover: the one under the pointer
+	uint32_t accent; // overview target
+	uint32_t combine, abandon;
+	uint32_t dim; // over wallpapers while zoomed out
+	uint32_t panel, panel_text; // overview labels, hints, shelf
+	uint32_t launcher, launcher_border, launcher_search, launcher_selected,
+		launcher_hover, launcher_text, launcher_dim_text, launcher_backdrop;
+};
+
+inline constexpr Palette palette_dark{
+	.canvas = 0x14161bff,
+	.grid = 0xffffff0c,
+	.title_active = 0x202020ff,
+	.title_inactive = 0x2b2b2bff,
+	.text_active = 0xffffffff,
+	.text_inactive = 0x8c8c8cff,
+	.button_hover = 0xffffff1a,
+	.button_press = 0xffffff0f,
+	.close_hover = 0xc42b1cff,
+	.close_press = 0xa52618ff,
+	.close_text = 0xffffffff,
+	.border_active = 0x0078d4ff,
+	.border_inactive = 0x3c3c3cff,
+	.frame = 0xc8ccd4d0, // virtual desktop dashed outline
+	.frame_hover = 0xffffffff,
+	.accent = 0x4c9bffff,
+	.combine = 0x3ddc84ff,
+	.abandon = 0xff6b5bff,
+	.dim = 0x000000a0,
+	.panel = 0x101216e0,
+	.panel_text = 0xe8eaedff,
+	.launcher = 0x1f1f1ff5,
+	.launcher_border = 0x3a3a3aff,
+	.launcher_search = 0x2b2b2bff,
+	.launcher_selected = 0x0078d4ff,
+	.launcher_hover = 0xffffff14,
+	.launcher_text = 0xffffffff,
+	.launcher_dim_text = 0x9a9a9aff,
+	.launcher_backdrop = 0x00000060,
+};
+
+// The light palette, anchored on the bar's ([shell/theme.md]): background
+// #e1e2e7, text #3760bf, attention #f52a65.
+inline constexpr Palette palette_light{
+	.canvas = 0xe1e2e7ff,
+	.grid = 0x00000012,
+	.title_active = 0xf2f3f7ff,
+	.title_inactive = 0xe4e5eaff,
+	.text_active = 0x1f2430ff,
+	.text_inactive = 0x767a86ff,
+	.button_hover = 0x0000001a,
+	.button_press = 0x0000000f,
+	.close_hover = 0xf52a65ff,
+	.close_press = 0xd52251ff,
+	.close_text = 0xffffffff,
+	.border_active = 0x3760bfff,
+	.border_inactive = 0xb0b3bcff,
+	.frame = 0x5a6072d0,
+	.frame_hover = 0x1f2430ff,
+	.accent = 0x3760bfff,
+	.combine = 0x1a9e68ff,
+	.abandon = 0xe5484dff,
+	.dim = 0x000000a0, // dims wallpapers in the overview in both modes
+	.panel = 0xf4f5f8f0,
+	.panel_text = 0x1f2430ff,
+	.launcher = 0xf4f5f8f5,
+	.launcher_border = 0xd1d4dcff,
+	.launcher_search = 0xe6e8ecff,
+	.launcher_selected = 0x3760bfff,
+	.launcher_hover = 0x00000014,
+	.launcher_text = 0x1f2430ff,
+	.launcher_dim_text = 0x767a86ff,
+	.launcher_backdrop = 0x00000060,
+};
 
 // Panning. Touchpad units are libinput's (roughly pointer pixels).
 inline constexpr double pan_speed = 1.0; // canvas px per unit at zoom 1
@@ -90,13 +155,6 @@ inline constexpr int launcher_max_rows = 10;
 inline constexpr int launcher_icon = 28;
 inline constexpr const char *launcher_font = "Sans 11";
 inline constexpr const char *launcher_search_font = "Sans 13";
-inline constexpr uint32_t color_launcher = 0x1f1f1ff5;
-inline constexpr uint32_t color_launcher_search = 0x2b2b2bff;
-inline constexpr uint32_t color_launcher_selected = 0x0078d4ff;
-inline constexpr uint32_t color_launcher_hover = 0xffffff14;
-inline constexpr uint32_t color_launcher_text = 0xffffffff;
-inline constexpr uint32_t color_launcher_dim_text = 0x9a9a9aff;
-inline constexpr uint32_t color_launcher_backdrop = 0x00000060;
 
 // Top bar: a Quickshell client autostarted by Server::start() when qs is on
 // PATH. Its config is found beside the compositor binary at one of the two
@@ -108,6 +166,10 @@ inline constexpr const char *bar_shell_install_dir = "../share/wayland-canvas/sh
 
 // Control socket for shell clients and `wayland-canvas msg`, created in
 // $XDG_RUNTIME_DIR as <prefix>-<wayland display>.sock and exported to
-// spawned clients as $WAYLAND_CANVAS_SOCKET.
+// spawned clients as $WAYLAND_CANVAS_SOCKET. Lines over `ipc_max_line`
+// bytes and subscribers with over `ipc_max_queued` bytes of unread events
+// are answered then dropped, so a client can never stall the compositor.
 inline constexpr const char *ipc_socket_prefix = "wayland-canvas";
+inline constexpr std::size_t ipc_max_line = 64 * 1024;
+inline constexpr std::size_t ipc_max_queued = 1024 * 1024;
 } // namespace config

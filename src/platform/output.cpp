@@ -411,6 +411,7 @@ void Output::handle_request_state(wlr_output_event_request_state *event) {
 	// Nested backends: the host resized our window.
 	wlr_output_commit_state(wlr, event->state);
 	damage();
+	server.ipc.emit_outputs(); // a committed scale or mode changes the state
 }
 
 void Output::handle_destroy() {
@@ -435,9 +436,9 @@ void Output::handle_destroy() {
 		layer->attached_ = false;
 		wlr_layer_surface_v1_destroy(layer->wlr);
 	}
-
 	server.visibility_dirty = true;
 	destroy_owned(server.outputs, this);
+	server.ipc.emit_outputs(); // the state no longer lists this output
 }
 
 void Server::handle_new_output(wlr_output *wlr) {
@@ -497,6 +498,7 @@ void Server::handle_layout_change() {
 		update_output_geometry(*output);
 	}
 	visibility_dirty = true;
+	ipc.emit_outputs(); // a moved or resized output changes the state
 }
 
 void Server::init_outputs() {

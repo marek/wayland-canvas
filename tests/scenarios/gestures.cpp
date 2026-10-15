@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include "core/config.h"
+#include "core/geometry.h"
 #include "platform/output.h"
 #include "render/render.h"
 #include "core/server.h"
@@ -34,6 +35,7 @@ uint32_t t_ms = 10000;
 pid_t grim_pid = -1;
 std::optional<DesktopId> d1, d2, d3;
 Camera cam0{}, super_start{};
+Rect grid_one{}, grid_two{}; // the boxes the grid left, for the off check
 std::string tmp_root;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -179,6 +181,19 @@ bool inside(const Rect &r, const wlr_box &b) {
 		r.y + r.h <= b.y + b.height + 0.5;
 }
 
+// The view's frame sits in one of the grid's cells (clients snap to their own
+// units, so a side may sit a few px short of the cell).
+bool fits_cell(View *view, const std::vector<Rect> &cells) {
+	Rect f = view->frame_rect();
+	for (const Rect &cell : cells) {
+		if (std::fabs(f.x - cell.x) < 2 && std::fabs(f.y - cell.y) < 2
+				&& cell.w - f.w < 20 && cell.h - f.h < 24) {
+			return true;
+		}
+	}
+	return false;
+}
+
 int run_step() {
 	Output *o = out();
 	View *one = view_titled("one"), *two = view_titled("two"), *three = view_titled("three");
@@ -282,7 +297,7 @@ int run_step() {
 	case 13:
 		swipe(3, 0, 80, 8); // back down onto Desktop 1
 		check(o->overview.target().desktop == d1, "3-finger down returned to Desktop 1");
-		pinch(3, 1.5, 10); // spread: tile Desktop 1
+		pinch(3, 1.5, 10); // spread: switch tiling on for Desktop 1
 		return 500;
 	case 14: {
 		Rect a = one->frame_rect(), b = two->frame_rect();
@@ -290,22 +305,47 @@ int run_step() {
 			"tiled windows stay inside Desktop 1");
 		check(!a.intersects(b), "tiled windows do not overlap");
 		check(std::fabs(a.w - b.w) < 2 && std::fabs(a.y - b.y) < 2, "two windows tiled side by side");
+		check(desk(d1)->tiling(), "the spread switched tiling on for Desktop 1");
+		check(one->tiled && two->tiled, "tiled windows are told they are tiled");
 		shot("07-tiled");
+		grid_one = a;
+		grid_two = b;
+		pinch(3, 1.5, 10); // spread again: tiling off
 		return 400;
 	}
-	case 15: {
-		int before_x = three->x - desk(d2)->frame().x;
+	case 15:
+		check(!desk(d1)->tiling(), "a second spread switched tiling off");
+		check(one->frame_rect().x == grid_one.x && one->frame_rect().y == grid_one.y
+			&& two->frame_rect().x == grid_two.x && two->frame_rect().y == grid_two.y,
+			"switching tiling off kept the windows where the grid left them"
+			" (untiled, they may re-fit their own size)");
+		check(!one->tiled && !two->tiled,
+			"switching tiling off told the windows they are no longer tiled");
+		shot("07-untiled");
+		pinch(3, 1.5, 10); // and back on: the combine below joins the grid
+		return 400;
+	case 16: {
+		check(desk(d1)->tiling(), "the third spread switched tiling on again");
 		pinch(3, 0.6, 10); // gather: combine nearest desktop (2) into Desktop 1
 		check(server->canvas.desktops.size() == 1,
 			"pinch-in combined Desktop 2 into Desktop 1");
-		check(server->canvas.desktop_of(*three) == desk(d1)
-			&& three->x - desk(d1)->frame().x == before_x,
-			"window three moved into Desktop 1 keeping its relative position");
+		check(server->canvas.desktop_of(*three) == desk(d1) && three->tiled,
+			"the combined-in window joined Desktop 1's grid");
 		d2 = std::nullopt;
 		return 500;
 	}
-	case 16: {
-		shot("08-combined");
+	case 17: {
+		// The 3-window grid: every window in a cell of Desktop 1's frame.
+		const wlr_box &frame = desk(d1)->frame();
+		std::vector<Rect> cells = tile_layout(
+			Rect{double(frame.x), double(frame.y), double(frame.width), double(frame.height)},
+			3, config::tile_gap);
+		check(fits_cell(one, cells) && fits_cell(two, cells) && fits_cell(three, cells),
+			"combine into a tiled desktop put every window in a grid cell");
+		shot("08-combined-into-grid");
+		return 400;
+	}
+	case 18: {
 		const wlr_box &frame = desk(d1)->frame();
 		o->overview.new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
 		d3 = o->overview.target().desktop;
@@ -313,11 +353,11 @@ int run_step() {
 			"new desktop created in the overview");
 		return 400;
 	}
-	case 17:
+	case 19:
 		shot("09-new-desktop");
-		swipe(4, 320, 0, 20); // 4 fingers sideways: abandon the target desktop
+		swipe(4, 320, 0, 20); // 4-finger sideways: abandon the target desktop
 		return 400;
-	case 18: {
+	case 20: {
 		check(server->canvas.desktops.size() == 1
 			&& server->canvas.desktops.find(o->overview.target().desktop) == nullptr,
 			"4-finger sideways swipe abandoned the desktop");
@@ -351,10 +391,10 @@ int run_step() {
 		o->overview.set_target(desk(d1)->frame(), d1, true);
 		return 400;
 	}
-	case 19:
-		swipe(4, 0, 300, 20); // 4 fingers down: zoom into the target
+	case 21:
+		swipe(4, 0, 300, 20); // 4-finger down: zoom into the target
 		return 700;
-	case 20: {
+	case 22: {
 		check(!o->overview.active() && o->camera.current().zoom == 1,
 			"4-finger down returned to normal mode");
 		Camera want = camera_for_box(desk(d1)->frame());
@@ -364,39 +404,39 @@ int run_step() {
 		shot("10-desktop1");
 		return 400;
 	}
-	case 21:
+	case 23:
 		one->set_minimized(true);
 		check(one->minimized && server->focused_view != one,
 			"minimize hides the window and moves focus");
 		o->overview.enter();
 		return 600;
-	case 22:
+	case 24:
 		shot("11-overview-shelf");
 		return 400;
-	case 23:
+	case 25:
 		one->activate();
 		check(!one->minimized, "restore from minimized");
 		o->overview.target_point(desk(d1)->frame().x - 3000, desk(d1)->frame().y + 2000);
 		o->overview.exit();
 		return 700;
-	case 24: {
+	case 26: {
 		check(!o->overview.active() && !o->overview.target().desktop.has_value() &&
 			std::fabs(o->camera.current().cx - (desk(d1)->frame().x - 3000)) < 1,
 			"clicking empty overview canvas lands on a free area");
 		shot("12-free-area");
 		return 400;
 	}
-	case 25:
+	case 27:
 		o->goto_direction(1, 0); // Super+Ctrl+Right: nearest desktop to the right
 		return 600;
-	case 26: {
+	case 28: {
 		Camera want = camera_for_box(desk(d1)->frame());
 		check(std::fabs(o->camera.current().cx - want.cx) < 1
 			&& std::fabs(o->camera.current().cy - want.cy) < 1,
 			"keyboard jump to the desktop in that direction");
 		return 400; // the scale scenario continues from here
 	}
-	case 27:
+	case 29:
 		// Fake devices for the Super pinch: a keyboard that can hold
 		// Super, a pointer that parks the cursor off-centre.
 		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
@@ -409,7 +449,7 @@ int run_step() {
 			"the fake pointer placed the cursor");
 		super_start = o->camera.current();
 		return 300;
-	case 28: {
+	case 30: {
 		// Super + 2-finger pinch from the normal view: the shown desktop
 		// scales with the fingers. Held open a step for a mid-pinch shot.
 		key(KEY_LEFTMETA, true);
@@ -429,7 +469,7 @@ int run_step() {
 		shot("13-super-pinch-mid");
 		return 400;
 	}
-	case 29: {
+	case 31: {
 		// Released just off a step: the scale settles on the nearest
 		// 5 % step (a pinch to 0.78 settles at 0.80).
 		pinch_move(0.78);
@@ -441,7 +481,7 @@ int run_step() {
 			"releasing Super after a Super pinch does not open the launcher");
 		return 400;
 	}
-	case 30: {
+	case 32: {
 		Camera want = camera_for_box(desk(d1)->frame(), desk(d1)->scale());
 		check(std::fabs(o->camera.current().zoom - want.zoom) < 1e-9
 			&& std::fabs(o->camera.current().cx - want.cx) < 1
@@ -458,11 +498,11 @@ int run_step() {
 		shot("14-desktop-80");
 		return 400;
 	}
-	case 31:
+	case 33:
 		spawn(std::format("foot -T marker sh -c 'cat > {}/scenarios/gestures/marker'",
 			tmp_root).c_str());
 		return 300;
-	case 32: {
+	case 34: {
 		// A window opened on the 80 % desktop: the pointer reaches it
 		// through the camera, landing where it points.
 		View *marker = view_titled("marker");
@@ -491,7 +531,7 @@ int run_step() {
 		shot("15-click-80");
 		return 300;
 	}
-	case 33:
+	case 35:
 		key(KEY_O, true);
 		key(KEY_O, false);
 		key(KEY_K, true);
@@ -499,7 +539,7 @@ int run_step() {
 		key(KEY_ENTER, true);
 		key(KEY_ENTER, false);
 		return 400;
-	case 34: {
+	case 36: {
 		// What was typed reached the client through the camera.
 		std::string path = std::format("{}/scenarios/gestures/marker", tmp_root);
 		FILE *f = std::fopen(path.c_str(), "r");
@@ -520,7 +560,7 @@ int run_step() {
 		key(KEY_LEFTMETA, false);
 		return 400;
 	}
-	case 35: {
+	case 37: {
 		check(o->camera.current().zoom == 1 && o->interactive()
 			&& std::fabs(one->told_scale - 1.0) < 1e-9,
 			"back at 100 %: zoom 1, interactive, clients told 1.0");
@@ -534,7 +574,7 @@ int run_step() {
 		key(KEY_LEFTMETA, false);
 		return 400;
 	}
-	case 36: {
+	case 38: {
 		check(std::fabs(o->camera.current().zoom - 1.25) < 1e-9 && o->interactive()
 			&& std::fabs(one->told_scale - 1.25) < 1e-9
 			&& desk(d1)->frame().width == std::lround(o->width / 1.25),
@@ -542,19 +582,19 @@ int run_step() {
 		shot("16-desktop-125");
 		return 400;
 	}
-	case 37:
+	case 39:
 		// The overview from a scaled desktop: its tab names the scale.
 		o->overview.enter();
 		return 600;
-	case 38:
+	case 40:
 		check(o->overview.active(), "the overview opened over the 125 % desktop");
 		shot("17-overview-125");
 		o->overview.exit();
 		return 700;
-	case 39:
+	case 41:
 		swipe(3, 0, -900, 30); // pan down off the desktop into a free area
 		return 700;
-	case 40: {
+	case 42: {
 		// A free landing spot stays wherever the pan stopped, at zoom 1.
 		if (o->camera.coasting() && retries++ < 100) {
 			return -100; // retry until the momentum settles
@@ -575,7 +615,7 @@ int run_step() {
 		shot("18-free-view-pinned");
 		return 400;
 	}
-	case 41: {
+	case 43: {
 		pinch_up(false);
 		check(o->desktop_showing() != nullptr
 			&& std::fabs(o->desktop_showing()->scale() - 0.9) < 1e-9,
@@ -585,7 +625,7 @@ int run_step() {
 			"no launcher from a Super pinch on a free view");
 		return 400;
 	}
-	case 42: {
+	case 44: {
 		// Without Super a 2-finger pinch still belongs to the client.
 		Camera start = o->camera.current();
 		pinch_down(2);
@@ -600,6 +640,51 @@ int run_step() {
 			&& std::fabs(o->camera.current().cx - start.cx) < 1e-9,
 			"without Super the canvas did not scale");
 		shot("19-pinch-without-super");
+		return 400; // the tiled-scale scenario continues
+	}
+	case 45:
+		// Back to Desktop 1 for the tiling interaction: Super+Ctrl+Right's
+		// path, at its scale.
+		o->goto_desktop(*desk(d1));
+		return 700;
+	case 46: {
+		Camera want = camera_for_box(desk(d1)->frame(), desk(d1)->scale());
+		check(std::fabs(o->camera.current().cx - want.cx) < 1
+			&& std::fabs(o->camera.current().cy - want.cy) < 1
+			&& std::fabs(o->camera.current().zoom - want.zoom) < 1e-9,
+			"going to a desktop eases onto it at its scale");
+	// Desktop 1 has been tiled since the combine; its grid flowed into
+	// the 125 % frame when that scale settled.
+	check(desk(d1)->tiling(), "tiling is on for Desktop 1");
+		grid_one = one->frame_rect();
+		grid_two = two->frame_rect();
+		check(inside(grid_one, desk(d1)->frame()) && inside(grid_two, desk(d1)->frame())
+			&& !grid_one.intersects(grid_two),
+			"the grid filled the 125 % frame");
+		shot("20-tiled-125");
+		return 400;
+	}
+	case 47: {
+		// Super + pinch on a tiled desktop: the grid re-flows into the
+		// frame the settled scale leaves.
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		pinch_move(0.64); // raw 1.25 x 0.64 = 0.8
+		pinch_up(false);
+		check(std::fabs(desk(d1)->scale() - 0.8) < 1e-9,
+			"the tiled desktop settled at 80 %");
+		key(KEY_LEFTMETA, false);
+		return 400;
+	}
+	case 48: {
+		Rect a = one->frame_rect(), b = two->frame_rect();
+		check(inside(a, desk(d1)->frame()) && inside(b, desk(d1)->frame())
+			&& !a.intersects(b),
+			"the grid re-flowed into the 80 % frame");
+		check(a.w > grid_one.w + 100 && b.w > grid_two.w + 100,
+			std::format("the 80 % grid boxes are the larger frame's ({:.0f} vs {:.0f})",
+				a.w, grid_one.w));
+		shot("21-tiled-80");
 		return 0;
 	}
 	default:

@@ -25,6 +25,7 @@ public:
 	Rect rect() const;
 	Point centre() const;
 	double scale() const; // the desktop's display scale; its frame fills the screen at it
+	bool tiling() const; // the switch: while on, the desktop keeps its windows in a grid
 	bool contains(double cx, double cy) const;
 
 private:
@@ -38,6 +39,7 @@ private:
 	double scale_ = 1.0;
 	int base_w_ = 0, base_h_ = 0; // the output's logical size when the desktop was made
 	wlr_box frame_;
+	bool tiling_ = false; // off on a new desktop
 };
 
 // Every desktop on the canvas, topmost first; the only owner of Desktop objects.
@@ -49,8 +51,10 @@ public:
 	Desktop &create(wlr_box frame);
 	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
-	void move(DesktopId id, int x, int y); // the frame only; damages
+	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows
 	void set_scale(DesktopId id, double scale); // resizes the frame around its centre; damages
+	// Flips the switch only; the grid that follows is Canvas::toggle_tiling's.
+	void set_tiling(DesktopId id, bool on);
 
 	// A removed desktop resolves to nullptr.
 	Desktop *find(DesktopId id);

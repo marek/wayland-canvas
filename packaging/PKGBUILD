@@ -12,6 +12,7 @@ install=wayland-canvas.install
 depends=(
 	'cairo'
 	'glib2'
+	'json-glib'
 	'libdisplay-info'
 	'libgcc'
 	'libglvnd'
@@ -45,6 +46,7 @@ makedepends=(
 	'pango'
 	'librsvg'
 	'glib2'
+	'json-glib'
 	'systemd-libs'
 )
 source=("wayland-canvas-$pkgver.tar.xz")

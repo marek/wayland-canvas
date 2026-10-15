@@ -17,7 +17,7 @@ apt-get install -y --no-install-recommends \
 	libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgles-dev \
 	libinput-dev libseat-dev libxkbcommon-dev libpixman-1-dev \
 	libdisplay-info-dev hwdata libcairo2-dev libpango1.0-dev \
-	librsvg2-dev libglib2.0-dev
+	librsvg2-dev libglib2.0-dev libjson-glib-dev
 
 # std::function_ref, std::inplace_vector and std::print must all link and
 # run; fail here rather than partway through a long build.

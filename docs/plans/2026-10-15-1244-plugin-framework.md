@@ -16,10 +16,10 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 
 ## Compositor API
 
-- [ ] JSON lines on the control socket (json-glib): requests with ids, responses, errors, subscriptions and events; the packages and build docs name the dependency
-- [ ] Methods and events as the IPC intent lists them, the state report, and `wayland-canvas msg <method> [params]` with `msg subscribe`
-- [ ] Canvas items: drawn above windows in canvas space, dragged in the normal view and the overview, double-click reported
-- [ ] The compositor's two palettes (title bars, canvas, overview UI, launcher, hints), switched by `theme.set`
+- [x] JSON lines on the control socket (json-glib): requests with ids, responses, errors, subscriptions and events; the packages and build docs name the dependency
+- [x] Methods and events as the IPC intent lists them (the canvas items' aside), the state report, and `wayland-canvas msg <method> [params]` with `msg subscribe`
+- [ ] Canvas items: drawn above windows in canvas space, dragged in the normal view and the overview, double-click reported; their methods, events and state
+- [x] The compositor's two palettes (title bars, canvas, overview UI, launcher, hints), switched by `theme.set`
 
 ## Plugin host
 

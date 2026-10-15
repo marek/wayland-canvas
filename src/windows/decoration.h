@@ -39,6 +39,8 @@ public:
 	DecoHit hit(double cx, double cy, double zoom) const;
 	// Redraws the title bar texture at `scale` when what it shows changed.
 	void update(float scale);
+	// Drops the cached texture so the next update() redraws in the new palette.
+	void theme_changed();
 	wlr_texture *texture() const;
 	// View initial commit: send the SERVER_SIDE mode once the toplevel is initialized.
 	void handle_initial_commit();
