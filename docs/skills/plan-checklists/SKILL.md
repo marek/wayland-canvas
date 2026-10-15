@@ -46,6 +46,13 @@ The line directly under the title is `Date: YYYY-MM-DD HH:MM <tz>`
 (for example `Date: 2026-10-14 15:50 CEST`), the same minute as the
 file name.
 
+## Context
+
+A plan's `## Context` says what the plan is for: the goal and its
+constraints, in plain words. It is not a transcript of the session: no
+quoted messages, no remarks on how a request was phrased, no side
+questions that were asked and answered along the way.
+
 ## A plan that started outside the repo
 
 Plan mode writes its draft to `~/.claude/plans/<random-name>.md`. The
