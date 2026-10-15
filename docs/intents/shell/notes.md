@@ -41,7 +41,7 @@ were put across restarts.
 | Size | 220 × 220 canvas px, a plugin setting |
 | Look | A card of the note's colour, a darker strip along the top, the text in dark ink |
 | Edit | Double-click the note: the editor opens over it with the cursor at the end of the text; Escape or a click outside closes it, keeping the text |
-| Recolour | In the editor, colour dots on the strip |
+| Recolour | In the editor, colour dots on the strip, ordered as the manifest orders the colours — the toolbar menu's order — because the settings map arrives alphabetised; a colour the menu leaves out follows after |
 | Move | Drag the note, in the normal view or the overview |
 | Delete | In the editor, the × at the right of the strip; a note closed with no text is deleted too |
 | Kept | Every change is saved to the plugin's storage at once; the notes come back where they were when the shell starts |

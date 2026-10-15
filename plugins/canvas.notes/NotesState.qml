@@ -18,6 +18,13 @@ Item {
 	property var compositor: null
 	property var colors: ({})
 	property int size: 220
+	// The colours for the editor's dots, in the manifest's own order: the
+	// settings map arrives alphabetised (a QVariantMap sorts its keys), so
+	// its order is not the manifest's — the manifest's order lives on in
+	// its menu, the toolbar's colour menu — and a colour the menu leaves
+	// out follows after, in the map's (alphabetical) order. Built once at
+	// init; the dots bind to it directly.
+	property var dotList: []
 
 	readonly property string storageName: "notes.json"
 
@@ -31,6 +38,36 @@ Item {
 		compositor = api.compositor
 		colors = api.plugin.settings.colors
 		size = api.plugin.settings.size
+		var ordered = []
+		var buttons = api.plugin.manifest != null
+			&& api.plugin.manifest.contributes != null
+			&& api.plugin.manifest.contributes.toolbarButtons != null
+			? api.plugin.manifest.contributes.toolbarButtons : []
+		for (var i = 0; i < buttons.length; i++) {
+			var entries = buttons[i].menu || []
+			for (var j = 0; j < entries.length; j++) {
+				if (entries[j].color !== undefined && entries[j].color !== "") {
+					ordered.push(entries[j].color)
+				}
+			}
+		}
+		for (var name in colors) {
+			if (ordered.indexOf(colors[name]) === -1) {
+				ordered.push(colors[name])
+			}
+		}
+		// Built whole, then assigned once: a var property notifies on
+		// assignment, not on a push into the array it holds.
+		var dots = []
+		for (var k = 0; k < ordered.length; k++) {
+			for (var key in colors) {
+				if (colors[key] === ordered[k]) {
+					dots.push({name: key, color: ordered[k]})
+					break
+				}
+			}
+		}
+		dotList = dots
 		var saved = storage.read(storageName)
 		if (saved != null) {
 			if (saved.notes != null) {
@@ -60,15 +97,6 @@ Item {
 		if (storage !== null) {
 			storage.write(storageName, {notes: notes, nextId: nextId})
 		}
-	}
-
-	// The six colours in settings order, for the editor's dots.
-	function colorList() {
-		var out = []
-		for (var name in colors) {
-			out.push({name: name, color: colors[name]})
-		}
-		return out
 	}
 
 	// create {color}: a new note of that colour, centred on what the

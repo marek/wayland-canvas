@@ -158,7 +158,7 @@ PanelWindow {
 				spacing: root.dotGap
 
 				Repeater {
-					model: Notes.colorList()
+					model: Notes.dotList
 
 					Rectangle {
 						id: dot

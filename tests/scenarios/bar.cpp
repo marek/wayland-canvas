@@ -92,6 +92,14 @@ std::string scheme_start; // the machine's real color-scheme, read before the ru
 constexpr const char *note_yellow = "#ffd866";
 constexpr const char *note_green = "#a6e3a1";
 constexpr const char *note_blue = "#7dcfff";
+constexpr const char *note_pink = "#f4b8e4";
+constexpr const char *note_purple = "#caa9f7";
+constexpr const char *note_orange = "#ff9e64";
+// The manifest's colour order, the dots' and the menu's (docs/intents/
+// shell/notes.md, Recolour): the settings map arrives alphabetised, so
+// this array is the order the run checks for.
+constexpr const char *note_palette[] = {note_yellow, note_green, note_blue,
+	note_pink, note_purple, note_orange};
 constexpr int note_size = 220;
 constexpr int note_strip = 26; // canvas px, the darker strip
 constexpr const char *note_editor_namespace = "wayland-canvas-note-editor";
@@ -3415,6 +3423,21 @@ int run_step() {
 		ColourBox dot = dot_on_shot("note-dots", note, note_green);
 		check(dot.count >= 30, std::format("the editor's colour dots show on the "
 			"strip ({} green pixels)", dot.count));
+		// The dots follow the manifest's colour order: each colour's dot
+		// sits right of the one before it, left to right on the strip.
+		double dot_left = -1;
+		bool dot_order = true;
+		for (const char *colour : note_palette) {
+			ColourBox one = dot_on_shot("note-dots", note, colour);
+			if (one.count < 30 || (dot_left >= 0 && one.x0 <= dot_left)) {
+				dot_order = false;
+			}
+			if (one.count >= 30) {
+				dot_left = one.x0;
+			}
+		}
+		check(dot_order, "the dots sit in the manifest's colour order (yellow, "
+			"green, blue, pink, purple, orange)");
 		if (dot.count < 30) {
 			step = 133; // nothing to click; on to closing and the ×
 			return -100; // without the advance
