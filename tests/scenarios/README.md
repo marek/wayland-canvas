@@ -68,6 +68,16 @@ Wayland display namespace and GPU.
   Weather is not required: its widget hides until a first successful fetch,
   and the scenario skips it with a note when it did not load.
 
+  The bar's other half is the plugin host it now runs on, proven in the
+  same private world on scratch XDG dirs: a broken manifest sits in the
+  scratch data dir from the start (its skip shows as every bar run being
+  accounted for — logo, clock and weather, one tray item, this machine's
+  indicators, nothing more), a user plugin dropped in while the shell runs
+  appears as the bar's second run without anything of the shell being
+  touched, and disabling it in the scratch `shell.json` removes it again —
+  both through the shell's own reload, with the skip reasons visible as
+  `[plugins]` lines in the test log.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only

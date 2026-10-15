@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
+#include <filesystem>
 #include <format>
 #include <linux/input-event-codes.h>
 #include <optional>
@@ -52,6 +53,10 @@ wlr_keyboard kbd{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
 const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
 std::string shot_dir;
+std::string user_plugin; // the canvas.hello plugin staged for step 11
+std::string staged_plugin; // where its files wait until the drop-in
+std::size_t base_runs = 0; // the bar's run count before the user plugin
+int plugin_retries = 0; // the plugin phase's own retry counter (steps move)
 
 // ---- isolation: private buses and the stand-in services on them ----
 
@@ -120,6 +125,17 @@ void mkdir_p(const std::string &path) {
 	if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) {
 		std::fprintf(stderr, "mkdir %s: %s\n", path.c_str(), std::strerror(errno));
 	}
+}
+
+// Writes a small text file whole (the scratch plugin world's files).
+void write_file(const std::string &path, std::string_view text) {
+	FILE *f = std::fopen(path.c_str(), "w");
+	if (f == nullptr) {
+		std::fprintf(stderr, "cannot write %s\n", path.c_str());
+		return;
+	}
+	std::fwrite(text.data(), 1, text.size(), f);
+	std::fclose(f);
 }
 
 // ---- machine state: which indicators the bar shows ----
@@ -1279,8 +1295,90 @@ int run_step() {
 			return -100;
 		}
 		check(panel_layers() == 0, "the last panel closed on a click outside");
-		step = 99;
-		return 100;
+		return 100; // on to the plugin world: the bar as a plugin host
+	case 10: // the plain bar, before anything is added to it
+		shot("bar-plain");
+		return 700;
+	case 11: {
+		// Every run on the bar, accounted for: the logo, the clock (and the
+		// weather when it loaded) centred, the stand-in's one tray item, and
+		// this machine's indicators — nothing left over, so the broken
+		// manifest's plugin contributed nothing and was skipped.
+		cairo_surface_t *s = load_png("bar-plain");
+		LayerSurface *layer = bar_layer();
+		std::vector<Run> runs = s != nullptr && layer != nullptr
+			? bar_runs(s, layer->geo) : std::vector<Run>{};
+		cairo_surface_destroy(s);
+		check(layer != nullptr && runs.size() >= 1, "the bar is still mapped after the walk");
+		std::size_t mandatory = 4 + (has_sysfs_class("backlight") ? 1 : 0);
+		std::size_t keep = runs.size() >= 1 + mandatory ? runs.size() - 1 - mandatory : 0;
+		std::size_t centre = 0;
+		for (std::size_t i = 1; i < 1 + keep; i++) {
+			if (std::abs(runs[i].centre() - screen_w / 2.0) <= 250) {
+				centre++;
+			}
+		}
+		base_runs = runs.size();
+		check(keep - centre == 1, std::format("every run on the bar is accounted for "
+			"({} runs: logo, {} centred, 1 tray, {} indicators — the broken "
+			"manifest's plugin was skipped)", runs.size(), centre, mandatory));
+		// Drop the user plugin's staged files into the scratch data dir: the
+		// shell reloads with them, without anything of the shell being touched.
+		mkdir_p(user_plugin);
+		std::rename((staged_plugin + "/plugin.json").c_str(),
+			(user_plugin + "/plugin.json").c_str());
+		std::rename((staged_plugin + "/Hello.qml").c_str(),
+			(user_plugin + "/Hello.qml").c_str());
+		return 500;
+	}
+	case 12: // the shell reloads with the dropped-in plugin
+		shot("bar-user");
+		return 700;
+	case 13: {
+		cairo_surface_t *s = load_png("bar-user");
+		LayerSurface *layer = bar_layer();
+		std::vector<Run> runs = s != nullptr && layer != nullptr
+			? bar_runs(s, layer->geo) : std::vector<Run>{};
+		cairo_surface_destroy(s);
+		bool appeared = runs.size() == base_runs + 1 && runs.size() >= 2
+			&& runs[1].x1 < 300; // the new run sits beside the logo, left of centre
+		// The reload takes a digest poll and a remap, and the walk's own
+		// retry counter is reset on every step move, so this phase keeps its
+		// own: re-shoot and look again until the widget shows (or gives up).
+		if (!appeared && plugin_retries++ < 40) {
+			shot("bar-user");
+			step = 12; // stay on this check (handle_timer steps forward again)
+			return 700;
+		}
+		check(appeared, std::format("the user plugin's bar widget appeared after it "
+			"was dropped into the data dir ({} runs, was {})", runs.size(), base_runs));
+		// Disable it in the scratch config: the shell reloads without it.
+		write_file(shot_dir + "/xdg/config/wayland-canvas/shell.json",
+			"{\n\t\"plugins\": {\n\t\t\"canvas.hello\": {\n\t\t\t\"enabled\": false\n"
+			"\t\t}\n\t}\n}\n");
+		return 500;
+	}
+	case 14: // the shell reloads again, without the disabled plugin
+		plugin_retries = 0;
+		shot("bar-disabled");
+		return 700;
+	case 15: {
+		cairo_surface_t *s = load_png("bar-disabled");
+		LayerSurface *layer = bar_layer();
+		std::vector<Run> runs = s != nullptr && layer != nullptr
+			? bar_runs(s, layer->geo) : std::vector<Run>{};
+		cairo_surface_destroy(s);
+		bool gone = runs.size() == base_runs
+			&& (runs.size() < 2 || runs[1].x1 >= 300); // no run beside the logo
+		if (!gone && plugin_retries++ < 40) {
+			shot("bar-disabled");
+			step = 14;
+			return 700;
+		}
+		check(gone, std::format("disabling the user plugin in the config removed its "
+			"widget ({} runs, was {} after the drop-in)", runs.size(), base_runs + 1));
+		return 100; // done: the summary prints and the run ends
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
@@ -1345,6 +1443,47 @@ int main() {
 		stop_isolation();
 		return 2;
 	}
+	// The plugin world the shell host loads from, on this run's own scratch
+	// XDG dirs: the config is read from and written to scratch, user plugins
+	// land in scratch data, plugin storage goes to scratch state — nothing
+	// on the machine is touched. A broken manifest is there from the start:
+	// the shell must skip it (a line in its log, whose effect is checked by
+	// the run accounting at step 11) and still come up whole.
+	std::string xdg = shot_dir + "/xdg";
+	// A previous run's leftovers (a dropped-in plugin, a written config)
+	// would leak into this one: the scratch world starts empty.
+	std::error_code ec;
+	std::filesystem::remove_all(xdg, ec);
+	std::string plugins_dir = xdg + "/data/wayland-canvas/plugins";
+	mkdir_p(xdg + "/config/wayland-canvas");
+	mkdir_p(plugins_dir + "/bad.plugin");
+	mkdir_p(xdg + "/state");
+	write_file(plugins_dir + "/bad.plugin/plugin.json", "{ not json\n");
+	write_file(plugins_dir + "/bad.plugin/Bad.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\nBarButton {\n"
+		"\ticon: true\n\ttext: \"\\uf00d\"\n}\n");
+	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
+	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);
+	setenv("XDG_STATE_HOME", (xdg + "/state").c_str(), 1);
+	// The user plugin this run drops in while the shell runs (step 11): a
+	// bar widget beside the logo, first of the left section past it, so it
+	// shows as the bar's second run. Its files are staged outside the
+	// plugin root until then — dropping them in is what proves the shell
+	// reloads with a plugin that appears.
+	user_plugin = plugins_dir + "/canvas.hello";
+	staged_plugin = xdg + "/staged";
+	mkdir_p(staged_plugin);
+	write_file(staged_plugin + "/plugin.json",
+		"{\n\t\"id\": \"canvas.hello\",\n\t\"name\": \"Hello\",\n"
+		"\t\"version\": \"1.0.0\",\n\t\"apiVersion\": 1,\n"
+		"\t\"description\": \"A user plugin: a bar widget that says so\",\n"
+		"\t\"contributes\": {\n\t\t\"barWidgets\": [\n\t\t\t{\n"
+		"\t\t\t\t\"id\": \"hello\",\n\t\t\t\t\"entry\": \"Hello.qml\",\n"
+		"\t\t\t\t\"section\": \"left\",\n\t\t\t\t\"order\": 1\n\t\t\t}\n\t\t]\n\t}\n}\n");
+	write_file(staged_plugin + "/Hello.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\nBarButton {\n"
+		"\ticon: true\n\ttext: \"\\uf120\"\n}\n");
+
 	// The bar is the point of this scenario: it starts with the compositor
 	// (qs on PATH and the config beside the binary — the meson guard checked
 	// qs, the dbus daemon and the stand-in environment before registering
