@@ -21,13 +21,15 @@ finger counts the compositor does not bind are forwarded to clients.
 | Normal | 3 | Swipe | Pan the canvas anywhere, with momentum ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Normal | 4 | Swipe up | Zoom out into the overview, following the fingers ([../canvas/overview.md](../canvas/overview.md)) |
 | Normal | 3 or 4 | Pinch | Treated as a swipe of the same finger count |
-| Normal | 2 | Pinch or hold | Forwarded to the client under the pointer |
+| Normal | 2 | Pinch with Super held | Zoom the canvas around the cursor, following the fingers: pinching in passes into the overview ([../canvas/overview.md](../canvas/overview.md)); spreading stops at 1:1 |
+| Normal | 2 | Pinch or hold, without Super | Forwarded to the client under the pointer |
 | Overview | 3 | Swipe | Hop: jump to the closest desktop in that direction ([../canvas/overview.md](../canvas/overview.md)) |
 | Overview | 4 | Swipe down | Zoom into the target, following the fingers ([../canvas/overview.md](../canvas/overview.md)) |
 | Overview | 4 | Swipe up | Zoom out further |
 | Overview | 4 | Swipe sideways | Abandon the desktop under the pointer, else the target: the frame slides and fades with the fingers ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Overview | 3 | Pinch out (spread) | Tile that desktop's windows ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Overview | 3 | Pinch in (gather) | Combine the nearest other desktop into that one ([../canvas/desktops.md](../canvas/desktops.md)) |
+| Overview | 2 | Pinch with Super held | Zoom around the cursor, on in up to 1:1; released above the overview's zoom ceiling it lands in the normal view with the point under the cursor kept there |
 | Overview | 2 | Pinch / scroll | Zoom around the cursor / pan; Ctrl+scroll zooms |
 
 Rules that hold across the table:
@@ -47,6 +49,13 @@ Rules that hold across the table:
   range shows what release will do; backing out of range clears it
   ([../canvas/overview.md](../canvas/overview.md)).
 - **Hold stops momentum.** A hold-gesture begin stops camera coasting.
+- **Super decides a 2-finger pinch at its start.** Held as the pinch
+  begins, the pinch zooms the canvas in either mode and never reaches a
+  client; letting Super go mid-pinch changes nothing, and the pinch never
+  counts as a Super tap. Released below the overview's zoom ceiling
+  (compile-time, `src/core/config.h`), the overview stays at that zoom;
+  above it the view settles 1:1 — where it started when the pinch began in
+  the normal view, under the cursor when it began in the overview.
 - **Forwarding.** Only an interactive output
   ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) — zoom
   exactly 1, no transition in progress — forwards gestures to clients

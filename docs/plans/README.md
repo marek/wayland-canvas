@@ -24,3 +24,4 @@ be worked.
 | [2026-10-15-0719-bar-panels.md](2026-10-15-0719-bar-panels.md) | A panel under every bar indicator: Wi-Fi, Bluetooth, audio, brightness, power, weather, calendar, tray menus | 6 | 7 |
 | [2026-10-15-1156-source-layout.md](2026-10-15-1156-source-layout.md) | `src/` in one folder per area, includes written from `src/`, the placement rule for new files | 6 | 0 |
 | [2026-10-15-1244-plugin-framework.md](2026-10-15-1244-plugin-framework.md) | The shell as a plugin host, the bar and panels as plugins, the overview toolbar, sticky notes, the light/dark switch, the JSON control socket with canvas items | 0 | 18 |
+| [2026-10-15-1251-super-pinch-zoom.md](2026-10-15-1251-super-pinch-zoom.md) | Super + 2-finger pinch zooms the canvas around the cursor in both views, crossing between them; plain pinches stay the client's | 0 | 6 |

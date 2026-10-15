@@ -35,10 +35,11 @@ or free area, is one gesture away.
 
 | Subject | Rule |
 |---|---|
-| Enter | 4-finger swipe up, following the fingers; release early to cancel ([../input/gestures.md](../input/gestures.md)). Also Super+Tab / Super+W |
+| Enter | 4-finger swipe up, following the fingers; release early to cancel ([../input/gestures.md](../input/gestures.md)). Also Super+Tab / Super+W, and Super + 2-finger pinch in, which zooms out from the normal view around the cursor |
 | Fit | The zoom fits everything on the canvas — desktops and windows — with a margin (compile-time, `src/core/config.h`); the current screen is kept centred when that still fits |
 | Zoom further | 4-finger swipe up again zooms out further; 2-finger pinch zooms around the cursor; scroll pans; Ctrl+scroll zooms; `+`/`−` zoom about the screen centre. Clamped to compile-time zoom bounds |
 | Leave into the target | 4-finger swipe down zooms into the target, following the fingers; release early to cancel |
+| Leave under the cursor | Super + 2-finger spread zooms in around the cursor, on past the overview's zoom ceiling; released above the ceiling it lands 1:1 with the point under the cursor kept there |
 | Leave on choice | Return, or a click, zooms into the target and exits; Esc goes back to the view before entering |
 
 ### The target
