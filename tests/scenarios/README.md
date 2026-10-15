@@ -3,9 +3,10 @@
 Each scenario runs the **real compositor in-process** on the wlroots headless
 backend (`Server::init`/`Server::start`), spawns real `foot` clients, drives
 input, and takes `grim` screenshots. Every check prints a PASS/FAIL line; the
-scenario exits non-zero if any check failed. Scenarios run serially
-(`is_parallel: false`, 180 s timeout) because they each own the machine's
-Wayland display namespace and GPU.
+scenario exits non-zero if any check failed, or if the compositor stopped
+before the run reached its last step (a lost backend, its own shutdown).
+Scenarios run serially (`is_parallel: false`, 180 s timeout) because they each
+own the machine's Wayland display namespace and GPU.
 
 ## What each scenario proves
 

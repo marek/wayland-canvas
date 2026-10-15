@@ -42,6 +42,7 @@ namespace {
 std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
+bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
 pid_t raw_pid = -1;
@@ -1473,6 +1474,7 @@ int run_step() {
 			return -100;
 		}
 		check(exited, "the item-events subscriber ended with the SIGINT");
+		finished = true; // the quit is the run's end
 		run_client("quit", "", "quit");
 		return 300;
 	}
@@ -1529,6 +1531,11 @@ int main() {
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display); // `msg quit` ends it
+	// A compositor that stops by itself (its own shutdown, a lost backend)
+	// ends the run early: without this the scenario would still exit 0.
+	if (!finished) {
+		check(false, std::format("the run ended at step {}, before its last step", step));
+	}
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	server.reset(); // releases the control socket
