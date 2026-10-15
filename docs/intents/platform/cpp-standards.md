@@ -46,8 +46,9 @@ sits on the object it acts on.
 | A wlroots signal | A `Listener` member of the object that handles it. `connect<&Class::handler>(signal, this)` names a member function taking nothing or the signal's data pointer; destroying, reconnecting or `disconnect()` removes it |
 | A C object with a destroy function (texture, cairo surface and context, pango layout, `GKeyFile`, event source) | `Handle<T, destroy>`, a `std::unique_ptr` with that function as its deleter; `TexturePtr` and friends in `src/util.h` |
 | A compositor object (output, view, popup, layer surface, keyboard, desktop) | Owned by exactly one `std::vector<std::unique_ptr<T>>` of its owner. Its wlroots destroy handler ends with `destroy_owned(owner, this)` |
-| A reference that does not own | A raw pointer or a reference. A pointer that can outlive its target is cleared by the code that destroys the target |
+| A reference that does not own | A raw pointer or reference for the length of a call. Kept longer: a name resolved when it is used (`DesktopId` through `Desktops::find`, `nullptr` once the desktop is gone). Outputs and views have no names: the one subsystem holding such a pointer is told when they go (`forget`, `output_gone`); no other code writes its fields |
 | A state, kind or mode | `enum class`, enumerators `snake_case`. Plain integers only for masks and values shared with a C API (`wlr_edges`, layer indices) |
+| A state machine whose states carry different data | A `std::variant` of one struct per state (`Gestures`, `PointerGrab`), each holding only what that state needs; `std::visit` or `std::get_if`. No shared fields plus a kind enum |
 | A result that may be absent | `std::optional`; out-parameters are not used |
 | Several results | A small struct returned by value (`ViewHit`, `TabLayout`) |
 | A sequence passed in | `std::span` |
@@ -62,14 +63,16 @@ sits on the object it acts on.
 |---|---|
 | A value (`Rect`, `Camera`, `Point`) | `struct`, public fields with default member initialisers, `constexpr` members, defaulted `==` |
 | An object with a lifetime (`Server`, `Output`, `View`, `LayerSurface`, `Keyboard`) | `class`, neither copyable nor movable. Listeners, wlroots handles and caches are private; state other classes read or legitimately set is public, changed through the member function that keeps an invariant where one exists (`move`, `set_minimized`) |
-| One per compositor (input, gesture, hint, launcher, painter, decorations) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
+| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
 | Fallible setup | `bool init()` after construction; a constructor never fails |
 | Teardown order | `~Server` releases wlroots resources explicitly, in reverse order of creation; each subsystem's `finish()` releases its own before the display goes |
 | Inheritance | Only where something is polymorphic; not for sharing code |
 
-A class may span files by concern; its header names the file of each
-group (`Output`: lifecycle in `output.cpp`, camera and overview in
-`canvas.cpp`, layers in `layer.cpp`).
+A class is one concept of the compositor: the canvas and its desktops, a
+screen's camera and its overview, gestures, pointer grabs, bindings. Other
+classes ask it through queries and change it through its members. A class
+spans files only for a separate concern of the same object (`Output`'s
+layer arrangement in `layer.cpp`).
 
 ### Code
 
