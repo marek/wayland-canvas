@@ -20,7 +20,7 @@ constexpr char usage_text[] =
 	"  -S <scale>    fixed output scale (default: picked per output;\n"
 	"                can also be set via $WAYLAND_CANVAS_SCALE)\n"
 	"  -d            enable debug logging\n"
-	"  -B            start without the top bar\n"
+	"  -B            start without the shell (bar, toolbar, notes)\n"
 	"  -h            show this help and exit\n"
 	"\n"
 	"Touchpad gestures:\n"
