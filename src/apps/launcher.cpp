@@ -402,6 +402,10 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 			const App &app = apps_.items()[results_[idx]];
 			double ry = rows_y + i * config::launcher_row_height;
 			double rw = w - 24;
+			// The selected row is the accent fill, so everything on it — icon,
+			// name, generic name — is drawn in the accent's contrasting text
+			// colour; the dim grey would vanish on it.
+			uint32_t row_text = idx == selected_ ? pal.accent_text : pal.launcher_text;
 			if (idx == selected_) {
 				rounded_path(cr, 12, ry, rw, config::launcher_row_height, 4);
 				set_source_rgba32(cr, pal.launcher_selected);
@@ -414,7 +418,7 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 
 			draw_icon(cr, icons_, app, 24,
 				ry + (config::launcher_row_height - config::launcher_icon) / 2.0,
-				scale, pal.launcher_text);
+				scale, row_text);
 
 			double nx = 24 + config::launcher_icon + 10;
 			int navail = static_cast<int>(w) - 12 - 8 - static_cast<int>(nx);
@@ -422,13 +426,14 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 			int nw = 0;
 			if (!app.name.empty()) {
 				nw = paint_text(cr, app.name.c_str(), config::launcher_font,
-					pal.launcher_text, nx, ncy, navail);
+					row_text, nx, ncy, navail);
 			}
 			if (!app.generic.empty()) {
 				int rem = navail - nw - 8;
 				if (rem >= 32) {
 					paint_text(cr, app.generic.c_str(), config::launcher_font,
-						pal.launcher_dim_text, nx + nw + 8, ncy, rem);
+						idx == selected_ ? pal.accent_text : pal.launcher_dim_text,
+						nx + nw + 8, ncy, rem);
 				}
 			}
 		}

@@ -35,7 +35,9 @@
 #include <optional>
 #include <poll.h>
 #include <print>
+#include <ranges>
 #include <source_location>
+#include <span>
 #include <string>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -47,13 +49,16 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/theme.h"
 #include "core/wlr.h"
+#include "render/render.h"
 
 namespace {
 
 std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
+bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
 wlr_pointer ptr{};
@@ -72,6 +77,9 @@ bool idle_spawned = false; // any child of the shell seen while idle
 constexpr int idle_sample_count = 1000; // 10 s of samples
 constexpr int idle_sample_ms = 10;
 constexpr double widen_px = 20; // how much the edited widget must grow
+double theme_x = 0; // the theme switch's centre: the right-most bar run
+double power_x = 0; // the power indicator's centre: the theme phase's panel
+std::string shell_config; // the scratch shell.json the theme switch writes
 
 // ---- the notes phase, over the public control socket ----
 
@@ -124,9 +132,28 @@ constexpr int brightness_panel = 240;
 constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
+constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
+
+// The shell's own colours the theme phase samples (the UI kit's palette;
+// the compositor's half comes from config.h's palettes). Keep in sync with
+// shell/ui/WaylandCanvas/Ui/UiTheme.qml.
+constexpr uint32_t shell_bg_dark = 0x1a1b26ff;
+constexpr uint32_t shell_bg_light = 0xe1e2e7ff;
+constexpr uint32_t shell_panel_light = 0xf4f5f8ff;
 
 // Output geometry the headless backend gives: 1280x720, one output.
 constexpr int screen_w = 1280, screen_h = 720;
+
+// The toolbar strip's geometry the plugin commits (docs/intents/shell/
+// toolbar.md): a 44 px square per button, 8 px from the right edge,
+// vertically centred on the output. The flyout and a toolbar-opened
+// panel hang a further 8 px left of the strip, and both the scratch
+// panel and the flyout are 200 px wide.
+constexpr int toolbar_button = 44;
+constexpr int toolbar_margin = 8;
+constexpr int strip_left = screen_w - toolbar_margin - toolbar_button;
+constexpr int beside_gap = toolbar_margin;
+constexpr int scratch_card = 200;
 
 enum CloseMode { close_outside, close_escape, close_icon };
 
@@ -147,6 +174,9 @@ int phase = 0;
 wlr_box popup_box{}; // the open panel's card, from the walk's phase 1
 wlr_box field_box{}; // where the Wi-Fi password field ended up
 double clock_x = 0, network_x = 0; // where the walk found the clock, network
+double tb_x = 0, tb_y = 0; // the toolbar's own re-issued click point: a
+// click can be lost while the bar's render loop is stalled on a
+// screenshot, so the proof phase re-issues it until the storage says so
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -198,6 +228,7 @@ void write_file(const std::string &path, std::string_view text) {
 	std::fwrite(text.data(), 1, text.size(), f);
 	std::fclose(f);
 }
+
 
 // ---- machine state: which indicators the bar shows ----
 
@@ -480,6 +511,14 @@ void tap(uint32_t code) {
 	key(code, false);
 }
 
+// A key with modifiers held: Super+Tab toggles the overview.
+void chord(uint32_t code, uint32_t mod) {
+	key(mod, true);
+	tap(code);
+	key(mod, false);
+}
+
+// Letters and digits, enough for a password-shaped string.
 // Lower-case letters, digits and the space, enough for a password or a
 // note's text.
 void type(std::string_view s) {
@@ -558,6 +597,26 @@ void drag_note(double x0, double y0, double x1, double y1) {
 	}
 }
 
+// The scratch plugin's storage file, read back as text: the proof an
+// action ran is what it wrote (api.storage writes JSON under the
+// scratch state dir).
+std::string read_storage(const char *name) {
+	std::string path = std::format(
+		"{}/xdg/state/wayland-canvas/plugins/canvas.scratch/{}", shot_dir, name);
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return {};
+	}
+	std::string out;
+	char buf[512];
+	std::size_t n = 0;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	return out;
+}
+
 void shot(const char *name) {
 	std::string path = std::format("{}/{}.png", shot_dir, name);
 	grim_pid = fork();
@@ -567,20 +626,40 @@ void shot(const char *name) {
 	}
 }
 
+// Press mods..., tap k, release mods.
+void chord(uint32_t k, std::span<const uint32_t> mods) {
+	for (uint32_t m : mods) {
+		key(m, true);
+	}
+	key(k, true);
+	key(k, false);
+	for (uint32_t m : std::views::reverse(mods)) {
+		key(m, false);
+	}
+}
+
+constexpr uint32_t SUPER[] = {KEY_LEFTMETA};
+
 // ---- the bar client and its surfaces ----
 
-LayerSurface *bar_layer() {
+// The mapped layer surface with this namespace: the shell client's
+// surfaces are told apart by name (the bar, each panel, the toolbar).
+LayerSurface *named_layer(const char *ns) {
 	for (const std::unique_ptr<Output> &output : server->outputs) {
 		for (auto &vec : output->layers) {
 			for (const std::unique_ptr<LayerSurface> &l : vec) {
 				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& std::strcmp(l->wlr->namespace_, bar_namespace) == 0) {
+						&& std::strcmp(l->wlr->namespace_, ns) == 0) {
 					return l.get();
 				}
 			}
 		}
 	}
 	return nullptr;
+}
+
+LayerSurface *bar_layer() {
+	return named_layer(bar_namespace);
 }
 
 wl_client *bar_client() {
@@ -599,17 +678,13 @@ int bar_h() {
 // names its surface; the shell and this suite agree on the names).
 LayerSurface *panel_layer(const char *name) {
 	std::string ns = std::format("wayland-canvas-panel-{}", name);
-	for (const std::unique_ptr<Output> &output : server->outputs) {
-		for (auto &vec : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &l : vec) {
-				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& ns == l->wlr->namespace_) {
-					return l.get();
-				}
-			}
-		}
-	}
-	return nullptr;
+	return named_layer(ns.c_str());
+}
+
+// The overview toolbar surface, shown only while its output is in the
+// overview.
+LayerSurface *toolbar_layer() {
+	return named_layer(toolbar_namespace);
 }
 
 // Mapped panels of any name: the one-at-a-time rule counts them.
@@ -647,17 +722,23 @@ struct Band {
 	double centre() const { return (top + bottom - 1) / 2.0; }
 };
 
-std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+std::vector<Band> tb_buttons; // the toolbar's button bands, from the shot
+
+// The lit row bands inside a rectangle of the screen, top to bottom: one
+// per line of glyphs or text, so positions are read off the screenshot
+// instead of assumed from the layout. Clamped to the image on every side.
+std::vector<Band> bands_in(cairo_surface_t *s, const wlr_box &rect) {
 	std::vector<Band> bands;
 	if (s == nullptr) {
 		return bands;
 	}
 	unsigned char *data = cairo_image_surface_get_data(s);
 	int stride = cairo_image_surface_get_stride(s);
-	int x0 = card.x + 8, x1 = card.x + card.width - 8;
+	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
+	int x0 = std::max(0, rect.x), x1 = std::min(w, rect.x + rect.width);
 	bool in_band = false;
 	int band_top = 0, band_lit = 0;
-	for (int y = card.y; y < screen_h; y++) {
+	for (int y = std::max(0, rect.y); y < std::min(h, rect.y + rect.height); y++) {
 		int lit = 0;
 		for (int x = x0; x < x1; x++) {
 			unsigned char *p = data + y * stride + x * 4;
@@ -677,9 +758,15 @@ std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
 		}
 	}
 	if (in_band) { // a band running to the scan's end
-		bands.push_back({band_top, screen_h, band_lit});
+		bands.push_back({band_top, std::min(h, rect.y + rect.height), band_lit});
 	}
 	return bands;
+}
+
+// The lit text bands inside a card's column, top to bottom: one per row,
+// header or field of the panel's content.
+std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+	return bands_in(s, {card.x + 8, card.y, card.width - 16, screen_h - card.y});
 }
 
 cairo_surface_t *load_png(const char *name); // defined with the screenshots
@@ -915,6 +1002,58 @@ int bright_count(cairo_surface_t *s, const wlr_box &rect) {
 	return n;
 }
 
+// ---- the theme phase: sampling flat palette fills off screenshots ----
+
+// The renderer's rounding of a flat fill stays within this of the palette.
+constexpr int palette_tolerance = 8;
+
+// One screenshot pixel as 0xRRGGBB (grim's ARGB32: B, G, R, A in memory).
+uint32_t pixel_at(cairo_surface_t *s, int x, int y) {
+	unsigned char *p = cairo_image_surface_get_data(s)
+		+ y * cairo_image_surface_get_stride(s) + x * 4;
+	return uint32_t(p[2]) << 16 | uint32_t(p[1]) << 8 | uint32_t(p[0]);
+}
+
+bool near_channel(unsigned char got, unsigned char want) {
+	int d = got > want ? got - want : want - got;
+	return d <= palette_tolerance;
+}
+
+// True when the pixel is the palette colour: the bar, panel cards, title
+// bars and the target tab are flat fills of one palette entry, so sampling
+// one clear pixel tells the mode. The palette carries 0xRRGGBBAA with the
+// alpha in the low byte; a screenshot pixel has no alpha, so the alpha is
+// shifted out before the channels are compared.
+bool pixel_is(cairo_surface_t *s, int x, int y, uint32_t want) {
+	if (s == nullptr) {
+		return false;
+	}
+	want >>= 8;
+	uint32_t got = pixel_at(s, x, y);
+	return near_channel(got >> 16, want >> 16)
+		&& near_channel(got >> 8, want >> 8) && near_channel(got, want);
+}
+
+// A shot's one pixel against a palette colour.
+bool shot_pixel_is(const char *name, int x, int y, uint32_t want) {
+	cairo_surface_t *s = load_png(name);
+	bool ok = pixel_is(s, x, y, want);
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return ok;
+}
+
+// The mapped view with this title, as the input scenario finds its windows.
+View *titled(const char *title) {
+	for (View *v : server->views) {
+		if (v->mapped && v->wlr->title && std::strcmp(v->wlr->title, title) == 0) {
+			return v;
+		}
+	}
+	return nullptr;
+}
+
 // ---- notes: the msg client, the plugin's state, its storage ----
 
 // Runs `wayland-canvas msg <method> [<params>]` through /bin/sh, with
@@ -1101,6 +1240,78 @@ LayerSurface *editor_layer() {
 		}
 	}
 	return nullptr;
+}
+
+// The one output the headless backend gives.
+Output *out() {
+	return server->outputs.front().get();
+}
+
+// The target tab's fill pixel in a shot: the tab layout is read from the
+// compositor itself, the sample point is the tab's clear top-left corner.
+// A note in the log names the rect and pixel, so a failure says why.
+bool target_tab_is(const char *name, uint32_t want) {
+	Output *o = out();
+	Desktop *d = o != nullptr
+		? o->server.canvas.desktops.find(o->overview.target().desktop) : nullptr;
+	std::optional<TabLayout> layout = d != nullptr
+		? o->server.painter.overview_tab_layout(*o, *d) : std::nullopt;
+	cairo_surface_t *s = load_png(name);
+	int x = layout.has_value() ? layout->tab.x + 4 : 0;
+	int y = layout.has_value() ? layout->tab.y + 4 : 0;
+	bool ok = layout.has_value() && pixel_is(s, x, y, want);
+	std::println("note: tab sample ({},{}): {:06x}, want {:06x}, layout {}, desktop {}",
+		x, y, s != nullptr ? pixel_at(s, x, y) : 0, want,
+		layout.has_value() ? "found" : "missing", d != nullptr ? "found" : "missing");
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return ok;
+}
+
+// The themed window's title bar in a shot: one of the mode's two title
+// colours (which one depends on focus; both follow the mode), sampled mid
+// bar where no title or button is drawn. A note in the log names the
+// sample point and pixel, so a failure says why.
+bool title_bar_is(const char *name, uint32_t active, uint32_t inactive) {
+	View *v = titled("themed");
+	wlr_box f = v != nullptr ? v->frame_box() : wlr_box{};
+	int x = f.x + f.width / 2, y = f.y + config::titlebar_height / 2;
+	cairo_surface_t *s = load_png(name);
+	bool ok = v != nullptr && s != nullptr
+		&& (pixel_is(s, x, y, active) || pixel_is(s, x, y, inactive));
+	std::println("note: title sample ({},{}): {:06x}, want {:06x} or {:06x}, view {}",
+		x, y, s != nullptr ? pixel_at(s, x, y) : 0, active, inactive,
+		v != nullptr ? "found" : "missing");
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return ok;
+}
+
+// The left section's right edge, by ink: glyph pixels stand off the
+// background in either mode — bright on the dark bar, dark on the light
+// one — so the edge reads the same before and after a switch. The
+// re-enabled plugin's label sits past the logo, pushing the edge right.
+double bar_ink_edge(cairo_surface_t *s, const wlr_box &bar, bool light) {
+	if (s == nullptr) {
+		return 0;
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	double edge = 0;
+	int limit = screen_w / 2 - 250; // short of the centred widgets
+	for (int x = 0; bar.x + x < limit; x++) {
+		for (int y = 0; y < bar.height; y++) {
+			unsigned char *p = data + (bar.y + y) * stride + (bar.x + x) * 4;
+			int sum = p[0] + p[1] + p[2];
+			if (light ? sum < 550 : sum > 300) { // ink, this mode's way
+				edge = bar.x + x;
+				break;
+			}
+		}
+	}
+	return edge;
 }
 
 // True when the editor maps and holds the keyboard on its own surface.
@@ -1716,10 +1927,17 @@ int run_step() {
 		if (!runs.empty()) {
 			runs.erase(runs.begin());
 		}
+		// The theme switch (canvas.theme) is the right-most widget of all:
+		// record it for the theme phase and take it out before matching the
+		// indicators, which are the right-most runs of what is left.
+		if (!runs.empty()) {
+			theme_x = runs.back().centre();
+			runs.pop_back();
+		}
 		check(runs.size() >= 1 + mandatory.size(),
 			std::format("every indicator of this machine is on the bar "
-				"({} runs past the logo; the clock and {} indicators)",
-				runs.size(), mandatory.size()));
+				"({} runs past the logo and the theme switch; the clock and "
+				"{} indicators)", runs.size(), mandatory.size()));
 		if (runs.size() < 1 + mandatory.size()) {
 			step = 99; // positions cannot be trusted; nothing more to check
 			return 300;
@@ -1741,6 +1959,7 @@ int run_step() {
 			}
 			if (std::strcmp(ind.name, "power") == 0) {
 				ind.profile_flow = true;
+				power_x = ind.x; // right-anchored: stable across the whole run
 			}
 		}
 
@@ -1831,15 +2050,21 @@ int run_step() {
 		return 700;
 	case 11: {
 		// Every run on the bar, accounted for: the logo, the clock (and the
-		// weather when it loaded) centred, the stand-in's one tray item, and
-		// this machine's indicators — nothing left over, so the broken
-		// manifest's plugin contributed nothing and was skipped.
+		// weather when it loaded) centred, the stand-in's one tray item, the
+		// theme switch, and this machine's indicators — nothing left over,
+		// so the broken manifest's plugin contributed nothing and was
+		// skipped. base_runs counts the theme switch too: the later reload
+		// checks compare against a bar that still carries it.
 		cairo_surface_t *s = load_png("bar-plain");
 		LayerSurface *layer = bar_layer();
 		std::vector<Run> runs = s != nullptr && layer != nullptr
 			? bar_runs(s, layer->geo) : std::vector<Run>{};
 		cairo_surface_destroy(s);
 		check(layer != nullptr && runs.size() >= 1, "the bar is still mapped after the walk");
+		base_runs = runs.size();
+		if (!runs.empty()) { // the theme switch, right-most of all
+			runs.pop_back();
+		}
 		std::size_t mandatory = 4 + (has_sysfs_class("backlight") ? 1 : 0);
 		std::size_t keep = runs.size() >= 1 + mandatory ? runs.size() - 1 - mandatory : 0;
 		std::size_t centre = 0;
@@ -1848,10 +2073,9 @@ int run_step() {
 				centre++;
 			}
 		}
-		base_runs = runs.size();
 		check(keep - centre == 1, std::format("every run on the bar is accounted for "
-			"({} runs: logo, {} centred, 1 tray, {} indicators — the broken "
-			"manifest's plugin was skipped)", runs.size(), centre, mandatory));
+			"({} runs: logo, {} centred, 1 tray, {} indicators, the theme switch "
+			"— the broken manifest's plugin was skipped)", base_runs, centre, mandatory));
 		// Drop the user plugin's staged files into the scratch data dir: the
 		// shell reloads with them, without anything of the shell being touched.
 		mkdir_p(user_plugin);
@@ -2041,6 +2265,10 @@ int run_step() {
 		check(server->seat->keyboard_state.focused_surface == panel->wlr->surface,
 			"the panel holds the keyboard while the overview is active");
 		popup_box = card_box(network_x, network_panel);
+		// The overview's toolbar sits over this card's right edge, the
+		// card drawn above it: keep the scan column short of the strip,
+		// or the toolbar's glyphs pose as the card's rows.
+		popup_box.width = std::min(popup_box.width, strip_left - popup_box.x);
 		shot("overview-network");
 		return 700;
 	}
@@ -2124,11 +2352,487 @@ int run_step() {
 			return -100;
 		}
 		check(!o.overview.active(), "the second Escape left the overview");
-		step = 110; // on to the notes: the sticky-notes plugin end to end
+		step = 40; // on to the toolbar: the same world, in the overview
 		return -100; // without the advance: every other step moves on alone
 	}
+	// ---- the overview's toolbar ----
+	// A step range of its own, after the overview phase.
+	case 40: // the toolbar shows only in the overview: none yet
+		check(toolbar_layer() == nullptr,
+			"the toolbar is not mapped while the output is out of the overview");
+		chord(KEY_TAB, KEY_LEFTMETA); // Super+Tab enters the overview again
+		return 400;
+	case 41: {
+		LayerSurface *toolbar = toolbar_layer();
+		if (toolbar == nullptr && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(toolbar != nullptr, "entering the overview mapped the toolbar "
+			"(a layer surface of the shell client)");
+		if (toolbar != nullptr) {
+			check(wl_resource_get_client(toolbar->wlr->surface->resource) == bar_client(),
+				"the toolbar belongs to the shell client");
+		}
+		shot("toolbar");
+		return 700;
+	}
+	case 42: { // the buttons, read off the screenshot: the strip's column
+		// is opaque — its own glyphs are the only lit pixels in it — and
+		// the strip is the cluster of bands closest to the output's
+		// vertical centre, so stray lit pixels cannot pose as buttons.
+		cairo_surface_t *s = load_png("toolbar");
+		std::vector<Band> all = bands_in(s, {strip_left, 0, toolbar_button, screen_h});
+		cairo_surface_destroy(s);
+		std::vector<Band> best;
+		double best_distance = screen_h;
+		for (std::size_t i = 0; i < all.size();) {
+			std::vector<Band> cluster{all[i]};
+			for (std::size_t j = i + 1; j < all.size()
+					&& all[j].top - cluster.back().bottom <= toolbar_button; j++) {
+				cluster.push_back(all[j]);
+			}
+			double distance = std::abs((cluster.front().top + cluster.back().bottom) / 2.0
+				- screen_h / 2.0);
+			if (cluster.size() > best.size()
+					|| (cluster.size() == best.size() && distance < best_distance)) {
+				best = cluster;
+				best_distance = distance;
+			}
+			i += cluster.size();
+		}
+		if (best.size() < 3 && retries++ < 20) { // the slide-in may still finish
+			shot("toolbar");
+			return -700;
+		}
+		retries = 0;
+		check(best.size() >= 3, std::format("the toolbar holds every registered "
+			"button ({} glyph bands in its column: act, panel, menu)", best.size()));
+		if (best.size() < 3) {
+			step = 99; // positions cannot be trusted; nothing more to check
+			return 300;
+		}
+		check(std::abs((best.front().top + best.back().bottom) / 2.0
+				- screen_h / 2.0) <= toolbar_button,
+			"the strip is vertically centred on the output");
+		tb_buttons = best;
+		// The action button is the first (order 0): click it.
+		tb_x = strip_left + toolbar_button / 2.0;
+		tb_y = tb_buttons[0].centre();
+		click(tb_x, tb_y);
+		return 400;
+	}
+	case 43: { // the proof the action ran: its storage, read back
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"button\"") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			return -300;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"button\"") != std::string::npos,
+			"the action button ran its action with its args (the plugin's "
+			"storage says so)");
+		check(toolbar_layer() != nullptr, "the toolbar stays after an action");
+		// The pointer rests on the action button: its label shows beside
+		// it, left of the strip.
+		shot("toolbar-hover");
+		return 700;
+	}
+	case 44: { // the label, beside the strip on hover
+		cairo_surface_t *s = load_png("toolbar-hover");
+		std::vector<Band> labels = bands_in(s,
+			{strip_left - 160, int(tb_buttons[0].top) - 20, 160 - beside_gap, 40});
+		cairo_surface_destroy(s);
+		check(!labels.empty(), "hovering a button shows its label beside the strip");
+		// The panel button is the second (order 1).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[1].centre());
+		return 400;
+	}
+	case 45: {
+		LayerSurface *panel = panel_layer("scratch");
+		if (panel == nullptr && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel != nullptr, "the panel button opened the panel through the "
+			"common trigger");
+		if (panel != nullptr) {
+			check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
+				"the toolbar's panel belongs to the shell client");
+		}
+		shot("toolbar-panel");
+		return 700;
+	}
+	case 46: { // the panel card: left of the strip, level with the button
+		// The card sits left of the strip, centred on the panel button;
+		// scan that window, so overview content elsewhere cannot pose as
+		// rows.
+		cairo_surface_t *s = load_png("toolbar-panel");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[1].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		if (rows.size() < 2 && retries++ < 10) {
+			shot("toolbar-panel");
+			return -700;
+		}
+		retries = 0;
+		check(rows.size() >= 2, "the panel opened beside the toolbar (its two rows "
+			"are left of the strip)");
+		if (!rows.empty()) {
+			double level = (rows.front().top + rows.back().bottom) / 2.0;
+			check(std::abs(level - tb_buttons[1].centre()) <= 32,
+				"the panel is level with the panel button");
+		}
+		// Escape closes the panel itself (it holds the keyboard); a click
+		// on the empty canvas would instead leave the overview.
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 47: {
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0, "the toolbar's panel closed on Escape");
+		// The menu button is the third (order 2).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[2].centre());
+		return 400;
+	}
+	case 48: // the flyout, out of the toolbar to the left of the button
+		shot("toolbar-flyout");
+		return 700;
+	case 49: { // its rows: a glyph row and a colour-swatch row
+		// The flyout sits left of the strip, centred on the menu button.
+		cairo_surface_t *s = load_png("toolbar-flyout");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[2].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		if (rows.size() < 2 && retries++ < 10) {
+			shot("toolbar-flyout");
+			return -700;
+		}
+		retries = 0;
+		check(rows.size() >= 2, "the menu button expanded a flyout beside the "
+			"toolbar (a glyph row and a swatch row)");
+		if (rows.size() < 2) {
+			// Nothing was clicked: the fold shot still happens, the
+			// choice proof is skipped.
+			shot("toolbar-folded");
+			step = 50;
+			return 700;
+		}
+		// Choose the first entry: its action runs and the flyout folds.
+		tb_x = strip_left - beside_gap - scratch_card / 2.0;
+		tb_y = rows[0].centre();
+		click(tb_x, tb_y);
+		return 400;
+	}
+	case 50: { // the choice's proof, and the fold
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"menu-one\"") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			return -300;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"menu-one\"") != std::string::npos,
+			"choosing a flyout entry ran its action with its args (the "
+			"plugin's storage says so)");
+		shot("toolbar-folded");
+		return 700;
+	}
+	case 51: { // the flyout must have folded; leaving the overview ends it
+		cairo_surface_t *s = load_png("toolbar-folded");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[2].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		check(rows.empty(), "choosing an entry folded the flyout");
+		check(toolbar_layer() != nullptr, "the toolbar stays after a menu choice");
+		tap(KEY_ESC); // Escape leaves the overview, folding everything
+		return 400;
+	}
+	case 52: { // the slide out unmaps the toolbar, panel and flyout with it
+		bool gone = toolbar_layer() == nullptr && panel_layers() == 0;
+		if (!gone && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(toolbar_layer() == nullptr, "leaving the overview slid the toolbar "
+			"out (unmapped)");
+		check(panel_layers() == 0, "no panel and no flyout outlived the toolbar");
+		step = 60; // on to the theme phase: the switch, both palettes, the reload
+		return -100; // without the advance: every other step moves on alone
+	}
+	case 60: // the theme phase: a window for its title bar, then both modes
+		if (theme_x <= 0) {
+			std::println("note: the theme switch was not found on the bar; "
+				"the theme phase is skipped");
+			step = 99;
+			return 100;
+		}
+		::spawn("foot -T themed sh -c 'exec sleep 600'"); // Server's double-forked spawn
+		return 500;
+	case 61:
+		if (titled("themed") == nullptr && retries++ < 100) {
+			return -300;
+		}
+		retries = 0;
+		check(titled("themed") != nullptr, "the themed window mapped");
+		shot("dark-window");
+		return 700;
+	case 62: { // the title bar the compositor draws, in dark
+		bool dark = title_bar_is("dark-window", config::palette_dark.title_active,
+			config::palette_dark.title_inactive);
+		if (!dark && retries++ < 10) {
+			shot("dark-window"); // re-shoot on this step: retries survive it
+			return -700;
+		}
+		retries = 0;
+		check(dark, "the window's title bar is dark (a dark-mode title colour)");
+		chord(KEY_TAB, SUPER); // the overview, with its tabs
+		return 400;
+	}
+	case 63: { // the overview opens; the target's tab is the accent fill
+		Output *o = out();
+		if (!(o != nullptr && o->overview.active()) && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(o != nullptr && o->overview.active(), "Super+Tab opened the overview");
+		if (Desktop *d = o->server.canvas.desktops.find(o->overview.target().desktop);
+			d != nullptr) {
+			o->overview.set_target(d->frame(), d->id(), false);
+		}
+		shot("dark-overview");
+		return 700;
+	}
+	case 64: { // the target tab's fill is the dark accent
+		bool accent = target_tab_is("dark-overview", config::palette_dark.accent);
+		if (!accent && retries++ < 10) {
+			shot("dark-overview");
+			return -700;
+		}
+		retries = 0;
+		check(accent, "the overview's target tab is the dark accent fill");
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 65:
+		if (out() != nullptr && out()->overview.active() && retries++ < 20) {
+			return -300;
+		}
+		check(out() != nullptr && !out()->overview.active(), "the overview closed");
+		click(theme_x, 13); // the switch: dark -> light
+		return 500;
+	case 66: { // the switch's two promises: the config and the compositor
+		std::string cfg = read_file(shell_config);
+		bool written = cfg.find("\"mode\": \"light\"") != std::string::npos;
+		bool told = server->theme.mode() == ThemeMode::light;
+		if (!(written && told) && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "clicking the switch wrote theme.mode: light to the scratch shell.json");
+		check(told, "the compositor reports theme light (told over the control socket)");
+		shot("light-bar");
+		return 700;
+	}
+	case 67: { // the bar itself follows: its background is the light one
+		LayerSurface *l = bar_layer();
+		bool light = l != nullptr
+			&& shot_pixel_is("light-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!light && retries++ < 40) {
+			shot("light-bar");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the bar is light (its background pixel is #e1e2e7)");
+		click(power_x, 13); // a panel, to see the light panel surface
+		return 400;
+	}
+	case 68:
+		if (panel_layer("power") == nullptr && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(panel_layer("power") != nullptr, "the power panel opened in light mode");
+		shot("light-panel");
+		return 700;
+	case 69: { // the panel's card, against the palette
+		wlr_box card = card_box(power_x, power_panel);
+		bool light = shot_pixel_is("light-panel", card.x + 5, card.y + 5, shell_panel_light);
+		if (!light && retries++ < 10) {
+			shot("light-panel");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the open panel is light (its card is #f4f5f8)");
+		click(60.0, 700.0); // outside: closed again
+		return 400;
+	}
+	case 70:
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -300;
+		}
+		check(panel_layers() == 0, "the light panel closed on a click outside");
+		shot("light-window");
+		return 700;
+	case 71: { // the title bar followed too
+		bool light = title_bar_is("light-window", config::palette_light.title_active,
+			config::palette_light.title_inactive);
+		if (!light && retries++ < 10) {
+			shot("light-window");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the window's title bar is light (a light-mode title colour)");
+		chord(KEY_TAB, SUPER);
+		return 400;
+	}
+	case 72: { // the overview again, now in light
+		Output *o = out();
+		if (!(o != nullptr && o->overview.active()) && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(o != nullptr && o->overview.active(), "the overview opened in light mode");
+		if (Desktop *d = o->server.canvas.desktops.find(o->overview.target().desktop);
+			d != nullptr) {
+			o->overview.set_target(d->frame(), d->id(), false);
+		}
+		shot("light-overview");
+		return 700;
+	}
+	case 73: { // the target tab's fill is the light accent
+		bool accent = target_tab_is("light-overview", config::palette_light.accent);
+		if (!accent && retries++ < 10) {
+			shot("light-overview");
+			return -700;
+		}
+		retries = 0;
+		check(accent, "the overview's target tab is the light accent fill");
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 74: { // a reload must keep the mode: an edit the shell reloads on
+		if (out() != nullptr && out()->overview.active() && retries++ < 20) {
+			return -300;
+		}
+		check(out() != nullptr && !out()->overview.active(), "the overview closed");
+		// The bar as it is before the edit, for the before/after comparison.
+		shot("light-prereload");
+		return 700;
+	}
+	case 75: {
+		// Re-enable the user plugin in the config: different bytes, so the
+		// shell reloads — and its widget coming back (its files are still in
+		// the scratch data dir, its label pushing the left section's ink edge
+		// right) is what proves the reload happened, leaving theme.mode:
+		// light to prove the mode survived it.
+		std::string cfg = read_file(shell_config);
+		std::size_t at = cfg.find("\"enabled\": false");
+		if (at != std::string::npos) {
+			cfg.replace(at, 16, "\"enabled\": true");
+		}
+		write_file(shell_config, cfg);
+		// The after picture, taken as the edit lands: the next step reads it
+		// before anything else, and re-shoots it until the reload shows.
+		shot("light-reloaded");
+		return 700;
+	}
+	case 76: { // the reload's two proofs: the widget back, the bar still light
+		LayerSurface *l = bar_layer();
+		cairo_surface_t *pre = load_png("light-prereload");
+		cairo_surface_t *re = load_png("light-reloaded");
+		double before = l != nullptr && pre != nullptr ? bar_ink_edge(pre, l->geo, true) : 0;
+		double after = l != nullptr && re != nullptr ? bar_ink_edge(re, l->geo, true) : 0;
+		if (pre != nullptr) {
+			cairo_surface_destroy(pre);
+		}
+		if (re != nullptr) {
+			cairo_surface_destroy(re);
+		}
+		bool reloaded = after >= before + widen_px;
+		if (!reloaded && retries++ < 40) {
+			shot("light-reloaded");
+			return -700;
+		}
+		retries = 0;
+		check(reloaded, std::format("the shell reloaded on the config edit "
+			"(the re-enabled plugin's label pushed the left section's edge "
+			"from {} to {} px)", before, after));
+		bool light = l != nullptr
+			&& shot_pixel_is("light-reloaded", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!light && retries++ < 40) {
+			shot("light-reloaded");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the reloaded shell kept the light mode (the bar stayed #e1e2e7)");
+		click(theme_x, 13); // and back: light -> dark
+		return 500;
+	}
+	case 77: { // the switch's promises, the other way round
+		std::string cfg = read_file(shell_config);
+		bool written = cfg.find("\"mode\": \"dark\"") != std::string::npos;
+		bool told = server->theme.mode() == ThemeMode::dark;
+		if (!(written && told) && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "clicking the switch again wrote theme.mode: dark to the scratch shell.json");
+		check(told, "the compositor reports theme dark again");
+		shot("dark-restored-bar");
+		return 700;
+	}
+	case 78: { // the bar is dark again
+		LayerSurface *l = bar_layer();
+		bool dark = l != nullptr
+			&& shot_pixel_is("dark-restored-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_dark);
+		if (!dark && retries++ < 40) {
+			shot("dark-restored-bar");
+			return -700;
+		}
+		retries = 0;
+		check(dark, "switching back restored the dark bar (its background is #1a1b26)");
+		click(power_x, 13); // and the panel with it
+		return 400;
+	}
+	case 79:
+		if (panel_layer("power") == nullptr && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(panel_layer("power") != nullptr, "the power panel opened in dark mode");
+		shot("dark-restored-panel");
+		return 700;
+	case 80: { // the panel's card is the dark surface again
+		wlr_box card = card_box(power_x, power_panel);
+		bool dark = shot_pixel_is("dark-restored-panel", card.x + 5, card.y + 5, shell_bg_dark);
+		if (!dark && retries++ < 10) {
+			shot("dark-restored-panel");
+			return -700;
+		}
+		retries = 0;
+		check(dark, "switching back restored the dark panel (its card is #1a1b26)");
+		click(60.0, 700.0);
+		return 400;
+	}
+	case 81:
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -300;
+		}
+		check(panel_layers() == 0, "the last panel closed");
+		step = 110; // on to the notes: the sticky-notes plugin end to end
+		return -100; // without the advance: every other step moves on alone
 	// ---- the notes: the sticky-notes plugin end to end ----
-	// A step range of its own, after the overview.
+	// A step range of its own, after the theme.
 	case 110: // a note created the way any script would: action.run over the socket
 		run_msg("action.run",
 			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
@@ -2570,6 +3274,7 @@ int run_step() {
 		return 100; // done: the summary prints and the run ends
 	}
 	default:
+		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
 		return -1;
@@ -2652,9 +3357,63 @@ int main() {
 	write_file(plugins_dir + "/bad.plugin/Bad.qml",
 		"import QtQuick\nimport WaylandCanvas.Ui\nBarButton {\n"
 		"\ticon: true\n\ttext: \"\\uf00d\"\n}\n");
+	// The toolbar scenario's own scratch plugin (there from the start; it
+	// contributes no bar widget, so the run accounting keeps holding):
+	// one action button, one panel button and one menu button, whose
+	// action appends its args to the plugin's storage — the read-back is
+	// the proof a click ran what it should. The menu's second row names a
+	// colour, the first a glyph, so the flyout draws both kinds.
+	std::string scratch_plugin = plugins_dir + "/canvas.scratch";
+	mkdir_p(scratch_plugin);
+	write_file(scratch_plugin + "/plugin.json",
+		"{\n\t\"id\": \"canvas.scratch\",\n\t\"name\": \"Scratch\",\n"
+		"\t\"version\": \"1.0.0\",\n\t\"apiVersion\": 1,\n"
+		"\t\"description\": \"The toolbar scenario's plugin: an action, a panel and a menu button\",\n"
+		"\t\"contributes\": {\n"
+		"\t\t\"toolbarButtons\": [\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"act\",\n\t\t\t\t\"icon\": \"A\",\n"
+		"\t\t\t\t\"label\": \"Act\",\n\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\"args\": {\"kind\": \"button\"},\n\t\t\t\t\"order\": 0\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n\t\t\t\t\"icon\": \"P\",\n"
+		"\t\t\t\t\"label\": \"Panel\",\n\t\t\t\t\"panel\": \"panel\",\n"
+		"\t\t\t\t\"order\": 1\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"menu\",\n\t\t\t\t\"icon\": \"M\",\n"
+		"\t\t\t\t\"label\": \"Menu\",\n\t\t\t\t\"menu\": [\n"
+		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"One\",\n\t\t\t\t\t\t\"icon\": \"1\",\n"
+		"\t\t\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-one\"}\n\t\t\t\t\t},\n"
+		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"Yellow\",\n\t\t\t\t\t\t\"color\": \"#e0af68\",\n"
+		"\t\t\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-yellow\"}\n\t\t\t\t\t}\n"
+		"\t\t\t\t],\n\t\t\t\t\"order\": 2\n\t\t\t}\n"
+		"\t\t],\n"
+		"\t\t\"panels\": [\n\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n"
+		"\t\t\t\t\"entry\": \"ScratchPanel.qml\"\n\t\t\t}\n\t\t],\n"
+		"\t\t\"actions\": [\n\t\t\t{\n\t\t\t\t\"id\": \"mark\",\n"
+		"\t\t\t\t\"entry\": \"Mark.qml\"\n\t\t\t}\n\t\t]\n\t}\n}\n");
+	write_file(scratch_plugin + "/Mark.qml",
+		"import QtQuick\n// The scratch action: appends its args to the plugin's\n"
+		"// storage, so the scenario reads back that it ran and what with.\n"
+		"Item {\n\tproperty var api: null\n"
+	"\tfunction run(args) {\n"
+		"\t\tvar marks = api.storage.read(\"marks\")\n"
+		"\t\tif (marks == null) {\n\t\t\tmarks = []\n\t\t}\n"
+		"\t\tmarks.push(args == null ? {} : args)\n"
+		"\t\tapi.storage.write(\"marks\", marks)\n\t}\n}\n");
+	write_file(scratch_plugin + "/ScratchPanel.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\n"
+		"// The scratch panel: two labelled rows, so the scenario finds the\n"
+		"// card where it should be on the screenshot.\n"
+		"PanelCard {\n\tpanelWidth: 200\n\tpanelName: \"scratch\"\n"
+		"\tPanelRow { glyph: \"1\"; label: \"Scratch one\"; clickable: false }\n"
+		"\tPanelRow { glyph: \"2\"; label: \"Scratch two\"; clickable: false }\n}\n");
+
 	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
 	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);
 	setenv("XDG_STATE_HOME", (xdg + "/state").c_str(), 1);
+	// The scratch config the theme switch writes theme.mode into (and the
+	// theme phase reads back and rewrites to prove the reload keeps it).
+	shell_config = xdg + "/config/wayland-canvas/shell.json";
 	// The user plugin this run drops in while the shell runs (step 11): a
 	// bar widget beside the logo, first of the left section past it, so it
 	// shows as the bar's second run. Its files are staged outside the
@@ -2689,6 +3448,11 @@ int main() {
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display);
+	// A compositor that stops by itself (its own shutdown, a lost backend)
+	// ends the run early: without this the scenario would still exit 0.
+	if (!finished) {
+		check(false, std::format("the run ended at step {}, before its last step", step));
+	}
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);

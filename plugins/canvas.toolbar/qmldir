@@ -1,0 +1,7 @@
+# The components this plugin's own files reference by name. The host
+# compiles each manifest entry with Qt.createComponent from outside this
+# folder, so the implicit same-directory lookup is off: a file that uses
+# a sibling names it here and imports "."
+ToolbarButton ToolbarButton.qml
+Flyout Flyout.qml
+FlyoutRow FlyoutRow.qml

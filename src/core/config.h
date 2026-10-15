@@ -28,7 +28,7 @@ struct Palette {
 	uint32_t close_hover, close_press, close_text;
 	uint32_t border_active, border_inactive;
 	uint32_t frame, frame_hover; // desktop outlines; hover: the one under the pointer
-	uint32_t accent; // overview target
+	uint32_t accent, accent_text; // overview target; text on an accent fill
 	uint32_t combine, abandon;
 	uint32_t dim; // over wallpapers while zoomed out
 	uint32_t panel, panel_text; // overview labels, hints, shelf
@@ -53,6 +53,7 @@ inline constexpr Palette palette_dark{
 	.frame = 0xc8ccd4d0, // virtual desktop dashed outline
 	.frame_hover = 0xffffffff,
 	.accent = 0x4c9bffff,
+	.accent_text = 0x14161bff, // near-black on the mid-blue (6:1; white manages 2.8)
 	.combine = 0x3ddc84ff,
 	.abandon = 0xff6b5bff,
 	.dim = 0x000000a0,
@@ -87,6 +88,7 @@ inline constexpr Palette palette_light{
 	.frame = 0x5a6072d0,
 	.frame_hover = 0x1f2430ff,
 	.accent = 0x3760bfff,
+	.accent_text = 0xffffffff, // white on the dark blue, as the light launcher rows
 	.combine = 0x1a9e68ff,
 	.abandon = 0xe5484dff,
 	.dim = 0x000000a0, // dims wallpapers in the overview in both modes

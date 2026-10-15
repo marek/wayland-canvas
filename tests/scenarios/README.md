@@ -3,9 +3,10 @@
 Each scenario runs the **real compositor in-process** on the wlroots headless
 backend (`Server::init`/`Server::start`), spawns real `foot` clients, drives
 input, and takes `grim` screenshots. Every check prints a PASS/FAIL line; the
-scenario exits non-zero if any check failed. Scenarios run serially
-(`is_parallel: false`, 180 s timeout) because they each own the machine's
-Wayland display namespace and GPU.
+scenario exits non-zero if any check failed, or if the compositor stopped
+before the run reached its last step (a lost backend, its own shutdown).
+Scenarios run serially (`is_parallel: false`, 180 s timeout) because they each
+own the machine's Wayland display namespace and GPU.
 
 ## What each scenario proves
 
@@ -88,6 +89,49 @@ Wayland display namespace and GPU.
   `[plugins]` lines in the test log. Last, an idle watch: the shell is
   sampled about every 10 ms for 10 s and must have spawned no process at
   all, because the reloads ride on change notifications, not on a poll.
+  Then the theme: a foot window is mapped for its title bar and the
+  overview is opened for its tabs, and both are sampled against the
+  palettes in `src/core/config.h`; the theme switch (the right-most bar
+  widget) is clicked and the scratch `shell.json` must carry
+  `theme.mode: light` while the compositor reports light, the bar and an
+  open panel are sampled light against the UI kit's palette
+  (`shell_bg_light`/`shell_panel_light`, kept in sync with `UiTheme.qml`),
+  the title bar and the target tab's accent fill likewise; rewriting the
+  config as an edit reloads the shell and the bar that comes back is still
+  light (a new bar surface proves the reload happened), and clicking the
+  switch again restores dark in the config, the compositor, the bar and a
+  panel. Screenshots of both modes — bar, panel, window title bar,
+  overview — land in `tmp/scenarios/bar/` as `light-*`/`dark-*`.
+
+  The overview then takes that bar's world: Super+Tab opens it, and the
+  shell surfaces keep their input over it — a click on the bar's own
+  background stays in the overview, the network indicator opens its
+  panel inside it, a click outside the card closes the panel without
+  leaving, and the indicator's next click reopens it. The panel holds
+  the keyboard: typing reaches the Wi-Fi password field (seen as its
+  password dots), and the panel takes the first Escape while the
+  overview hears the second and closes.
+
+  The same private world then proves the overview toolbar. A scratch
+  user plugin sits in the scratch data dir from the start with one
+  action button, one panel button and one menu button (its menu holds a
+  glyph row and a colour-swatch row), and its one action appends its args
+  to its storage — the read-back is the proof any click ran what it
+  should. The toolbar must be unmapped out of the overview; entering it
+  (Super+Tab) maps the toolbar as a `wayland-canvas-toolbar` layer
+  surface of the shell client, its buttons read off the screenshot (the
+  strip's opaque column holds nothing but its own glyphs) and its
+  centring checked. The action button runs its action with its args and
+  the toolbar stays; the pointer's resting place shows the button's
+  label beside the strip on hover. The panel button opens the scratch
+  panel through the common trigger, left of the strip and level with the
+  button, and Escape — the panel holds the keyboard — closes it. The
+  menu button expands the flyout beside the toolbar; choosing an entry
+  runs its action with its
+  args and folds the flyout. Escape then leaves the overview — the
+  toolbar never takes the keyboard — and the slide out unmaps it with
+  no panel or flyout outliving it. Screenshots of the toolbar, the
+  flyout and the panel beside it are inspected on the way.
 
   The same world then carries the `canvas.notes` plugin end to end, driven
   only through the public socket: `msg action.run canvas.notes/create`

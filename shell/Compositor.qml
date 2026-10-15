@@ -104,26 +104,31 @@ Item {
 		}
 	}
 
-	// Kept state: each event rebuilds what it names, so bindings on the
-	// state re-run.
+	// Kept state: each event rebuilds what it names, and the whole state
+	// object is reassigned — a var property mutated in place fires no
+	// change signal, so bindings on the state would never re-run.
 	function handleEvent(name, params) {
 		if (name === "overview") {
-			state.outputs = state.outputs.map(function(output) {
-				return output.name === params.output
-					? Object.assign({}, output, {overview: params.active})
-					: output
+			state = Object.assign({}, state, {
+				outputs: (state.outputs || []).map(function(output) {
+					return output.name === params.output
+						? Object.assign({}, output, {overview: params.active})
+						: output
+				})
 			})
 		} else if (name === "outputs") {
-			state.outputs = params.outputs || []
+			state = Object.assign({}, state, {outputs: params.outputs || []})
 		} else if (name === "desktops") {
-			state.desktops = params.desktops || []
+			state = Object.assign({}, state, {desktops: params.desktops || []})
 		} else if (name === "theme") {
-			state.theme = params.mode
+			state = Object.assign({}, state, {theme: params.mode})
 		} else if (name === "item.moved") {
-			state.items = state.items.map(function(item) {
-				return item.id === params.id
-					? Object.assign({}, item, {x: params.x, y: params.y})
-					: item
+			state = Object.assign({}, state, {
+				items: (state.items || []).map(function(item) {
+					return item.id === params.id
+						? Object.assign({}, item, {x: params.x, y: params.y})
+						: item
+				})
 			})
 		}
 		event(name, params)

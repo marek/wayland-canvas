@@ -227,7 +227,9 @@ if foot_prog.found() and grim_prog.found()
 			),
 			suite: 'scenarios',
 			is_parallel: false,
-			timeout: 180,
+			# The bar scenario also walks every panel, the plugin reloads,
+			# the idle watch and the theme phase: it needs the wider budget.
+			timeout: scenario == 'bar' ? 240 : 180,
 			env: scenario_env,
 		)
 	endforeach

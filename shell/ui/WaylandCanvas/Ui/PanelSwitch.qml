@@ -28,7 +28,7 @@ Item {
 			radius: 6
 			anchors.verticalCenter: parent.verticalCenter
 			x: root.checked ? parent.width - width - 2 : 2
-			color: UiTheme.background
+			color: UiTheme.panel
 
 			Behavior on x {
 				NumberAnimation { duration: 100; easing.type: Easing.OutCubic }

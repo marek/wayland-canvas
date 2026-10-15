@@ -27,7 +27,8 @@ Item {
 	// Everything the plugins contributed, for the surfaces that host them:
 	// barWidgets: {name, section, order, panel, component, api} — `panel`
 	//   is the global name of the panel a left click opens, "" for none;
-	// toolbarButtons: {name, icon, label, action, panel, menu, order}.
+	// toolbarButtons: {name, icon, label, action, args, panel, menu, order} —
+	//   `action`, `panel` and every menu entry's action are global names.
 	property var registry: ({barWidgets: [], toolbarButtons: []})
 
 	// The screens, so per-output surfaces can follow them coming and going.
@@ -312,8 +313,12 @@ Item {
 			["barWidgets", contributes.barWidgets],
 			["panels", contributes.panels],
 			["actions", contributes.actions],
-			["toolbarButtons", contributes.toolbarButtons],
 		]
+		// Toolbar buttons are manifest data, not components: they name no
+		// file, so there is nothing to compile — the toolbar that hosts
+		// them skips a button that names none or more than one of action,
+		// panel and menu.
+		var toolbarEntries = contributes.toolbarButtons || []
 		// Compile everything the manifest names first: one file that does
 		// not compile skips the whole plugin, before anything registers.
 		var compiled = []
@@ -386,23 +391,31 @@ Item {
 				panels.register(plugin.id + "/" + e.id, instance)
 			} else if (kind === "actions") {
 				actions.register(plugin.id + "/" + e.id, piece, plugin.api)
-			} else if (kind === "toolbarButtons") {
-				pluginButtons.push({
-					name: plugin.id + "/" + e.id,
-					icon: e.icon || "",
-					label: e.label || "",
-					action: e.action ? plugin.id + "/" + e.action : "",
-					panel: e.panel ? plugin.id + "/" + e.panel : "",
-					menu: e.menu || [],
-					order: e.order || 0,
-				})
 			}
 		}
-		if (problem !== "") {
-			skip(plugin.dir, problem)
-			continue
-		}
-		kept.push(plugin)
+	// The toolbar buttons, straight from the manifest data.
+	for (var t = 0; t < toolbarEntries.length; t++) {
+		var b = toolbarEntries[t]
+		pluginButtons.push({
+			name: plugin.id + "/" + (b.id || "?"),
+			icon: b.icon || "",
+			label: b.label || "",
+			action: b.action ? plugin.id + "/" + b.action : "",
+			panel: b.panel ? plugin.id + "/" + b.panel : "",
+			menu: (b.menu || []).map(function(entry) {
+				return Object.assign({}, entry, {
+					action: entry.action ? plugin.id + "/" + entry.action : ""
+				})
+			}),
+			args: b.args,
+			order: b.order || 0,
+		})
+	}
+	if (problem !== "") {
+		skip(plugin.dir, problem)
+		continue
+	}
+	kept.push(plugin)
 		widgets = widgets.concat(pluginWidgets)
 		buttons = buttons.concat(pluginButtons)
 		surfaces = surfaces.concat(pluginSurfaces)

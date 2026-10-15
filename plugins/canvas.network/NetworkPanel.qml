@@ -123,8 +123,8 @@ PanelCard {
 			required property var modelData
 			readonly property var network: modelData
 			glyph: root.model ? root.model.wifiGlyph(root.model.percent(network)) : ""
-			label: network.name !== "" ? network.name : "Hidden network"
 			marked: network.connected
+			selected: network === root.selected
 			onClicked: root.select(network)
 
 			Text {

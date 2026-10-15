@@ -27,6 +27,7 @@ namespace {
 std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0, views_before = 0;
+bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
 wlr_pointer ptr{};
@@ -213,6 +214,7 @@ int run_step() {
 		check(mapped() == views_before + 1, "the custom entry opened foot (window mapped)");
 		return 0;
 	default:
+		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
 		return -1;
@@ -288,6 +290,11 @@ int main() {
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display);
+	// A compositor that stops by itself (its own shutdown, a lost backend)
+	// ends the run early: without this the scenario would still exit 0.
+	if (!finished) {
+		check(false, std::format("the run ended at step {}, before its last step", step));
+	}
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);

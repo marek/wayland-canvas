@@ -21,6 +21,7 @@
 				"id": "note",
 				"icon": "\uf249",
 				"label": "Note",
+				"order": 3,
 				"menu": [
 					{
 						"label": "Yellow",
