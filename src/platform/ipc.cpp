@@ -6,6 +6,7 @@
 #include <cstring>
 #include <expected>
 #include <format>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,6 +16,7 @@
 #include <json-glib/json-glib.h>
 
 #include "canvas/desktop.h"
+#include "canvas/items.h"
 #include "core/config.h"
 #include "core/theme.h"
 #include "platform/ipc.h"
@@ -136,6 +138,70 @@ std::string event_line(std::string_view name, std::string_view params) {
 	return out;
 }
 
+// ------------------------------------------------------------- params
+
+// A string param: nullopt when absent; an error naming it when not one.
+std::expected<std::optional<std::string>, std::string> opt_string(
+		JsonObject *params, const char *name) {
+	if (params == nullptr || !json_object_has_member(params, name)) {
+		return std::optional<std::string>{};
+	}
+	JsonNode *node = json_object_get_member(params, name);
+	if (json_node_get_node_type(node) != JSON_NODE_VALUE
+			|| json_node_get_value_type(node) != G_TYPE_STRING) {
+		return std::unexpected(std::format("params: {} must be a string", name));
+	}
+	return std::optional{std::string{json_node_get_string(node)}};
+}
+
+// A whole-number param: nullopt when absent; an error naming it when not one.
+std::expected<std::optional<long long>, std::string> opt_int(
+		JsonObject *params, const char *name) {
+	if (params == nullptr || !json_object_has_member(params, name)) {
+		return std::optional<long long>{};
+	}
+	JsonNode *node = json_object_get_member(params, name);
+	if (json_node_get_node_type(node) != JSON_NODE_VALUE
+			|| json_node_get_value_type(node) != G_TYPE_INT64) {
+		return std::unexpected(std::format("params: {} must be a whole number", name));
+	}
+	return std::optional{json_node_get_int(node)};
+}
+
+// "#rrggbb" as 0xRRGGBBAA; nullopt when it is not that shape.
+std::optional<uint32_t> parse_color(std::string_view text) {
+	auto hex = [](char ch) -> std::optional<uint32_t> {
+		if (ch >= '0' && ch <= '9') {
+			return static_cast<uint32_t>(ch - '0');
+		}
+		if (ch >= 'a' && ch <= 'f') {
+			return static_cast<uint32_t>(ch - 'a' + 10);
+		}
+		if (ch >= 'A' && ch <= 'F') {
+			return static_cast<uint32_t>(ch - 'A' + 10);
+		}
+		return std::nullopt;
+	};
+	if (text.size() != 7 || text.front() != '#') {
+		return std::nullopt;
+	}
+	uint32_t rgb = 0;
+	for (std::size_t i = 1; i < text.size(); i++) {
+		std::optional<uint32_t> digit = hex(text[i]);
+		if (!digit.has_value()) {
+			return std::nullopt;
+		}
+		rgb = rgb << 4 | *digit;
+	}
+	return rgb << 8 | 0xffu;
+}
+
+// A colour as "#rrggbb": what item.set was given.
+std::string color_text(uint32_t rgba) {
+	return std::format("#{:02x}{:02x}{:02x}",
+		(rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff);
+}
+
 // -------------------------------------------------------- state as JSON
 
 std::string_view theme_name(ThemeMode mode) {
@@ -189,6 +255,36 @@ void add_desktops_array(JsonBuilder *builder, Server &server) {
 		json_builder_set_member_name(builder, "height");
 		json_builder_add_int_value(builder, frame.height);
 		json_builder_end_object(builder);
+	}
+	json_builder_end_array(builder);
+}
+void add_item(JsonBuilder *builder, const Item &item) {
+	std::string id = item.id; // NUL-terminated for the C API
+	std::string color = color_text(item.color);
+	std::string text = item.text;
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "id");
+	json_builder_add_string_value(builder, id.c_str());
+	json_builder_set_member_name(builder, "color");
+	json_builder_add_string_value(builder, color.c_str());
+	json_builder_set_member_name(builder, "text");
+	json_builder_add_string_value(builder, text.c_str());
+	json_builder_set_member_name(builder, "x");
+	json_builder_add_int_value(builder, item.x);
+	json_builder_set_member_name(builder, "y");
+	json_builder_add_int_value(builder, item.y);
+	json_builder_set_member_name(builder, "width");
+	json_builder_add_int_value(builder, item.width);
+	json_builder_set_member_name(builder, "height");
+	json_builder_add_int_value(builder, item.height);
+	json_builder_end_object(builder);
+}
+
+void add_items_array(JsonBuilder *builder, Server &server) {
+	json_builder_set_member_name(builder, "items");
+	json_builder_begin_array(builder);
+	for (const Item &item : server.items.all()) {
+		add_item(builder, item);
 	}
 	json_builder_end_array(builder);
 }
@@ -443,8 +539,7 @@ void Ipc::handle_line(Client &client, std::string_view line) {
 
 std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::string_view name, JsonObject *params) {
-	// The protocol's method table; the canvas-items slice adds item.set and
-	// item.remove rows here.
+	// The protocol's method table.
 	constexpr std::array table = {
 		std::pair{std::string_view{"state"}, &Ipc::m_state},
 		std::pair{std::string_view{"subscribe"}, &Ipc::m_subscribe},
@@ -452,6 +547,8 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"overview.toggle"}, &Ipc::m_overview_toggle},
 		std::pair{std::string_view{"quit"}, &Ipc::m_quit},
 		std::pair{std::string_view{"theme.set"}, &Ipc::m_theme_set},
+		std::pair{std::string_view{"item.set"}, &Ipc::m_item_set},
+		std::pair{std::string_view{"item.remove"}, &Ipc::m_item_remove},
 	};
 	for (const auto &[method, run] : table) {
 		if (method == name) {
@@ -465,6 +562,7 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 	return object_text([&](JsonBuilder *builder) {
 		add_outputs_array(builder, server_);
 		add_desktops_array(builder, server_);
+		add_items_array(builder, server_);
 		json_builder_set_member_name(builder, "theme");
 		std::string mode = std::string{theme_name(server_.theme.mode())};
 		json_builder_add_string_value(builder, mode.c_str());
@@ -551,6 +649,135 @@ std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *p
 	return std::string{"true"};
 }
 
+std::expected<std::string, std::string> Ipc::m_item_set(Client &, JsonObject *params) {
+	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
+	if (!id.has_value()) {
+		return std::unexpected(id.error());
+	}
+	if (!id->has_value() || (*id)->empty()) {
+		return std::unexpected(std::string{"params: id must be a non-empty string"});
+	}
+
+	std::expected<std::optional<std::string>, std::string> color =
+		opt_string(params, "color");
+	if (!color.has_value()) {
+		return std::unexpected(color.error());
+	}
+	std::optional<uint32_t> color_value;
+	if (color->has_value()) {
+		color_value = parse_color(**color);
+		if (!color_value.has_value()) {
+			return std::unexpected(std::format(
+				"params: color must be #rrggbb, not '{}'", **color));
+		}
+	}
+
+	std::expected<std::optional<std::string>, std::string> text =
+		opt_string(params, "text");
+	if (!text.has_value()) {
+		return std::unexpected(text.error());
+	}
+
+	// A dimension: positive and int-sized, or an error naming it.
+	auto dimension = [](std::string_view name,
+			const std::expected<std::optional<long long>, std::string> &value)
+			-> std::expected<std::optional<int>, std::string> {
+		if (!value.has_value()) {
+			return std::unexpected(value.error());
+		}
+		if (!value->has_value()) {
+			return std::optional<int>{};
+		}
+		if (*value < 1 || *value > std::numeric_limits<int>::max()) {
+			return std::unexpected(std::format("params: {} must be a positive size", name));
+		}
+		return std::optional<int>{static_cast<int>(**value)};
+	};
+	// A canvas coordinate: int-sized, or an error naming it.
+	auto coordinate = [](std::string_view name,
+			const std::expected<std::optional<long long>, std::string> &value)
+			-> std::expected<std::optional<int>, std::string> {
+		if (!value.has_value()) {
+			return std::unexpected(value.error());
+		}
+		if (!value->has_value()) {
+			return std::optional<int>{};
+		}
+		if (*value < std::numeric_limits<int>::min()
+				|| *value > std::numeric_limits<int>::max()) {
+			return std::unexpected(std::format("params: {} is too far out", name));
+		}
+		return std::optional<int>{static_cast<int>(**value)};
+	};
+
+	std::expected<std::optional<long long>, std::string> width = opt_int(params, "width");
+	std::expected<std::optional<long long>, std::string> height =
+		opt_int(params, "height");
+	std::expected<std::optional<long long>, std::string> x = opt_int(params, "x");
+	std::expected<std::optional<long long>, std::string> y = opt_int(params, "y");
+	std::expected<std::optional<int>, std::string> w = dimension("width", width);
+	if (!w.has_value()) {
+		return std::unexpected(w.error());
+	}
+	std::expected<std::optional<int>, std::string> h = dimension("height", height);
+	if (!h.has_value()) {
+		return std::unexpected(h.error());
+	}
+	std::expected<std::optional<int>, std::string> px = coordinate("x", x);
+	if (!px.has_value()) {
+		return std::unexpected(px.error());
+	}
+	std::expected<std::optional<int>, std::string> py = coordinate("y", y);
+	if (!py.has_value()) {
+		return std::unexpected(py.error());
+	}
+
+	if (server_.items.find(**id) == nullptr && (!color_value.has_value()
+			|| !text->has_value() || !w->has_value() || !h->has_value())) {
+		return std::unexpected(std::string{
+			"params: item.set needs color, text, width and height to create an item"});
+	}
+
+	ItemUpdate update{
+		.color = color_value,
+		.text = *text,
+		.width = *w,
+		.height = *h,
+	};
+	Item *item = server_.items.set(**id, update, *px, *py);
+	if (item == nullptr) {
+		return std::unexpected(
+			std::string{"no output under the cursor to place the item"});
+	}
+	std::string id_text = item->id;
+	return object_text([&](JsonBuilder *builder) {
+		json_builder_set_member_name(builder, "id");
+		json_builder_add_string_value(builder, id_text.c_str());
+		json_builder_set_member_name(builder, "x");
+		json_builder_add_int_value(builder, item->x);
+		json_builder_set_member_name(builder, "y");
+		json_builder_add_int_value(builder, item->y);
+		json_builder_set_member_name(builder, "width");
+		json_builder_add_int_value(builder, item->width);
+		json_builder_set_member_name(builder, "height");
+		json_builder_add_int_value(builder, item->height);
+	});
+}
+
+std::expected<std::string, std::string> Ipc::m_item_remove(Client &, JsonObject *params) {
+	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
+	if (!id.has_value()) {
+		return std::unexpected(id.error());
+	}
+	if (!id->has_value() || (*id)->empty()) {
+		return std::unexpected(std::string{"params: id must be a non-empty string"});
+	}
+	if (!server_.items.remove(**id)) {
+		return std::unexpected(std::format("unknown item id '{}'", **id));
+	}
+	return std::string{"true"};
+}
+
 // --------------------------------------------------------------- writing
 
 void Ipc::queue(Client &client, std::string_view line) {
@@ -579,9 +806,6 @@ void Ipc::flush(Client &client) {
 		} else {
 			break; // EAGAIN or a dead peer: the queue keeps the rest
 		}
-	}
-	if (done > 0) {
-		client.outbuf.erase(0, done);
 	}
 	uint32_t mask = WL_EVENT_READABLE;
 	if (!client.outbuf.empty()) {
@@ -654,6 +878,42 @@ void Ipc::emit_theme() {
 	push_event("theme", object_text([&](JsonBuilder *builder) {
 		json_builder_set_member_name(builder, "mode");
 		json_builder_add_string_value(builder, mode.c_str());
+	}));
+}
+
+void Ipc::emit_item_moved(const Item &item) {
+	std::string id = item.id;
+	push_event("item.moved", object_text([&](JsonBuilder *builder) {
+		json_builder_set_member_name(builder, "id");
+		json_builder_add_string_value(builder, id.c_str());
+		json_builder_set_member_name(builder, "x");
+		json_builder_add_int_value(builder, item.x);
+		json_builder_set_member_name(builder, "y");
+		json_builder_add_int_value(builder, item.y);
+	}));
+}
+
+void Ipc::emit_item_activated(const Item &item, const Output &output) {
+	std::string id = item.id;
+	std::string name = output.wlr->name;
+	Point top_left = output.canvas_to_local(item.x, item.y);
+	double zoom = output.camera.drawn().zoom;
+	push_event("item.activated", object_text([&](JsonBuilder *builder) {
+		json_builder_set_member_name(builder, "id");
+		json_builder_add_string_value(builder, id.c_str());
+		json_builder_set_member_name(builder, "output");
+		json_builder_add_string_value(builder, name.c_str());
+		json_builder_set_member_name(builder, "box");
+		json_builder_begin_object(builder);
+		json_builder_set_member_name(builder, "x");
+		json_builder_add_double_value(builder, top_left.x);
+		json_builder_set_member_name(builder, "y");
+		json_builder_add_double_value(builder, top_left.y);
+		json_builder_set_member_name(builder, "width");
+		json_builder_add_double_value(builder, item.width * zoom);
+		json_builder_set_member_name(builder, "height");
+		json_builder_add_double_value(builder, item.height * zoom);
+		json_builder_end_object(builder);
 	}));
 }
 
