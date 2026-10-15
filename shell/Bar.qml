@@ -66,7 +66,7 @@ PanelWindow {
 			Audio {
 				theme: theme
 			}
-			Monitor {
+			Brightness {
 				theme: theme
 			}
 			Power {

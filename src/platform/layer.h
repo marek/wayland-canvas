@@ -19,6 +19,10 @@ public:
 	wlr_box geo{}; // output-local logical
 	bool mapped = false;
 
+	// Keyboard interactivity, as the client last committed it.
+	bool wants_keyboard() const;
+	bool holds_keyboard_exclusively() const;
+
 private:
 	void handle_map();
 	void handle_unmap();

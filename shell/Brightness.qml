@@ -1,9 +1,10 @@
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import "."
 
-// Monitor: screen count as the glyph; the wheel steps backlight brightness
-// by 5 % through brightnessctl. Hidden without a controllable backlight.
+// Brightness: the display glyph; the wheel steps the backlight by 5 %, the
+// click opens the slider panel. Hidden without a controllable backlight.
 BarButton {
 	id: root
 
@@ -37,12 +38,31 @@ BarButton {
 	Component.onCompleted: readBrightness.running = true
 
 	onWheeled: function(delta) {
+		apply(percent + (delta > 0 ? 5 : -5))
+	}
+
+	onPressed: function(button) {
+		if (button === Qt.LeftButton) {
+			Panels.toggle(panel)
+		}
+	}
+
+	BrightnessPanel {
+		id: panel
+		theme: root.theme
+		anchorItem: root
+		model: root
+	}
+
+	// A step from the wheel or the panel slider. --min-value=1: the screen
+	// never blacks out entirely.
+	function apply(pct) {
 		if (!hasBacklight) {
 			return
 		}
-		// --min-value=1: a wheel step never blacks the screen out entirely.
+		pct = Math.max(1, Math.min(100, Math.round(pct)))
 		setBrightness.command = ["brightnessctl", "--class=backlight", "--min-value=1",
-			"set", delta > 0 ? "5%+" : "5%-"]
+			"set", pct + "%"]
 		setBrightness.running = true
 	}
 

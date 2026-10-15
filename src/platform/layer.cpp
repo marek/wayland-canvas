@@ -123,11 +123,32 @@ LayerSurface::LayerSurface(Server &server, Output &output, wlr_layer_surface_v1 
 
 LayerSurface::~LayerSurface() = default;
 
+bool LayerSurface::wants_keyboard() const {
+	return wlr->current.keyboard_interactive != ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+}
+
+bool LayerSurface::holds_keyboard_exclusively() const {
+	return wlr->current.keyboard_interactive
+		== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
+}
+
 void LayerSurface::handle_map() {
 	mapped = true;
 	if (attached_) {
 		// The surface's exclusive zone (if any) takes effect now.
 		output.arrange_layers();
+	}
+	// A surface above the windows that takes keyboard input (a panel, a
+	// launcher) gets the keyboard as it appears, as a new window does,
+	// unless an exclusive surface holds it.
+	zwlr_layer_shell_v1_layer layer = wlr->current.layer;
+	bool above_windows = layer == ZWLR_LAYER_SHELL_V1_LAYER_TOP
+		|| layer == ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+	LayerSurface *holder = server.focused_layer;
+	if (above_windows && wants_keyboard()
+			&& (holder == nullptr || !holder->holds_keyboard_exclusively())) {
+		server.focused_layer = this;
+		server.focus_keyboard(wlr->surface);
 	}
 	server.refocus_layers();
 }
@@ -239,8 +260,7 @@ void Server::refocus_layers() {
 		for (const std::unique_ptr<Output> &output : outputs) {
 			for (const std::unique_ptr<LayerSurface> &layer :
 					output->layers[layer_order[i]]) {
-				if (!layer->mapped || layer->wlr->current.keyboard_interactive !=
-						ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+				if (!layer->mapped || !layer->holds_keyboard_exclusively()) {
 					continue;
 				}
 				focused_layer = layer.get();
@@ -252,7 +272,8 @@ void Server::refocus_layers() {
 
 	LayerSurface *focused = focused_layer;
 	if (focused == nullptr || focused->mapped) {
-		// A still-mapped ON_DEMAND surface keeps its click focus.
+		// A still-mapped on-demand surface keeps the keyboard it got on
+		// map or by a click.
 		return;
 	}
 	focused_layer = nullptr;

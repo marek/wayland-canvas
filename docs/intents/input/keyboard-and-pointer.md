@@ -28,6 +28,10 @@ reach the client. A lone tap of Super opens the app launcher.
   Super+Ctrl+D, Super+Ctrl+F4), so the habits transfer.
 - **Click-to-focus with raise** is the Windows pointer model the title
   bars belong to ([../windows/title-bars.md](../windows/title-bars.md)).
+- **A shell surface that takes typing gets the keyboard as it appears**
+  (a panel, a launcher): what a click opened is typed into at once, and
+  Escape closes it, without a second click. Focusing a window takes the
+  keyboard back; a lock screen's exclusive claim beats both.
 
 ## Behavior
 
@@ -70,6 +74,15 @@ reach the client. A lone tap of Super opens the app launcher.
 | Drag or scroll on empty canvas | Pans ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Scroll over a client | Scrolls the client |
 | In the overview | Pointer actions are [../canvas/overview.md](../canvas/overview.md)'s |
+
+### Keyboard focus
+
+| Holder | Rule |
+|---|---|
+| The focused window | Has the keyboard unless a shell surface above the windows holds it |
+| A shell surface on the top or overlay layer asking for the keyboard on demand | Gets it when it appears and when it is clicked; gives it back to the focused window when it goes or a window is focused |
+| A shell surface asking for the keyboard exclusively | Holds it while mapped, the topmost first; windows and on-demand surfaces cannot take it |
+| No keyboard connected yet | Focus is assigned all the same; the first keyboard to connect types into it |
 
 ### Devices
 

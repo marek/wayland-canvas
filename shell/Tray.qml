@@ -2,15 +2,21 @@ import Quickshell
 import Quickshell.Services.SystemTray
 import Quickshell.Widgets
 import QtQuick
+import "."
 
 // The system tray: one icon per status-notifier item; left activates, right
-// secondary-activates. Hidden when the tray is empty.
+// opens the item's own menu. Hidden when the tray is empty.
 Row {
 	id: root
 
 	property var theme: null
 	spacing: 0
 	visible: SystemTray.items.values.length > 0
+
+	TrayMenu {
+		id: menuPanel
+		theme: root.theme
+	}
 
 	Repeater {
 		model: SystemTray.items
@@ -37,7 +43,11 @@ Row {
 				acceptedButtons: Qt.LeftButton | Qt.RightButton
 				onClicked: function(mouse) {
 					if (mouse.button === Qt.RightButton) {
-						item.entry.secondaryActivate()
+						if (item.entry.hasMenu) {
+							menuPanel.showFor(item.entry, item)
+						} else {
+							item.entry.secondaryActivate()
+						}
 					} else {
 						item.entry.activate()
 					}

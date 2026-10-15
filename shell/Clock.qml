@@ -1,7 +1,9 @@
 import Quickshell
 import QtQuick
+import "."
 
-// The clock: `dddd HH:mm`; right-click cycles to the ISO-week date form.
+// The clock: `dddd HH:mm`; right-click cycles to the ISO-week date form, the
+// click opens the calendar.
 BarButton {
 	id: root
 
@@ -21,7 +23,16 @@ BarButton {
 	onPressed: function(button) {
 		if (button === Qt.RightButton) {
 			root.alt = !root.alt
+		} else {
+			Panels.toggle(panel)
 		}
+	}
+
+	ClockPanel {
+		id: panel
+		theme: root.theme
+		anchorItem: root
+		model: root
 	}
 
 	// ISO-8601 week number, the `ww` Qt.formatDateTime does not know.

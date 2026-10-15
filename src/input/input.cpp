@@ -519,10 +519,16 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	if (hit.surface != nullptr) {
 		if (hit.view != nullptr) {
 			server.focus_view(hit.view);
-		} else if (hit.layer != nullptr && hit.layer->wlr->current
-				.keyboard_interactive
-				!= ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE) {
-			server.focus_keyboard(hit.surface);
+		} else if (hit.layer != nullptr && hit.layer->wants_keyboard()) {
+			// Recorded as the holder, so the keyboard goes back to the
+			// window when the surface goes; an exclusive holder elsewhere
+			// keeps it.
+			LayerSurface *holder = server.focused_layer;
+			if (holder == nullptr || holder == hit.layer
+					|| !holder->holds_keyboard_exclusively()) {
+				server.focused_layer = hit.layer;
+				server.focus_keyboard(hit.surface);
+			}
 		}
 		forward_press(time, button);
 		return;

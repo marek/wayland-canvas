@@ -16,4 +16,13 @@ QtObject {
 	readonly property int iconSlot: 27
 	readonly property int iconSize: 16
 	readonly property int edgeMargin: 8
+
+	// Panels: fixed row and section metrics, so a panel's layout (and the
+	// geometry its scenario tests rely on) does not drift with the font.
+	readonly property int panelPadding: 10
+	readonly property int panelSpacing: 6
+	readonly property int rowHeight: 32
+	readonly property int sectionHeight: 18
+	readonly property int detailHeight: 14
+	readonly property color hover: Qt.rgba(1, 1, 1, 0.08)
 }

@@ -1,9 +1,9 @@
 import Quickshell.Bluetooth
-import Quickshell.Io
 import QtQuick
+import "."
 
-// Bluetooth: radio state, connected mark while a device holds a link.
-// Left opens bluetoothctl in the terminal, right toggles the radio.
+// Bluetooth: radio state, connected mark while a device holds a link. Left
+// opens the panel (power, scan, devices); right still flips the radio.
 // Hidden without an adapter.
 BarButton {
 	id: root
@@ -16,20 +16,19 @@ BarButton {
 	visible: adapter != null
 	text: !radioOn ? "󰂲" : (linked ? "󰂱" : "󰂯")
 
-	Process {
-		id: terminal
-		command: ["/bin/sh", "-c",
-			"if command -v xdg-terminal-exec >/dev/null 2>&1; " +
-			"then exec xdg-terminal-exec -- \"$@\"; else exec foot -e \"$@\"; fi",
-			"tui", "bluetoothctl"]
-	}
-
 	onPressed: function(button) {
 		if (button === Qt.RightButton) {
 			adapter.enabled = !adapter.enabled
 		} else {
-			terminal.running = true
+			Panels.toggle(panel)
 		}
+	}
+
+	BluetoothPanel {
+		id: panel
+		theme: root.theme
+		anchorItem: root
+		model: root
 	}
 
 	function anyConnected() {

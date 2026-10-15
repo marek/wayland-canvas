@@ -1,20 +1,26 @@
 import Quickshell.Services.Pipewire
 import QtQuick
+import "."
 
-// Audio: the default sink, crossed out when muted. Left toggles mute; the
-// wheel steps the volume by 5 %.
+// Audio: the default sink, crossed out when muted. Left opens the panel
+// (volume, mute, output device); the wheel still steps the volume by 5 %.
 BarButton {
 	id: root
 
 	readonly property var sink: Pipewire.defaultAudioSink
 	readonly property bool muted: sink != null && sink.audio != null && sink.audio.muted
 
+	// The sink's volume and mute are filled in only while it is bound.
+	PwObjectTracker {
+		objects: root.sink ? [root.sink] : []
+	}
+
 	icon: true
 	text: muted ? "\ueee8" : sinkGlyph()
 
 	onPressed: function(button) {
-		if (button === Qt.LeftButton && sink != null && sink.audio != null) {
-			sink.audio.muted = !sink.audio.muted
+		if (button === Qt.LeftButton) {
+			Panels.toggle(panel)
 		}
 	}
 
@@ -24,6 +30,12 @@ BarButton {
 		}
 		var volume = sink.audio.volume + Math.round(delta / 120) * 0.05
 		sink.audio.volume = Math.max(0, Math.min(1, volume))
+	}
+
+	AudioPanel {
+		id: panel
+		theme: root.theme
+		anchorItem: root
 	}
 
 	// The sink's own glyph, by how it describes itself.

@@ -851,26 +851,32 @@ View *Server::last_minimized_view() {
 
 void Server::focus_view(View *view) {
 	View *prev = focused_view;
-	if (prev == view) {
-		return;
-	}
-	if (prev != nullptr) {
-		wlr_xdg_toplevel_set_activated(prev->wlr, false);
-		if (prev->foreign_) {
-			wlr_foreign_toplevel_handle_v1_set_activated(prev->foreign_.get(), false);
+	if (prev != view) {
+		if (prev != nullptr) {
+			wlr_xdg_toplevel_set_activated(prev->wlr, false);
+			if (prev->foreign_) {
+				wlr_foreign_toplevel_handle_v1_set_activated(prev->foreign_.get(), false);
+			}
+			prev->damage();
 		}
-		prev->damage();
-	}
-	focused_view = view;
-	if (view != nullptr) {
-		// Raise to the top of the stacking order.
-		std::erase(views, view);
-		views.insert(views.begin(), view);
-		wlr_xdg_toplevel_set_activated(view->wlr, true);
-		if (view->foreign_) {
-			wlr_foreign_toplevel_handle_v1_set_activated(view->foreign_.get(), true);
+		focused_view = view;
+		if (view != nullptr) {
+			// Raise to the top of the stacking order.
+			std::erase(views, view);
+			views.insert(views.begin(), view);
+			wlr_xdg_toplevel_set_activated(view->wlr, true);
+			if (view->foreign_) {
+				wlr_foreign_toplevel_handle_v1_set_activated(view->foreign_.get(), true);
+			}
+			view->damage();
 		}
-		view->damage();
+	}
+	// The keyboard follows the focused window. An exclusive layer surface
+	// (a lock screen) keeps it; an on-demand one (a panel) gives it up to a
+	// window being focused, the one already focused behind it included.
+	if (view != nullptr && focused_layer != nullptr
+			&& !focused_layer->holds_keyboard_exclusively()) {
+		focused_layer = nullptr;
 	}
 	if (focused_layer == nullptr) {
 		focus_keyboard(view != nullptr ? view->wlr->base->surface : nullptr);
@@ -882,8 +888,11 @@ void Server::focus_keyboard(wlr_surface *surface) {
 		wlr_seat_keyboard_notify_clear_focus(seat);
 		return;
 	}
+	// With no keyboard yet the focus is still recorded: wlroots enters the
+	// surface once its client binds the first keyboard that appears.
 	wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
 	if (keyboard == nullptr) {
+		wlr_seat_keyboard_notify_enter(seat, surface, nullptr, 0, nullptr);
 		return;
 	}
 	wlr_seat_keyboard_notify_enter(seat, surface,
