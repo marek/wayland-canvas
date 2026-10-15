@@ -18,7 +18,9 @@ A C++26 compiler — LLVM's clang, selected by
 — meson ≥ 1.3 and ninja; the wlroots 0.20 dependencies
 (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat,
 xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
-(decorations, launcher); librsvg and glib (icons).
+(decorations, launcher); librsvg and glib (icons). Optional: `qs`
+(Quickshell) for the autostarted top bar
+([../apps/bar.md](../apps/bar.md)).
 
 ### Build
 
@@ -40,6 +42,9 @@ xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
 | Startup command | `-s <cmd>` | run at startup, for example `-s foot` |
 | Scale | `-S <scale>`, or `$WAYLAND_CANVAS_SCALE` | default by the dpi rule: 2 on dense panels, else 1 ([../render/hidpi.md](../render/hidpi.md)) |
 | Debug | `-d` | debug logging |
+| Without the bar | `-B` | start without the autostarted top bar; the scenario suites always do |
+| Control commands | `wayland-canvas msg <command>` | `launcher`, `overview`, `quit` over `$WAYLAND_CANVAS_SOCKET`
+| Install | `meson install` | the binary and `shell/` (under `share/wayland-canvas/`) |
 
 The terminal binding (`Super+Return`) and `Terminal=true` desktop
 entries run `$TERMINAL`, falling back to `foot`.

@@ -31,7 +31,9 @@ If `wlroots-0.20` isn't installed system-wide, meson fetches 0.20.2 into
   host may swallow 3/4-finger gestures if it binds them itself.
 - Options: `-s <cmd>` startup command, `-S <scale>` output scale (or
   `$WAYLAND_CANVAS_SCALE`; default is 2 on dense panels such as 2880×1800, else 1),
-  `-d` debug logging.
+  `-d` debug logging, `-B` start without the top bar.
+  Control commands to a running compositor: `wayland-canvas msg launcher|overview|quit`
+  over `$WAYLAND_CANVAS_SOCKET` (set for every client it spawns).
 
 The terminal is `$TERMINAL` (falls back to `foot`).
 
@@ -64,6 +66,22 @@ command inside `$TERMINAL`. `Exec` only allows double quotes, so put anything
 shell-heavy in a script, and check files with `desktop-file-validate`. To hide an
 app, put a copy of its `.desktop` file here with `NoDisplay=true`; yours wins over
 the system one.
+
+## Top bar
+
+When `qs` (Quickshell) is on `PATH`, the compositor starts a top bar — a separate
+layer-shell client in `shell/`, one panel per output with an exclusive zone, so a
+maximized window starts below it. It is a dark 26 px bar in the monospace font
+with icon glyphs: the logo button left (click: launcher, right-click: terminal),
+clock and weather centred, and tray, bluetooth, network, audio, monitor
+(brightness on the wheel) and battery right. Widgets without a working source
+hide themselves; there are no workspace numbers. `-B` starts without the bar.
+
+Click actions use standard tools: `nmtui` and `bluetoothctl` open in `$TERMINAL`,
+the audio wheel drives the default sink, the power button opens a
+suspend/restart/power-off/log-out menu. The bar's colours and metrics live in
+`shell/Theme.qml`; its Quickshell config is found beside the compositor binary
+(build tree or install prefix) or at `$WAYLAND_CANVAS_SHELL_DIR`.
 
 ## Concepts
 

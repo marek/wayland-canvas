@@ -13,7 +13,7 @@ wlroots is a meson subproject built from source here.
 
 - [x] Language: C++26 on LLVM under rules of our own (decided by the user)
 - [ ] Scripting language: Lua, JavaScript, or both (the user to decide)
-- [ ] The top bar as a separate layer-shell client, or drawn and scripted inside the compositor (the user to decide)
+- [x] The top bar as a separate layer-shell client, or drawn and scripted inside the compositor (decided: a separate Quickshell client — [2026-10-14-2140-top-bar.md](2026-10-14-2140-top-bar.md))
 
 ## Conversion
 

@@ -33,9 +33,9 @@ their values.
 | [canvas/](canvas/) | The plane, the desktops, the overview |
 | [input/](input/) | Touchpad gestures, keyboard and pointer |
 | [windows/](windows/) | Title bars and window management |
-| [apps/](apps/) | The launcher and desktop entries |
+| [apps/](apps/) | The launcher, desktop entries and the top bar |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
-| [platform/](platform/) | wlroots, protocols, outputs, the C++ standard |
+| [platform/](platform/) | wlroots, protocols, outputs, the C++ standard, the control IPC |
 | [bugs/](bugs/) | Bug case studies — the one place history is told |
 
 ## Docs
@@ -55,12 +55,14 @@ their values.
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |
 | [apps/launcher.md](apps/launcher.md) | Opening, layout, search ranking, keys, pointer, launching, Terminal=true |
 | [apps/desktop-entries.md](apps/desktop-entries.md) | The standard XDG entry as the way to add items, precedence, overrides, TryExec, Exec quoting, icon theme lookup order |
+| [apps/bar.md](apps/bar.md) | The top bar: look, sections, widgets, click actions, autostart |
 | [render/rendering.md](render/rendering.md) | The own renderer and why, repaint policy, frame callbacks, presentation, enter/leave policy, needs_frame |
 | [render/hidpi.md](render/hidpi.md) | Scale choice, crispness, nested 1x |
 | [platform/wlroots.md](platform/wlroots.md) | wlroots as the reference, version, subproject, the listener-balance rule, request_* handlers start the action |
 | [platform/protocols.md](platform/protocols.md) | The supported protocols table: protocol → what it enables / policy |
 | [platform/outputs.md](platform/outputs.md) | Outputs, layout, per-output camera, hotplug, layer-shell usable area |
 | [platform/cpp-standards.md](platform/cpp-standards.md) | What the source looks like: C++26 on clang, listeners and ownership, classes, names |
+| [platform/ipc.md](platform/ipc.md) | The control socket: path, line protocol, commands, the msg client |
 | [bugs/screencopy-never-returned.md](bugs/screencopy-never-returned.md) | grim hung forever: a frame rendered only on own damage, never on needs_frame |
 | [bugs/resize-anchor-lost-on-release.md](bugs/resize-anchor-lost-on-release.md) | Left/top resizes drifting: the client's final commit arrives after the button release |
 | [bugs/grabs-that-never-ended.md](bugs/grabs-that-never-ended.md) | Fake-device tests found pointer grabs that never ended and canvas shortcuts bound without Super |
@@ -76,6 +78,8 @@ their values.
 - **Changing windows or title bars**: windows/title-bars →
   windows/window-management → render/rendering.
 - **Changing the launcher**: apps/launcher → apps/desktop-entries.
+- **Changing the top bar or the control IPC**: apps/bar → platform/ipc →
+  apps/launcher.
 - **Changing rendering**: render/rendering → render/hidpi →
   platform/outputs.
 - **Adding a protocol**: platform/protocols → platform/wlroots →
