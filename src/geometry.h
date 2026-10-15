@@ -1,76 +1,84 @@
-#ifndef CV_GEOMETRY_H
-#define CV_GEOMETRY_H
+#pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
+#include <cstddef>
+#include <optional>
+#include <span>
+#include <vector>
 
-/* Pure canvas math: no wlroots types, unit-tested in tests/test_geometry.c. */
+// Pure canvas math: no wlroots types, unit-tested in tests/test_geometry.cpp.
 
-/* Canvas-space rectangle. */
-struct rect {
-	double x, y, w, h;
+struct Point {
+	double x = 0, y = 0;
+
+	bool operator==(const Point &) const = default;
 };
 
-/* A view onto the canvas: the canvas point shown at the viewport centre and
- * the magnification (1 = one canvas unit per logical pixel). */
-struct camera {
-	double cx, cy, zoom;
+// Canvas-space rectangle.
+struct Rect {
+	double x = 0, y = 0, w = 0, h = 0;
+
+	constexpr double cx() const { return x + w / 2; }
+	constexpr double cy() const { return y + h / 2; }
+	bool contains(double px, double py) const;
+	bool intersects(const Rect &other) const;
+	double overlap_area(const Rect &other) const;
+	Rect united(const Rect &other) const;
+
+	bool operator==(const Rect &) const = default;
 };
 
-static inline double rect_cx(struct rect r) {
-	return r.x + r.w / 2;
+// A view onto the canvas: the canvas point shown at the viewport centre and the
+// magnification (1 = one canvas unit per logical pixel).
+struct Camera {
+	double cx = 0, cy = 0, zoom = 1;
+
+	// Canvas rectangle visible on a vw x vh logical-pixel viewport.
+	Rect viewport(double vw, double vh) const;
+
+	bool operator==(const Camera &) const = default;
+};
+
+// Compass direction: each component -1, 0 or 1.
+struct Compass {
+	int x = 0, y = 0;
+
+	bool operator==(const Compass &) const = default;
+};
+
+// lo wins when hi < lo.
+constexpr double clampd(double v, double lo, double hi) {
+	return v < lo ? lo : (v > hi ? hi : v);
 }
 
-static inline double rect_cy(struct rect r) {
-	return r.y + r.h / 2;
-}
-
-double clampd(double v, double lo, double hi);
 double ease_out_cubic(double t);
 
-bool rect_contains(struct rect r, double x, double y);
-bool rect_intersects(struct rect a, struct rect b);
-double rect_overlap_area(struct rect a, struct rect b);
-struct rect rect_union(struct rect a, struct rect b);
+// Centre moves linearly, zoom geometrically; t in [0, 1]. Used for pans.
+Camera camera_lerp(const Camera &a, const Camera &b, double t);
 
-/* Canvas rectangle visible through `cam` on a vw x vh logical-pixel viewport. */
-struct rect camera_viewport(struct camera cam, double vw, double vh);
+// Zoom transition between a close-up camera `near` (t = 0) and a zoomed-out camera `far`
+// (t = 1). Zoom changes geometrically while the region `near` shows slides linearly on
+// screen from the centre to where `far` displays it, so zooming out visibly shrinks the
+// current screen into its place on the canvas (and zooming in grows the target out of it).
+Camera camera_zoom_path(const Camera &near, const Camera &far, double t);
 
-/* Centre moves linearly, zoom geometrically; t in [0, 1]. Used for pans. */
-struct camera camera_lerp(struct camera a, struct camera b, double t);
+// Largest zoom (at most max_zoom) that shows all of `content` inside a vw x vh viewport
+// with `margin` logical pixels free on every side.
+double fit_zoom(const Rect &content, double vw, double vh, double margin, double max_zoom);
 
-/*
- * Zoom transition between a close-up camera `near` (t = 0) and a zoomed-out
- * camera `far` (t = 1). Zoom changes geometrically while the region `near`
- * shows slides linearly on screen from the centre to where `far` displays it,
- * so zooming out visibly shrinks the current screen into its place on the
- * canvas (and zooming in grows the target out of it).
- */
-struct camera camera_zoom_path(struct camera near, struct camera far, double t);
+// The candidate closest to (ox, oy) in direction (dx, dy): its centre must lie within
+// max_angle_deg of the direction, and distance off-axis is penalised so the most "straight
+// ahead" neighbour wins over a slightly nearer diagonal one. `exclude` is skipped.
+std::optional<std::size_t> nav_pick_direction(double ox, double oy, double dx, double dy,
+	std::span<const Rect> candidates, std::optional<std::size_t> exclude,
+	double max_angle_deg);
 
-/* Largest zoom (at most max_zoom) that shows all of `content` inside a
- * vw x vh viewport with `margin` logical pixels free on every side. */
-double fit_zoom(struct rect content, double vw, double vh, double margin, double max_zoom);
+// Snaps a direction to one of the 8 compass directions.
+Compass nav_quantize_direction(double dx, double dy);
 
-/*
- * Picks the candidate closest to (ox, oy) in direction (dx, dy): its centre
- * must lie within max_angle_deg of the direction; distance off-axis is
- * penalised so the most "straight ahead" neighbour wins over a slightly
- * nearer diagonal one. Index `exclude` is skipped (pass -1 for none).
- * Returns -1 if nothing lies in that direction.
- */
-int nav_pick_direction(double ox, double oy, double dx, double dy,
-	const struct rect *cands, size_t n, int exclude, double max_angle_deg);
+// Grid of n cells filling `area`, `gap` between and around cells. Row-major; the last
+// row's cells widen to fill the row.
+std::vector<Rect> tile_layout(const Rect &area, std::size_t n, double gap);
 
-/* Snaps a direction to one of the 8 compass directions (components -1/0/1). */
-void nav_quantize_direction(double dx, double dy, int *qx, int *qy);
-
-/* Grid of n cells filling `area`, `gap` between and around cells. Row-major;
- * the last row's cells widen to fill the row. */
-void tile_layout(struct rect area, size_t n, double gap, struct rect *out);
-
-/* Orders frames for tile_layout: rows (frame centres banded by `band` canvas
- * units) top to bottom, left to right within a row. Writes indices to order. */
-void tile_order(const struct rect *frames, size_t n, double band, size_t *order);
-
-#endif
+// Order of frames for tile_layout: rows (frame centres banded by `band` canvas units)
+// top to bottom, left to right within a row. Returns indices into `frames`.
+std::vector<std::size_t> tile_order(std::span<const Rect> frames, double band);

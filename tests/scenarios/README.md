@@ -1,7 +1,7 @@
 # Scenario tests
 
 Each scenario runs the **real compositor in-process** on the wlroots headless
-backend (`server_init`/`server_start`), spawns real `foot` clients, drives
+backend (`Server::init`/`Server::start`), spawns real `foot` clients, drives
 input, and takes `grim` screenshots. Every check prints a PASS/FAIL line; the
 scenario exits non-zero if any check failed. Scenarios run serially
 (`is_parallel: false`, 180 s timeout) because they each own the machine's
@@ -9,7 +9,7 @@ Wayland display namespace and GPU.
 
 ## What each scenario proves
 
-- **`gestures.c`** — touchpad gesture semantics through the `gesture_*()`
+- **`gestures.cpp`** — touchpad gesture semantics through the `Gesture`
   entry points (the same ones the libinput listeners call): mapping three
   foot windows, title-bar button hit-testing, maximize, 3-finger panning with
   momentum, pinning a free area as a desktop, moving a window between
@@ -17,7 +17,7 @@ Wayland display namespace and GPU.
   spot), pinch-out tiling, pinch-in combining, overview desktop
   create/abandon, minimize/restore via the shelf, landing on empty canvas,
   and the keyboard desktop-direction jump.
-- **`input.c`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
+- **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
   buttons (incl. hover highlighting), anchored corner resize, Super+Return
@@ -25,11 +25,11 @@ Wayland display namespace and GPU.
   swipe events delivered by a device, right-click desktop creation, tab-drag
   combining, frame-vs-window drag, the tab Tile button, and clicking empty
   canvas to land on a free area.
-- **`launcher.c`** — the app launcher: logo-key tap opens, panel renders,
+- **`launcher.cpp`** — the app launcher: logo-key tap opens, panel renders,
   search filters, Enter and result-click launch foot and close the launcher,
   logo-as-modifier does not open it, Escape and outside-click close it,
   no-match queries, and a custom desktop entry installed into
-  `$XDG_DATA_HOME/applications` before `server_init`: found by typing its
+  `$XDG_DATA_HOME/applications` before `Server::init`: found by typing its
   name, launched with Enter, and verified by the marker file its spec-quoted
   `Exec` touches plus the foot window it opens.
 

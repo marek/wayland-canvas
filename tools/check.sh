@@ -36,9 +36,13 @@ if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; the
 	fi
 fi
 
+native=(--native-file toolchain/llvm.ini)
 if [[ ! -d build ]]; then
-	echo "check.sh: meson setup build"
-	meson setup build
+	echo "check.sh: meson setup build ${native[*]}"
+	meson setup build "${native[@]}"
+elif meson introspect build --compilers 2>/dev/null | grep -q '"id": "gcc"'; then
+	echo "check.sh: build/ was configured with GCC; meson setup --wipe build ${native[*]}"
+	meson setup --wipe build "${native[@]}"
 fi
 
 echo "check.sh: meson compile -C build"

@@ -1,10 +1,12 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
-#include <wlr/util/log.h>
+
 #include "server.h"
 
-static const char usage_text[] =
+namespace {
+
+constexpr char usage_text[] =
 	"usage: wayland-canvas [-s <startup command>] [-S <scale>] [-d] [-h]\n"
 	"\n"
 	"An infinite-canvas Wayland compositor: virtual desktops are dashed\n"
@@ -30,18 +32,20 @@ static const char usage_text[] =
 	"    4-finger swipe sideways  swipe a desktop away (abandon it)\n"
 	"    2-finger pinch     zoom the overview around the cursor\n"
 	"\n"
-	"See the keyboard bindings in src/config.h and src/input.c.\n";
+	"See the keyboard bindings in src/config.h and src/input.cpp.\n";
+
+} // namespace
 
 int main(int argc, char *argv[]) {
-	struct cv_options options = {0};
+	Options options;
 	bool debug = false;
 	double scale = 0;
 	bool have_scale = false;
 
 	// The environment variable is the default; -S overrides it.
 	const char *scale_env = getenv("WAYLAND_CANVAS_SCALE");
-	if (scale_env != NULL) {
-		scale = strtod(scale_env, NULL);
+	if (scale_env != nullptr) {
+		scale = strtod(scale_env, nullptr);
 		have_scale = scale > 0;
 	}
 
@@ -52,17 +56,17 @@ int main(int argc, char *argv[]) {
 			options.startup_cmd = optarg;
 			break;
 		case 'S':
-			scale = strtod(optarg, NULL);
+			scale = strtod(optarg, nullptr);
 			have_scale = scale > 0;
 			break;
 		case 'd':
 			debug = true;
 			break;
 		case 'h':
-			fputs(usage_text, stdout);
+			std::fputs(usage_text, stdout);
 			return 0;
 		default:
-			fputs(usage_text, stderr);
+			std::fputs(usage_text, stderr);
 			return 1;
 		}
 	}
@@ -70,19 +74,17 @@ int main(int argc, char *argv[]) {
 		options.scale = scale;
 	}
 
-	wlr_log_init(debug ? WLR_DEBUG : WLR_INFO, NULL);
+	wlr_log_init(debug ? WLR_DEBUG : WLR_INFO, nullptr);
 
-	struct cv_server server = {0};
-	if (!server_init(&server, &options)) {
+	Server server;
+	if (!server.init(options)) {
 		wlr_log(WLR_ERROR, "failed to initialize the server");
 		return 1;
 	}
-	if (!server_start(&server)) {
-		server_finish(&server);
+	if (!server.start()) {
 		return 1;
 	}
 
 	wl_display_run(server.display);
-	server_finish(&server);
 	return 0;
 }

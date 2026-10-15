@@ -17,7 +17,7 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        wayland-canvas = pkgs.stdenv.mkDerivation {
+        wayland-canvas = pkgs.clangStdenv.mkDerivation {
           pname = "wayland-canvas";
           version = "0.1.0";
 
@@ -62,7 +62,7 @@
       });
 
       devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
+        default = (pkgs.mkShell.override { stdenv = pkgs.clangStdenv; }) {
           inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.wayland-canvas ];
         };
       });

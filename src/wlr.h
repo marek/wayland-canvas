@@ -1,0 +1,91 @@
+#pragma once
+
+// The one place wlroots enters C++. Its headers use two things C++ rejects: `[static N]`
+// array parameters (render/color.h) and a member named `namespace` (the layer-shell
+// protocol header and wlr_layer_shell_v1.h). Every C header they depend on is included
+// first, so the two macros below only ever touch wlroots' own declarations.
+#include <errno.h>
+#include <libinput.h>
+#include <pixman.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <wayland-protocols/color-management-v1-enum.h>
+#include <wayland-protocols/color-representation-v1-enum.h>
+#include <wayland-protocols/content-type-v1-enum.h>
+#include <wayland-protocols/cursor-shape-v1-enum.h>
+#include <wayland-protocols/ext-image-copy-capture-v1-enum.h>
+#include <wayland-protocols/ext-workspace-v1-enum.h>
+#include <wayland-protocols/pointer-constraints-unstable-v1-enum.h>
+#include <wayland-protocols/tablet-v2-enum.h>
+#include <wayland-protocols/tearing-control-v1-enum.h>
+#include <wayland-protocols/xdg-shell-enum.h>
+#include <wayland-server.h>
+#include <xkbcommon/xkbcommon.h>
+
+extern "C" {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wkeyword-macro"
+#define static
+#define namespace namespace_
+#include <wlr/backend.h>
+#include <wlr/backend/headless.h>
+#include <wlr/backend/libinput.h>
+#include <wlr/backend/multi.h>
+#include <wlr/backend/session.h>
+#include <wlr/interfaces/wlr_keyboard.h>
+#include <wlr/interfaces/wlr_pointer.h>
+#include <wlr/render/allocator.h>
+#include <wlr/render/pass.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
+#include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_data_control_v1.h>
+#include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <wlr/types/wlr_ext_data_control_v1.h>
+#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
+#include <wlr/types/wlr_idle_inhibit_v1.h>
+#include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/types/wlr_input_device.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_pointer.h>
+#include <wlr/types/wlr_pointer_gestures_v1.h>
+#include <wlr/types/wlr_presentation_time.h>
+#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_primary_selection_v1.h>
+#include <wlr/types/wlr_relative_pointer_v1.h>
+#include <wlr/types/wlr_screencopy_v1.h>
+#include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_server_decoration.h>
+#include <wlr/types/wlr_single_pixel_buffer_v1.h>
+#include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_viewporter.h>
+#include <wlr/types/wlr_virtual_keyboard_v1.h>
+#include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_activation_v1.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/box.h>
+#include <wlr/util/edges.h>
+#include <wlr/util/log.h>
+#include <wlr/util/transform.h>
+#include <wlr/xcursor.h>
+#undef namespace
+#undef static
+#pragma clang diagnostic pop
+}
