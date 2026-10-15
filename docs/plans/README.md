@@ -21,7 +21,7 @@ be worked.
 | [2026-10-14-2140-top-bar.md](2026-10-14-2140-top-bar.md) | The top bar: a Quickshell client per output, its widgets and click actions; the control IPC and the msg client; autostart and the off flag | 7 | 0 |
 | [2026-10-14-2151-domain-classes.md](2026-10-14-2151-domain-classes.md) | Classes per concept: desktops named by ID, camera and overview per output, gestures and pointer grabs as variant state machines, bindings | 10 | 0 |
 | [2026-10-14-2150-packaging.md](2026-10-14-2150-packaging.md) | The .pkg.tar.zst and .deb build targets, the session file, the default-session tool and its rules per display manager, the installer flow, removal guarantees | 14 | 0 |
-| [2026-10-15-0719-bar-panels.md](2026-10-15-0719-bar-panels.md) | A panel under every bar indicator: Wi-Fi, Bluetooth, audio, brightness, power, weather, calendar, tray menus | 11 | 4 |
+| [2026-10-15-0719-bar-panels.md](2026-10-15-0719-bar-panels.md) | A panel under every bar indicator: Wi-Fi, Bluetooth, audio, brightness, power, weather, calendar, tray menus | 12 | 3 |
 | [2026-10-15-1156-source-layout.md](2026-10-15-1156-source-layout.md) | `src/` in one folder per area, includes written from `src/`, the placement rule for new files | 6 | 0 |
 | [2026-10-15-1244-plugin-framework.md](2026-10-15-1244-plugin-framework.md) | The shell as a plugin host, the bar and panels as plugins, the overview toolbar, sticky notes, the light/dark switch, the JSON control socket with canvas items | 0 | 18 |
 | [2026-10-15-1251-super-pinch-zoom.md](2026-10-15-1251-super-pinch-zoom.md) | Super + 2-finger pinch zooms the canvas around the cursor in both views, crossing between them; plain pinches stay the client's | 0 | 6 |
