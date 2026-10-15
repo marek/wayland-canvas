@@ -1,10 +1,12 @@
 #include <cmath>
 #include <optional>
 
+#include "canvas/canvas.h"
 #include "core/config.h"
 #include "canvas/desktop.h"
 #include "core/geometry.h"
 #include "core/server.h"
+#include "windows/view.h"
 
 Desktop::Desktop(DesktopId id, int number, wlr_box frame)
 	: id_(id), number_(number), frame_(frame) {
@@ -38,6 +40,10 @@ Point Desktop::centre() const {
 	};
 }
 
+bool Desktop::tiling() const {
+	return tiling_;
+}
+
 bool Desktop::contains(double cx, double cy) const {
 	return wlr_box_contains_point(&frame_, cx, cy);
 }
@@ -59,7 +65,15 @@ Desktop &Desktops::create(wlr_box frame) {
 }
 
 void Desktops::remove(DesktopId id) {
-	destroy_owned(stack_, find(id));
+	Desktop *desktop = find(id);
+	if (desktop != nullptr && desktop->tiling()) {
+		// Abandoning a tiled desktop leaves its windows where they are,
+		// no longer tiled.
+		for (View *view : server_.canvas.views_in(desktop->frame())) {
+			view->set_tiled(false);
+		}
+	}
+	destroy_owned(stack_, desktop);
 	server_.damage_all();
 }
 
@@ -74,14 +88,48 @@ void Desktops::raise(DesktopId id) {
 	stack_.insert(stack_.begin(), std::move(owned));
 }
 
+namespace {
+
+// The frame centre of a view.
+Point view_centre(const View &view) {
+	wlr_box frame = view.frame_box();
+	return Point{frame.x + frame.width / 2.0, frame.y + frame.height / 2.0};
+}
+
+} // namespace
+
 void Desktops::move(DesktopId id, int x, int y) {
 	Desktop *desktop = find(id);
 	if (desktop == nullptr) {
 		return;
 	}
+	if (desktop->tiling()) {
+		// The one case a frame carries its windows: a tiled desktop keeps
+		// its grid wherever the frame goes.
+		int dx = x - desktop->frame_.x;
+		int dy = y - desktop->frame_.y;
+		for (View *view : server_.views) {
+			if (!view->mapped || view->minimized) {
+				continue;
+			}
+			Point centre = view_centre(*view);
+			if (desktop->contains(centre.x, centre.y)) {
+				view->move(view->x + dx, view->y + dy);
+			}
+		}
+	}
 	desktop->frame_.x = x;
 	desktop->frame_.y = y;
 	server_.damage_all();
+}
+
+void Desktops::set_tiling(DesktopId id, bool on) {
+	Desktop *desktop = find(id);
+	if (desktop == nullptr || desktop->tiling_ == on) {
+		return;
+	}
+	desktop->tiling_ = on;
+	server_.damage_all(); // the tab's Tile switch lights up
 }
 
 Desktop *Desktops::find(DesktopId id) {
