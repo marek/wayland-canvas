@@ -6,8 +6,8 @@
 #include "geometry.h"
 #include "server.h"
 
-Desktop::Desktop(DesktopId id, wlr_box frame)
-	: id_(id), frame_(frame) {
+Desktop::Desktop(DesktopId id, int number, wlr_box frame)
+	: id_(id), number_(number), frame_(frame) {
 }
 
 DesktopId Desktop::id() const {
@@ -15,7 +15,7 @@ DesktopId Desktop::id() const {
 }
 
 int Desktop::number() const {
-	return static_cast<int>(id_);
+	return number_;
 }
 
 const wlr_box &Desktop::frame() const {
@@ -48,10 +48,12 @@ Desktops::Desktops(Server &server)
 
 Desktop &Desktops::create(wlr_box frame) {
 	int number = 1;
-	while (find(DesktopId{number}) != nullptr) {
+	while (by_number(number) != nullptr) {
 		number++;
 	}
-	stack_.insert(stack_.begin(), std::make_unique<Desktop>(DesktopId{number}, frame));
+	DesktopId id = next_id_;
+	next_id_ = DesktopId{static_cast<int>(next_id_) + 1};
+	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame));
 	server_.damage_all();
 	return *stack_.front();
 }
@@ -98,6 +100,15 @@ Desktop *Desktops::find(std::optional<DesktopId> id) {
 const Desktop *Desktops::find(DesktopId id) const {
 	for (const std::unique_ptr<Desktop> &desktop : stack_) {
 		if (desktop->id() == id) {
+			return desktop.get();
+		}
+	}
+	return nullptr;
+}
+
+Desktop *Desktops::by_number(int number) {
+	for (const std::unique_ptr<Desktop> &desktop : stack_) {
+		if (desktop->number() == number) {
 			return desktop.get();
 		}
 	}

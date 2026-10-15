@@ -10,17 +10,17 @@
 
 class Server;
 
-// The number users see; never reused while the desktop exists.
+// A desktop's unique identity; handed out once and never reused.
 enum class DesktopId : int {};
 
 // A screen-sized rectangle on the canvas. Windows belong to the desktop their centre
 // lies in; moving the frame never moves windows.
 class Desktop {
 public:
-	Desktop(DesktopId id, wlr_box frame);
+	Desktop(DesktopId id, int number, wlr_box frame);
 
 	DesktopId id() const;
-	int number() const; // "Desktop 2"
+	int number() const; // "Desktop 2": the smallest unused number at creation
 	const wlr_box &frame() const; // canvas coordinates
 	Rect rect() const;
 	Point centre() const;
@@ -29,6 +29,7 @@ public:
 private:
 	friend class Desktops; // the frame changes only through Desktops
 	DesktopId id_;
+	int number_;
 	wlr_box frame_;
 };
 
@@ -47,6 +48,7 @@ public:
 	Desktop *find(DesktopId id);
 	Desktop *find(std::optional<DesktopId> id); // nullopt finds nothing
 	const Desktop *find(DesktopId id) const;
+	Desktop *by_number(int number); // the desktop users call "Desktop N"
 	Desktop *at(double cx, double cy); // topmost containing the point
 	// Covers at least half of `area`; the most overlap wins.
 	Desktop *best_overlap(const Rect &area);
@@ -68,4 +70,5 @@ public:
 private:
 	Server &server_;
 	std::vector<std::unique_ptr<Desktop>> stack_; // front is topmost
+	DesktopId next_id_ = DesktopId{1}; // handed out once, never reused
 };

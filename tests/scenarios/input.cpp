@@ -280,7 +280,7 @@ int run_step() {
 		chord(KEY_LEFT, SUPER_CTRL);
 		return 600;
 	case 17: {
-		Desktop *d1 = server->canvas.desktops.find(DesktopId{1});
+		Desktop *d1 = server->canvas.desktops.by_number(1);
 		check(d1 && o->desktop_showing() == d1, "Super+Ctrl+Left jumped back to Desktop 1");
 		move_to(640, 360);
 		double cx0 = o->cam.cx;
@@ -297,7 +297,7 @@ int run_step() {
 		shot("overview");
 		return 300;
 	case 20: { // right-click on empty canvas below the desktops: new desktop
-		Desktop *d1 = server->canvas.desktops.find(DesktopId{1});
+		Desktop *d1 = server->canvas.desktops.by_number(1);
 		Point p = o->canvas_to_local(d1->frame().x + d1->frame().width / 2.0,
 			d1->frame().y + d1->frame().height * 1.9);
 		click(p.x, p.y, BTN_RIGHT);
@@ -307,20 +307,20 @@ int run_step() {
 	}
 	case 21: { // drag Desktop 3 by its tab onto Desktop 2: combine
 		shot("three-desktops");
-		Desktop *d2 = server->canvas.desktops.find(DesktopId{2});
-		Desktop *d3 = server->canvas.desktops.find(DesktopId{3});
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		Desktop *d3 = server->canvas.desktops.by_number(3);
 		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d3);
 		Point tx = o->canvas_to_local(d2->frame().x, d2->frame().y);
 		Point sx = o->canvas_to_local(d3->frame().x, d3->frame().y);
 		drag(layout->tab.x + 30, layout->tab.y + 14, layout->tab.x + 30 + (tx.x - sx.x),
 			layout->tab.y + 14 + (tx.y - sx.y));
 		check(server->canvas.desktops.size() == 2
-			&& server->canvas.desktops.find(DesktopId{3}) == nullptr,
+			&& server->canvas.desktops.by_number(3) == nullptr,
 			"dropping a frame onto another combined them");
 		return 400;
 	}
 	case 22: { // drag Desktop 2's frame over the windows of Desktop 1 (frames move, windows don't)
-		Desktop *d2 = server->canvas.desktops.find(DesktopId{2});
+		Desktop *d2 = server->canvas.desktops.by_number(2);
 		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d2);
 		int ax = a->x;
 		wlr_box before = d2->frame();
@@ -329,7 +329,7 @@ int run_step() {
 		return 300;
 	}
 	case 23: { // click the Tile button on Desktop 1's tab
-		Desktop *d1 = server->canvas.desktops.find(DesktopId{1});
+		Desktop *d1 = server->canvas.desktops.by_number(1);
 		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d1);
 		click(layout->tile_button.x + layout->tile_button.width / 2.0,
 			layout->tile_button.y + layout->tile_button.height / 2.0, BTN_LEFT);

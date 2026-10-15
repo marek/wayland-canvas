@@ -216,7 +216,7 @@ void act_goto_desktop(Server &server, Output *output, KeyArg arg) {
 	if (output == nullptr) {
 		return;
 	}
-	Desktop *desktop = server.canvas.desktops.find(DesktopId{std::get<int>(arg)});
+	Desktop *desktop = server.canvas.desktops.by_number(std::get<int>(arg));
 	if (desktop != nullptr) {
 		output->goto_box(desktop->frame());
 	}

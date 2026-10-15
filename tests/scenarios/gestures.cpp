@@ -271,6 +271,15 @@ int run_step() {
 		server->gesture.swipe_end(t_ms += 8, false);
 		check(server->canvas.desktops.size() == 1 && server->gesture.kind == GestureKind::none,
 			"abandoning the swiped desktop mid-swipe ends the swipe cleanly");
+		// A desktop created after an abandon reuses the freed number, never
+		// the abandoned identity.
+		std::optional<DesktopId> abandoned = o->target_desktop;
+		o->overview_new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
+		Desktop *reused = server->canvas.desktops.by_number(2);
+		check(abandoned.has_value()
+			&& server->canvas.desktops.find(abandoned) == nullptr
+			&& reused != nullptr && reused->id() != *abandoned && reused->number() == 2,
+			"the freed number is reused, the abandoned id is not");
 		o->overview_set_target(desk(d1)->frame(), d1, true);
 		return 400;
 	}
