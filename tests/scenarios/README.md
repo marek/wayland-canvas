@@ -133,6 +133,21 @@ own the machine's Wayland display namespace and GPU.
   no panel or flyout outliving it. Screenshots of the toolbar, the
   flyout and the panel beside it are inspected on the way.
 
+  Last, adoption and the applications' preference. The machine's real
+  color-scheme is read first through a child with the run's isolation
+  undone (nothing else may see that environment), then an outside client
+  sends `theme.set` light on the control socket — the compositor's own
+  event is the only thing that could tell the shell — and the shell must
+  adopt it: the bar's palette flips light, the scratch `shell.json`
+  carries the adopted mode, and an edit that reloads the shell keeps it.
+  The switch still works on the adopted mode, restoring dark. The run
+  never writes the preference itself: it is the real session's to set, so
+  the headless compositor must leave even the scratch keyfile backend the
+  run points at (no `glib-2.0/settings/keyfile` under the scratch
+  config), and the machine's color-scheme must read exactly as it started
+  (today `prefer-dark`). The write itself is proven by the unit test
+  `theme-prefs` against that same private backend.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only

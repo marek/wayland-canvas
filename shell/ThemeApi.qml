@@ -6,7 +6,10 @@ import WaylandCanvas.Ui
 // colours itself from); setMode flips it, persists it as theme.mode in
 // shell.json and tells the compositor at start and on every change, so the
 // shell and the compositor never disagree for longer than a message
-// (docs/intents/shell/theme.md).
+// (docs/intents/shell/theme.md). A mode the compositor reports in its
+// theme event — an outside client's theme.set — is adopted the same way,
+// kept in the config but never told back; at start the config's choice
+// still wins, so it is pushed over whatever the compositor had.
 Item {
 	id: root
 
@@ -18,18 +21,34 @@ Item {
 	// accent, hover, fill, track, and the font and panel metrics.
 	readonly property var colors: UiTheme
 
-	function setMode(mode) {
+	// Flips the palette and keeps the mode in shell.json; true when the
+	// mode actually changed.
+	function apply(mode) {
 		if (mode !== "light" && mode !== "dark") {
-			return
+			return false
 		}
 		if (UiTheme.mode === mode) {
-			return
+			return false
 		}
 		UiTheme.mode = mode
 		host.config.theme = host.config.theme || {}
 		host.config.theme.mode = mode
 		host.writeConfig()
-		host.compositorApi.call("theme.set", {mode: mode})
+		return true
+	}
+
+	function setMode(mode) {
+		if (apply(mode)) {
+			host.compositorApi.call("theme.set", {mode: mode})
+		}
+	}
+
+	// A mode the compositor reported: adopted as if the switch had been
+	// clicked — palette flipped, kept in the config — but never told back:
+	// the event came from the compositor, and an event matching the
+	// shell's own mode changes nothing.
+	function adopt(mode) {
+		apply(mode)
 	}
 
 	// Applied when the shell starts: the config's choice (dark on anything
@@ -43,5 +62,14 @@ Item {
 		}
 		UiTheme.mode = mode === "light" ? "light" : "dark"
 		host.compositorApi.call("theme.set", {mode: UiTheme.mode})
+	}
+
+	Connections {
+		target: host.compositorApi
+		function onEvent(name, params) {
+			if (name === "theme") {
+				root.adopt(params.mode)
+			}
+		}
 	}
 }

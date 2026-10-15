@@ -36,7 +36,7 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 - [ ] `canvas.notes`: the note button with its colour submenu, notes as canvas items, the editor over a note, moving, recolouring, deleting, kept across restarts
 - [x] `canvas.theme`: the switch in the bar's top-right corner, both palettes for the shell, the compositor told
 - [x] Light mode keeps text readable on accent-coloured tabs and buttons, in the compositor and the shell
-- [ ] (the user to decide) Whether the switch also sets the applications' light/dark preference, a system-wide setting other sessions share
+- [x] The switch also sets the applications' light/dark preference (`color-scheme`), as every `theme.set` does — the compositor writes it, the real session (DRM backend) only; the shell adopts a compositor-reported mode as if the switch had been clicked, kept in `shell.json`, never told back
 
 ## Verification
 

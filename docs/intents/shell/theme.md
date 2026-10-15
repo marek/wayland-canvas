@@ -42,6 +42,10 @@ choice is kept across restarts.
 | Kept | The mode is written to `shell.json` as `theme.mode` and applied when the shell starts; the compositor starts dark until told |
 | Applications | Every applied mode sets the applications' preference (`color-scheme` `prefer-light` / `prefer-dark`) — the real session only; see Design considerations |
 
+| Adoption | A mode the compositor reports in its `theme` event — an outside client's `theme.set` — is adopted as if the switch had been clicked: palette flipped, kept in `shell.json`, never told back; at start the kept mode still wins |
+
+### The palettes
+
 The UI kit's `UiTheme` carries the shell's; the compositor's (title bars,
 canvas, overview, launcher) mirrors it in `src/core/config.h`. Every
 colour the shell or the compositor draws is one of these roles — nothing

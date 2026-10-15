@@ -32,8 +32,10 @@
 #include <span>
 #include <string>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -72,6 +74,7 @@ constexpr double widen_px = 20; // how much the edited widget must grow
 double theme_x = 0; // the theme switch's centre: the right-most bar run
 double power_x = 0; // the power indicator's centre: the theme phase's panel
 std::string shell_config; // the scratch shell.json the theme switch writes
+std::string scheme_start; // the machine's real color-scheme, read before the run
 
 // ---- isolation: private buses and the stand-in services on them ----
 
@@ -280,6 +283,113 @@ bool prints_line(Spawned &child, std::string_view want, int timeout_s) {
 		}
 	}
 	return false;
+}
+
+// ---- the applications' preference, as the user's own session sees it ----
+
+// The environment this run replaces, saved at start: a child that restores
+// it reads — and only reads — the machine's own settings over its own bus.
+struct SavedEnv {
+	const char *name;
+	bool set = false;
+	std::string value;
+};
+SavedEnv saved_env[] = {
+	{"DBUS_SESSION_BUS_ADDRESS"},
+	{"DBUS_SYSTEM_BUS_ADDRESS"},
+	{"XDG_CONFIG_HOME"},
+	{"GSETTINGS_BACKEND"},
+};
+
+// The user's real color-scheme (org.gnome.desktop.interface), through a
+// child with the machine's own environment restored — empty when there is
+// no session bus to read it from, in which case the run cannot verify it.
+std::string real_color_scheme() {
+	int fds[2];
+	if (pipe(fds) != 0) {
+		return "";
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		close(fds[0]);
+		dup2(fds[1], STDOUT_FILENO);
+		close(fds[1]);
+		for (SavedEnv &saved : saved_env) {
+			if (saved.set) {
+				setenv(saved.name, saved.value.c_str(), 1);
+			} else {
+				unsetenv(saved.name);
+			}
+		}
+		sigset_t set;
+		sigemptyset(&set);
+		sigprocmask(SIG_SETMASK, &set, nullptr);
+		prctl(PR_SET_PDEATHSIG, SIGKILL); // a killed run must not leak it
+		execlp("gsettings", "gsettings", "get", "org.gnome.desktop.interface",
+			"color-scheme", static_cast<char *>(nullptr));
+		_exit(127);
+	}
+	close(fds[1]);
+	std::string out;
+	char chunk[256];
+	ssize_t n;
+	while ((n = read(fds[0], chunk, sizeof chunk)) > 0) {
+		out.append(chunk, static_cast<std::size_t>(n));
+	}
+	close(fds[0]);
+	int status = 0;
+	waitpid(pid, &status, 0);
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		return "";
+	}
+	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+		out.pop_back();
+	}
+	return out;
+}
+
+// An outside client's theme.set on the compositor's control socket, from a
+// double-forked child (the compositor runs in this process, so nothing
+// here may block its loop) — the way a user's script or keybinding would
+// switch the compositor alone, for the shell to adopt.
+void outside_theme_set(const char *mode) {
+	const char *path = std::getenv("WAYLAND_CANVAS_SOCKET");
+	if (path == nullptr || *path == '\0') {
+		return;
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		if (fork() == 0) {
+			alarm(5); // never outlive the run on a stalled socket
+			int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+			sockaddr_un addr{};
+			addr.sun_family = AF_UNIX;
+			if (fd >= 0 && strlen(path) < sizeof(addr.sun_path)) {
+				strcpy(addr.sun_path, path);
+				if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) == 0) {
+					std::string line = std::format(
+						"{{\"id\": 1, \"method\": \"theme.set\", "
+						"\"params\": {{\"mode\": \"{}\"}}}}\n", mode);
+					(void)write(fd, line.data(), line.size());
+					// The response, read out so the compositor's write is
+					// never blocked; then this end goes quiet.
+					char chunk[256];
+					ssize_t got = 0;
+					while ((got = read(fd, chunk, sizeof chunk)) > 0) {
+						if (memchr(chunk, '\n', static_cast<std::size_t>(got)) != nullptr) {
+							break;
+						}
+					}
+				}
+			}
+			if (fd >= 0) {
+				close(fd);
+			}
+		}
+		_exit(0);
+	}
+	int status = 0;
+	waitpid(pid, &status, 0); // the middle child, at once: no zombie
 }
 
 // A dbus-daemon of our own on a private socket under tmp/: everything on
@@ -2371,7 +2481,156 @@ int run_step() {
 			return -300;
 		}
 		check(panel_layers() == 0, "the last panel closed");
+		step = 82; // on to the adoption phase: an outside theme.set
+		return -100; // without the advance: every other step moves on alone
+	// ---- adoption and the applications' preference ----
+	// A step range of its own, after the theme's: an outside theme.set (a
+	// user's script, a keybinding) switches the compositor alone, and the
+	// shell must adopt it — the same run also proves the headless
+	// compositor never writes the applications' preference the switch
+	// would set on a real session.
+	case 82: { // the machine's real color-scheme, read before any of it
+		scheme_start = real_color_scheme();
+		if (scheme_start.empty()) {
+			std::println("note: the machine's color-scheme could not be read"
+				" (no session bus); the untouched check is skipped");
+		} else {
+			std::println("note: the machine's color-scheme starts as {}",
+				scheme_start);
+		}
+		return 300;
+	}
+	case 83: // an outside theme.set, the way a keybinding would send it
+		outside_theme_set("light");
+		return 400;
+	case 84: { // the compositor switched; the shell was told nothing else
+		bool light = server->theme.mode() == ThemeMode::light;
+		if (!light && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(light, "the outside theme.set switched the compositor to light");
+		shot("adopt-light-bar"); // the shell's answer, caught by the next step
+		return 700;
+	}
+	case 85: { // the shell adopted it: the bar's own palette flipped
+		LayerSurface *l = bar_layer();
+		bool light = l != nullptr
+			&& shot_pixel_is("adopt-light-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!light && retries++ < 40) {
+			shot("adopt-light-bar");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the shell adopted the outside switch (the bar is #e1e2e7)");
+		return 400;
+	}
+	case 86: { // adoption keeps the mode, like a click of the switch would
+		std::string cfg = read_file(shell_config);
+		bool kept = cfg.find("\"mode\": \"light\"") != std::string::npos;
+		if (!kept && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(kept, "the adopted mode was kept (theme.mode: light in the scratch shell.json)");
+		return 300;
+	}
+	case 87: // the bar before the reload, for the before/after comparison
+		shot("adopt-prereload");
+		return 700;
+	case 88: { // an edit the shell reloads on: the user plugin disabled again
+		std::string cfg = read_file(shell_config);
+		std::size_t at = cfg.find("\"enabled\": true");
+		if (at != std::string::npos) {
+			cfg.replace(at, 15, "\"enabled\": false");
+		}
+		write_file(shell_config, cfg);
+		return 500;
+	}
+	case 89: // the shell reloads; the shot of it comes first
+		shot("adopt-reloaded");
+		return 700;
+	case 90: { // the reload's two proofs: it happened, and the mode survived
+		LayerSurface *l = bar_layer();
+		cairo_surface_t *pre = load_png("adopt-prereload");
+		cairo_surface_t *re = load_png("adopt-reloaded");
+		double before = l != nullptr && pre != nullptr ? bar_ink_edge(pre, l->geo, true) : 0;
+		double after = l != nullptr && re != nullptr ? bar_ink_edge(re, l->geo, true) : 0;
+		if (pre != nullptr) {
+			cairo_surface_destroy(pre);
+		}
+		if (re != nullptr) {
+			cairo_surface_destroy(re);
+		}
+		bool reloaded = after <= before - widen_px;
+		if (!reloaded && retries++ < 40) {
+			shot("adopt-reloaded");
+			return -700;
+		}
+		retries = 0;
+		check(reloaded, std::format("the shell reloaded on the config edit "
+			"(the disabled plugin's label pulled the left section's edge "
+			"from {} to {} px)", before, after));
+		bool light = l != nullptr
+			&& shot_pixel_is("adopt-reloaded", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!light && retries++ < 40) {
+			shot("adopt-reloaded");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the reloaded shell kept the adopted mode (the bar stayed #e1e2e7)");
+		return 300;
+	}
+	case 91: { // and the switch itself still works on the adopted mode
+		click(theme_x, 13); // light -> dark, the ordinary way back
+		return 500;
+	}
+	case 92: { // the switch's promises, back from an adopted mode
+		std::string cfg = read_file(shell_config);
+		bool written = cfg.find("\"mode\": \"dark\"") != std::string::npos;
+		bool told = server->theme.mode() == ThemeMode::dark;
+		if (!(written && told) && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "clicking the switch wrote theme.mode: dark to the scratch shell.json");
+		check(told, "the compositor reports theme dark again");
+		shot("adopt-dark-bar");
+		return 700;
+	}
+	case 93: { // the bar is dark again
+		LayerSurface *l = bar_layer();
+		bool dark = l != nullptr
+			&& shot_pixel_is("adopt-dark-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_dark);
+		if (!dark && retries++ < 40) {
+			shot("adopt-dark-bar");
+			return -700;
+		}
+		retries = 0;
+		check(dark, "the switch restored the dark bar (its background is #1a1b26)");
+		return 300;
+	}
+	case 94: { // the headless run never wrote the applications' preference
+		// Every settings write in this process (the compositor's own
+		// included) was pointed at the scratch keyfile backend in main():
+		// the headless backend is not the real session, so through every
+		// switch of this run nothing may have landed even there.
+		std::string store = shot_dir + "/xdg/config/glib-2.0/settings/keyfile";
+		check(!std::filesystem::exists(store),
+			"the headless run wrote no settings store (the preference is "
+			"the real session's to set)");
+		return 300;
+	}
+	case 95: { // and the machine's own setting is what it was
+		if (scheme_start.empty()) {
+			std::println("PASS (unchecked: no session bus to read it)");
+			return 100; // done: the summary prints and the run ends
+		}
+		std::string scheme_end = real_color_scheme();
+		check(scheme_end == scheme_start, std::format("the machine's "
+			"color-scheme is untouched (still {})", scheme_start));
 		return 100; // done: the summary prints and the run ends
+	}
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
@@ -2416,6 +2675,21 @@ int main() {
 	std::string root = env && *env ? env : "tmp"; // meson passes the repo's tmp/ via env
 	shot_dir = std::format("{}/scenarios/bar", root);
 	mkdir_p(shot_dir);
+	// The machine's own environment, saved before this run's isolation
+	// replaces it: the adoption phase's last checks read the user's real
+	// color-scheme through a child with it restored. And every settings
+	// write in this process — the compositor's own preference write above
+	// all — is pointed at the scratch keyfile backend, so the machine's
+	// dconf is never a write away; the headless backend means even that
+	// store should stay empty, which the run checks.
+	for (SavedEnv &saved : saved_env) {
+		const char *value = std::getenv(saved.name);
+		saved.set = value != nullptr && *value != '\0';
+		if (saved.set) {
+			saved.value = value;
+		}
+	}
+	setenv("GSETTINGS_BACKEND", "keyfile", 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	// Isolation first: the bar may only ever start on the private buses
