@@ -86,7 +86,9 @@ struct Indicator {
 	double x = 0; // centre of the bar run that opens it
 	int button = BTN_LEFT;
 	CloseMode close_mode = close_outside;
-	bool typing = false; // the Wi-Fi password flow
+	bool connect_flow = false; // the Wi-Fi flow, ending in Connect/Disconnect
+	bool bt_flow = false; // the paired/found device actions
+	bool profile_flow = false; // the power profile switch
 };
 
 std::vector<Indicator> indicators;
@@ -95,6 +97,9 @@ int phase = 0;
 wlr_box popup_box{}; // the open panel's card, from the walk's phase 1
 wlr_box field_box{}; // where the Wi-Fi password field ended up
 double clock_x = 0, network_x = 0;
+double action_x = 0, action_y = 0; // an action row's click point: a click
+// can be lost while the bar's render loop is stalled on a screenshot, so
+// the proof phases re-issue it until the mock records the call
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -482,6 +487,8 @@ wlr_box card_box(double icon_x, int width) {
 // screenshot instead of assumed from the layout.
 struct Band {
 	int top, bottom;
+	int lit = 0; // lit pixels: a row of text has hundreds, a dim header
+		     // fragment dozens — the row filter below tells them apart
 	double centre() const { return (top + bottom - 1) / 2.0; }
 };
 
@@ -494,28 +501,119 @@ std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
 	int stride = cairo_image_surface_get_stride(s);
 	int x0 = card.x + 8, x1 = card.x + card.width - 8;
 	bool in_band = false;
-	int band_top = 0;
+	int band_top = 0, band_lit = 0;
 	for (int y = card.y; y < screen_h; y++) {
-		bool lit = false;
+		int lit = 0;
 		for (int x = x0; x < x1; x++) {
 			unsigned char *p = data + y * stride + x * 4;
 			if (p[0] + p[1] + p[2] > 300) {
-				lit = true;
-				break;
+				lit++;
 			}
 		}
-		if (lit && !in_band) {
+		if (lit > 0 && !in_band) {
 			in_band = true;
 			band_top = y;
-		} else if (!lit && in_band) {
+			band_lit = lit;
+		} else if (lit > 0) {
+			band_lit += lit;
+		} else if (in_band) {
 			in_band = false;
-			bands.push_back({band_top, y});
+			bands.push_back({band_top, y, band_lit});
 		}
 	}
 	if (in_band) { // a band running to the scan's end
-		bands.push_back({band_top, screen_h});
+		bands.push_back({band_top, screen_h, band_lit});
 	}
 	return bands;
+}
+
+cairo_surface_t *load_png(const char *name); // defined with the screenshots
+std::vector<Band> panel_bands(const char *name) {
+	cairo_surface_t *panel = load_png(name);
+	std::vector<Band> bands = panel != nullptr ? text_bands(panel, popup_box)
+						   : std::vector<Band>();
+	if (panel != nullptr) {
+		cairo_surface_destroy(panel);
+	}
+	return bands;
+}
+
+// Only the rows of a named shot: dim section headers render as thin
+// half-lit fragments that shift raw band indices, so the action flows
+// click by row, counted from the bottom (the last row is stable).
+std::vector<Band> panel_rows(const char *name) {
+	std::vector<Band> rows;
+	for (const Band &b : panel_bands(name)) {
+		if (b.lit >= 60) {
+			rows.push_back(b);
+		}
+	}
+	return rows;
+}
+
+// ---- the stand-ins' own record: what the mocks received ----
+
+constexpr const char *NM_NAME = "org.freedesktop.NetworkManager";
+constexpr const char *NM_MANAGER = "/org/freedesktop/NetworkManager";
+constexpr const char *NM_DEVICE = "/org/freedesktop/NetworkManager/Devices/wifi0";
+constexpr const char *BT_NAME = "org.bluez";
+constexpr const char *BT_HEADPHONES = "/org/bluez/hci0/dev_11_22_33_44_55_66";
+constexpr const char *BT_SPEAKER = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF";
+constexpr const char *PPD_NAME = "org.freedesktop.UPower.PowerProfiles";
+constexpr const char *PPD_PATH = "/org/freedesktop/UPower/PowerProfiles";
+constexpr const char *PPD_IFACE = "org.freedesktop.UPower.PowerProfiles";
+
+// All of a child's stdout, or empty; the child is reaped either way.
+std::string child_output(Spawned &child, int timeout_s) {
+	std::string out;
+	char buf[4096];
+	std::time_t deadline = std::time(nullptr) + timeout_s;
+	while (std::time(nullptr) < deadline) {
+		pollfd p{.fd = child.out, .events = POLLIN};
+		if (poll(&p, 1, 200) <= 0 || (p.revents & (POLLIN | POLLHUP)) == 0) {
+			continue;
+		}
+		ssize_t n = read(child.out, buf, sizeof buf);
+		if (n <= 0) {
+			break; // EOF: the child is done writing
+		}
+		out.append(buf, n);
+	}
+	kill(child.pid, SIGKILL); // a no-op on an already-exited child
+	waitpid(child.pid, nullptr, 0);
+	close(child.out);
+	return out;
+}
+
+// busctl against the private system bus only — the address is always
+// explicit, so nothing can ever reach the machine's bus.
+std::string busctl(const char *verb, const char *name, const char *path,
+	const char *interface, const char *member) {
+	const char *const argv[] = {"busctl", "--address", system_bus.address.c_str(),
+		verb, name, path, interface, member, static_cast<const char *>(nullptr)};
+	Spawned child = spawn(argv);
+	if (child.pid <= 0) {
+		return {};
+	}
+	return child_output(child, 10);
+}
+
+// True when the mock object at `path` recorded a call to `method` — with
+// `arg` in its arguments when `arg` is not empty.
+bool mock_called(const char *name, const char *path, const char *method,
+	const char *arg = nullptr) {
+	std::string calls = busctl("call", name, path, "org.freedesktop.DBus.Mock",
+		"GetCalls");
+	if (calls.find(std::format("\"{}\"", method)) == std::string::npos) {
+		return false;
+	}
+	return arg == nullptr || calls.find(arg) != std::string::npos;
+}
+
+// A property of a stand-in object, as busctl prints it.
+std::string mock_property(const char *name, const char *path, const char *interface,
+	const char *property) {
+	return busctl("get-property", name, path, interface, property);
 }
 
 // The keyboard is on a surface of the bar client (so panel keystrokes land).
@@ -661,8 +759,12 @@ int walk() {
 		popup_box = card_box(ind.x, ind.width);
 		shot(ind.name);
 	}
-		if (ind.typing) {
+		if (ind.connect_flow) {
 			phase = 10;
+		} else if (ind.bt_flow) {
+			phase = 30;
+		} else if (ind.profile_flow) {
+			phase = 40;
 		} else {
 			phase = 2;
 		}
@@ -751,6 +853,232 @@ int walk() {
 		// each of the 14 dots lights ~9 px; a bare cursor lights under 40
 		check(dots >= 80, std::format("typing reached the Wi-Fi password "
 			"field ({} bright pixels in it; a bare cursor is under 40)", dots));
+		phase = 17; // on to Connect: the flow continues against the mock
+		return 300;
+	}
+	case 17: { // submit the typed password: Connect is the bottom band
+		cairo_surface_t *panel = load_png("network-typed");
+		std::vector<Band> bands = text_bands(panel, popup_box);
+		cairo_surface_destroy(panel);
+		if (bands.size() < 8) { // the panel moved on without us
+			phase = 2;
+			return 300;
+		}
+		action_x = popup_box.x + popup_box.width / 2.0;
+		action_y = bands.back().centre();
+		click(action_x, action_y);
+		phase = 18;
+		return 400;
+	}
+	case 18: { // the mock NetworkManager received the activation with the PSK
+		bool sent = mock_called(NM_NAME, NM_MANAGER, "AddAndActivateConnection",
+			"correctbattery");
+		if (!sent && retries++ < 100) { // the click's round trip takes its time
+			if (retries % 10 == 3) {
+				click(action_x, action_y); // a lost click: send it again
+			}
+			return 300;
+		}
+		retries = 0;
+		check(sent, "Connect sent CafeGuest's activation with the typed password "
+			"to the stand-in NetworkManager");
+		shot("network-connected");
+		phase = 19;
+		return 400;
+	}
+	case 19: { // pick HomeNet, the connected network: the second row
+		std::vector<Band> bands = panel_bands("network-connected");
+		if (bands.size() < 5 && retries++ < 10) {
+			shot("network-connected");
+			return 400;
+		}
+		retries = 0;
+		if (bands.size() < 5) {
+			phase = 2;
+			return 300;
+		}
+		click(popup_box.x + popup_box.width / 2.0, bands[3].centre());
+		phase = 20;
+		return 400;
+	}
+	case 20:
+		shot("network-home");
+		phase = 21;
+		return 400;
+	case 21: { // a connected network's action row is Disconnect
+		std::vector<Band> bands = panel_bands("network-home");
+		if (bands.size() < 5 && retries++ < 10) {
+			shot("network-home");
+			return 400;
+		}
+		retries = 0;
+		if (bands.size() < 5) {
+			phase = 2;
+			return 300;
+		}
+		action_x = popup_box.x + popup_box.width / 2.0;
+		action_y = bands.back().centre();
+		click(action_x, action_y);
+		phase = 22;
+		return 400;
+	}
+	case 22: {
+		bool dropped = mock_called(NM_NAME, NM_DEVICE, "Disconnect");
+		if (!dropped && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(action_x, action_y); // a lost click: send it again
+			}
+			return 300;
+		}
+		retries = 0;
+		check(dropped, "Disconnect deactivated the connection on the "
+			"stand-in's Wi-Fi device");
+		phase = 2;
+		return 300;
+	}
+	case 30: // the bluetooth panel: its device rows settle after the scan
+		shot("bluetooth-devices");
+		phase = 31;
+		return 400;
+	case 31: { // the paired device's row: Scenario Headphones, the first one
+		std::vector<Band> rows = panel_rows("bluetooth-devices");
+		if (rows.size() < 4 && retries++ < 15) {
+			shot("bluetooth-devices");
+			return 400;
+		}
+		retries = 0;
+		check(rows.size() >= 4, std::format("the bluetooth panel lists the "
+			"stand-in's two devices ({} rows: switch, scan, 2 devices)",
+			rows.size()));
+		if (rows.size() < 4) {
+			phase = 2;
+			return 300;
+		}
+		// known devices come first, so the paired one is the second row
+		// from the bottom; the found one is last
+		action_x = popup_box.x + popup_box.width / 2.0;
+		action_y = rows[rows.size() - 2].centre();
+		click(action_x, action_y);
+		phase = 32;
+		return 400;
+	}
+	case 32: { // Connect went to the mock device; the row reads Connected
+		bool connected = mock_property(BT_NAME, BT_HEADPHONES, "org.bluez.Device1",
+			"Connected").find("true") != std::string::npos;
+		bool called = mock_called(BT_NAME, BT_HEADPHONES, "Connect");
+		if (!(called && connected) && retries++ < 100) {
+			if (!called && retries % 10 == 3) {
+				click(action_x, action_y); // a lost click: send it again
+			}
+			return 300;
+		}
+		retries = 0;
+		check(called && connected, "clicking the paired device connected it on "
+			"the stand-in (Connect called, Connected reported)");
+		shot("bluetooth-connected");
+		phase = 33;
+		return 400;
+	}
+	case 33: { // the same row again: a connected device disconnects
+		std::vector<Band> rows = panel_rows("bluetooth-connected");
+		if (rows.size() < 4 && retries++ < 10) {
+			shot("bluetooth-connected");
+			return 400;
+		}
+		retries = 0;
+		if (rows.size() < 4) {
+			phase = 2;
+			return 300;
+		}
+		action_x = popup_box.x + popup_box.width / 2.0;
+		action_y = rows[rows.size() - 2].centre();
+		click(action_x, action_y);
+		phase = 34;
+		return 400;
+	}
+	case 34: {
+		bool off = mock_called(BT_NAME, BT_HEADPHONES, "Disconnect")
+			&& mock_property(BT_NAME, BT_HEADPHONES, "org.bluez.Device1",
+				"Connected").find("false") != std::string::npos;
+		if (!off && retries++ < 100) {
+			if (retries % 10 == 3
+				&& !mock_called(BT_NAME, BT_HEADPHONES, "Disconnect")) {
+				click(action_x, action_y); // a lost click: send it again
+			}
+			return 300;
+		}
+		retries = 0;
+		check(off, "clicking the connected device disconnected it on the stand-in "
+			"(Disconnect called, Connected false)");
+		shot("bluetooth-after");
+		phase = 35;
+		return 400;
+	}
+	case 35: { // the found device's row: Scenario Speaker, the last one
+		std::vector<Band> rows = panel_rows("bluetooth-after");
+		if (rows.size() < 4 && retries++ < 10) {
+			shot("bluetooth-after");
+			return 400;
+		}
+		retries = 0;
+		if (rows.size() < 4) {
+			phase = 2;
+			return 300;
+		}
+		action_x = popup_box.x + popup_box.width / 2.0;
+		action_y = rows[rows.size() - 1].centre();
+		click(action_x, action_y);
+		phase = 36;
+		return 400;
+	}
+	case 36: {
+		bool paired = mock_called(BT_NAME, BT_SPEAKER, "Pair");
+		if (!paired && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(action_x, action_y); // a lost click: send it again
+			}
+			return 300;
+		}
+		retries = 0;
+		check(paired, "clicking the found device called Pair on the stand-in");
+		phase = 2;
+		return 300;
+	}
+	case 40: // the power panel: the profile rows settle
+		shot("power-profiles");
+		phase = 41;
+		return 400;
+	case 41: { // "Power saver" is the second row: the battery block above it
+		// and nothing below it is ever clicked — the Session rows (Suspend,
+		// Restart, Power off, Log out) sit below the other two profiles.
+		std::vector<Band> rows = panel_rows("power-profiles");
+		if (rows.size() < 8 && retries++ < 10) {
+			shot("power-profiles");
+			return 400;
+		}
+		retries = 0;
+		if (rows.size() < 8) {
+			phase = 2;
+			return 300;
+		}
+		// rows: battery, Power saver, Balanced, Performance, 4 session rows
+		action_x = popup_box.x + popup_box.width / 2.0;
+		action_y = rows[1].centre();
+		click(action_x, action_y);
+		phase = 42;
+		return 400;
+	}
+	case 42: {
+		std::string profile = mock_property(PPD_NAME, PPD_PATH, PPD_IFACE, "ActiveProfile");
+		if (profile.find("power-saver") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(action_x, action_y); // a lost click: send it again
+			}
+			return 300;
+		}
+		retries = 0;
+		check(profile.find("power-saver") != std::string::npos,
+			"clicking Power saver made the stand-in's active profile power-saver");
 		phase = 2;
 		return 300;
 	}
@@ -859,8 +1187,14 @@ int run_step() {
 			Indicator &ind = mandatory[i];
 			ind.x = runs[runs.size() - 1 - i].centre();
 			if (std::strcmp(ind.name, "network") == 0) {
-				ind.typing = true;
+				ind.connect_flow = true;
 				network_x = ind.x;
+			}
+			if (std::strcmp(ind.name, "bluetooth") == 0) {
+				ind.bt_flow = true;
+			}
+			if (std::strcmp(ind.name, "power") == 0) {
+				ind.profile_flow = true;
 			}
 		}
 

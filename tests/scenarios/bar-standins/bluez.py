@@ -14,11 +14,25 @@ import dbusmock.templates.bluez5 as bluez
 
 
 def load(mock, parameters):
+    # the template's Connect/Disconnect flip a private attribute and signal
+    # the change, but leave the D-Bus property stale; keep the property in
+    # step so the scenario can read the state back off the bus
+    orig_connect, orig_disconnect = bluez.Connect, bluez.Disconnect
+
+    def connect_then_prop(device):
+        orig_connect(device)
+        device.props[bluez.DEVICE_IFACE]["Connected"] = dbus.Boolean(True)
+
+    def disconnect_then_prop(device):
+        orig_disconnect(device)
+        device.props[bluez.DEVICE_IFACE]["Connected"] = dbus.Boolean(False)
+
+    bluez.Connect, bluez.Disconnect = connect_then_prop, disconnect_then_prop
+
     # the bluez5 convenience methods reach the root object through the
     # global object table, which the mock runner fills only after load
     dbusmock.mockobject.objects.setdefault("/", mock)
     bluez.load(mock, parameters)
-
     bluez.AddAdapter(mock, "hci0", "bar-scenario")
     bluez.AddDevice(mock, "hci0", "11:22:33:44:55:66", "Scenario Headphones")
     bluez.PairDevice(mock, "hci0", "11:22:33:44:55:66")
