@@ -84,7 +84,7 @@ file's current content, the user's literal words.
   where a compile-time constant was asked for. Name the proper
   structure and build it (see the `aim-for-ideal` skill).
 - **Magic numbers.** A bare `32` tells the reader nothing. Use a named
-  constant in `src/config.h`, such as `config::titlebar_height`.
+  constant in `src/core/config.h`, such as `config::titlebar_height`.
 - **A giant file.** While adding substantial logic to an existing file,
   check whether it still has one responsibility. A file holding every
   binding, gesture and grab at once is a split candidate on sight.
@@ -111,6 +111,6 @@ file's current content, the user's literal words.
   "one camera per output") are design facts and are fine to state.
   Full detail belongs only where something outside must integrate
   against it: a protocol's semantics, a desktop entry's fields, a
-  constant's meaning in `src/config.h`.
+  constant's meaning in `src/core/config.h`.
 - Chat replies are plain and short. Progress lines while working are
   fine; they are not a reason to stop.

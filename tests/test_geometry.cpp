@@ -1,4 +1,4 @@
-// Unit tests for src/geometry.cpp. Self-contained: no framework, links only
+// Unit tests for src/core/geometry.cpp. Self-contained: no framework, links only
 // geometry.cpp. Run via `meson test` (test 'geometry').
 
 #include <cmath>
@@ -6,7 +6,7 @@
 #include <optional>
 #include <source_location>
 
-#include "geometry.h"
+#include "core/geometry.h"
 
 namespace {
 

@@ -9,12 +9,12 @@ state requirements and rationale, never a walkthrough of the code. The
 **Sources.** This corpus is written from what was decided: the users'
 words in the working sessions, the plan-time design prose, the plans,
 and the user-facing README. It is not read off the code; a constant's
-name in `src/config.h` is cited only to say where something is set. A
+name in `src/core/config.h` is cited only to say where something is set. A
 doc is as long as what was decided about its subject; a subject touched
 once gets a short doc. A number appears only where it was decided
 (finger counts, the Windows 11 title-bar metrics 32 px / 46 px,
 screen-sized desktops, the dpi rule); tuning thresholds are compile-time
-constants in `src/config.h`, and the doc says so rather than listing
+constants in `src/core/config.h`, and the doc says so rather than listing
 their values.
 
 **Cornerstones.** Two docs win when another doc disagrees with them:

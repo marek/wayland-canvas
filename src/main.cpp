@@ -3,8 +3,8 @@
 #include <cstring>
 #include <unistd.h>
 
-#include "ipc.h"
-#include "server.h"
+#include "platform/ipc.h"
+#include "core/server.h"
 
 namespace {
 
@@ -41,7 +41,7 @@ constexpr char usage_text[] =
 	"  overview      toggle the overview there\n"
 	"  quit          end the session\n"
 	"\n"
-	"See the keyboard bindings in src/config.h and src/input.cpp.\n";
+	"See the keyboard bindings in src/core/config.h and src/input/input.cpp.\n";
 
 } // namespace
 

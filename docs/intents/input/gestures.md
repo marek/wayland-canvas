@@ -33,14 +33,14 @@ finger counts the compositor does not bind are forwarded to clients.
 Rules that hold across the table:
 
 - **Natural direction.** Content follows the fingers, like dragging a
-  map (a compile-time toggle in `src/config.h`).
+  map (a compile-time toggle in `src/core/config.h`).
 - **Follow the fingers.** A gesture that drives a zoom transition moves
   the camera along the zoom path continuously; nothing jumps.
 - **Commit or spring back.** Release past a threshold of progress — or
   a flick onward — commits the transition; released earlier, the camera
   animates back. The abandon swipe commits past a sideways travel
   distance; short of it the frame springs back. All thresholds are
-  compile-time constants in `src/config.h`.
+  compile-time constants in `src/core/config.h`.
 - **One action per gesture.** A hop triggers once past its travel
   threshold; a second jump takes a new gesture.
 - **Previews while pinching.** A 3-finger pinch in tile or combine

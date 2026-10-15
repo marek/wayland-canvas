@@ -29,7 +29,7 @@ asked.
   a remembered global instead of the owner's own; a special path for
   one client; a protocol-facing change without its intent doc moved; a
   wlroots signal wired outside a `Listener` member; a limit or
-  threshold changed in the code but not in `src/config.h`; a removed
+  threshold changed in the code but not in `src/core/config.h`; a removed
   implementation that took a capability with it; magic numbers;
   history-narrating comments; debug output left in; the same UI drawn
   twice.

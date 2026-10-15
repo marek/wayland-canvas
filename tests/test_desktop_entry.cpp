@@ -1,4 +1,4 @@
-// Unit tests for src/desktop_entry.cpp. Self-contained: no framework, links
+// Unit tests for src/apps/desktop_entry.cpp. Self-contained: no framework, links
 // only desktop_entry.cpp. Run via `meson test` (test 'desktop-entry').
 
 #include <cstdio>
@@ -6,7 +6,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
-#include "desktop_entry.h"
+#include "apps/desktop_entry.h"
 
 namespace {
 

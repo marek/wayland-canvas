@@ -40,7 +40,7 @@ Two checks that apply here often:
 ## What "remove, don't deprecate" means here
 
 - **No aliases for old conventions.** A renamed constant or function
-  leaves no old name behind; `src/config.h` has one name per tunable.
+  leaves no old name behind; `src/core/config.h` has one name per tunable.
 - **No compatibility paths in protocol usage.** The decoration
   negotiation has one policy; there is no legacy mode beside it.
 - **The wlroots subproject is fetched source, not ours.** It is never

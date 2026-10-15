@@ -56,7 +56,7 @@ reach the client. A lone tap of Super opens the app launcher.
 - Super+Ctrl+arrows and its kin are Windows' own virtual-desktop keys.
 - Alt+F4 is the one close binding without Super, for Windows parity.
 - Bindings live in a table in the input code next to the actions;
-  sizes, colours and tuning in `src/config.h` (dwl-style: edit and
+  sizes, colours and tuning in `src/core/config.h` (dwl-style: edit and
   rebuild).
 
 ### Pointer
@@ -66,7 +66,7 @@ reach the client. A lone tap of Super opens the app launcher.
 | Focus | Click-to-focus, and the click raises the window |
 | Drag over a window | Title-bar drag and edge/corner resize: [../windows/title-bars.md](../windows/title-bars.md) |
 | Super+left-drag / Super+right-drag | Move / resize from anywhere on the window ([../windows/window-management.md](../windows/window-management.md)) |
-| Press vs drag | A press becomes a drag only past a small travel (compile-time, `src/config.h`); under it, the release is a click |
+| Press vs drag | A press becomes a drag only past a small travel (compile-time, `src/core/config.h`); under it, the release is a click |
 | Drag or scroll on empty canvas | Pans ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Scroll over a client | Scrolls the client |
 | In the overview | Pointer actions are [../canvas/overview.md](../canvas/overview.md)'s |

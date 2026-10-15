@@ -165,8 +165,8 @@ suspend/restart/power-off/log-out menu. The bar's colours and metrics live in
 
 ## Configuration
 
-dwl-style: edit `src/config.h` (sizes, colours, gesture tuning, commands) and the
-binding table in `src/bindings.cpp`, then rebuild.
+dwl-style: edit `src/core/config.h` (sizes, colours, gesture tuning, commands) and the
+binding table in `src/input/bindings.cpp`, then rebuild.
 
 ## Protocols
 
@@ -193,7 +193,7 @@ beside it.
 
 | Folder | What |
 |---|---|
-| `src/` | Compositor source (`src/config.h` holds the tunables) |
+| `src/` | Compositor source, one folder per area: `core/`, `canvas/`, `windows/`, `input/`, `render/`, `platform/`, `apps/` (`src/core/config.h` holds the tunables) |
 | `tests/` | Unit tests and headless scenario sources (`tests/scenarios/`) |
 | `tools/` | `check.sh` (build + test), `check-plans.sh`, hooks |
 | `scripts/` | `agent-setup.sh` (links skills, roles and hooks into `.claude/`) |

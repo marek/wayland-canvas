@@ -14,7 +14,7 @@ No client ever shows two title bars.
 
 ## Behavior
 
-Metrics, logical pixels (Windows 11; constants in `src/config.h`):
+Metrics, logical pixels (Windows 11; constants in `src/core/config.h`):
 
 | Part | Rule |
 |---|---|
@@ -24,7 +24,7 @@ Metrics, logical pixels (Windows 11; constants in `src/config.h`):
 | Border | 1 px on every side — accent colour while the window is focused, neutral otherwise |
 
 Text position, fonts and all decoration colours are compile-time
-constants in `src/config.h`.
+constants in `src/core/config.h`.
 
 Window state:
 

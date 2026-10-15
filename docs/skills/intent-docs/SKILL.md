@@ -22,14 +22,14 @@ code and not a diary.
 **Not from reading the code.** Until the user lifts this, do not fill a
 doc by describing what a source file happens to do: that turns
 accidents into contract. The one lookup allowed is a constant's name in
-`src/config.h`, to say where something is set. If a decision was never
+`src/core/config.h`, to say where something is set. If a decision was never
 made about something, the doc is silent on it. A subject touched once
 in conversation gets a short doc; nothing is padded to look complete.
 
 A number goes in only if it was decided (finger counts, the Windows 11
 title-bar metrics 32 px / 46 px, screen-sized desktops, the dpi rule);
 tuning thresholds are referenced as compile-time constants in
-`src/config.h`, not listed. Where the code and the doc disagree, one of
+`src/core/config.h`, not listed. Where the code and the doc disagree, one of
 them drifted: find out which, and fix that one — in a body of work that
 touches the tests too.
 

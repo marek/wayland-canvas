@@ -22,8 +22,8 @@ headers written first, rather than one module at a time.
 
 - [x] `platform/cpp-standards.md`: toolchain, what C++ carries, classes, code, names, hot paths
 - [x] LLVM toolchain: `toolchain/llvm.ini`; `meson.build` refuses other compilers; `tools/check.sh` configures through the native file; wlroots built by clang
-- [x] `src/wlr.h`: wlroots inside `extern "C"` with the two header hazards handled
-- [x] `Listener`, `Handle` and `destroy_owned` in `src/util.h`
+- [x] `src/core/wlr.h`: wlroots inside `extern "C"` with the two header hazards handled
+- [x] `Listener`, `Handle` and `destroy_owned` in `src/core/util.h`
 - [x] Class headers for the server, outputs, views, popups, decorations, layer surfaces, desktops, input, gestures, painter, hint, launcher, apps, icons and desktop entries, compiling together
 - [x] Every module and test converted to the headers
 - [x] The docs name the C++ code: code-style skill, build-and-run, wlroots, the intent index, README

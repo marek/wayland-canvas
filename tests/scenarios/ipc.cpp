@@ -17,10 +17,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include "ipc.h"
-#include "output.h"
-#include "server.h"
-#include "wlr.h"
+#include "platform/ipc.h"
+#include "platform/output.h"
+#include "core/server.h"
+#include "core/wlr.h"
 
 namespace {
 

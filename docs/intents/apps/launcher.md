@@ -26,7 +26,7 @@ The list holds the installed apps — every application entry that
 survives the desktop-entry rules
 ([desktop-entries.md](desktop-entries.md)) — each row an icon and a
 name. Panel width, row height, rows shown, icon size and fonts are
-compile-time constants in `src/config.h`.
+compile-time constants in `src/core/config.h`.
 
 Typing filters the list; matches are ranked:
 

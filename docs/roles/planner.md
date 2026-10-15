@@ -25,7 +25,7 @@ docs that hold what was decided so it is not decided again.
 - Writes the contract the plan settles into `docs/intents/`, and keeps
   only tasks and open decisions in the plan.
 - States chosen numbers and choices exactly, with the reason; points at
-  compile-time constants in `src/config.h` for tuning thresholds
+  compile-time constants in `src/core/config.h` for tuning thresholds
   instead of listing values.
 - Asks what established compositors and desktops do before proposing
   something smaller.

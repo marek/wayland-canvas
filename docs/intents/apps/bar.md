@@ -68,7 +68,7 @@ tooling, no standard source to read).
 ## Autostart
 
 `Server::start()` launches the bar when `qs` is on `PATH` (constants in
-`src/config.h`). The bar's config is found beside the compositor binary —
+`src/core/config.h`). The bar's config is found beside the compositor binary —
 `../shell` in the build tree, `../share/wayland-canvas/shell` when
 installed (meson installs `shell/` under the data dir) — or at
 `$WAYLAND_CANVAS_SHELL_DIR` when set. `-B` (and `Options::start_bar`)

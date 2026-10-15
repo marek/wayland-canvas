@@ -70,7 +70,7 @@ first-class; every canvas shortcut includes Super.
 
 A taskbar; Xwayland; an output-configuration protocol (wlr-randr,
 kanshi); session lock; gamma control; damage-region rendering; window
-open/close animations; a configuration file instead of `src/config.h`;
+open/close animations; a configuration file instead of `src/core/config.h`;
 a run on real hardware (TTY, touchpad gestures, the 2x panel); anything
 that pushes. Write these into the plan and keep working on something
 else.

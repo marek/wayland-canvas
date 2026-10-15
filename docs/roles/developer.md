@@ -27,7 +27,7 @@ and code agreeing with each other.
 - Writes C++26 in the tree's conventions
   ([../intents/platform/cpp-standards.md](../intents/platform/cpp-standards.md)):
   wlroots signals as `Listener` members, single ownership with
-  `destroy_owned`, constants in `src/config.h`; keeps a file to one
+  `destroy_owned`, constants in `src/core/config.h`; keeps a file to one
   responsibility.
 - Holds every wlroots signal in a `Listener` member: it disconnects
   when its owner is destroyed.

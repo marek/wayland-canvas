@@ -36,7 +36,7 @@ or free area, is one gesture away.
 | Subject | Rule |
 |---|---|
 | Enter | 4-finger swipe up, following the fingers; release early to cancel ([../input/gestures.md](../input/gestures.md)). Also Super+Tab / Super+W |
-| Fit | The zoom fits everything on the canvas — desktops and windows — with a margin (compile-time, `src/config.h`); the current screen is kept centred when that still fits |
+| Fit | The zoom fits everything on the canvas — desktops and windows — with a margin (compile-time, `src/core/config.h`); the current screen is kept centred when that still fits |
 | Zoom further | 4-finger swipe up again zooms out further; 2-finger pinch zooms around the cursor; scroll pans; Ctrl+scroll zooms; `+`/`−` zoom about the screen centre. Clamped to compile-time zoom bounds |
 | Leave into the target | 4-finger swipe down zooms into the target, following the fingers; release early to cancel |
 | Leave on choice | Return, or a click, zooms into the target and exits; Esc goes back to the view before entering |
@@ -54,7 +54,7 @@ or free area, is one gesture away.
 
 - A 3-finger swipe jumps to the closest desktop in the swipe's general
   direction: the target moves toward the fingers' direction, within a
-  tolerance cone (compile-time, `src/config.h`); straight-ahead
+  tolerance cone (compile-time, `src/core/config.h`); straight-ahead
   neighbours beat nearer off-axis ones.
 - No desktop lies that way: the target moves one screen that way — a
   free spot.
@@ -100,7 +100,7 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
 - **Hopping with no desktop in the cone**: the target still moves, one
   screen that way, as a free spot.
 - **Zoom bounds reached**: the zoom clamps (compile-time bounds in
-  `src/config.h`); the gesture keeps tracking but the view stops.
+  `src/core/config.h`); the gesture keeps tracking but the view stops.
 
 ## Cross-links
 

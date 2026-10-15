@@ -69,40 +69,46 @@ foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
 	)
 endforeach
 
+# Includes are written from src/ ("canvas/desktop.h").
+src_inc = include_directories('src')
+
 # Pure logic without wlroots, unit-tested on its own.
 geometry_lib = static_library(
 	'canvas-geometry',
-	'src/geometry.cpp',
+	'src/core/geometry.cpp',
+	include_directories: src_inc,
 )
 desktop_entry_lib = static_library(
 	'canvas-desktop-entry',
-	'src/desktop_entry.cpp',
+	'src/apps/desktop_entry.cpp',
+	include_directories: src_inc,
 )
 
 core_lib = static_library(
 	'canvas-core',
 	files(
-		'src/bindings.cpp',
-		'src/apps.cpp',
-		'src/camera.cpp',
-		'src/canvas.cpp',
-		'src/decoration.cpp',
-		'src/desktop.cpp',
-		'src/draw.cpp',
-		'src/gesture.cpp',
-		'src/grab.cpp',
-		'src/icons.cpp',
-		'src/input.cpp',
-		'src/ipc.cpp',
-		'src/launcher.cpp',
-		'src/overview.cpp',
-		'src/layer.cpp',
-		'src/output.cpp',
-		'src/render.cpp',
-		'src/server.cpp',
-		'src/view.cpp',
+		'src/apps/apps.cpp',
+		'src/apps/icons.cpp',
+		'src/apps/launcher.cpp',
+		'src/canvas/camera.cpp',
+		'src/canvas/canvas.cpp',
+		'src/canvas/desktop.cpp',
+		'src/canvas/overview.cpp',
+		'src/core/server.cpp',
+		'src/input/bindings.cpp',
+		'src/input/gesture.cpp',
+		'src/input/grab.cpp',
+		'src/input/input.cpp',
+		'src/platform/ipc.cpp',
+		'src/platform/layer.cpp',
+		'src/platform/output.cpp',
+		'src/render/draw.cpp',
+		'src/render/render.cpp',
+		'src/windows/decoration.cpp',
+		'src/windows/view.cpp',
 	),
 	protocol_headers,
+	include_directories: src_inc,
 	link_with: [geometry_lib, desktop_entry_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
 		glib, libinput, libdrm],
@@ -112,6 +118,7 @@ wayland_canvas = executable(
 	'wayland-canvas',
 	'src/main.cpp',
 	protocol_headers,
+	include_directories: src_inc,
 	link_with: core_lib,
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, libinput, libdrm],
 	install: true,
@@ -151,7 +158,7 @@ test(
 	executable(
 		'test-geometry',
 		'tests/test_geometry.cpp',
-		include_directories: include_directories('src'),
+		include_directories: src_inc,
 		link_with: geometry_lib,
 	),
 	suite: 'unit',
@@ -162,7 +169,7 @@ test(
 	executable(
 		'test-desktop-entry',
 		'tests/test_desktop_entry.cpp',
-		include_directories: include_directories('src'),
+		include_directories: src_inc,
 		link_with: desktop_entry_lib,
 	),
 	suite: 'unit',
@@ -185,7 +192,7 @@ if foot_prog.found() and grim_prog.found()
 				'scenario-' + scenario,
 				'tests/scenarios/' + scenario + '.cpp',
 				protocol_headers,
-				include_directories: include_directories('src'),
+				include_directories: src_inc,
 				link_with: core_lib,
 				dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
 					libinput, libdrm],

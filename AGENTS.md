@@ -67,7 +67,7 @@ Three things sit beside the helix and are not part of it:
    Progress narrative belongs in commit messages and `docs/plans/`.
 6. **Intents are written from what was decided, not read off the
    code.** Sources are the users' words, the plans and the plan-time
-   design prose. A constant's name may be looked up in `src/config.h`
+   design prose. A constant's name may be looked up in `src/core/config.h`
    only to say where something is set; until the user says otherwise, do
    not fill an intent doc by describing what a source file happens to
    do.

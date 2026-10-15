@@ -24,7 +24,7 @@ structure — the canvas and its renderer are this project's own
 
 ## Error states, corner cases
 
-- A listener wired outside a `Listener` member (`src/util.h`) is not a
+- A listener wired outside a `Listener` member (`src/core/util.h`) is not a
   leak but a crash: the assert fires on destroy. Count listeners in
   both directions when wiring a new object by hand against the wlroots
   C API.

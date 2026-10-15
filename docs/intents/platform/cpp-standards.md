@@ -44,7 +44,7 @@ sits on the object it acts on.
 | Need | Form |
 |---|---|
 | A wlroots signal | A `Listener` member of the object that handles it. `connect<&Class::handler>(signal, this)` names a member function taking nothing or the signal's data pointer; destroying, reconnecting or `disconnect()` removes it |
-| A C object with a destroy function (texture, cairo surface and context, pango layout, `GKeyFile`, event source) | `Handle<T, destroy>`, a `std::unique_ptr` with that function as its deleter; `TexturePtr` and friends in `src/util.h` |
+| A C object with a destroy function (texture, cairo surface and context, pango layout, `GKeyFile`, event source) | `Handle<T, destroy>`, a `std::unique_ptr` with that function as its deleter; `TexturePtr` and friends in `src/core/util.h` |
 | A compositor object (output, view, popup, layer surface, keyboard, desktop) | Owned by exactly one `std::vector<std::unique_ptr<T>>` of its owner. Its wlroots destroy handler ends with `destroy_owned(owner, this)` |
 | A reference that does not own | A raw pointer or reference for the length of a call. Kept longer: a name resolved when it is used (`DesktopId` through `Desktops::find`, `nullptr` once the desktop is gone). Outputs and views have no names: the one subsystem holding such a pointer is told when they go (`forget`, `output_gone`); no other code writes its fields |
 | A state, kind or mode | `enum class`, enumerators `snake_case`. Plain integers only for masks and values shared with a C API (`wlr_edges`, layer indices) |
@@ -55,7 +55,7 @@ sits on the object it acts on.
 | Text | `std::string` owned, `std::string_view` read; `const char *` where it goes straight to a C API that needs the terminator |
 | A list built per frame | `std::inplace_vector`, or a member vector reused with `clear()` |
 | A callback into our code | `std::function_ref` parameter. From C (iterators, timers): a captureless lambda or static member, `void *` cast back with `static_cast` |
-| A constant | `constexpr`. Tunables live in `src/config.h`, namespace `config` |
+| A constant | `constexpr`. Tunables live in `src/core/config.h`, namespace `config` |
 
 ### Classes
 
@@ -72,14 +72,34 @@ A class is one concept of the compositor: the canvas and its desktops, a
 screen's camera and its overview, gestures, pointer grabs, bindings. Other
 classes ask it through queries and change it through its members. A class
 spans files only for a separate concern of the same object (`Output`'s
-layer arrangement in `layer.cpp`).
+layer arrangement in `platform/layer.cpp`).
+
+### Layout
+
+Sources sit in one folder per area of the compositor; `src/main.cpp` alone
+stays at the root.
+
+| Folder | Holds |
+|---|---|
+| `src/core/` | `Server`, the wlroots wrapper, ownership helpers, tunables, canvas geometry |
+| `src/canvas/` | The canvas and its desktops; a screen's camera and overview |
+| `src/windows/` | Views, popups and their title bars |
+| `src/input/` | Devices and the seat, gestures, pointer grabs, key bindings |
+| `src/render/` | The painter and text drawing |
+| `src/platform/` | Outputs, layer surfaces, the control socket |
+| `src/apps/` | The launcher, installed applications, icons, desktop entries |
+
+A new file goes in the folder of the concept it belongs to. Includes are
+written from `src/` (`#include "canvas/desktop.h"`), so a moved file changes
+its includers' lines and nothing else. An area that outgrows one folder
+splits into subfolders, never more than two levels below `src/`.
 
 ### Code
 
 | Subject | Rule |
 |---|---|
 | Files | `.cpp` sources, `.h` headers with `#pragma once`; a header per class or close group |
-| wlroots | Only through `src/wlr.h`, the `extern "C"` wrapper; other C libraries directly |
+| wlroots | Only through `src/core/wlr.h`, the `extern "C"` wrapper; other C libraries directly |
 | File-local code | An unnamed namespace |
 | Null, casts | `nullptr`; named casts only |
 | Macros | None of our own; constants are `constexpr`, helpers `constexpr` functions or templates |
@@ -119,7 +139,7 @@ non-obvious reason, never history.
 - **A wlroots object that dies before ours** (a decoration, a drag
   icon): our listeners on it disconnect in its destroy handler.
 - **wlroots headers that are not C++** (`[static N]` parameters, a field
-  named `namespace`) are handled once in `src/wlr.h` and never patched.
+  named `namespace`) are handled once in `src/core/wlr.h` and never patched.
 - **The wlroots subproject and other bundled code** keep their own style.
 
 ## Cross-links

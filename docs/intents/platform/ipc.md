@@ -22,7 +22,7 @@ menu ends the session.
 
 The compositor listens on
 `$XDG_RUNTIME_DIR/wayland-canvas-<wayland display>.sock` (the prefix is a
-constant in `src/config.h`) and exports the path to every spawned client as
+constant in `src/core/config.h`) and exports the path to every spawned client as
 `$WAYLAND_CANVAS_SOCKET`. The socket is created once the Wayland display
 socket exists and before any client is spawned.
 

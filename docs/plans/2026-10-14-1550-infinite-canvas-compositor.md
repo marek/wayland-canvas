@@ -62,4 +62,4 @@ What was decided is in the intents: [canvas/infinite-canvas.md](../intents/canva
 - [ ] Gamma control for night light (the user to decide)
 - [ ] Repainting only damaged regions instead of whole outputs (the user to decide)
 - [ ] Window open and close animations (the user to decide)
-- [ ] A configuration file read at run time instead of `src/config.h` (the user to decide)
+- [ ] A configuration file read at run time instead of `src/core/config.h` (the user to decide)

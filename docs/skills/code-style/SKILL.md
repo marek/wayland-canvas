@@ -78,7 +78,7 @@ The full rules — toolchain, class shapes, error states — live in
 The short form:
 
 - Every wlroots signal an object handles is a `Listener` member of
-  that object (`src/util.h`); it disconnects when its owner is
+  that object (`src/core/util.h`); it disconnects when its owner is
   destroyed, so listener balance is structural, not counted by hand.
 - Every compositor object has exactly one owner
   (`std::vector<std::unique_ptr<T>>`); its destroy handler ends with
@@ -87,7 +87,7 @@ The short form:
   named casts, never C casts; file-local code in an unnamed
   namespace; no macros of our own.
 - **No magic numbers.** A raw `32` tells the reader nothing;
-  `config::titlebar_height` in `src/config.h` does. Gesture and
+  `config::titlebar_height` in `src/core/config.h` does. Gesture and
   animation thresholds live there too.
 - **Read the wlroots headers** to verify every API called; check
   `tinywl` and `wlr_scene` in the subproject for how a request handler
@@ -111,8 +111,12 @@ The short form:
 
 - A file mixing distinct responsibilities is a split candidate — check
   while writing, not when asked. One file holding every binding, gesture
-  and grab at once would be that case; they are `bindings.cpp`,
-  `gesture.cpp` and `grab.cpp`.
+  and grab at once would be that case; they are `input/bindings.cpp`,
+  `input/gesture.cpp` and `input/grab.cpp`.
+- A new file goes in the area folder of its concept (`src/canvas/`,
+  `src/input/`, ...), included from `src/` as `"input/grab.h"`; the folders
+  are listed in
+  [../../intents/platform/cpp-standards.md](../../intents/platform/cpp-standards.md).
 - Two features that need the same behaviour share the implementation;
   the gesture path, the key path and the pointer path drive the same
   canvas actions.

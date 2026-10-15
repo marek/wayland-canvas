@@ -65,7 +65,7 @@ other desktop.
 
 Grid-tile the windows whose centre is in the desktop — or in the
 target spot when the target is a free spot — inside the area not
-covered by bars, with gaps (a compile-time constant in `src/config.h`).
+covered by bars, with gaps (a compile-time constant in `src/core/config.h`).
 The windows are told they are tiled; the per-window tiling contract is
 [../windows/window-management.md](../windows/window-management.md)'s.
 

@@ -54,7 +54,7 @@ to a free area of the canvas is as easy as going to a desktop.
   a map.
 - A released 3-finger pan keeps momentum; the camera coasts and decays
   (decay time constant and minimum coasting speed are compile-time
-  constants in `src/config.h`).
+  constants in `src/core/config.h`).
 - A pan that lands close to a desktop (a compile-time fraction of the
   screen) snaps onto it; any other landing spot stays wherever the
   pan stopped.

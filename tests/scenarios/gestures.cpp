@@ -19,11 +19,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <variant>
-#include "config.h"
-#include "output.h"
-#include "render.h"
-#include "server.h"
-#include "wlr.h"
+#include "core/config.h"
+#include "platform/output.h"
+#include "render/render.h"
+#include "core/server.h"
+#include "core/wlr.h"
 
 namespace {
 
