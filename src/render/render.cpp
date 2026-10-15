@@ -477,15 +477,17 @@ void draw_tabs(const RenderCtx &ctx) {
 	Output &o = *ctx.output;
 	Server &server = o.server;
 	for (const Desktop &d : server.canvas.desktops.all()) {
+		// The target's tab is the accent fill, so its label is drawn in
+		// the accent-text variant: a contrasting colour in both modes.
+		bool target = o.overview.target().desktop == d.id();
 		// Make sure the cached label matches this output's scale before
 		// the layout measures it.
-		DesktopLabel label = server.painter.desktop_label(d, ctx.scale);
+		DesktopLabel label = server.painter.desktop_label(d, ctx.scale, target);
 		std::optional<TabLayout> layout = server.painter.overview_tab_layout(o, d);
 		if (!layout) {
 			continue;
 		}
-		uint32_t bg = o.overview.target().desktop == d.id()
-			? server.theme.colors().accent : server.theme.colors().panel;
+		uint32_t bg = target ? server.theme.colors().accent : server.theme.colors().panel;
 		draw_logical_rect(ctx, layout->tab.x, layout->tab.y, layout->tab.width,
 			layout->tab.height, color_rgba(bg));
 		if (label.texture != nullptr && label.w > 0 && label.h > 0) {
@@ -705,17 +707,18 @@ const Painter::LabelSlot *Painter::label_slot(DesktopId id) const {
 	return nullptr;
 }
 
-DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale) {
+DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale, bool on_accent) {
 	LabelSlot *slot = label_slot(desktop.id());
 	if (slot == nullptr) {
 		label_cache_.push_back(LabelSlot{.id = desktop.id()});
 		slot = label_slot(desktop.id());
 	}
-	if (slot->texture != nullptr && slot->number == desktop.number()
+	TexturePtr &texture = on_accent ? slot->accent_texture : slot->texture;
+	if (texture != nullptr && slot->number == desktop.number()
 			&& slot->desktop_scale == desktop.scale() && slot->scale == scale) {
-		return {slot->texture.get(), slot->w, slot->h};
+		return {texture.get(), slot->w, slot->h};
 	}
-	slot->texture.reset();
+	texture.reset();
 	char buf[48];
 	int len;
 	if (desktop.scale() == 1.0) {
@@ -724,22 +727,24 @@ DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale) {
 		len = std::snprintf(buf, sizeof(buf), "Desktop %d · %d %%",
 			desktop.number(), static_cast<int>(std::lround(desktop.scale() * 100)));
 	}
+	// The same text in the colour its fill asks for: the panel text of an
+	// ordinary tab, the contrasting accent text of the target's accent.
 	int w = 0, h = 0;
-	TexturePtr texture;
 	if (len > 0) {
 		TextTexture t = draw_text(server_.renderer, buf, config::ui_font_bold,
-			server_.theme.colors().panel_text, 0x00000000u, scale, 0, 0);
+			on_accent ? server_.theme.colors().accent_text
+				  : server_.theme.colors().panel_text,
+			0x00000000u, scale, 0, 0);
 		texture = std::move(t.texture);
 		w = t.width;
 		h = t.height;
 	}
-	slot->texture = std::move(texture);
 	slot->number = desktop.number();
 	slot->desktop_scale = desktop.scale();
 	slot->scale = scale;
 	slot->w = w;
 	slot->h = h;
-	return {slot->texture.get(), slot->w, slot->h};
+	return {texture.get(), slot->w, slot->h};
 }
 
 std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
@@ -970,6 +975,7 @@ void Painter::theme_changed() {
 	}
 	for (LabelSlot &slot : label_cache_) {
 		slot.texture.reset();
+		slot.accent_texture.reset();
 	}
 }
 

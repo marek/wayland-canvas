@@ -96,9 +96,11 @@ public:
 	void theme_changed(); // drops the help-line and tab-label textures
 	void finish(); // releases cached textures before the renderer goes
 
-	// Regenerates the cached label when the desktop's number or scale, or
-	// the output scale, changed.
-	DesktopLabel desktop_label(const Desktop &desktop, float scale);
+	// Regenerates the cached label when the desktop's number or scale, the
+	// output scale, or the palette changed; `on_accent` picks the variant
+	// for the target tab's accent fill, in the contrasting accent text
+	// colour instead of the panel text colour.
+	DesktopLabel desktop_label(const Desktop &desktop, float scale, bool on_accent);
 	// The tab above a desktop frame and its Tile and Abandon buttons; nullopt when the
 	// tab is off-screen.
 	std::optional<TabLayout> overview_tab_layout(const Output &output,
@@ -107,10 +109,12 @@ public:
 private:
 	static constexpr std::size_t help_slots = 4;
 
-	// One slot of the desktop-label cache.
+	// One slot of the desktop-label cache: one texture per fill the label
+	// sits on — the panel of an ordinary tab, the accent of the target.
 	struct LabelSlot {
 		DesktopId id{};
 		TexturePtr texture;
+		TexturePtr accent_texture;
 		int number = 0, w = 0, h = 0;
 		double desktop_scale = 1; // the scale the label names
 		float scale = 0;
