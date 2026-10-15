@@ -1,0 +1,24 @@
+{
+	"id": "canvas.weather",
+	"name": "Weather",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The weather widget: condition glyph and temperature from wttr.in, with the forecast panel",
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "weather",
+				"entry": "Weather.qml",
+				"section": "center",
+				"order": 1,
+				"panel": "weather"
+			}
+		],
+		"panels": [
+			{
+				"id": "weather",
+				"entry": "WeatherPanel.qml"
+			}
+		]
+	}
+}

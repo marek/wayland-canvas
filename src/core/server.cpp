@@ -339,7 +339,10 @@ bool Server::start() {
 	return true;
 }
 
-// Autostarts the top bar when its client and its config are both present.
+// Autostarts the shell (the plugin host and its bar) when its client and
+// its config are both present. QML_IMPORT_PATH is prefixed with the
+// shell's ui/ dir so every plugin, wherever the host found it, can
+// `import WaylandCanvas.Ui`.
 void Server::start_bar() {
 	if (!program_on_path(config::bar_program)) {
 		wlr_log(WLR_INFO, "%s is not on PATH: no top bar", config::bar_program);
@@ -351,7 +354,9 @@ void Server::start_bar() {
 			"no bar config beside the binary or at $WAYLAND_CANVAS_SHELL_DIR: no top bar");
 		return;
 	}
-	std::string cmd = std::format("{} -p {}", config::bar_program, shell_quote(*dir));
+	std::string cmd = "QML_IMPORT_PATH=" + shell_quote(*dir + "/ui")
+		+ "${QML_IMPORT_PATH:+:$QML_IMPORT_PATH} " + config::bar_program
+		+ " -p " + shell_quote(*dir);
 	spawn(cmd.c_str());
 }
 

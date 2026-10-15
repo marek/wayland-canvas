@@ -1,0 +1,9 @@
+module WaylandCanvas.Ui
+singleton UiTheme UiTheme.qml
+BarButton BarButton.qml
+PanelCard PanelCard.qml
+PanelField PanelField.qml
+PanelRow PanelRow.qml
+PanelSlider PanelSlider.qml
+PanelSwitch PanelSwitch.qml
+PanelText PanelText.qml
