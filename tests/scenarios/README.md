@@ -88,6 +88,19 @@ Wayland display namespace and GPU.
   `[plugins]` lines in the test log. Last, an idle watch: the shell is
   sampled about every 10 ms for 10 s and must have spawned no process at
   all, because the reloads ride on change notifications, not on a poll.
+  Then the theme: a foot window is mapped for its title bar and the
+  overview is opened for its tabs, and both are sampled against the
+  palettes in `src/core/config.h`; the theme switch (the right-most bar
+  widget) is clicked and the scratch `shell.json` must carry
+  `theme.mode: light` while the compositor reports light, the bar and an
+  open panel are sampled light against the UI kit's palette
+  (`shell_bg_light`/`shell_panel_light`, kept in sync with `UiTheme.qml`),
+  the title bar and the target tab's accent fill likewise; rewriting the
+  config as an edit reloads the shell and the bar that comes back is still
+  light (a new bar surface proves the reload happened), and clicking the
+  switch again restores dark in the config, the compositor, the bar and a
+  panel. Screenshots of both modes — bar, panel, window title bar,
+  overview — land in `tmp/scenarios/bar/` as `light-*`/`dark-*`.
 
 ## What they need
 

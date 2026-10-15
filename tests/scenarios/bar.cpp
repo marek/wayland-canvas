@@ -27,7 +27,9 @@
 #include <optional>
 #include <poll.h>
 #include <print>
+#include <ranges>
 #include <source_location>
+#include <span>
 #include <string>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -39,7 +41,9 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/theme.h"
 #include "core/wlr.h"
+#include "render/render.h"
 
 namespace {
 
@@ -64,6 +68,9 @@ bool idle_spawned = false; // any child of the shell seen while idle
 constexpr int idle_sample_count = 1000; // 10 s of samples
 constexpr int idle_sample_ms = 10;
 constexpr double widen_px = 20; // how much the edited widget must grow
+double theme_x = 0; // the theme switch's centre: the right-most bar run
+double power_x = 0; // the power indicator's centre: the theme phase's panel
+std::string shell_config; // the scratch shell.json the theme switch writes
 
 // ---- isolation: private buses and the stand-in services on them ----
 
@@ -86,6 +93,13 @@ constexpr int brightness_panel = 240;
 constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
+
+// The shell's own colours the theme phase samples (the UI kit's palette;
+// the compositor's half comes from config.h's palettes). Keep in sync with
+// shell/ui/WaylandCanvas/Ui/UiTheme.qml.
+constexpr uint32_t shell_bg_dark = 0x1a1b26ff;
+constexpr uint32_t shell_bg_light = 0xe1e2e7ff;
+constexpr uint32_t shell_panel_light = 0xf4f5f8ff;
 
 // Output geometry the headless backend gives: 1280x720, one output.
 constexpr int screen_w = 1280, screen_h = 720;
@@ -143,6 +157,22 @@ void write_file(const std::string &path, std::string_view text) {
 	}
 	std::fwrite(text.data(), 1, text.size(), f);
 	std::fclose(f);
+}
+
+// Reads a small text file whole (the scratch config the theme switch writes).
+std::string read_file(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return {};
+	}
+	std::string out;
+	char buf[512];
+	std::size_t n = 0;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	return out;
 }
 
 // ---- machine state: which indicators the bar shows ----
@@ -473,6 +503,20 @@ void shot(const char *name) {
 	}
 }
 
+// Press mods..., tap k, release mods.
+void chord(uint32_t k, std::span<const uint32_t> mods) {
+	for (uint32_t m : mods) {
+		key(m, true);
+	}
+	key(k, true);
+	key(k, false);
+	for (uint32_t m : std::views::reverse(mods)) {
+		key(m, false);
+	}
+}
+
+constexpr uint32_t SUPER[] = {KEY_LEFTMETA};
+
 // ---- the bar client and its surfaces ----
 
 LayerSurface *bar_layer() {
@@ -768,6 +812,130 @@ int bright_count(cairo_surface_t *s, const wlr_box &rect) {
 		}
 	}
 	return n;
+}
+
+// ---- the theme phase: sampling flat palette fills off screenshots ----
+
+// The renderer's rounding of a flat fill stays within this of the palette.
+constexpr int palette_tolerance = 8;
+
+// One screenshot pixel as 0xRRGGBB (grim's ARGB32: B, G, R, A in memory).
+uint32_t pixel_at(cairo_surface_t *s, int x, int y) {
+	unsigned char *p = cairo_image_surface_get_data(s)
+		+ y * cairo_image_surface_get_stride(s) + x * 4;
+	return uint32_t(p[2]) << 16 | uint32_t(p[1]) << 8 | uint32_t(p[0]);
+}
+
+bool near_channel(unsigned char got, unsigned char want) {
+	int d = got > want ? got - want : want - got;
+	return d <= palette_tolerance;
+}
+
+// True when the pixel is the palette colour: the bar, panel cards, title
+// bars and the target tab are flat fills of one palette entry, so sampling
+// one clear pixel tells the mode. The palette carries 0xRRGGBBAA with the
+// alpha in the low byte; a screenshot pixel has no alpha, so the alpha is
+// shifted out before the channels are compared.
+bool pixel_is(cairo_surface_t *s, int x, int y, uint32_t want) {
+	if (s == nullptr) {
+		return false;
+	}
+	want >>= 8;
+	uint32_t got = pixel_at(s, x, y);
+	return near_channel(got >> 16, want >> 16)
+		&& near_channel(got >> 8, want >> 8) && near_channel(got, want);
+}
+
+// A shot's one pixel against a palette colour.
+bool shot_pixel_is(const char *name, int x, int y, uint32_t want) {
+	cairo_surface_t *s = load_png(name);
+	bool ok = pixel_is(s, x, y, want);
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return ok;
+}
+
+// The mapped view with this title, as the input scenario finds its windows.
+View *titled(const char *title) {
+	for (View *v : server->views) {
+		if (v->mapped && v->wlr->title && std::strcmp(v->wlr->title, title) == 0) {
+			return v;
+		}
+	}
+	return nullptr;
+}
+
+// The one output the headless backend gives.
+Output *out() {
+	return server->outputs.front().get();
+}
+
+// The target tab's fill pixel in a shot: the tab layout is read from the
+// compositor itself, the sample point is the tab's clear top-left corner.
+// A note in the log names the rect and pixel, so a failure says why.
+bool target_tab_is(const char *name, uint32_t want) {
+	Output *o = out();
+	Desktop *d = o != nullptr
+		? o->server.canvas.desktops.find(o->overview.target().desktop) : nullptr;
+	std::optional<TabLayout> layout = d != nullptr
+		? o->server.painter.overview_tab_layout(*o, *d) : std::nullopt;
+	cairo_surface_t *s = load_png(name);
+	int x = layout.has_value() ? layout->tab.x + 4 : 0;
+	int y = layout.has_value() ? layout->tab.y + 4 : 0;
+	bool ok = layout.has_value() && pixel_is(s, x, y, want);
+	std::println("note: tab sample ({},{}): {:06x}, want {:06x}, layout {}, desktop {}",
+		x, y, s != nullptr ? pixel_at(s, x, y) : 0, want,
+		layout.has_value() ? "found" : "missing", d != nullptr ? "found" : "missing");
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return ok;
+}
+
+// The themed window's title bar in a shot: one of the mode's two title
+// colours (which one depends on focus; both follow the mode), sampled mid
+// bar where no title or button is drawn. A note in the log names the
+// sample point and pixel, so a failure says why.
+bool title_bar_is(const char *name, uint32_t active, uint32_t inactive) {
+	View *v = titled("themed");
+	wlr_box f = v != nullptr ? v->frame_box() : wlr_box{};
+	int x = f.x + f.width / 2, y = f.y + config::titlebar_height / 2;
+	cairo_surface_t *s = load_png(name);
+	bool ok = v != nullptr && s != nullptr
+		&& (pixel_is(s, x, y, active) || pixel_is(s, x, y, inactive));
+	std::println("note: title sample ({},{}): {:06x}, want {:06x} or {:06x}, view {}",
+		x, y, s != nullptr ? pixel_at(s, x, y) : 0, active, inactive,
+		v != nullptr ? "found" : "missing");
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return ok;
+}
+
+// The left section's right edge, by ink: glyph pixels stand off the
+// background in either mode — bright on the dark bar, dark on the light
+// one — so the edge reads the same before and after a switch. The
+// re-enabled plugin's label sits past the logo, pushing the edge right.
+double bar_ink_edge(cairo_surface_t *s, const wlr_box &bar, bool light) {
+	if (s == nullptr) {
+		return 0;
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	double edge = 0;
+	int limit = screen_w / 2 - 250; // short of the centred widgets
+	for (int x = 0; bar.x + x < limit; x++) {
+		for (int y = 0; y < bar.height; y++) {
+			unsigned char *p = data + (bar.y + y) * stride + (bar.x + x) * 4;
+			int sum = p[0] + p[1] + p[2];
+			if (light ? sum < 550 : sum > 300) { // ink, this mode's way
+				edge = bar.x + x;
+				break;
+			}
+		}
+	}
+	return edge;
 }
 
 // ---- the indicator walk: one phase machine on step 4 ----
@@ -1231,10 +1399,17 @@ int run_step() {
 		if (!runs.empty()) {
 			runs.erase(runs.begin());
 		}
+		// The theme switch (canvas.theme) is the right-most widget of all:
+		// record it for the theme phase and take it out before matching the
+		// indicators, which are the right-most runs of what is left.
+		if (!runs.empty()) {
+			theme_x = runs.back().centre();
+			runs.pop_back();
+		}
 		check(runs.size() >= 1 + mandatory.size(),
 			std::format("every indicator of this machine is on the bar "
-				"({} runs past the logo; the clock and {} indicators)",
-				runs.size(), mandatory.size()));
+				"({} runs past the logo and the theme switch; the clock and "
+				"{} indicators)", runs.size(), mandatory.size()));
 		if (runs.size() < 1 + mandatory.size()) {
 			step = 99; // positions cannot be trusted; nothing more to check
 			return 300;
@@ -1256,6 +1431,7 @@ int run_step() {
 			}
 			if (std::strcmp(ind.name, "power") == 0) {
 				ind.profile_flow = true;
+				power_x = ind.x; // right-anchored: stable across the whole run
 			}
 		}
 
@@ -1346,15 +1522,21 @@ int run_step() {
 		return 700;
 	case 11: {
 		// Every run on the bar, accounted for: the logo, the clock (and the
-		// weather when it loaded) centred, the stand-in's one tray item, and
-		// this machine's indicators — nothing left over, so the broken
-		// manifest's plugin contributed nothing and was skipped.
+		// weather when it loaded) centred, the stand-in's one tray item, the
+		// theme switch, and this machine's indicators — nothing left over,
+		// so the broken manifest's plugin contributed nothing and was
+		// skipped. base_runs counts the theme switch too: the later reload
+		// checks compare against a bar that still carries it.
 		cairo_surface_t *s = load_png("bar-plain");
 		LayerSurface *layer = bar_layer();
 		std::vector<Run> runs = s != nullptr && layer != nullptr
 			? bar_runs(s, layer->geo) : std::vector<Run>{};
 		cairo_surface_destroy(s);
 		check(layer != nullptr && runs.size() >= 1, "the bar is still mapped after the walk");
+		base_runs = runs.size();
+		if (!runs.empty()) { // the theme switch, right-most of all
+			runs.pop_back();
+		}
 		std::size_t mandatory = 4 + (has_sysfs_class("backlight") ? 1 : 0);
 		std::size_t keep = runs.size() >= 1 + mandatory ? runs.size() - 1 - mandatory : 0;
 		std::size_t centre = 0;
@@ -1363,10 +1545,9 @@ int run_step() {
 				centre++;
 			}
 		}
-		base_runs = runs.size();
 		check(keep - centre == 1, std::format("every run on the bar is accounted for "
-			"({} runs: logo, {} centred, 1 tray, {} indicators — the broken "
-			"manifest's plugin was skipped)", runs.size(), centre, mandatory));
+			"({} runs: logo, {} centred, 1 tray, {} indicators, the theme switch "
+			"— the broken manifest's plugin was skipped)", base_runs, centre, mandatory));
 		// Drop the user plugin's staged files into the scratch data dir: the
 		// shell reloads with them, without anything of the shell being touched.
 		mkdir_p(user_plugin);
@@ -1481,6 +1662,264 @@ int run_step() {
 		check(!idle_spawned && bar_pid > 0, std::format("an idle shell spawned no "
 			"processes ({} samples over {} s)", idle_sample_count,
 			idle_sample_count * idle_sample_ms / 1000));
+		return 100; // on to the theme: the switch, both palettes, the reload
+	case 19: // the theme phase: a window for its title bar, then both modes
+		if (theme_x <= 0) {
+			std::println("note: the theme switch was not found on the bar; "
+				"the theme phase is skipped");
+			step = 99;
+			return 100;
+		}
+		::spawn("foot -T themed sh -c 'exec sleep 600'"); // Server's double-forked spawn
+		return 500;
+	case 20:
+		if (titled("themed") == nullptr && retries++ < 100) {
+			return -300;
+		}
+		retries = 0;
+		check(titled("themed") != nullptr, "the themed window mapped");
+		shot("dark-window");
+		return 700;
+	case 21: { // the title bar the compositor draws, in dark
+		bool dark = title_bar_is("dark-window", config::palette_dark.title_active,
+			config::palette_dark.title_inactive);
+		if (!dark && retries++ < 10) {
+			shot("dark-window"); // re-shoot on this step: retries survive it
+			return -700;
+		}
+		retries = 0;
+		check(dark, "the window's title bar is dark (a dark-mode title colour)");
+		chord(KEY_TAB, SUPER); // the overview, with its tabs
+		return 400;
+	}
+	case 22: { // the overview opens; the target's tab is the accent fill
+		Output *o = out();
+		if (!(o != nullptr && o->overview.active()) && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(o != nullptr && o->overview.active(), "Super+Tab opened the overview");
+		if (Desktop *d = o->server.canvas.desktops.find(o->overview.target().desktop);
+			d != nullptr) {
+			o->overview.set_target(d->frame(), d->id(), false);
+		}
+		shot("dark-overview");
+		return 700;
+	}
+	case 23: { // the target tab's fill is the dark accent
+		bool accent = target_tab_is("dark-overview", config::palette_dark.accent);
+		if (!accent && retries++ < 10) {
+			shot("dark-overview");
+			return -700;
+		}
+		retries = 0;
+		check(accent, "the overview's target tab is the dark accent fill");
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 24:
+		if (out() != nullptr && out()->overview.active() && retries++ < 20) {
+			return -300;
+		}
+		check(out() != nullptr && !out()->overview.active(), "the overview closed");
+		click(theme_x, 13); // the switch: dark -> light
+		return 500;
+	case 25: { // the switch's two promises: the config and the compositor
+		std::string cfg = read_file(shell_config);
+		bool written = cfg.find("\"mode\": \"light\"") != std::string::npos;
+		bool told = server->theme.mode() == ThemeMode::light;
+		if (!(written && told) && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "clicking the switch wrote theme.mode: light to the scratch shell.json");
+		check(told, "the compositor reports theme light (told over the control socket)");
+		shot("light-bar");
+		return 700;
+	}
+	case 26: { // the bar itself follows: its background is the light one
+		LayerSurface *l = bar_layer();
+		bool light = l != nullptr
+			&& shot_pixel_is("light-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!light && retries++ < 40) {
+			shot("light-bar");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the bar is light (its background pixel is #e1e2e7)");
+		click(power_x, 13); // a panel, to see the light panel surface
+		return 400;
+	}
+	case 27:
+		if (panel_layer("power") == nullptr && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(panel_layer("power") != nullptr, "the power panel opened in light mode");
+		shot("light-panel");
+		return 700;
+	case 28: { // the panel's card, against the palette
+		wlr_box card = card_box(power_x, power_panel);
+		bool light = shot_pixel_is("light-panel", card.x + 5, card.y + 5, shell_panel_light);
+		if (!light && retries++ < 10) {
+			shot("light-panel");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the open panel is light (its card is #f4f5f8)");
+		click(60.0, 700.0); // outside: closed again
+		return 400;
+	}
+	case 29:
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -300;
+		}
+		check(panel_layers() == 0, "the light panel closed on a click outside");
+		shot("light-window");
+		return 700;
+	case 30: { // the title bar followed too
+		bool light = title_bar_is("light-window", config::palette_light.title_active,
+			config::palette_light.title_inactive);
+		if (!light && retries++ < 10) {
+			shot("light-window");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the window's title bar is light (a light-mode title colour)");
+		chord(KEY_TAB, SUPER);
+		return 400;
+	}
+	case 31: { // the overview again, now in light
+		Output *o = out();
+		if (!(o != nullptr && o->overview.active()) && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(o != nullptr && o->overview.active(), "the overview opened in light mode");
+		if (Desktop *d = o->server.canvas.desktops.find(o->overview.target().desktop);
+			d != nullptr) {
+			o->overview.set_target(d->frame(), d->id(), false);
+		}
+		shot("light-overview");
+		return 700;
+	}
+	case 32: { // the target tab's fill is the light accent
+		bool accent = target_tab_is("light-overview", config::palette_light.accent);
+		if (!accent && retries++ < 10) {
+			shot("light-overview");
+			return -700;
+		}
+		retries = 0;
+		check(accent, "the overview's target tab is the light accent fill");
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 33: { // a reload must keep the mode: an edit the shell reloads on
+		if (out() != nullptr && out()->overview.active() && retries++ < 20) {
+			return -300;
+		}
+		check(out() != nullptr && !out()->overview.active(), "the overview closed");
+		// The bar as it is before the edit, for the before/after comparison.
+		shot("light-prereload");
+		return 700;
+	}
+	case 34: {
+		// Re-enable the user plugin in the config: different bytes, so the
+		// shell reloads — and its widget coming back (its files are still in
+		// the scratch data dir, its label pushing the left section's ink edge
+		// right) is what proves the reload happened, leaving theme.mode:
+		// light to prove the mode survived it.
+		std::string cfg = read_file(shell_config);
+		std::size_t at = cfg.find("\"enabled\": false");
+		if (at != std::string::npos) {
+			cfg.replace(at, 16, "\"enabled\": true");
+		}
+		write_file(shell_config, cfg);
+		return 500;
+	}
+	case 35: { // the reload's two proofs: the widget back, the bar still light
+		LayerSurface *l = bar_layer();
+		cairo_surface_t *pre = load_png("light-prereload");
+		cairo_surface_t *re = load_png("light-reloaded");
+		double before = l != nullptr && pre != nullptr ? bar_ink_edge(pre, l->geo, true) : 0;
+		double after = l != nullptr && re != nullptr ? bar_ink_edge(re, l->geo, true) : 0;
+		if (pre != nullptr) {
+			cairo_surface_destroy(pre);
+		}
+		if (re != nullptr) {
+			cairo_surface_destroy(re);
+		}
+		bool reloaded = after >= before + widen_px;
+		if (!reloaded && retries++ < 40) {
+			shot("light-reloaded");
+			return -700;
+		}
+		retries = 0;
+		check(reloaded, std::format("the shell reloaded on the config edit "
+			"(the re-enabled plugin's label pushed the left section's edge "
+			"from {} to {} px)", before, after));
+		bool light = l != nullptr
+			&& shot_pixel_is("light-reloaded", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!light && retries++ < 40) {
+			shot("light-reloaded");
+			return -700;
+		}
+		retries = 0;
+		check(light, "the reloaded shell kept the light mode (the bar stayed #e1e2e7)");
+		click(theme_x, 13); // and back: light -> dark
+		return 500;
+	}
+	case 36: { // the switch's promises, the other way round
+		std::string cfg = read_file(shell_config);
+		bool written = cfg.find("\"mode\": \"dark\"") != std::string::npos;
+		bool told = server->theme.mode() == ThemeMode::dark;
+		if (!(written && told) && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "clicking the switch again wrote theme.mode: dark to the scratch shell.json");
+		check(told, "the compositor reports theme dark again");
+		shot("dark-restored-bar");
+		return 700;
+	}
+	case 37: { // the bar is dark again
+		LayerSurface *l = bar_layer();
+		bool dark = l != nullptr
+			&& shot_pixel_is("dark-restored-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_dark);
+		if (!dark && retries++ < 40) {
+			shot("dark-restored-bar");
+			return -700;
+		}
+		retries = 0;
+		check(dark, "switching back restored the dark bar (its background is #1a1b26)");
+		click(power_x, 13); // and the panel with it
+		return 400;
+	}
+	case 38:
+		if (panel_layer("power") == nullptr && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(panel_layer("power") != nullptr, "the power panel opened in dark mode");
+		shot("dark-restored-panel");
+		return 700;
+	case 39: { // the panel's card is the dark surface again
+		wlr_box card = card_box(power_x, power_panel);
+		bool dark = shot_pixel_is("dark-restored-panel", card.x + 5, card.y + 5, shell_bg_dark);
+		if (!dark && retries++ < 10) {
+			shot("dark-restored-panel");
+			return -700;
+		}
+		retries = 0;
+		check(dark, "switching back restored the dark panel (its card is #1a1b26)");
+		click(60.0, 700.0);
+		return 400;
+	}
+	case 40:
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -300;
+		}
+		check(panel_layers() == 0, "the last panel closed");
 		return 100; // done: the summary prints and the run ends
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
@@ -1568,6 +2007,9 @@ int main() {
 	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
 	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);
 	setenv("XDG_STATE_HOME", (xdg + "/state").c_str(), 1);
+	// The scratch config the theme switch writes theme.mode into (and the
+	// theme phase reads back and rewrites to prove the reload keeps it).
+	shell_config = xdg + "/config/wayland-canvas/shell.json";
 	// The user plugin this run drops in while the shell runs (step 11): a
 	// bar widget beside the logo, first of the left section past it, so it
 	// shows as the bar's second run. Its files are staged outside the
