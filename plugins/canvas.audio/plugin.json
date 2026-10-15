@@ -1,0 +1,24 @@
+{
+	"id": "canvas.audio",
+	"name": "Audio",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The audio indicator: the default sink, crossed out when muted, with the audio panel",
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "audio",
+				"entry": "Audio.qml",
+				"section": "right",
+				"order": 3,
+				"panel": "audio"
+			}
+		],
+		"panels": [
+			{
+				"id": "audio",
+				"entry": "AudioPanel.qml"
+			}
+		]
+	}
+}

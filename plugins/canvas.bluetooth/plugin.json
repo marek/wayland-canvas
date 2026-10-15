@@ -1,0 +1,24 @@
+{
+	"id": "canvas.bluetooth",
+	"name": "Bluetooth",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The Bluetooth indicator: adapter state and a connected mark, with the Bluetooth panel",
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "bluetooth",
+				"entry": "Bluetooth.qml",
+				"section": "right",
+				"order": 1,
+				"panel": "bluetooth"
+			}
+		],
+		"panels": [
+			{
+				"id": "bluetooth",
+				"entry": "BluetoothPanel.qml"
+			}
+		]
+	}
+}
