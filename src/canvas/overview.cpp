@@ -246,9 +246,13 @@ void Overview::abandon(std::optional<DesktopId> desktop) {
 }
 
 void Overview::tile(std::optional<DesktopId> desktop) {
-	Desktop *found = output_.server.canvas.desktops.find(desktop);
-	output_.server.canvas.tile(found != nullptr ? found->frame() : target_.box,
-		output_);
+	Server &server = output_.server;
+	if (Desktop *found = server.canvas.desktops.find(desktop)) {
+		server.canvas.toggle_tiling(found->id());
+		return;
+	}
+	// A free spot holds no switch: its windows are tiled once, where they stand.
+	server.canvas.tile(target_.box, output_);
 }
 
 void Overview::combine(std::optional<DesktopId> into) {

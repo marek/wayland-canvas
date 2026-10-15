@@ -423,7 +423,9 @@ void Gestures::pinch_update(uint32_t time, double dx, double dy,
 			pinch->merge_from = std::nullopt;
 			if (pinched != nullptr) {
 				char buf[64];
-				std::snprintf(buf, sizeof(buf), "Release to tile Desktop %d",
+				std::snprintf(buf, sizeof(buf), pinched->tiling()
+					? "Release to untile Desktop %d"
+					: "Release to tile Desktop %d",
 					pinched->number());
 				pinch_preview(*pinch, buf);
 			} else {
