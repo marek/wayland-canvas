@@ -95,10 +95,11 @@ reach the client. A lone tap of Super opens the app launcher.
 ## Error states, corner cases
 
 - **A canvas shortcut pressed with the overview open**: the overview's
-  own unmodified keys (`t`, `m`, `n`, arrows) act on it; clients receive
+  own unmodified keys (`t`, `m`, `n`, arrows) act on it; windows receive
   no keys while the compositor owns the view
   ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)), so
-  nothing is stolen.
+  nothing is stolen. A shell surface holding the keyboard (a panel, the
+  note editor) takes the keys before the overview does.
 - **A lone Super tap nested inside another compositor**: passes through
   to the host, so the host's own Super bindings keep working; only on
   its own outputs does the tap open the launcher.
