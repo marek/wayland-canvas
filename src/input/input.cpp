@@ -249,7 +249,6 @@ void Keyboard::handle_destroy() {
 			? keyboards[1].get() : keyboards.front().get();
 		wlr_seat_set_keyboard(server_.seat, next->wlr);
 	}
-	server_.input.update_capabilities();
 	destroy_owned(keyboards, this);
 }
 
@@ -258,14 +257,6 @@ Input::Input(Server &server)
 }
 
 Input::~Input() = default;
-
-void Input::update_capabilities() {
-	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
-	if (!keyboards.empty()) {
-		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
-	}
-	wlr_seat_set_capabilities(server_.seat, caps);
-}
 
 void Input::new_keyboard(wlr_input_device *device, bool has_keymap) {
 	wlr_keyboard *wlr = wlr_keyboard_from_input_device(device);
@@ -308,13 +299,11 @@ void Input::handle_new_input(wlr_input_device *device) {
 	default:
 		break;
 	}
-	update_capabilities();
 }
 
 void Input::handle_new_virtual_keyboard(wlr_virtual_keyboard_v1 *keyboard) {
 	// A virtual keyboard (wtype) may carry its own keymap; keep it then.
 	new_keyboard(&keyboard->keyboard.base, keyboard->has_keymap);
-	update_capabilities();
 }
 
 // ---- key events ----

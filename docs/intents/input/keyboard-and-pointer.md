@@ -82,7 +82,7 @@ reach the client. A lone tap of Super opens the app launcher.
 | The focused window | Has the keyboard unless a shell surface above the windows holds it |
 | A shell surface on the top or overlay layer asking for the keyboard on demand | Gets it when it appears and when it is clicked; gives it back to the focused window when it goes or a window is focused |
 | A shell surface asking for the keyboard exclusively | Holds it while mapped, the topmost first; windows and on-demand surfaces cannot take it |
-| No keyboard connected yet | Focus is assigned all the same; the first keyboard to connect types into it |
+| No keyboard connected yet | Focus is assigned all the same, and the seat offers a keyboard from the start, so clients are ready: the first keyboard to connect (an on-screen one, `wtype`) types into the focus from its first key |
 
 ### Devices
 

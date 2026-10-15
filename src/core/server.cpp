@@ -299,6 +299,11 @@ bool Server::init(const Options &options) {
 	wlr_xdg_output_manager_v1_create(d, output_layout);
 
 	seat = wlr_seat_create(d, "seat0");
+	// The seat always offers a pointer and a keyboard, so clients bind both
+	// at start: a keyboard that connects later (wtype, an on-screen keyboard)
+	// types into the focus from its first key, instead of racing the
+	// client's get_keyboard after a late capability change.
+	wlr_seat_set_capabilities(seat, WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD);
 	cursor = wlr_cursor_create();
 	wlr_cursor_attach_output_layout(cursor, output_layout);
 	const char *size_env = getenv("XCURSOR_SIZE");

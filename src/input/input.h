@@ -90,7 +90,6 @@ private:
 	void handle_new_virtual_keyboard(wlr_virtual_keyboard_v1 *keyboard);
 	void new_keyboard(wlr_input_device *device, bool has_keymap);
 	void new_pointer(wlr_input_device *device);
-	void update_capabilities();
 
 	// Key events.
 	void process_key(Keyboard &keyboard, wlr_keyboard_key_event *event);
