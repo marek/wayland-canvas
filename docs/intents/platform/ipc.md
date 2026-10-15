@@ -2,7 +2,7 @@
 
 > Owns the compositor's control socket: the path, the JSON-lines protocol,
 > the methods and events, the state it reports, canvas items, and the `msg`
-> client. The shell's API over it is [../apps/plugins.md](../apps/plugins.md).
+> client. The shell's API over it is [../shell/plugins.md](../shell/plugins.md).
 
 ## Requirement
 
@@ -119,9 +119,9 @@ interrupted.
 
 ## Cross-links
 
-- [../apps/plugins.md](../apps/plugins.md) — the shell's API over this
+- [../shell/plugins.md](../shell/plugins.md) — the shell's API over this
   socket.
-- [../apps/notes.md](../apps/notes.md) — the canvas items' one user.
-- [../apps/theme.md](../apps/theme.md) — the mode the compositor follows.
+- [../shell/notes.md](../shell/notes.md) — the canvas items' one user.
+- [../shell/theme.md](../shell/theme.md) — the mode the compositor follows.
 - [../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md) —
   the bindings whose actions the methods share.

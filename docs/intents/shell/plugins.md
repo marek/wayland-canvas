@@ -131,4 +131,4 @@ switches, text and fields, all coloured from `api.theme`.
 - [../platform/ipc.md](../platform/ipc.md) - the compositor API over the
   control socket.
 - [bar.md](bar.md) - the bar and its widgets.
-- [launcher.md](launcher.md).
+- [../apps/launcher.md](../apps/launcher.md).

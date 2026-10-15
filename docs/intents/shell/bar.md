@@ -3,7 +3,7 @@
 > Owns the top system bar: its look, its sections and widgets, what each
 > click does, the panels under its indicators, and how it starts. The control
 > socket the logo button uses is in [../platform/ipc.md](../platform/ipc.md);
-> the launcher it opens is in [launcher.md](launcher.md).
+> the launcher it opens is in [../apps/launcher.md](../apps/launcher.md).
 
 ## Requirement
 
@@ -105,6 +105,6 @@ starts the compositor without it.
 
 - [../platform/ipc.md](../platform/ipc.md) — the socket the logo button
   and the power panel talk to.
-- [launcher.md](launcher.md) — the launcher the logo button opens.
+- [../apps/launcher.md](../apps/launcher.md) — the launcher the logo button opens.
 - [../platform/outputs.md](../platform/outputs.md) — layer-shell usable
   area: the bar's exclusive zone is why maximized windows start below it.

@@ -24,7 +24,7 @@ restored before the session file disappears.
 | Debian release | the one whose toolchain builds the C++26 library features the compositor needs (`std::function_ref`, `std::inplace_vector`, `std::print`); the in-root build probes exactly those three features before compiling, so an unsuitable `--dist` override fails early |
 | Prompts | never from the packages themselves: pacman forbids prompts in install scripts, and the Debian maintainer scripts stay non-interactive. `tools/install.sh` is the one flow that asks, for both formats |
 | Removal hooks | Arch `pre_remove` and Debian `prerm` run `wayland-canvas-session restore`; Debian `postrm purge` removes `/var/lib/wayland-canvas` |
-| Top bar runtime | optional: quickshell is `optdepends` on Arch and `Recommends` on Debian (in sid) — the compositor starts the bar when `qs` is on PATH (`-B` turns it off), and the package is complete without it ([../apps/bar.md](../apps/bar.md)) |
+| Top bar runtime | optional: quickshell is `optdepends` on Arch and `Recommends` on Debian (in sid) — the compositor starts the bar when `qs` is on PATH (`-B` turns it off), and the package is complete without it ([../shell/bar.md](../shell/bar.md)) |
 
 ## The session file
 

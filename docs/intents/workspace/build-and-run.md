@@ -20,7 +20,7 @@ A C++26 compiler — LLVM's clang, selected by
 xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
 (decorations, launcher); librsvg and glib (icons). Optional: `qs`
 (Quickshell) for the autostarted top bar
-([../apps/bar.md](../apps/bar.md)).
+([../shell/bar.md](../shell/bar.md)).
 
 ### Build
 

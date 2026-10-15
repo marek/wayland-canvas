@@ -33,7 +33,8 @@ their values.
 | [canvas/](canvas/) | The plane, the desktops, the overview |
 | [input/](input/) | Touchpad gestures, keyboard and pointer |
 | [windows/](windows/) | Title bars and window management |
-| [apps/](apps/) | The launcher, desktop entries, the top bar, plugins, the overview toolbar, sticky notes, light and dark |
+| [apps/](apps/) | Applications: the launcher and the desktop entries it finds them by |
+| [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, sticky notes, light and dark |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
 | [platform/](platform/) | wlroots, protocols, outputs, the C++ standard, the control IPC |
 | [bugs/](bugs/) | Bug case studies — the one place history is told |
@@ -56,11 +57,11 @@ their values.
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |
 | [apps/launcher.md](apps/launcher.md) | Opening, layout, search ranking, keys, pointer, launching, Terminal=true |
 | [apps/desktop-entries.md](apps/desktop-entries.md) | The standard XDG entry as the way to add items, precedence, overrides, TryExec, Exec quoting, icon theme lookup order |
-| [apps/bar.md](apps/bar.md) | The top bar: look, sections, widgets, click actions, panels, autostart |
-| [apps/plugins.md](apps/plugins.md) | What a plugin is, where plugins are found, the config, the common trigger, the API, the UI kit, the built-in plugins |
-| [apps/toolbar.md](apps/toolbar.md) | The overview toolbar: place, when it shows, buttons, actions, panels and submenus |
-| [apps/notes.md](apps/notes.md) | Sticky notes: creating from the toolbar, colours, look, editing, moving, deleting, keeping |
-| [apps/theme.md](apps/theme.md) | The light/dark switch, the two palettes, what follows the mode, keeping it |
+| [shell/bar.md](shell/bar.md) | The top bar: look, sections, widgets, click actions, panels, autostart |
+| [shell/plugins.md](shell/plugins.md) | What a plugin is, where plugins are found, the config, the common trigger, the API, the UI kit, the built-in plugins |
+| [shell/toolbar.md](shell/toolbar.md) | The overview toolbar: place, when it shows, buttons, actions, panels and submenus |
+| [shell/notes.md](shell/notes.md) | Sticky notes: creating from the toolbar, colours, look, editing, moving, deleting, keeping |
+| [shell/theme.md](shell/theme.md) | The light/dark switch, the two palettes, what follows the mode, keeping it |
 | [render/rendering.md](render/rendering.md) | The own renderer and why, repaint policy, frame callbacks, presentation, enter/leave policy, needs_frame |
 | [render/hidpi.md](render/hidpi.md) | Scale choice, crispness, nested 1x |
 | [platform/wlroots.md](platform/wlroots.md) | wlroots as the reference, version, subproject, the listener-balance rule, request_* handlers start the action |
@@ -83,8 +84,8 @@ their values.
 - **Changing windows or title bars**: windows/title-bars →
   windows/window-management → render/rendering.
 - **Changing the launcher**: apps/launcher → apps/desktop-entries.
-- **Changing the top bar or the control IPC**: apps/bar → platform/ipc →
-  apps/launcher.
+- **Changing the top bar or the control IPC**: shell/bar → shell/plugins →
+  platform/ipc → apps/launcher.
 - **Changing rendering**: render/rendering → render/hidpi →
   platform/outputs.
 - **Adding a protocol**: platform/protocols → platform/wlroots →

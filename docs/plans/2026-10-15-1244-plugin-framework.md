@@ -10,8 +10,8 @@ the overview toolbar on the right edge (shown only in the overview, holding butt
 or expand a submenu), sticky notes with a colour choice, and a light/dark switch in the bar's top-right corner are all
 plugins. The compositor's half of the API is the control socket, which moves to JSON lines with methods, state and
 events, and gains canvas items (what a sticky note is on the canvas) and the theme mode. What each part is:
-[apps/plugins.md](../intents/apps/plugins.md), [apps/toolbar.md](../intents/apps/toolbar.md),
-[apps/notes.md](../intents/apps/notes.md), [apps/theme.md](../intents/apps/theme.md),
+[shell/plugins.md](../intents/shell/plugins.md), [shell/toolbar.md](../intents/shell/toolbar.md),
+[shell/notes.md](../intents/shell/notes.md), [shell/theme.md](../intents/shell/theme.md),
 [platform/ipc.md](../intents/platform/ipc.md).
 
 ## Compositor API
