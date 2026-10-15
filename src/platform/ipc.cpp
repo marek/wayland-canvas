@@ -807,6 +807,11 @@ void Ipc::flush(Client &client) {
 			break; // EAGAIN or a dead peer: the queue keeps the rest
 		}
 	}
+	// What went out is out: the queue keeps only the unwritten rest, or
+	// the writable source would fire again and resend it forever.
+	if (done > 0) {
+		client.outbuf.erase(0, done);
+	}
 	uint32_t mask = WL_EVENT_READABLE;
 	if (!client.outbuf.empty()) {
 		mask |= WL_EVENT_WRITABLE; // the rest goes out once the client reads
