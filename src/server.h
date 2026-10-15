@@ -4,9 +4,8 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include "bindings.h"
 #include "canvas.h"
-#include "decoration.h"
-#include "geometry.h"
 #include "gesture.h"
 #include "input.h"
 #include "ipc.h"
@@ -94,6 +93,7 @@ public:
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame
 
 	Input input;
+	Bindings bindings;
 	Gestures gestures;
 	Hint hint;
 	Launcher launcher;

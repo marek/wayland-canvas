@@ -82,6 +82,7 @@ desktop_entry_lib = static_library(
 core_lib = static_library(
 	'canvas-core',
 	files(
+		'src/bindings.cpp',
 		'src/apps.cpp',
 		'src/camera.cpp',
 		'src/canvas.cpp',
