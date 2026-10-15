@@ -33,7 +33,7 @@ their values.
 | [canvas/](canvas/) | The plane, the desktops, the overview |
 | [input/](input/) | Touchpad gestures, keyboard and pointer |
 | [windows/](windows/) | Title bars and window management |
-| [apps/](apps/) | The launcher, desktop entries and the top bar |
+| [apps/](apps/) | The launcher, desktop entries, the top bar, plugins, the overview toolbar, sticky notes, light and dark |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
 | [platform/](platform/) | wlroots, protocols, outputs, the C++ standard, the control IPC |
 | [bugs/](bugs/) | Bug case studies — the one place history is told |
@@ -56,14 +56,18 @@ their values.
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |
 | [apps/launcher.md](apps/launcher.md) | Opening, layout, search ranking, keys, pointer, launching, Terminal=true |
 | [apps/desktop-entries.md](apps/desktop-entries.md) | The standard XDG entry as the way to add items, precedence, overrides, TryExec, Exec quoting, icon theme lookup order |
-| [apps/bar.md](apps/bar.md) | The top bar: look, sections, widgets, click actions, autostart |
+| [apps/bar.md](apps/bar.md) | The top bar: look, sections, widgets, click actions, panels, autostart |
+| [apps/plugins.md](apps/plugins.md) | What a plugin is, where plugins are found, the config, the common trigger, the API, the UI kit, the built-in plugins |
+| [apps/toolbar.md](apps/toolbar.md) | The overview toolbar: place, when it shows, buttons, actions, panels and submenus |
+| [apps/notes.md](apps/notes.md) | Sticky notes: creating from the toolbar, colours, look, editing, moving, deleting, keeping |
+| [apps/theme.md](apps/theme.md) | The light/dark switch, the two palettes, what follows the mode, keeping it |
 | [render/rendering.md](render/rendering.md) | The own renderer and why, repaint policy, frame callbacks, presentation, enter/leave policy, needs_frame |
 | [render/hidpi.md](render/hidpi.md) | Scale choice, crispness, nested 1x |
 | [platform/wlroots.md](platform/wlroots.md) | wlroots as the reference, version, subproject, the listener-balance rule, request_* handlers start the action |
 | [platform/protocols.md](platform/protocols.md) | The supported protocols table: protocol → what it enables / policy |
 | [platform/outputs.md](platform/outputs.md) | Outputs, layout, per-output camera, hotplug, layer-shell usable area |
 | [platform/cpp-standards.md](platform/cpp-standards.md) | What the source looks like: C++26 on clang, listeners and ownership, classes, names |
-| [platform/ipc.md](platform/ipc.md) | The control socket: path, line protocol, commands, the msg client |
+| [platform/ipc.md](platform/ipc.md) | The control socket: path, JSON-lines protocol, methods, events, state, canvas items, the msg client |
 | [bugs/screencopy-never-returned.md](bugs/screencopy-never-returned.md) | grim hung forever: a frame rendered only on own damage, never on needs_frame |
 | [bugs/resize-anchor-lost-on-release.md](bugs/resize-anchor-lost-on-release.md) | Left/top resizes drifting: the client's final commit arrives after the button release |
 | [bugs/grabs-that-never-ended.md](bugs/grabs-that-never-ended.md) | Fake-device tests found pointer grabs that never ended and canvas shortcuts bound without Super |
