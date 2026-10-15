@@ -198,7 +198,7 @@ struct Server::Inhibitor {
 
 Server::Server()
 	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
-	painter(*this), decorations(*this), canvas(*this), ipc(*this) {
+	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this) {
 }
 
 Server::~Server() {
@@ -243,6 +243,7 @@ bool Server::init(const Options &options) {
 
 	display = wl_display_create();
 	loop = wl_display_get_event_loop(display);
+	
 	wl_event_loop_add_signal(loop, SIGINT, handle_terminate_signal, this);
 	wl_event_loop_add_signal(loop, SIGTERM, handle_terminate_signal, this);
 
