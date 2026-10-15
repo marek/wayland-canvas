@@ -11,6 +11,13 @@ namespace {
 // Travel (touchpad units) before a pending gesture is classified.
 constexpr double decide_threshold = 12.0;
 
+template <typename... Ts>
+struct overloaded : Ts... {
+	using Ts::operator()...;
+};
+template <typename... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 // Touchpad delta -> canvas delta, natural pan sign, scaled by the zoom.
 Point pan_deltas(const Output &output, double dx, double dy) {
 	double sign = config::natural_pan ? -1.0 : 1.0;
@@ -18,32 +25,29 @@ Point pan_deltas(const Output &output, double dx, double dy) {
 	return {sign * dx * config::pan_speed / zoom, sign * dy * config::pan_speed / zoom};
 }
 
+// The output a gesture state acts on, or null for the states without one.
+Output *state_output(const Gestures::State &state) {
+	return std::visit(overloaded{
+		[](const Gestures::Pending &s) -> Output * { return s.output; },
+		[](const Gestures::Pan &s) -> Output * { return s.output; },
+		[](const Gestures::ZoomOut &s) -> Output * { return s.output; },
+		[](const Gestures::ZoomIn &s) -> Output * { return s.output; },
+		[](const Gestures::ZoomFurther &s) -> Output * { return s.output; },
+		[](const Gestures::Hop &s) -> Output * { return s.output; },
+		[](const Gestures::Abandon &s) -> Output * { return s.output; },
+		[](const Gestures::Pinch &s) -> Output * { return s.output; },
+		[](const Gestures::OverviewZoom &s) -> Output * { return s.output; },
+		[](const auto &) -> Output * { return nullptr; },
+	}, state);
+}
+
 } // namespace
 
-Gesture::Gesture(Server &server)
+Gestures::Gestures(Server &server)
 	: server_(server) {
 }
 
-void Gesture::reset() {
-	kind = GestureKind::none;
-	pinch = false;
-	fingers = 0;
-	output = nullptr;
-	ax = 0;
-	ay = 0;
-	scale = 1;
-	vx = 0;
-	vy = 0;
-	progress = 0;
-	start_zoom = 0;
-	desktop = std::nullopt;
-	merge_from = std::nullopt;
-	abandon_offset_ = 0;
-	hop_done_ = false;
-	pinch_hinted_ = false;
-}
-
-std::optional<DesktopId> Gesture::desktop_under(Output &out) {
+std::optional<DesktopId> Gestures::desktop_under(Output &out) {
 	if (std::optional<CanvasPos> pos = server_.input.cursor_canvas_pos()) {
 		if (Desktop *desktop = server_.canvas.desktops.at(pos->cx, pos->cy)) {
 			return desktop->id();
@@ -55,172 +59,222 @@ std::optional<DesktopId> Gesture::desktop_under(Output &out) {
 	return std::nullopt;
 }
 
-double Gesture::abandon_offset(DesktopId id) const {
-	if (kind == GestureKind::abandon && desktop == id) {
-		return abandon_offset_;
+const Gestures::State &Gestures::state() const {
+	return state_;
+}
+
+bool Gestures::panning(const Output &output) const {
+	const Pan *pan = std::get_if<Pan>(&state_);
+	return pan != nullptr && pan->output == &output;
+}
+
+bool Gestures::zooming(const Output &output) const {
+	return std::visit(overloaded{
+		[&](const ZoomOut &s) { return s.output == &output; },
+		[&](const ZoomIn &s) { return s.output == &output; },
+		[&](const ZoomFurther &s) { return s.output == &output; },
+		[&](const OverviewZoom &s) { return s.output == &output; },
+		[](const auto &) { return false; },
+	}, state_);
+}
+
+double Gestures::abandon_offset(DesktopId id) const {
+	if (const Abandon *abandon = std::get_if<Abandon>(&state_);
+			abandon != nullptr && abandon->desktop == id) {
+		return abandon->offset;
 	}
 	return 0;
 }
 
-void Gesture::decide() {
-	Output *o = output;
+const Gestures::Pinch *Gestures::pinch() const {
+	return std::get_if<Pinch>(&state_);
+}
+
+void Gestures::output_gone(const Output &output) {
+	// A forwarded gesture still owes its client the end event; idle and
+	// ignored gestures hold nothing.
+	if (state_output(state_) == &output) {
+		state_ = Ignored{};
+	}
+}
+
+void Gestures::decide(Pending &pending) {
+	// The assignment below replaces the state, so read the pending fields
+	// into locals first.
+	Output *o = pending.output;
+	uint32_t fingers = pending.fingers;
+	double ax = pending.ax, ay = pending.ay;
 	bool vertical = std::fabs(ay) > std::fabs(ax);
 
 	if (!o->overview.active()) {
 		if (fingers == 3) {
-			kind = GestureKind::pan;
 			// Apply the travel accumulated so far in one go.
 			Point d = pan_deltas(*o, ax, ay);
 			o->pan(d.x, d.y);
+			state_ = Pan{o, 0, 0};
 		} else if (fingers == 4 && vertical && ay < 0) {
-			kind = GestureKind::zoom_out;
-			far = o->overview.prepare();
-			near = o->overview.home();
+			Camera far = o->overview.prepare();
+			state_ = ZoomOut{o, o->overview.home(), far, ay, 0, 0};
 		} else {
-			kind = GestureKind::ignored;
+			state_ = Ignored{};
 		}
 		return;
 	}
 
 	// Overview mode.
 	if (fingers == 3) {
-		kind = GestureKind::hop;
+		state_ = Hop{o, ax, ay, false};
 	} else if (fingers == 4) {
 		if (vertical && ay > 0) {
-			kind = GestureKind::zoom_in;
-			near = camera_for_box(o->overview.target().box);
-			far = o->camera.current();
+			Camera near = camera_for_box(o->overview.target().box);
+			state_ = ZoomIn{o, near, o->camera.current(), ay, 0, 0};
 		} else if (vertical && ay < 0) {
-			kind = GestureKind::zoom_further;
-			start_zoom = o->camera.current().zoom;
+			state_ = ZoomFurther{o, o->camera.current().zoom, ay, 0};
 		} else {
 			std::optional<DesktopId> d = desktop_under(*o);
 			if (!d.has_value()) {
-				kind = GestureKind::ignored;
+				state_ = Ignored{};
 			} else {
-				kind = GestureKind::abandon;
-				desktop = d;
+				state_ = Abandon{o, *d, 0};
 			}
 		}
 	} else {
-		kind = GestureKind::ignored;
+		state_ = Ignored{};
 	}
 }
 
-void Gesture::swipe_begin(uint32_t time, uint32_t fingers) {
+void Gestures::swipe_begin(uint32_t time, uint32_t fingers) {
 	Output *out = server_.output_under_cursor();
-	reset();
+	state_ = Idle{};
 	if (out == nullptr) {
-		kind = GestureKind::ignored;
+		state_ = Ignored{};
 		return;
 	}
-	output = out;
-	this->fingers = fingers;
-	last_time = time;
+	last_time_ = time;
 	if (fingers == 3 || fingers == 4) {
-		kind = GestureKind::pending;
+		state_ = Pending{out, fingers, false, 0, 0};
 		return;
 	}
 	if (out->interactive()) {
-		kind = GestureKind::forward;
+		state_ = Forwarded{};
 		wlr_pointer_gestures_v1_send_swipe_begin(server_.pointer_gestures,
 			server_.seat, time, fingers);
 		return;
 	}
-	kind = GestureKind::ignored;
+	state_ = Ignored{};
 }
 
-void Gesture::swipe_update(uint32_t time, double dx, double dy) {
-	if (kind == GestureKind::forward) {
+void Gestures::swipe_update(uint32_t time, double dx, double dy) {
+	if (std::get_if<Forwarded>(&state_)) {
 		wlr_pointer_gestures_v1_send_swipe_update(server_.pointer_gestures,
 			server_.seat, time, dx, dy);
 		return;
 	}
-	if (output == nullptr || kind == GestureKind::none ||
-			kind == GestureKind::ignored) {
+	if (state_output(state_) == nullptr) {
 		return;
 	}
-	Output *o = output;
-	ax += dx;
-	ay += dy;
-	double dt = static_cast<double>(time) - static_cast<double>(last_time);
+	double dt = static_cast<double>(time) - static_cast<double>(last_time_);
 
+	// A pending gesture accumulates travel until there is enough to
+	// classify it; the decided state carries the travel it needs.
 	bool just_decided = false;
-	if (kind == GestureKind::pending && std::hypot(ax, ay) > decide_threshold) {
-		decide();
+	if (auto *pending = std::get_if<Pending>(&state_)) {
+		pending->ax += dx;
+		pending->ay += dy;
+		if (std::hypot(pending->ax, pending->ay) <= decide_threshold) {
+			last_time_ = time;
+			return;
+		}
+		decide(*pending);
 		just_decided = true;
 	}
 
-	switch (kind) {
-	case GestureKind::pan: {
-		Point d = pan_deltas(*o, dx, dy);
-		if (dt > 0) {
-			vx = 0.8 * vx + 0.2 * (d.x / dt);
-			vy = 0.8 * vy + 0.2 * (d.y / dt);
-		}
-		// The deciding update already applied the accumulated travel.
-		if (!just_decided) {
-			o->pan(d.x, d.y);
-		}
-		break;
-	}
-	case GestureKind::hop:
-		if (!hop_done_ && std::hypot(ax, ay) > config::hop_threshold) {
-			o->overview.hop(ax, ay);
-			hop_done_ = true;
-		}
-		break;
-	case GestureKind::zoom_out:
-		if (dt > 0) {
-			vy = 0.8 * vy + 0.2 * (dy / dt);
-		}
-		progress = clampd(-ay / config::overview_swipe_distance, 0, 1);
-		o->camera.jump(camera_zoom_path(near, far, progress));
-		break;
-	case GestureKind::zoom_in:
-		if (dt > 0) {
-			vy = 0.8 * vy + 0.2 * (dy / dt);
-		}
-		progress = clampd(ay / config::overview_swipe_distance, 0, 1);
-		o->camera.jump(camera_zoom_path(near, far, 1 - progress));
-		break;
-	case GestureKind::zoom_further: {
-		if (dt > 0) {
-			vy = 0.8 * vy + 0.2 * (dy / dt);
-		}
-		Camera cam = o->camera.current();
-		cam.zoom = clampd(start_zoom * std::exp(ay / 400),
-			config::overview_min_zoom, 0.75);
-		o->camera.jump(cam);
-		break;
-	}
-	case GestureKind::abandon:
-		if (Desktop *swiped = server_.canvas.desktops.find(desktop); swiped != nullptr) {
-			abandon_offset_ = ax;
-			o->damage();
-		}
-		break;
-	default:
-		break;
-	}
-	last_time = time;
+	std::visit(overloaded{
+		[&](Pan &pan) {
+			Point d = pan_deltas(*pan.output, dx, dy);
+			if (dt > 0) {
+				pan.vx = 0.8 * pan.vx + 0.2 * (d.x / dt);
+				pan.vy = 0.8 * pan.vy + 0.2 * (d.y / dt);
+			}
+			// The deciding update already applied the accumulated travel.
+			if (!just_decided) {
+				pan.output->pan(d.x, d.y);
+			}
+		},
+		[&](Hop &hop) {
+			if (!just_decided) {
+				hop.ax += dx;
+				hop.ay += dy;
+			}
+			if (!hop.done && std::hypot(hop.ax, hop.ay) > config::hop_threshold) {
+				hop.output->overview.hop(hop.ax, hop.ay);
+				hop.done = true;
+			}
+		},
+		[&](ZoomOut &z) {
+			if (!just_decided) {
+				z.ay += dy;
+			}
+			if (dt > 0) {
+				z.vy = 0.8 * z.vy + 0.2 * (dy / dt);
+			}
+			z.progress = clampd(-z.ay / config::overview_swipe_distance, 0, 1);
+			z.output->camera.jump(camera_zoom_path(z.near, z.far, z.progress));
+		},
+		[&](ZoomIn &z) {
+			if (!just_decided) {
+				z.ay += dy;
+			}
+			if (dt > 0) {
+				z.vy = 0.8 * z.vy + 0.2 * (dy / dt);
+			}
+			z.progress = clampd(z.ay / config::overview_swipe_distance, 0, 1);
+			z.output->camera.jump(camera_zoom_path(z.near, z.far, 1 - z.progress));
+		},
+		[&](ZoomFurther &z) {
+			if (!just_decided) {
+				z.ay += dy;
+			}
+			if (dt > 0) {
+				z.vy = 0.8 * z.vy + 0.2 * (dy / dt);
+			}
+			Camera cam = z.output->camera.current();
+			cam.zoom = clampd(z.start_zoom * std::exp(z.ay / 400),
+				config::overview_min_zoom, 0.75);
+			z.output->camera.jump(cam);
+		},
+		[&](Abandon &a) {
+			if (Desktop *swiped = server_.canvas.desktops.find(a.desktop);
+					swiped != nullptr) {
+				if (!just_decided) {
+					a.offset += dx;
+				}
+				a.output->damage();
+			}
+		},
+		[](auto &) {},
+	}, state_);
+	last_time_ = time;
 }
 
-void Gesture::swipe_end(uint32_t time, bool cancelled) {
-	if (kind == GestureKind::forward) {
-		wlr_pointer_gestures_v1_send_swipe_end(server_.pointer_gestures,
-			server_.seat, time, cancelled);
-		reset();
+void Gestures::swipe_end(uint32_t time, bool cancelled) {
+	if (auto *forwarded = std::get_if<Forwarded>(&state_)) {
+		if (!forwarded->pinch) {
+			wlr_pointer_gestures_v1_send_swipe_end(server_.pointer_gestures,
+				server_.seat, time, cancelled);
+		}
+		state_ = Idle{};
 		return;
 	}
-	if (Output *o = output) {
-		switch (kind) {
-		case GestureKind::pan: {
+
+	std::visit(overloaded{
+		[&](Pan &pan) {
+			Output &o = *pan.output;
 			// Where the momentum would leave the camera.
-			Camera cam = o->camera.drawn();
-			double lx = cam.cx + vx * config::inertia_tau_ms;
-			double ly = cam.cy + vy * config::inertia_tau_ms;
-			double snap = config::snap_radius * std::fmin(o->width, o->height);
+			Camera cam = o.camera.drawn();
+			double lx = cam.cx + pan.vx * config::inertia_tau_ms;
+			double ly = cam.cy + pan.vy * config::inertia_tau_ms;
+			double snap = config::snap_radius * std::fmin(o.width, o.height);
 			const Desktop *best = nullptr;
 			double best_dist = HUGE_VAL;
 			for (const Desktop &d : server_.canvas.desktops.all()) {
@@ -232,76 +286,81 @@ void Gesture::swipe_end(uint32_t time, bool cancelled) {
 				}
 			}
 			if (best != nullptr && best_dist <= snap) {
-				o->camera.animate_to(camera_for_box(best->frame()));
-			} else if (!cancelled && std::hypot(vx, vy) > config::inertia_min_speed) {
-				o->camera.coast(vx, vy);
+				o.camera.animate_to(camera_for_box(best->frame()));
+			} else if (!cancelled && std::hypot(pan.vx, pan.vy) > config::inertia_min_speed) {
+				o.camera.coast(pan.vx, pan.vy);
 			}
-			break;
-		}
-		case GestureKind::zoom_out:
-			if (!cancelled && (progress > config::overview_commit || vy < -0.5)) {
-				o->overview.finish_enter(far, progress);
+			o.damage();
+		},
+		[&](ZoomOut &z) {
+			Output &o = *z.output;
+			if (!cancelled && (z.progress > config::overview_commit || z.vy < -0.5)) {
+				o.overview.finish_enter(z.far, z.progress);
 			} else {
-				o->camera.animate_zoom(near, far, progress, 0);
+				o.camera.animate_zoom(z.near, z.far, z.progress, 0);
 			}
-			break;
-		case GestureKind::zoom_in:
-			if (!cancelled && (progress > config::overview_commit || vy > 0.5)) {
-				o->overview.finish_exit(near, far, 1 - progress);
+			o.damage();
+		},
+		[&](ZoomIn &z) {
+			Output &o = *z.output;
+			if (!cancelled && (z.progress > config::overview_commit || z.vy > 0.5)) {
+				o.overview.finish_exit(z.near, z.far, 1 - z.progress);
 			} else {
-				o->camera.animate_zoom(near, far, 1 - progress, 1);
+				o.camera.animate_zoom(z.near, z.far, 1 - z.progress, 1);
 			}
-			break;
-		case GestureKind::zoom_further:
-			o->overview.keep_zoom();
-			break;
-		case GestureKind::abandon:
-			if (Desktop *swiped = server_.canvas.desktops.find(desktop);
+			o.damage();
+		},
+		[&](ZoomFurther &z) {
+			z.output->overview.keep_zoom();
+			z.output->damage();
+		},
+		[&](Abandon &a) {
+			Output &o = *a.output;
+			if (Desktop *swiped = server_.canvas.desktops.find(a.desktop);
 					swiped != nullptr) {
-				if (std::fabs(abandon_offset_) > config::abandon_distance && !cancelled) {
-					o->overview.abandon(swiped->id());
+				if (std::fabs(a.offset) > config::abandon_distance && !cancelled) {
+					o.overview.abandon(swiped->id());
 				} else {
-					abandon_offset_ = 0;
-					o->damage();
+					a.offset = 0;
+					o.damage();
 				}
 			}
-			break;
-		default:
-			break;
-		}
-		o->damage();
-	}
-	reset();
+			o.damage();
+		},
+		// Hop, pending and overview-zoom gestures have no release action of
+		// their own; the output is still damaged.
+		[&](Hop &hop) { hop.output->damage(); },
+		[&](Pending &pending) { pending.output->damage(); },
+		[&](OverviewZoom &z) { z.output->damage(); },
+		[](auto &) {},
+	}, state_);
+	state_ = Idle{};
 }
 
-void Gesture::pinch_begin(uint32_t time, uint32_t fingers) {
+void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 	Output *out = server_.output_under_cursor();
-	reset();
+	state_ = Idle{};
 	if (out == nullptr) {
-		kind = GestureKind::ignored;
+		state_ = Ignored{};
 		return;
 	}
-	output = out;
-	this->fingers = fingers;
-	last_time = time;
+	last_time_ = time;
 
 	if (out->overview.active()) {
 		switch (fingers) {
 		case 2:
-			kind = GestureKind::overview_zoom;
+			state_ = OverviewZoom{out, 1};
 			return;
 		case 3:
-			kind = GestureKind::pinch;
 			// A null target is allowed: tile then acts on the target box.
-			desktop = desktop_under(*out);
+			state_ = Pinch{out, desktop_under(*out), std::nullopt, 1, false};
 			return;
 		default:
 			if (fingers >= 4) {
 				// Travel drives the 4-finger swipe logic.
-				kind = GestureKind::pending;
-				pinch = true;
+				state_ = Pending{out, fingers, true, 0, 0};
 			} else {
-				kind = GestureKind::ignored;
+				state_ = Ignored{};
 			}
 			return;
 		}
@@ -310,121 +369,118 @@ void Gesture::pinch_begin(uint32_t time, uint32_t fingers) {
 	// Normal mode: sloppy 3/4-finger swipes arrive as pinches; treat the
 	// travel as a swipe so they still pan / open the overview.
 	if (fingers >= 3) {
-		kind = GestureKind::pending;
-		pinch = true;
+		state_ = Pending{out, fingers, true, 0, 0};
 		return;
 	}
 	if (fingers == 2 && out->interactive()) {
-		kind = GestureKind::forward;
+		state_ = Forwarded{true};
 		wlr_pointer_gestures_v1_send_pinch_begin(server_.pointer_gestures,
 			server_.seat, time, fingers);
 		return;
 	}
-	kind = GestureKind::ignored;
+	state_ = Ignored{};
 }
 
-void Gesture::pinch_preview(std::string_view text) {
+void Gestures::pinch_preview(Pinch &pinch, std::string_view text) {
 	server_.hint.set(text);
-	pinch_hinted_ = true;
+	pinch.hinted = true;
 }
 
-void Gesture::pinch_clear_preview(bool clear_merge) {
+void Gestures::pinch_clear_preview(Pinch &pinch, bool clear_merge) {
 	if (clear_merge) {
-		merge_from = std::nullopt;
+		pinch.merge_from = std::nullopt;
 	}
-	if (pinch_hinted_) {
+	if (pinch.hinted) {
 		server_.hint.set({});
-		pinch_hinted_ = false;
+		pinch.hinted = false;
 	}
 }
 
-void Gesture::pinch_update(uint32_t time, double dx, double dy,
+void Gestures::pinch_update(uint32_t time, double dx, double dy,
 		double scale, double rotation) {
-	if (kind == GestureKind::forward) {
+	if (std::get_if<Forwarded>(&state_)) {
 		wlr_pointer_gestures_v1_send_pinch_update(server_.pointer_gestures,
 			server_.seat, time, dx, dy, scale, rotation);
 		return;
 	}
-	if (output == nullptr || kind == GestureKind::none ||
-			kind == GestureKind::ignored) {
+	if (state_output(state_) == nullptr) {
 		return;
 	}
-	Output *o = output;
 
-	switch (kind) {
-	case GestureKind::overview_zoom: {
-		double factor = this->scale > 0 ? scale / this->scale : 1;
-		double ox = server_.cursor->x - o->lx;
-		double oy = server_.cursor->y - o->ly;
-		o->overview.zoom_by(factor, ox, oy);
-		this->scale = scale;
-		break;
+	if (auto *z = std::get_if<OverviewZoom>(&state_)) {
+		double factor = z->scale > 0 ? scale / z->scale : 1;
+		double ox = server_.cursor->x - z->output->lx;
+		double oy = server_.cursor->y - z->output->ly;
+		z->output->overview.zoom_by(factor, ox, oy);
+		z->scale = scale;
+		last_time_ = time;
+		return;
 	}
-	case GestureKind::pinch: {
-		this->scale = scale;
-		Desktop *pinched = server_.canvas.desktops.find(desktop);
+	if (auto *pinch = std::get_if<Pinch>(&state_)) {
+		pinch->scale = scale;
+		Desktop *pinched = server_.canvas.desktops.find(pinch->desktop);
 		if (scale > config::pinch_tile_scale) {
-			merge_from = std::nullopt;
+			pinch->merge_from = std::nullopt;
 			if (pinched != nullptr) {
 				char buf[64];
 				std::snprintf(buf, sizeof(buf), "Release to tile Desktop %d",
 					pinched->number());
-				pinch_preview(buf);
+				pinch_preview(*pinch, buf);
 			} else {
-				pinch_preview("Release to tile windows here");
+				pinch_preview(*pinch, "Release to tile windows here");
 			}
 		} else if (scale < config::pinch_combine_scale) {
 			if (pinched == nullptr) {
-				merge_from = std::nullopt;
-				pinch_preview("Pinch over a desktop to combine");
+				pinch->merge_from = std::nullopt;
+				pinch_preview(*pinch, "Pinch over a desktop to combine");
 			} else {
 				Desktop *merge = server_.canvas.desktops.nearest(pinched->id());
-				merge_from = merge != nullptr ? std::optional<DesktopId>{merge->id()}
-					: std::nullopt;
+				pinch->merge_from = merge != nullptr
+					? std::optional<DesktopId>{merge->id()} : std::nullopt;
 				if (merge != nullptr) {
 					char buf[80];
 					std::snprintf(buf, sizeof(buf),
 						"Release to combine Desktop %d into Desktop %d",
 						merge->number(), pinched->number());
-					pinch_preview(buf);
+					pinch_preview(*pinch, buf);
 				} else {
-					pinch_clear_preview(false);
+					pinch_clear_preview(*pinch, false);
 				}
 			}
 		} else {
 			// Back in the neutral range: drop the preview.
-			pinch_clear_preview(true);
+			pinch_clear_preview(*pinch, true);
 		}
-		o->damage();
-		break;
-	}
-	default:
-		// Pending / decided swipe-like gestures: treat the travel of the
-		// pinch as swipe motion. swipe_update updates last_time.
-		swipe_update(time, dx, dy);
+		pinch->output->damage();
+		last_time_ = time;
 		return;
 	}
-	last_time = time;
+	// Pending / decided swipe-like gestures: treat the travel of the
+	// pinch as swipe motion. swipe_update updates last_time_.
+	swipe_update(time, dx, dy);
 }
 
-void Gesture::pinch_end(uint32_t time, bool cancelled) {
-	if (kind == GestureKind::forward) {
-		wlr_pointer_gestures_v1_send_pinch_end(server_.pointer_gestures,
-			server_.seat, time, cancelled);
-		reset();
+void Gestures::pinch_end(uint32_t time, bool cancelled) {
+	if (auto *forwarded = std::get_if<Forwarded>(&state_)) {
+		if (forwarded->pinch) {
+			wlr_pointer_gestures_v1_send_pinch_end(server_.pointer_gestures,
+				server_.seat, time, cancelled);
+		}
+		state_ = Idle{};
 		return;
 	}
-	if (kind == GestureKind::pinch) {
-		if (Output *o = output) {
-			if (!cancelled && scale > config::pinch_tile_scale) {
-				o->overview.tile(desktop);
-			} else if (!cancelled && server_.canvas.desktops.find(merge_from) != nullptr) {
-				o->overview.combine(desktop);
+	if (auto *pinch = std::get_if<Pinch>(&state_)) {
+		if (Output *o = pinch->output) {
+			if (!cancelled && pinch->scale > config::pinch_tile_scale) {
+				o->overview.tile(pinch->desktop);
+			} else if (!cancelled
+					&& server_.canvas.desktops.find(pinch->merge_from) != nullptr) {
+				o->overview.combine(pinch->desktop);
 			}
 			o->damage();
 		}
-		pinch_clear_preview(true);
-		reset();
+		pinch_clear_preview(*pinch, true);
+		state_ = Idle{};
 		return;
 	}
 	// Everything else (pending, pan, zoom, hop, abandon) releases like a
@@ -432,7 +488,7 @@ void Gesture::pinch_end(uint32_t time, bool cancelled) {
 	swipe_end(time, cancelled);
 }
 
-void Gesture::hold_begin(uint32_t time, uint32_t fingers) {
+void Gestures::hold_begin(uint32_t time, uint32_t fingers) {
 	hold_forwarded_ = false;
 	Output *out = server_.output_under_cursor();
 	if (out == nullptr) {
@@ -448,7 +504,7 @@ void Gesture::hold_begin(uint32_t time, uint32_t fingers) {
 	}
 }
 
-void Gesture::hold_end(uint32_t time, bool cancelled) {
+void Gestures::hold_end(uint32_t time, bool cancelled) {
 	if (hold_forwarded_) {
 		wlr_pointer_gestures_v1_send_hold_end(server_.pointer_gestures,
 			server_.seat, time, cancelled);

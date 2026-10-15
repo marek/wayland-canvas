@@ -92,7 +92,7 @@ public:
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame
 
 	Input input;
-	Gesture gesture;
+	Gestures gestures;
 	Hint hint;
 	Launcher launcher;
 	Painter painter;

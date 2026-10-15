@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <variant>
 #include "config.h"
 #include "output.h"
 #include "render.h"
@@ -94,23 +95,23 @@ void shot(const char *name) {
 }
 
 void swipe(uint32_t fingers, double dx, double dy, int steps) {
-	server->gesture.swipe_begin(t_ms, fingers);
+	server->gestures.swipe_begin(t_ms, fingers);
 	for (int i = 0; i < steps; i++) {
 		t_ms += 8;
-		server->gesture.swipe_update(t_ms, dx / steps, dy / steps);
+		server->gestures.swipe_update(t_ms, dx / steps, dy / steps);
 	}
 	t_ms += 8;
-	server->gesture.swipe_end(t_ms, false);
+	server->gestures.swipe_end(t_ms, false);
 }
 
 void pinch(uint32_t fingers, double scale, int steps) {
-	server->gesture.pinch_begin(t_ms, fingers);
+	server->gestures.pinch_begin(t_ms, fingers);
 	for (int i = 1; i <= steps; i++) {
 		t_ms += 8;
-		server->gesture.pinch_update(t_ms, 0, 0, 1 + (scale - 1) * i / steps, 0);
+		server->gestures.pinch_update(t_ms, 0, 0, 1 + (scale - 1) * i / steps, 0);
 	}
 	t_ms += 8;
-	server->gesture.pinch_end(t_ms, false);
+	server->gestures.pinch_end(t_ms, false);
 }
 
 bool inside(const Rect &r, const wlr_box &b) {
@@ -264,18 +265,19 @@ int run_step() {
 		// Abandoning (by key) the desktop a swipe is sliding away must end that swipe cleanly.
 		const wlr_box &frame = desk(d1)->frame();
 		o->overview.new_desktop(frame.x + frame.width * 1.8, frame.y + frame.height / 2.0);
-		server->gesture.swipe_begin(t_ms += 8, 4);
+		server->gestures.swipe_begin(t_ms += 8, 4);
 		for (int i = 0; i < 6; i++) {
-			server->gesture.swipe_update(t_ms += 8, 20, 0);
+			server->gestures.swipe_update(t_ms += 8, 20, 0);
 		}
-		check(server->gesture.kind == GestureKind::abandon,
+		check(std::holds_alternative<Gestures::Abandon>(server->gestures.state()),
 			"4-finger sideways swipe is sliding a desktop away");
 		o->overview.abandon(o->overview.target().desktop);
 		for (int i = 0; i < 6; i++) {
-			server->gesture.swipe_update(t_ms += 8, 20, 0);
+			server->gestures.swipe_update(t_ms += 8, 20, 0);
 		}
-		server->gesture.swipe_end(t_ms += 8, false);
-		check(server->canvas.desktops.size() == 1 && server->gesture.kind == GestureKind::none,
+		server->gestures.swipe_end(t_ms += 8, false);
+		check(server->canvas.desktops.size() == 1
+			&& std::holds_alternative<Gestures::Idle>(server->gestures.state()),
 			"abandoning the swiped desktop mid-swipe ends the swipe cleanly");
 		// A desktop created after an abandon reuses the freed number, never
 		// the abandoned identity.

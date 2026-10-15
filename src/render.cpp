@@ -360,7 +360,7 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 			continue;
 		}
 
-		double offset = server.gesture.abandon_offset(d.id());
+		double offset = server.gestures.abandon_offset(d.id());
 		uint32_t color = config::color_frame;
 		double alpha = 1.0;
 		double thickness = 2.0;
@@ -418,17 +418,17 @@ void draw_desktops_normal(const RenderCtx &ctx) {
 // for combine.
 void draw_pinch_preview(const RenderCtx &ctx) {
 	Output &o = *ctx.output;
-	const Gesture &g = o.server.gesture;
-	if (g.kind != GestureKind::pinch) {
+	const Gestures::Pinch *g = o.server.gestures.pinch();
+	if (g == nullptr) {
 		return;
 	}
-	Desktop *desktop = o.server.canvas.desktops.find(g.desktop);
-	Desktop *merge_from = o.server.canvas.desktops.find(g.merge_from);
+	Desktop *desktop = o.server.canvas.desktops.find(g->desktop);
+	Desktop *merge_from = o.server.canvas.desktops.find(g->merge_from);
 	const wlr_box &box = desktop != nullptr ? desktop->frame() : o.overview.target().box;
 	Rect br = box_rect(box);
 	bool box_visible = br.intersects(ctx.viewport);
 
-	if (g.scale > config::pinch_tile_scale && box_visible) {
+	if (g->scale > config::pinch_tile_scale && box_visible) {
 		draw_canvas_rect(ctx, box.x, box.y, box.width, box.height,
 			color_rgba(config::color_accent, 0.12f));
 	}
@@ -722,7 +722,7 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 	Camera cam = o.camera.drawn();
 	double left = cam.cx - o.width / (2.0 * cam.zoom);
 	double top = cam.cy - o.height / (2.0 * cam.zoom);
-	double offset = server_.gesture.abandon_offset(desktop.id());
+	double offset = server_.gestures.abandon_offset(desktop.id());
 	double frame_left = (desktop.frame().x - left) * cam.zoom + offset;
 	double frame_top = (desktop.frame().y - top) * cam.zoom;
 

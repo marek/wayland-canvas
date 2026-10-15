@@ -9,7 +9,7 @@ Wayland display namespace and GPU.
 
 ## What each scenario proves
 
-- **`gestures.cpp`** — touchpad gesture semantics through the `Gesture`
+- **`gestures.cpp`** — touchpad gesture semantics through the `Gestures`
   entry points (the same ones the libinput listeners call): mapping three
   foot windows, title-bar button hit-testing, maximize, 3-finger panning with
   momentum, pinning a free area as a desktop, moving a window between

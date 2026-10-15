@@ -1484,44 +1484,44 @@ void Input::handle_cursor_frame() {
 void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	notify_activity(server_);
 	super_tap_ = false;
-	server_.gesture.swipe_begin(event->time_msec, event->fingers);
+	server_.gestures.swipe_begin(event->time_msec, event->fingers);
 }
 
 void Input::handle_swipe_update(wlr_pointer_swipe_update_event *event) {
 	notify_activity(server_);
-	server_.gesture.swipe_update(event->time_msec, event->dx, event->dy);
+	server_.gestures.swipe_update(event->time_msec, event->dx, event->dy);
 }
 
 void Input::handle_swipe_end(wlr_pointer_swipe_end_event *event) {
 	notify_activity(server_);
-	server_.gesture.swipe_end(event->time_msec, event->cancelled);
+	server_.gestures.swipe_end(event->time_msec, event->cancelled);
 }
 
 void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 	notify_activity(server_);
 	super_tap_ = false;
-	server_.gesture.pinch_begin(event->time_msec, event->fingers);
+	server_.gestures.pinch_begin(event->time_msec, event->fingers);
 }
 
 void Input::handle_pinch_update(wlr_pointer_pinch_update_event *event) {
 	notify_activity(server_);
-	server_.gesture.pinch_update(event->time_msec, event->dx, event->dy,
+	server_.gestures.pinch_update(event->time_msec, event->dx, event->dy,
 		event->scale, event->rotation);
 }
 
 void Input::handle_pinch_end(wlr_pointer_pinch_end_event *event) {
 	notify_activity(server_);
-	server_.gesture.pinch_end(event->time_msec, event->cancelled);
+	server_.gestures.pinch_end(event->time_msec, event->cancelled);
 }
 
 void Input::handle_hold_begin(wlr_pointer_hold_begin_event *event) {
 	notify_activity(server_);
-	server_.gesture.hold_begin(event->time_msec, event->fingers);
+	server_.gestures.hold_begin(event->time_msec, event->fingers);
 }
 
 void Input::handle_hold_end(wlr_pointer_hold_end_event *event) {
 	notify_activity(server_);
-	server_.gesture.hold_end(event->time_msec, event->cancelled);
+	server_.gestures.hold_end(event->time_msec, event->cancelled);
 }
 
 // ---- seat requests ----

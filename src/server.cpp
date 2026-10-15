@@ -113,7 +113,7 @@ struct Server::Inhibitor {
 };
 
 Server::Server()
-	: input(*this), gesture(*this), hint(*this), launcher(*this),
+	: input(*this), gestures(*this), hint(*this), launcher(*this),
 	painter(*this), decorations(*this), canvas(*this) {
 }
 

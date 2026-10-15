@@ -203,7 +203,7 @@ bool Output::is_panning() const {
 	if (camera.panning()) {
 		return true;
 	}
-	if (server.gesture.kind == GestureKind::pan && server.gesture.output == this) {
+	if (server.gestures.panning(*this)) {
 		return true;
 	}
 	if (server.input.cursor_mode == CursorMode::pan && server.input.grab_output == this) {
@@ -222,16 +222,8 @@ bool Output::interactive() const {
 	if (camera.zooming()) {
 		return false;
 	}
-	if (server.gesture.output == this) {
-		switch (server.gesture.kind) {
-		case GestureKind::zoom_out:
-		case GestureKind::zoom_in:
-		case GestureKind::zoom_further:
-		case GestureKind::overview_zoom:
-			return false;
-		default:
-			break;
-		}
+	if (server.gestures.zooming(*this)) {
+		return false;
 	}
 	return true;
 }
@@ -392,13 +384,7 @@ void Output::handle_destroy() {
 	if (server.input.grab_output == this) {
 		server.input.cancel_grab();
 	}
-	if (server.gesture.output == this) {
-		server.gesture.output = nullptr;
-		// A forwarded gesture still owes its client the end event.
-		if (server.gesture.kind != GestureKind::forward) {
-			server.gesture.kind = GestureKind::ignored;
-		}
-	}
+	server.gestures.output_gone(*this);
 	for (View *view : server.views) {
 		view->output_mask &= ~bit;
 	}
