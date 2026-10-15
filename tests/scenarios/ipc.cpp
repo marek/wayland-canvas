@@ -70,6 +70,24 @@ std::string client_cmd(std::string_view command) {
 	return std::format("\"{}\" msg {}", bin, command);
 }
 
+std::string read_file(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return "";
+	}
+	std::string out;
+	char buf[256];
+	std::size_t n;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+		out.pop_back();
+	}
+	return out;
+}
+
 int run_step() {
 	switch (step) {
 	case 0: {
@@ -118,14 +136,21 @@ int run_step() {
 		check(normal, "`msg overview` left the overview");
 		return 200;
 	}
-	case 9: {
-		std::optional<std::string> response = send_ipc_message("nonsense");
-		check(response && response->rfind("error", 0) == 0,
+	case 9: // the answer to an unknown command, captured from the real client
+		spawn(std::format("\"{}\" msg nonsense > {}/unknown.out",
+			std::getenv("WAYLAND_CANVAS_BIN"), shot_dir).c_str());
+		return 300;
+	case 10: {
+		// Read in a later step: a blocking read here would stall the loop the
+		// compositor answers on.
+		std::string response = read_file(shot_dir + "/unknown.out");
+		if (response.empty() && retries++ < 50) return -100;
+		check(response.rfind("error", 0) == 0,
 			std::format("an unknown command answers with an error ({})",
-				response ? *response : std::string("no answer")));
+				response.empty() ? "no answer" : response));
 		return 200;
 	}
-	case 10: // the compositor's own exit path, through the socket
+	case 11: // the compositor's own exit path, through the socket
 		spawn(client_cmd("quit").c_str());
 		return 300;
 	default:

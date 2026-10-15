@@ -80,7 +80,8 @@ bool Ipc::init() {
 	path_ = std::string(runtime) + "/" + config::ipc_socket_prefix + "-" + display + ".sock";
 	// A socket left behind by a crashed run would block this one.
 	unlink(path_.c_str());
-	listen_fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	// Nonblocking, so accepting pending connections can never stall the loop.
+	listen_fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 	if (listen_fd_ < 0) {
 		wlr_log_errno(WLR_ERROR, "ipc: socket() failed");
 		path_.clear();
