@@ -1,7 +1,10 @@
-// End-to-end control-IPC scenario: the socket the compositor exports, the
-// `wayland-canvas msg` client driving the launcher, the overview and the
-// session end through it. Writes only under $CANVAS_TMP (meson passes the
-// repo's tmp/); meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
+// End-to-end control-IPC scenario: the JSON-lines protocol on the socket the
+// compositor exports — every method, every error case (a malformed line
+// answered with the connection kept, unknown methods, bad params, a line
+// over 64 KiB answered then dropped, a slow subscriber dropped), each event
+// type triggered for real, and the `wayland-canvas msg` client with its exit
+// codes. Writes only under $CANVAS_TMP (meson passes the repo's tmp/);
+// meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -10,16 +13,21 @@
 #include <format>
 #include <optional>
 #include <print>
+#include <signal.h>
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <sys/poll.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include "platform/ipc.h"
+#include <json-glib/json-glib.h>
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/theme.h"
 #include "core/wlr.h"
 
 namespace {
@@ -29,8 +37,13 @@ wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
 uint32_t t = 90000;
 pid_t grim_pid = -1;
+pid_t raw_pid = -1;
+pid_t sub_pid = -1;
+int raw_status = 0;
 std::string shot_dir;
 std::string socket_path;
+std::string events_path;
+std::string output_name; // the headless output's name, for `output` params
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -64,12 +77,6 @@ void shot(const char *name) {
 	}
 }
 
-// The command line of the real client against this compositor's socket.
-std::string client_cmd(std::string_view command) {
-	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
-	return std::format("\"{}\" msg {}", bin, command);
-}
-
 std::string read_file(const std::string &path) {
 	FILE *f = std::fopen(path.c_str(), "r");
 	if (f == nullptr) {
@@ -88,6 +95,315 @@ std::string read_file(const std::string &path) {
 	return out;
 }
 
+bool file_exists(const std::string &path) {
+	struct stat st{};
+	return stat(path.c_str(), &st) == 0;
+}
+
+// Runs the real client through /bin/sh with stdout, stderr and the exit code
+// captured under `name` (.out, .err, .code). Params, when given, are
+// single-quoted for the shell.
+void run_client(std::string_view method, std::string_view params, const char *name) {
+	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
+	std::string cmd = std::format("\"{}\" msg {}", bin, method);
+	if (!params.empty()) {
+		cmd += std::format(" '{}'", params);
+	}
+	cmd += std::format(" > {}/{}.out 2> {}/{}.err; echo $? > {}/{}.code",
+		shot_dir, name, shot_dir, name, shot_dir, name);
+	spawn(cmd.c_str());
+}
+
+bool client_done(const char *name) {
+	return file_exists(std::format("{}/{}.code", shot_dir, name));
+}
+
+std::string client_out(const char *name) {
+	return read_file(std::format("{}/{}.out", shot_dir, name));
+}
+
+std::string client_err(const char *name) {
+	return read_file(std::format("{}/{}.err", shot_dir, name));
+}
+
+int client_code(const char *name) {
+	return std::atoi(read_file(std::format("{}/{}.code", shot_dir, name)).c_str());
+}
+
+// ---------------------------------------------------------- raw clients
+
+// Connects to the control socket from a child process (the compositor runs
+// in this one, so nothing here may block the parent). -1 on failure.
+int child_connect() {
+	const char *path = std::getenv("WAYLAND_CANVAS_SOCKET");
+	if (path == nullptr || *path == '\0') {
+		return -1;
+	}
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		return -1;
+	}
+	sockaddr_un addr{};
+	addr.sun_family = AF_UNIX;
+	if (strlen(path) >= sizeof(addr.sun_path)) {
+		close(fd);
+		return -1;
+	}
+	strcpy(addr.sun_path, path);
+	if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+bool child_write_all(int fd, std::string_view bytes) {
+	std::size_t done = 0;
+	while (done < bytes.size()) {
+		ssize_t n = write(fd, bytes.data() + done, bytes.size() - done);
+		if (n > 0) {
+			done += static_cast<std::size_t>(n);
+		} else if (n < 0 && errno == EINTR) {
+			continue;
+		} else {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Forks a child that sends `to_send` as raw lines, optionally half-closes
+// its write side, then captures everything the compositor sends back until
+// it goes quiet (800 ms), drops the connection, or 10 s pass. A trailing
+// "EOF" line is appended when the compositor closed the connection.
+pid_t fork_raw(const std::string &to_send, bool half_close, const char *out) {
+	pid_t pid = fork();
+	if (pid != 0) {
+		return pid;
+	}
+	int fd = child_connect();
+	FILE *f = std::fopen((shot_dir + "/" + out).c_str(), "w");
+	if (fd < 0 || f == nullptr) {
+		if (f != nullptr) {
+			std::fclose(f);
+		}
+		_exit(125);
+	}
+	if (!child_write_all(fd, to_send)) {
+		std::fclose(f);
+		close(fd);
+		_exit(124);
+	}
+	if (half_close) {
+		shutdown(fd, SHUT_WR);
+	}
+	char buf[1024];
+	int idle = 0;
+	bool eof = false;
+	for (int elapsed = 0; elapsed < 10000 && !eof && idle < 2; elapsed += 400) {
+		pollfd pfd{.fd = fd, .events = POLLIN, .revents = 0};
+		if (poll(&pfd, 1, 400) == 0) {
+			idle++;
+			continue;
+		}
+		idle = 0;
+		if ((pfd.revents & (POLLERR | POLLNVAL)) != 0) {
+			break;
+		}
+		ssize_t n = read(fd, buf, sizeof buf);
+		if (n <= 0) {
+			eof = true;
+			break;
+		}
+		std::fwrite(buf, 1, static_cast<std::size_t>(n), f);
+	}
+	if (eof) {
+		std::fputs("\nEOF\n", f);
+	}
+	std::fflush(f);
+	std::fclose(f);
+	close(fd);
+	_exit(0);
+}
+
+// Forks a child that subscribes, writes "ready" to `ready`, then reads
+// nothing for 3 s while the parent floods events, and finally drains: it
+// writes "dropped <bytes>" when the compositor dropped it (EOF), or
+// "alive <bytes>" when the connection survived 10 s.
+pid_t fork_slow_subscriber(const char *ready, const char *result) {
+	pid_t pid = fork();
+	if (pid != 0) {
+		return pid;
+	}
+	int fd = child_connect();
+	FILE *f = std::fopen((shot_dir + "/" + result).c_str(), "w");
+	if (fd < 0 || f == nullptr) {
+		if (f != nullptr) {
+			std::fclose(f);
+		}
+		_exit(125);
+	}
+	if (!child_write_all(fd, "{\"id\":1,\"method\":\"subscribe\"}\n")) {
+		std::fclose(f);
+		close(fd);
+		_exit(124);
+	}
+	// The subscribe response: read it, so `ready` means really subscribed.
+	char line[512];
+	std::size_t len = 0;
+	bool got_response = false;
+	for (int elapsed = 0; elapsed < 5000 && !got_response; elapsed += 100) {
+		pollfd pfd{.fd = fd, .events = POLLIN, .revents = 0};
+		if (poll(&pfd, 1, 100) == 0) {
+			continue;
+		}
+		ssize_t n = read(fd, line + len, 1);
+		if (n <= 0) {
+			break;
+		}
+		if (line[len] == '\n') {
+			got_response = true;
+			break;
+		}
+		if (++len == sizeof line - 1) {
+			break;
+		}
+	}
+	if (got_response) {
+		FILE *r = std::fopen((shot_dir + "/" + ready).c_str(), "w");
+		if (r != nullptr) {
+			std::fputs("ready\n", r);
+			std::fflush(r);
+			std::fclose(r);
+		}
+	}
+	// Not a single read while the parent floods: the backlog must build.
+	sleep(3);
+	long bytes = 0;
+	bool eof = false;
+	char buf[65536];
+	for (int elapsed = 0; elapsed < 10000 && !eof; elapsed += 200) {
+		pollfd pfd{.fd = fd, .events = POLLIN, .revents = 0};
+		if (poll(&pfd, 1, 200) == 0) {
+			continue;
+		}
+		if ((pfd.revents & (POLLERR | POLLNVAL)) != 0) {
+			break;
+		}
+		ssize_t n = read(fd, buf, sizeof buf);
+		if (n <= 0) {
+			eof = true;
+			break;
+		}
+		bytes += n;
+	}
+	std::fprintf(f, "%s %ld\n", eof ? "dropped" : "alive", bytes);
+	std::fflush(f);
+	std::fclose(f);
+	close(fd);
+	_exit(0);
+}
+
+// True when the subscriber printed an event line containing `needle`.
+bool events_has(std::string_view needle) {
+	return read_file(events_path).find(needle) != std::string::npos;
+}
+
+int events_count(std::string_view needle) {
+	std::string text = read_file(events_path);
+	int n = 0;
+	for (std::size_t pos = text.find(needle); pos != std::string::npos;
+			pos = text.find(needle, pos + needle.size())) {
+		n++;
+	}
+	return n;
+}
+
+// ------------------------------------------------------ state checking
+
+// The first failed expectation about a `msg state` result, or empty when the
+// result is well-formed: `want_theme`, at least `want_outputs` outputs (the
+// first reporting `want_overview`), at least `want_desktops` desktops.
+std::string state_mismatch(const std::string &text, std::string_view want_theme,
+		int want_outputs, bool want_overview, int want_desktops) {
+	JsonParser *parser = json_parser_new();
+	std::string problem;
+	if (!json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		problem = "the result is not JSON";
+	} else {
+		JsonNode *root = json_parser_get_root(parser);
+		JsonObject *object =
+			root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
+			? json_node_get_object(root) : nullptr;
+		if (object == nullptr) {
+			problem = "the result is not an object";
+		} else if (!json_object_has_member(object, "theme")) {
+			problem = "the result has no theme";
+		} else {
+			JsonNode *theme = json_object_get_member(object, "theme");
+			if (json_node_get_node_type(theme) != JSON_NODE_VALUE
+					|| json_node_get_value_type(theme) != G_TYPE_STRING) {
+				problem = "theme is not a string";
+			} else if (std::string_view{json_node_get_string(theme)} != want_theme) {
+				problem = std::format("theme is {}, not {}", json_node_get_string(theme),
+					want_theme);
+			}
+		}
+		if (problem.empty() && json_object_has_member(object, "outputs")) {
+			JsonNode *outputs = json_object_get_member(object, "outputs");
+			if (json_node_get_node_type(outputs) != JSON_NODE_ARRAY) {
+				problem = "outputs is not an array";
+			} else if (static_cast<int>(json_array_get_length(
+					json_node_get_array(outputs))) < want_outputs) {
+				problem = std::format("only {} outputs",
+					json_array_get_length(json_node_get_array(outputs)));
+			} else {
+				JsonObject *first = json_array_get_object_element(
+					json_node_get_array(outputs), 0);
+				if (!json_object_has_member(first, "name")
+						|| !json_object_has_member(first, "overview")
+						|| !json_object_has_member(first, "scale")) {
+					problem = "an output entry lacks name, overview or scale";
+				} else if (json_object_get_boolean_member(first, "overview")
+						!= want_overview) {
+					problem = want_overview
+						? "the output is not in the overview" : "the output is in the overview";
+				}
+			}
+		}
+		if (problem.empty() && json_object_has_member(object, "desktops")) {
+			JsonNode *desktops = json_object_get_member(object, "desktops");
+			if (json_node_get_node_type(desktops) != JSON_NODE_ARRAY) {
+				problem = "desktops is not an array";
+			} else if (static_cast<int>(json_array_get_length(
+					json_node_get_array(desktops))) < want_desktops) {
+				problem = std::format("only {} desktops",
+					json_array_get_length(json_node_get_array(desktops)));
+			}
+		}
+	}
+	g_object_unref(parser);
+	return problem;
+}
+
+// Waits for a forked raw client (or any pid) to have exited.
+bool child_exited(pid_t pid) {
+	return pid > 0 && waitpid(pid, &raw_status, WNOHANG) == pid;
+}
+
+// Commits a new output scale; the layout follows, and the outputs event.
+void commit_scale(float scale) {
+	Output *output = server->output_under_cursor();
+	wlr_output_state state;
+	wlr_output_state_init(&state);
+	wlr_output_state_set_scale(&state, scale);
+	wlr_output_commit_state(output->wlr, &state);
+	wlr_output_state_finish(&state);
+}
+
+// --------------------------------------------------------------- steps
+
 int run_step() {
 	switch (step) {
 	case 0: {
@@ -98,60 +414,452 @@ int run_step() {
 		check(!socket_path.empty() && is_socket,
 			std::format("the compositor exports a socket at $WAYLAND_CANVAS_SOCKET ({})",
 				socket_path));
+		output_name = server->outputs.empty() ? "" : server->outputs.front()->wlr->name;
+		check(!output_name.empty(), "the headless output has a name for params");
 		return 200;
 	}
-	case 1:
-		spawn(client_cmd("launcher").c_str());
+	case 1: // a real foot window, so the title bars have something to frame
+		spawn("foot -T ipc sh -c 'echo ipc scenario; exec sleep 600'");
+		return 400;
+	case 2: {
+		int mapped = 0;
+		View *view = nullptr;
+		for (View *v : server->views) {
+			if (v->mapped) {
+				mapped++;
+				view = v;
+			}
+		}
+		if (mapped < 1 && retries++ < 100) {
+			return -100;
+		}
+		check(mapped == 1, std::format("one foot window mapped ({})", mapped));
+		check(view != nullptr && view->deco.ssd,
+			"foot negotiated a server-side title bar");
+		if (view != nullptr) {
+			server->focus_view(view); // an active title bar for the screenshot
+		}
+		shot("titlebar-dark");
+		return 500;
+	}
+	case 3: // the state method through the real client
+		run_client("state", "", "state-dark");
 		return 300;
-	case 2:
-		if (!server->launcher.is_open() && retries++ < 50) return -100;
-		check(server->launcher.is_open(), "`msg launcher` opened the launcher");
+	case 4: {
+		if (!client_done("state-dark") && retries++ < 50) {
+			return -100;
+		}
+		std::string out = client_out("state-dark");
+		std::string problem = state_mismatch(out, "dark", 1, false, 1);
+		check(problem.empty(),
+			std::format("`msg state` reports the dark theme, the output, the desktops ({})",
+				problem.empty() ? out : problem));
+		check(client_code("state-dark") == 0, "`msg state` exits 0");
+		return 200;
+	}
+	case 5: // ids echoed, responses in order, on one connection
+		raw_pid = fork_raw(std::format(
+			"{{\"id\":1,\"method\":\"state\"}}\n{{\"id\":\"two\",\"method\":\"subscribe\"}}\n"),
+			false, "raw-order.out");
+		return 600;
+	case 6: {
+		if (!child_exited(raw_pid) && retries++ < 100) {
+			return -100;
+		}
+		std::string out = read_file(shot_dir + "/raw-order.out");
+		std::size_t first = out.find("\"id\":1,");
+		std::size_t second = out.find("\"id\":\"two\"");
+		check(first != std::string::npos && second != std::string::npos
+				&& first < second && out.find("\"result\"") != std::string::npos,
+			std::format("responses come in request order with their ids ({})", out));
+		return 200;
+	}
+	case 7: // malformed lines are answered, and the connection stays
+		raw_pid = fork_raw("nonsense\n"
+			"{\"id\":\"abc\"}\n"
+			"{\"id\":5,\"method\":\"theme.set\",\"params\":\"x\"}\n"
+			"{\"id\":7,\"method\":\"state\"}\n",
+			false, "raw-malformed.out");
+		return 700;
+	case 8: {
+		if (!child_exited(raw_pid) && retries++ < 100) {
+			return -100;
+		}
+		std::string out = read_file(shot_dir + "/raw-malformed.out");
+		check(out.find("\"id\":null") != std::string::npos
+				&& out.find("error") != std::string::npos,
+			std::format("a non-JSON line is answered with an id-null error ({})", out));
+		check(out.find("\"id\":\"abc\"") != std::string::npos
+				&& out.find("no method") != std::string::npos,
+			"an object without a method is answered with its readable id");
+		check(out.find("\"id\":5") != std::string::npos
+				&& out.find("params is not an object") != std::string::npos,
+			"a request whose params is not an object is answered naming params");
+		check(out.find("\"id\":7") != std::string::npos
+				&& out.find("\"result\"") != std::string::npos,
+			"the connection stayed: the next request is answered");
+		return 200;
+	}
+	case 9: // an unknown method is answered with an error naming it
+		raw_pid = fork_raw("{\"id\":9,\"method\":\"frobnicate\"}\n",
+			false, "raw-unknown.out");
+		return 500;
+	case 10: {
+		if (!child_exited(raw_pid) && retries++ < 100) {
+			return -100;
+		}
+		std::string out = read_file(shot_dir + "/raw-unknown.out");
+		check(out.find("\"id\":9") != std::string::npos
+				&& out.find("frobnicate") != std::string::npos
+				&& out.find("error") != std::string::npos,
+			std::format("an unknown method is answered naming it ({})", out));
+		return 200;
+	}
+	case 11: // the msg client's own error paths
+		run_client("theme.set", R"({"mode":"blue"})", "theme-blue");
+		run_client("launcher.toggle", R"({"output":"NOPE"})", "nope-output");
+		run_client("state", "{oops", "bad-params");
+		spawn(std::format(
+			"\"{}\" msg > /dev/null 2> {}/no-method.err; echo $? > {}/no-method.code",
+			std::getenv("WAYLAND_CANVAS_BIN"), shot_dir, shot_dir).c_str());
+		return 400;
+	case 12: {
+		if ((!client_done("theme-blue") || !client_done("nope-output")
+				|| !client_done("bad-params") || !file_exists(shot_dir + "/no-method.code"))
+				&& retries++ < 50) {
+			return -100;
+		}
+		check(client_code("theme-blue") == 1
+				&& client_out("theme-blue").empty()
+				&& client_err("theme-blue").find("mode") != std::string::npos,
+			std::format("`msg theme.set` with a bad mode: exit 1, the error on stderr ({})",
+				client_err("theme-blue")));
+		check(client_code("nope-output") == 1
+				&& client_err("nope-output").find("NOPE") != std::string::npos,
+			std::format("`msg launcher.toggle` naming an unknown output: exit 1 ({})",
+				client_err("nope-output")));
+		check(client_code("bad-params") == 1
+				&& client_err("bad-params").find("params") != std::string::npos,
+			std::format("`msg` with params that are not JSON: exit 1 ({})",
+				client_err("bad-params")));
+		check(std::atoi(read_file(shot_dir + "/no-method.code").c_str()) == 2,
+			"`msg` without a method: usage, exit 2");
+		return 200;
+	}
+	case 13: // launcher.toggle, default output
+		run_client("launcher.toggle", "", "launcher-open");
+		return 300;
+	case 14: {
+		if (!client_done("launcher-open") && retries++ < 50) {
+			return -100;
+		}
+		if (!server->launcher.is_open() && retries++ < 50) {
+			return -100;
+		}
+		check(server->launcher.is_open() && client_code("launcher-open") == 0,
+			"`msg launcher.toggle` opened the launcher");
 		shot("launcher-open");
 		return 500;
-	case 3:
-		spawn(client_cmd("launcher").c_str());
+	}
+	case 15: // launcher.toggle with a named output closes it again
+		run_client("launcher.toggle", std::format(R"({{"output":"{}"}})", output_name),
+			"launcher-close");
 		return 300;
-	case 4:
-		if (server->launcher.is_open() && retries++ < 50) return -100;
-		check(!server->launcher.is_open(), "`msg launcher` closed the open launcher");
+	case 16: {
+		if (!client_done("launcher-close") && retries++ < 50) {
+			return -100;
+		}
+		if (server->launcher.is_open() && retries++ < 50) {
+			return -100;
+		}
+		check(!server->launcher.is_open(), "`msg launcher.toggle` closed the open launcher");
 		return 200;
-	case 5:
-		spawn(client_cmd("overview").c_str());
+	}
+	case 17: // overview.toggle, default output
+		run_client("overview.toggle", "", "overview-enter");
 		return 300;
-	case 6: {
+	case 18: {
+		if (!client_done("overview-enter") && retries++ < 50) {
+			return -100;
+		}
 		Output *output = server->output_under_cursor();
-		bool overview = output && output->overview.active();
-		if (!overview && retries++ < 50) return -100;
-		check(overview, "`msg overview` entered the overview");
-		shot("overview");
+		if ((output == nullptr || !output->overview.active()) && retries++ < 50) {
+			return -100;
+		}
+		check(output != nullptr && output->overview.active(),
+			"`msg overview.toggle` entered the overview");
+		shot("overview-dark");
 		return 500;
 	}
-	case 7:
-		spawn(client_cmd("overview").c_str());
+	case 19: // overview.toggle with a named output leaves it
+		run_client("overview.toggle", std::format(R"({{"output":"{}"}})", output_name),
+			"overview-exit");
 		return 300;
-	case 8: {
+	case 20: {
+		if (!client_done("overview-exit") && retries++ < 50) {
+			return -100;
+		}
 		Output *output = server->output_under_cursor();
-		bool normal = output && !output->overview.active();
-		if (!normal && retries++ < 50) return -100;
-		check(normal, "`msg overview` left the overview");
+		if ((output == nullptr || output->overview.active()) && retries++ < 50) {
+			return -100;
+		}
+		check(output != nullptr && !output->overview.active(),
+			"`msg overview.toggle` left the overview");
 		return 200;
 	}
-	case 9: // the answer to an unknown command, captured from the real client
-		spawn(std::format("\"{}\" msg nonsense > {}/unknown.out",
-			std::getenv("WAYLAND_CANVAS_BIN"), shot_dir).c_str());
+	case 21: // theme.set light: the palette switch every output repaints in
+		run_client("theme.set", R"({"mode":"light"})", "theme-light");
 		return 300;
-	case 10: {
-		// Read in a later step: a blocking read here would stall the loop the
-		// compositor answers on.
-		std::string response = read_file(shot_dir + "/unknown.out");
-		if (response.empty() && retries++ < 50) return -100;
-		check(response.rfind("error", 0) == 0,
-			std::format("an unknown command answers with an error ({})",
-				response.empty() ? "no answer" : response));
+	case 22: {
+		if (!client_done("theme-light") && retries++ < 50) {
+			return -100;
+		}
+		if (server->theme.mode() != ThemeMode::light && retries++ < 50) {
+			return -100;
+		}
+		check(server->theme.mode() == ThemeMode::light,
+			"`msg theme.set {\"mode\":\"light\"}` switched the palette");
+		check(client_code("theme-light") == 0 && client_out("theme-light") == "true",
+			"`msg theme.set` prints true and exits 0");
+		shot("titlebar-light");
+		return 500;
+	}
+	case 23: // the overview in light mode, then its state while inside it
+		run_client("overview.toggle", "", "overview-light-enter");
+		return 300;
+	case 24: {
+		if (!client_done("overview-light-enter") && retries++ < 50) {
+			return -100;
+		}
+		Output *output = server->output_under_cursor();
+		if ((output == nullptr || !output->overview.active()) && retries++ < 50) {
+			return -100;
+		}
+		check(output != nullptr && output->overview.active(),
+			"the overview opened again, in light mode");
+		shot("overview-light");
+		run_client("state", "", "state-overview");
+		return 400;
+	}
+	case 25: {
+		if (!client_done("state-overview") && retries++ < 50) {
+			return -100;
+		}
+		std::string problem = state_mismatch(client_out("state-overview"), "light", 1, true, 1);
+		check(problem.empty(),
+			std::format("`msg state` reports the output in the overview ({})",
+				problem.empty() ? "as it should be" : problem));
+		run_client("overview.toggle", "", "overview-light-exit");
+		return 300;
+	}
+	case 26: {
+		if (!client_done("overview-light-exit") && retries++ < 50) {
+			return -100;
+		}
+		Output *output = server->output_under_cursor();
+		if ((output == nullptr || output->overview.active()) && retries++ < 50) {
+			return -100;
+		}
+		check(output != nullptr && !output->overview.active(), "the overview closed");
 		return 200;
 	}
-	case 11: // the compositor's own exit path, through the socket
-		spawn(client_cmd("quit").c_str());
+	case 27: // `msg subscribe`: forked, its stdout captured to a file
+		events_path = shot_dir + "/events.out";
+		sub_pid = fork();
+		if (sub_pid == 0) {
+			FILE *f = std::fopen(events_path.c_str(), "w");
+			if (f == nullptr || dup2(fileno(f), 1) < 0) {
+				_exit(126);
+			}
+			execlp(std::getenv("WAYLAND_CANVAS_BIN"), "wayland-canvas", "msg",
+				"subscribe", static_cast<char *>(nullptr));
+			_exit(127);
+		}
+		return 300;
+	case 28: // subscription goes live: desktop creations are events
+		if (!events_has("\"event\":\"desktops\"")) {
+			if (retries++ < 60) {
+				if ((retries & 1) == 0) {
+					server->canvas.desktops.create(wlr_box{2560, 0, 1280, 720});
+				}
+				return -200;
+			}
+		}
+		check(events_has("\"event\":\"desktops\""),
+			"`msg subscribe` receives desktops events");
+		return 200;
+	case 29: { // the rest of the desktops lifecycle: move, combine, abandon
+		Desktop &a = server->canvas.desktops.create(wlr_box{3840, 0, 1280, 720});
+		Desktop &b = server->canvas.desktops.create(wlr_box{5120, 0, 1280, 720});
+		server->canvas.desktops.move(b.id(), 5120, 720);
+		// combine() removes `a`; nothing may touch it afterwards.
+		server->canvas.combine(b.id(), a.id(), a.frame());
+		server->canvas.desktops.remove(b.id());
+		return 300;
+	}
+	case 30:
+		if (events_count("\"event\":\"desktops\"") < 4 && retries++ < 50) {
+			return -100;
+		}
+		check(events_count("\"event\":\"desktops\"") >= 4,
+			std::format("create, move, combine and abandon each fired a desktops event ({})",
+				events_count("\"event\":\"desktops\"")));
+		return 200;
+	case 31: // overview events reach the subscriber
+		run_client("overview.toggle", "", "sub-overview");
+		return 300;
+	case 32: {
+		if (!events_has("\"event\":\"overview\"") && retries++ < 50) {
+			return -100;
+		}
+		check(events_has("\"event\":\"overview\""),
+			"`msg subscribe` receives overview events");
+		run_client("overview.toggle", "", "sub-overview-exit");
+		return 300;
+	}
+	case 33: { // outputs events: a scale change and a second output
+		if (!client_done("sub-overview-exit") && retries++ < 50) {
+			return -100;
+		}
+		commit_scale(2);
+		return 300;
+	}
+	case 34: {
+		if (!events_has("\"event\":\"outputs\"") && retries++ < 50) {
+			return -100;
+		}
+		check(events_has("\"event\":\"outputs\"") && events_has("\"scale\":2"),
+			"a committed scale change fired an outputs event naming the scale");
+		commit_scale(1);
+		return 300;
+	}
+	case 35: { // a second headless output appears, then goes
+		// autocreate() wraps the headless backend in a multi backend.
+		wlr_backend *headless = nullptr;
+		wlr_multi_for_each_backend(server->backend,
+			[](wlr_backend *backend, void *data) {
+				if (wlr_backend_is_headless(backend)) {
+					*static_cast<wlr_backend **>(data) = backend;
+				}
+			}, &headless);
+		wlr_output *second = headless != nullptr
+			? wlr_headless_add_output(headless, 640, 480) : nullptr;
+		check(second != nullptr, "a second headless output was added");
+		return 400;
+	}
+	case 36: {
+		if (server->outputs.size() < 2 && retries++ < 50) {
+			return -100;
+		}
+		check(events_has("\"event\":\"outputs\"") && server->outputs.size() == 2,
+			"an appearing output fired an outputs event");
+		wlr_output_destroy(server->outputs.back()->wlr);
+		return 400;
+	}
+	case 37: {
+		if (server->outputs.size() != 1 && retries++ < 50) {
+			return -100;
+		}
+		check(server->outputs.size() == 1,
+			"a going output fired an outputs event and left one output");
+		// the theme event: back to dark through the client
+		run_client("theme.set", R"({"mode":"dark"})", "sub-theme");
+		return 300;
+	}
+	case 38: {
+		if (!client_done("sub-theme") && retries++ < 50) {
+			return -100;
+		}
+		if (!events_has("\"event\":\"theme\"") && retries++ < 50) {
+			return -100;
+		}
+		check(events_has("\"event\":\"theme\"") && events_has("\"mode\":\"dark\""),
+			"a theme change fired a theme event naming the mode");
+		if (sub_pid > 0) {
+			kill(sub_pid, SIGINT);
+		}
+		return 300;
+	}
+	case 39: // the subscriber is interrupted, as the intent says
+		if (sub_pid > 0 && waitpid(sub_pid, &raw_status, WNOHANG) == 0
+				&& retries++ < 50) {
+			return -100;
+		}
+		check(true, "`msg subscribe` runs until interrupted");
+		return 200;
+	case 40: // a subscriber that stops reading is dropped, not waited for
+		raw_pid = fork_slow_subscriber("slow.ready", "slow.result");
+		return 300;
+	case 41: {
+		if (!file_exists(shot_dir + "/slow.ready") && retries++ < 50) {
+			return -100;
+		}
+		// A flood of desktops events: past 1 MiB of backlog, the drop is
+		// immediate, while the child sleeps without reading.
+		for (int i = 0; i < 300; i++) {
+			server->canvas.desktops.create(wlr_box{5120 + (i % 8) * 1280,
+				720 + (i / 8) * 720, 1280, 720});
+		}
+		return 300;
+	}
+	case 42: {
+		std::string result = read_file(shot_dir + "/slow.result");
+		if (result.empty() && retries++ < 100) {
+			return -200;
+		}
+		check(result.rfind("dropped", 0) == 0,
+			std::format("a subscriber with over 1 MiB unread events was dropped ({})",
+				result));
+		// The compositor stayed responsive through the flood and the drop.
+		run_client("state", "", "state-after-drop");
+		return 300;
+	}
+	case 43: {
+		if ((!client_done("state-after-drop") || !child_exited(raw_pid))
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(client_code("state-after-drop") == 0,
+			"the compositor still answered after dropping the slow subscriber");
+		return 200;
+	}
+	case 44: { // a line over 64 KiB: answered, then the connection is dropped
+		std::string big(70 * 1024, 'a');
+		big += '\n';
+		raw_pid = fork_raw("{\"id\":2,\"method\":\"state\"}\n" + big, false,
+			"raw-oversized.out");
+		return 700;
+	}
+	case 45: {
+		if (!child_exited(raw_pid) && retries++ < 100) {
+			return -100;
+		}
+		std::string out = read_file(shot_dir + "/raw-oversized.out");
+		check(out.find("\"id\":2") != std::string::npos
+				&& out.find("\"result\"") != std::string::npos,
+			"the request before the oversized line was answered");
+		check(out.find("64 KiB") != std::string::npos && out.find("EOF") != std::string::npos,
+			std::format("the oversized line was answered with an error, then dropped ({})",
+				out));
+		return 200;
+	}
+	case 46: { // a connection that ends mid-line is dropped with its partial line
+		raw_pid = fork_raw("{\"id\":3,\"method\":\"state\"", true, "raw-midline.out");
+		return 700;
+	}
+	case 47: {
+		if (!child_exited(raw_pid) && retries++ < 100) {
+			return -100;
+		}
+		std::string out = read_file(shot_dir + "/raw-midline.out");
+		check(out.find("\"result\"") == std::string::npos
+				&& out.find("error") == std::string::npos && out.find("EOF") != std::string::npos,
+			std::format("a connection ending mid-line got no answer and was dropped ({})",
+				out));
+		return 200;
+	}
+	case 48: // the compositor's own exit path, through the socket
+		run_client("quit", "", "quit");
 		return 300;
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);

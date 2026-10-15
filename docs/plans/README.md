@@ -23,5 +23,5 @@ be worked.
 | [2026-10-14-2150-packaging.md](2026-10-14-2150-packaging.md) | The .pkg.tar.zst and .deb build targets, the session file, the default-session tool and its rules per display manager, the installer flow, removal guarantees | 14 | 0 |
 | [2026-10-15-0719-bar-panels.md](2026-10-15-0719-bar-panels.md) | A panel under every bar indicator: Wi-Fi, Bluetooth, audio, brightness, power, weather, calendar, tray menus | 12 | 3 |
 | [2026-10-15-1156-source-layout.md](2026-10-15-1156-source-layout.md) | `src/` in one folder per area, includes written from `src/`, the placement rule for new files | 6 | 0 |
-| [2026-10-15-1244-plugin-framework.md](2026-10-15-1244-plugin-framework.md) | The shell as a plugin host, the bar and panels as plugins, the overview toolbar, sticky notes, the light/dark switch, the JSON control socket with canvas items | 0 | 18 |
+| [2026-10-15-1244-plugin-framework.md](2026-10-15-1244-plugin-framework.md) | The shell as a plugin host, the bar and panels as plugins, the overview toolbar, sticky notes, the light/dark switch, the JSON control socket with canvas items | 3 | 15 |
 | [2026-10-15-1251-desktop-scale-and-tiling.md](2026-10-15-1251-desktop-scale-and-tiling.md) | A scale per desktop set with Super + 2-finger pinch, windows usable and sharp at it; tiling as a switch per desktop that keeps new windows tiled | 0 | 14 |

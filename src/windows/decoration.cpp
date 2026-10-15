@@ -63,25 +63,26 @@ void draw_button(cairo_t *cr, const View &view, DecoPart part, int width, bool a
 	bool hover = view.deco.hover == part;
 	bool pressed = view.deco.pressed == part;
 
-	uint32_t base = active ? config::color_title_active : config::color_title_inactive;
+	const config::Palette &pal = view.server.theme.colors();
+	uint32_t base = active ? pal.title_active : pal.title_inactive;
 	uint32_t overlay = 0;
 	if (part == DecoPart::close) {
 		if (pressed) {
-			fill_rect(cr, x, 0, bw, bh, config::color_close_press);
+			fill_rect(cr, x, 0, bw, bh, pal.close_press);
 		} else if (hover) {
-			fill_rect(cr, x, 0, bw, bh, config::color_close_hover);
+			fill_rect(cr, x, 0, bw, bh, pal.close_hover);
 		}
 	} else if (pressed) {
-		overlay = config::color_button_press;
+		overlay = pal.button_press;
 		fill_rect(cr, x, 0, bw, bh, overlay);
 	} else if (hover) {
-		overlay = config::color_button_hover;
+		overlay = pal.button_hover;
 		fill_rect(cr, x, 0, bw, bh, overlay);
 	}
 
-	uint32_t fg = active ? config::color_text_active : config::color_text_inactive;
+	uint32_t fg = active ? pal.text_active : pal.text_inactive;
 	if (part == DecoPart::close && (hover || pressed)) {
-		fg = config::color_text_active;
+		fg = pal.close_text; // white on the attention red in both palettes
 	}
 	set_source_rgba32(cr, fg);
 
@@ -155,8 +156,8 @@ void Decoration::update(float scale) {
 		static_cast<int>(std::ceil(config::titlebar_height * scale))));
 	CairoPtr cr(cairo_create(surf.get()));
 	cairo_scale(cr.get(), scale, scale);
-
-	uint32_t base = active ? config::color_title_active : config::color_title_inactive;
+	uint32_t base = active ? server.theme.colors().title_active
+		: server.theme.colors().title_inactive;
 	fill_rect(cr.get(), 0, 0, width, config::titlebar_height, base);
 
 	draw_button(cr.get(), view_, DecoPart::minimize, width, active);
@@ -176,8 +177,8 @@ void Decoration::update(float scale) {
 		}
 		int lw = 0, lh = 0;
 		pango_layout_get_pixel_size(layout.get(), &lw, &lh);
-		set_source_rgba32(cr.get(),
-			active ? config::color_text_active : config::color_text_inactive);
+		set_source_rgba32(cr.get(), active ? server.theme.colors().text_active
+			: server.theme.colors().text_inactive);
 		cairo_move_to(cr.get(), config::title_padding,
 			(config::titlebar_height - lh) / 2.0);
 		pango_cairo_show_layout(cr.get(), layout.get());
@@ -191,6 +192,10 @@ void Decoration::update(float scale) {
 	maximized_ = view_.maximized;
 	hover_ = hover;
 	pressed_ = pressed;
+}
+
+void Decoration::theme_changed() {
+	texture_.reset(); // update() redraws whenever the texture is gone
 }
 
 // ---- hit testing (canvas coordinates vs the frame) ----

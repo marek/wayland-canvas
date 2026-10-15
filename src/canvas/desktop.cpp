@@ -55,12 +55,14 @@ Desktop &Desktops::create(wlr_box frame) {
 	next_id_ = DesktopId{static_cast<int>(next_id_) + 1};
 	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame));
 	server_.damage_all();
+	server_.ipc.emit_desktops();
 	return *stack_.front();
 }
 
 void Desktops::remove(DesktopId id) {
 	destroy_owned(stack_, find(id));
 	server_.damage_all();
+	server_.ipc.emit_desktops();
 }
 
 void Desktops::raise(DesktopId id) {
@@ -82,6 +84,7 @@ void Desktops::move(DesktopId id, int x, int y) {
 	desktop->frame_.x = x;
 	desktop->frame_.y = y;
 	server_.damage_all();
+	server_.ipc.emit_desktops();
 }
 
 Desktop *Desktops::find(DesktopId id) {

@@ -190,7 +190,7 @@ std::size_t utf8_encode(uint32_t cp, char buf[4]) {
 // ---- drawing ----
 
 void draw_icon(cairo_t *cr, Icons &icons, const App &app, double x, double y,
-	float scale) {
+	float scale, uint32_t text_color) {
 	int idev = static_cast<int>(config::launcher_icon * scale + 0.5f);
 	cairo_surface_t *icon = !app.icon.empty() ? icons.lookup(app.icon, idev) : nullptr;
 	if (icon != nullptr) {
@@ -220,7 +220,7 @@ void draw_icon(cairo_t *cr, Icons &icons, const App &app, double x, double y,
 	first_letter(name, letter);
 	if (letter[0] != '\0') {
 		int lw = text_width(cr, letter, config::launcher_font, -1);
-		paint_text(cr, letter, config::launcher_font, config::color_launcher_text,
+		paint_text(cr, letter, config::launcher_font, text_color,
 			x + (config::launcher_icon - lw) / 2.0,
 			y + config::launcher_icon / 2.0, -1);
 	}
@@ -342,23 +342,24 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 	cairo_t *cr = cr_owner.get();
 	cairo_scale(cr, scale, scale);
 	double w = box.width, h = box.height;
+	const config::Palette &pal = server_.theme.colors();
 
-	// Panel: dark rounded card with a 1 px border.
+	// Panel: rounded card with a 1 px border.
 	rounded_path(cr, 0, 0, w, h, 8);
-	set_source_rgba32(cr, config::color_launcher);
+	set_source_rgba32(cr, pal.launcher);
 	cairo_fill(cr);
 	rounded_path(cr, 0.5, 0.5, w - 1, h - 1, 7.5);
-	cairo_set_source_rgb(cr, 0x3a / 255.0, 0x3a / 255.0, 0x3a / 255.0);
+	set_source_rgba32(cr, pal.launcher_border);
 	cairo_set_line_width(cr, 1.0);
 	cairo_stroke(cr);
 
 	// Search field with magnifier glyph.
 	double fx = 12, fy = 12, fw = w - 24, fh = config::launcher_search_height;
 	rounded_path(cr, fx, fy, fw, fh, 6);
-	set_source_rgba32(cr, config::color_launcher_search);
+	set_source_rgba32(cr, pal.launcher_search);
 	cairo_fill(cr);
 	double gx = fx + 24, gy = fy + fh / 2 - 2, gr = 6;
-	set_source_rgba32(cr, config::color_launcher_dim_text);
+	set_source_rgba32(cr, pal.launcher_dim_text);
 	cairo_set_line_width(cr, 1.5);
 	cairo_new_path(cr);
 	cairo_arc(cr, gx, gy, gr, 0, 2 * launcher_pi);
@@ -373,16 +374,16 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 	double tcy = fy + fh / 2;
 	if (!query_.empty()) {
 		int qw = paint_text(cr, query_.c_str(), config::launcher_search_font,
-			config::color_launcher_text, tx, tcy, tavail);
+			pal.launcher_text, tx, tcy, tavail);
 		double cx = std::floor(tx + qw + 4) + 0.5;
-		set_source_rgba32(cr, config::color_launcher_text);
+		set_source_rgba32(cr, pal.launcher_text);
 		cairo_set_line_width(cr, 1.0);
 		cairo_move_to(cr, cx, tcy - 11);
 		cairo_line_to(cr, cx, tcy + 11);
 		cairo_stroke(cr);
 	} else {
 		paint_text(cr, "Type to search apps", config::launcher_search_font,
-			config::color_launcher_dim_text, tx, tcy, tavail);
+			pal.launcher_dim_text, tx, tcy, tavail);
 	}
 
 	double rows_y = 12 + config::launcher_search_height + 8;
@@ -390,7 +391,7 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 		std::string msg = std::format("No apps match \xE2\x80\x9C{}\xE2\x80\x9D", query_);
 		int avail = static_cast<int>(w) - 48;
 		int mw = text_width(cr, msg.c_str(), config::launcher_font, avail);
-		paint_text(cr, msg.c_str(), config::launcher_font, config::color_launcher_dim_text,
+		paint_text(cr, msg.c_str(), config::launcher_font, pal.launcher_dim_text,
 			(w - mw) / 2.0, rows_y + rows * config::launcher_row_height / 2.0, avail);
 	} else {
 		for (int i = 0; i < rows; i++) {
@@ -403,17 +404,17 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 			double rw = w - 24;
 			if (idx == selected_) {
 				rounded_path(cr, 12, ry, rw, config::launcher_row_height, 4);
-				set_source_rgba32(cr, config::color_launcher_selected);
+				set_source_rgba32(cr, pal.launcher_selected);
 				cairo_fill(cr);
 			} else if (hover_ >= 0 && static_cast<std::size_t>(hover_) == idx) {
 				rounded_path(cr, 12, ry, rw, config::launcher_row_height, 4);
-				set_source_rgba32(cr, config::color_launcher_hover);
+				set_source_rgba32(cr, pal.launcher_hover);
 				cairo_fill(cr);
 			}
 
 			draw_icon(cr, icons_, app, 24,
 				ry + (config::launcher_row_height - config::launcher_icon) / 2.0,
-				scale);
+				scale, pal.launcher_text);
 
 			double nx = 24 + config::launcher_icon + 10;
 			int navail = static_cast<int>(w) - 12 - 8 - static_cast<int>(nx);
@@ -421,13 +422,13 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 			int nw = 0;
 			if (!app.name.empty()) {
 				nw = paint_text(cr, app.name.c_str(), config::launcher_font,
-					config::color_launcher_text, nx, ncy, navail);
+					pal.launcher_text, nx, ncy, navail);
 			}
 			if (!app.generic.empty()) {
 				int rem = navail - nw - 8;
 				if (rem >= 32) {
 					paint_text(cr, app.generic.c_str(), config::launcher_font,
-						config::color_launcher_dim_text, nx + nw + 8, ncy, rem);
+						pal.launcher_dim_text, nx + nw + 8, ncy, rem);
 				}
 			}
 		}
@@ -446,10 +447,10 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 			double frac = static_cast<double>(scroll_) / static_cast<double>(max_scroll);
 			double ty = rows_y + frac * (th - thumb);
 			rounded_path(cr, w - 16, rows_y, 4, th, 2);
-			set_source_rgba32(cr, config::color_launcher_hover);
+			set_source_rgba32(cr, pal.launcher_hover);
 			cairo_fill(cr);
 			rounded_path(cr, w - 16, ty, 4, thumb, 2);
-			set_source_rgba32(cr, config::color_launcher_dim_text);
+			set_source_rgba32(cr, pal.launcher_dim_text);
 			cairo_fill(cr);
 		}
 	}
@@ -457,12 +458,12 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 	// Footer.
 	double fcy = h - 14;
 	paint_text(cr, "\xE2\x86\x91\xE2\x86\x93 select   Enter open   Esc close",
-		config::ui_font, config::color_launcher_dim_text, 20, fcy,
+		config::ui_font, pal.launcher_dim_text, 20, fcy,
 		static_cast<int>(w) - 40);
 	std::string count = std::format("{} app{}", results_.size(),
 		results_.size() == 1 ? "" : "s");
 	int cw = text_width(cr, count.c_str(), config::ui_font, -1);
-	paint_text(cr, count.c_str(), config::ui_font, config::color_launcher_dim_text,
+	paint_text(cr, count.c_str(), config::ui_font, pal.launcher_dim_text,
 		w - 20 - cw, fcy, -1);
 
 	return texture_from_cairo(server_.renderer, surf.get());
@@ -525,6 +526,10 @@ void Launcher::output_destroyed(Output &output) {
 	if (open_ && output_ == &output) {
 		close();
 	}
+}
+
+void Launcher::theme_changed() {
+	stale_ = true; // panel() redraws on the next frame
 }
 
 void Launcher::finish() {

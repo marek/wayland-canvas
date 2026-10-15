@@ -133,6 +133,7 @@ void Overview::enter() {
 void Overview::finish_enter(const Camera &far, double t) {
 	output_.server.input.grab.cancel();
 	active_ = true;
+	output_.server.ipc.emit_overview(output_, true);
 	wlr_seat_pointer_clear_focus(output_.server.seat);
 	output_.camera.animate_zoom(home_, far, t, 1);
 	output_.damage();
@@ -147,6 +148,7 @@ void Overview::finish_exit(const Camera &near, const Camera &far, double t) {
 	Server &server = output_.server;
 	server.input.grab.cancel();
 	active_ = false;
+	server.ipc.emit_overview(output_, false);
 	output_.camera.animate_zoom(near, far, t, 0);
 	// Keyboard focus follows the target: if the focused window is not in it,
 	// focus the topmost one that is.

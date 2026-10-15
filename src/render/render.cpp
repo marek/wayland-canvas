@@ -267,7 +267,7 @@ void draw_grid(const RenderCtx &ctx) {
 	}
 	// 1 logical px thick, i.e. 1/zoom canvas units.
 	double t = 1.0 / ctx.cam.zoom;
-	wlr_render_color color = color_rgba(config::color_grid);
+	wlr_render_color color = color_rgba(ctx.output->server.theme.colors().grid);
 	double right = ctx.viewport.x + ctx.viewport.w;
 	double bottom = ctx.viewport.y + ctx.viewport.h;
 	for (double x = std::ceil(ctx.viewport.x / spacing) * spacing; x <= right; x += spacing) {
@@ -307,9 +307,9 @@ void draw_view(const RenderCtx &ctx, View &view) {
 			}
 		}
 		if (bw > 0) {
+			const config::Palette &pal = server.theme.colors();
 			wlr_render_color border = color_rgba(
-				server.focused_view == &view ? config::color_border_active
-					: config::color_border_inactive);
+				server.focused_view == &view ? pal.border_active : pal.border_inactive);
 			draw_canvas_rect(ctx, frame.x, frame.y + tb, frame.w, bw, border);
 			draw_canvas_rect(ctx, frame.x, frame.y + frame.h - bw, frame.w, bw, border);
 			draw_canvas_rect(ctx, frame.x, frame.y + tb, bw, frame.h - tb - bw, border);
@@ -344,6 +344,7 @@ void draw_view(const RenderCtx &ctx, View &view) {
 void draw_desktop_frames(const RenderCtx &ctx) {
 	Output &o = *ctx.output;
 	Server &server = o.server;
+	const config::Palette &pal = server.theme.colors();
 
 	Desktop *hovered = nullptr;
 	if (ctx.overview) {
@@ -361,7 +362,7 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 		}
 
 		double offset = server.gestures.abandon_offset(d.id());
-		uint32_t color = config::color_frame;
+		uint32_t color = pal.frame;
 		double alpha = 1.0;
 		double thickness = 2.0;
 		if (offset != 0) {
@@ -369,19 +370,19 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 			alpha = std::fmax(0.0,
 				1.0 - std::fabs(offset) / (2.0 * config::abandon_distance));
 			if (std::fabs(offset) > config::abandon_distance) {
-				color = config::color_abandon;
+				color = pal.abandon;
 			}
 		} else if (server.input.grab.drop_target() == d.id()) {
 			draw_canvas_rect(ctx, frame.x, frame.y, frame.width, frame.height,
-				color_rgba(config::color_combine, 0.15f));
-			color = config::color_combine;
+				color_rgba(pal.combine, 0.15f));
+			color = pal.combine;
 		} else if (o.overview.target().desktop == d.id()) {
-			color = config::color_accent;
+			color = pal.accent;
 			thickness = 3.0;
 		} else if (hovered == &d) {
 			draw_canvas_rect(ctx, frame.x, frame.y, frame.width, frame.height,
-				color_rgba(config::color_frame, 0.15f));
-			color = 0xffffffff; // brighter than the faint base frames
+				color_rgba(pal.frame, 0.15f));
+			color = pal.frame_hover; // stronger than the faint base frames
 		}
 		draw_dashed_desktop(ctx, d, offset, thickness,
 			color_rgba(color, static_cast<float>(alpha)));
@@ -396,13 +397,13 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 			draw_dashed_logical_rect(ctx, canvas_x(ctx, t.x),
 				canvas_y(ctx, t.y), t.width * zoom,
 				t.height * zoom, 2.0,
-				color_rgba(config::color_accent, 0.7f));
+				color_rgba(pal.accent, 0.7f));
 		}
 	}
 }
 
 void draw_desktops_normal(const RenderCtx &ctx) {
-	wlr_render_color color = color_rgba(config::color_frame,
+	wlr_render_color color = color_rgba(ctx.output->server.theme.colors().frame,
 		0.5f * static_cast<float>(ctx.output->frames_alpha));
 	for (const Desktop &d :
 			std::views::reverse(ctx.output->server.canvas.desktops.all())) {
@@ -430,21 +431,21 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 
 	if (g->scale > config::pinch_tile_scale && box_visible) {
 		draw_canvas_rect(ctx, box.x, box.y, box.width, box.height,
-			color_rgba(config::color_accent, 0.12f));
+			color_rgba(o.server.theme.colors().accent, 0.12f));
 	}
 	if (merge_from != nullptr) {
 		const wlr_box &m = merge_from->frame();
 		Rect mr = box_rect(m);
 		if (mr.intersects(ctx.viewport)) {
 			draw_dashed_desktop(ctx, *merge_from, 0, 3.0,
-				color_rgba(config::color_combine));
+				color_rgba(o.server.theme.colors().combine));
 			if (box_visible) {
 				double x0 = canvas_x(ctx, m.x + m.width / 2.0);
 				double y0 = canvas_y(ctx, m.y + m.height / 2.0);
 				double x1 = canvas_x(ctx, box.x + box.width / 2.0);
 				double y1 = canvas_y(ctx, box.y + box.height / 2.0);
 				draw_stepped_line(ctx, x0, y0, x1, y1, 3.0, 10.0,
-					color_rgba(config::color_combine));
+					color_rgba(o.server.theme.colors().combine));
 			}
 		}
 	}
@@ -478,7 +479,7 @@ void draw_tabs(const RenderCtx &ctx) {
 			continue;
 		}
 		uint32_t bg = o.overview.target().desktop == d.id()
-			? config::color_accent : config::color_panel;
+			? server.theme.colors().accent : server.theme.colors().panel;
 		draw_logical_rect(ctx, layout->tab.x, layout->tab.y, layout->tab.width,
 			layout->tab.height, color_rgba(bg));
 		if (label.texture != nullptr && label.w > 0 && label.h > 0) {
@@ -486,7 +487,7 @@ void draw_tabs(const RenderCtx &ctx) {
 				layout->tab.y + (layout->tab.height - label.h) / 2,
 				label.w, label.h, 1.0);
 		}
-		wlr_render_color fg = color_rgba(config::color_panel_text);
+		wlr_render_color fg = color_rgba(server.theme.colors().panel_text);
 		draw_tile_glyph(ctx, layout->tile_button, fg);
 		draw_abandon_glyph(ctx, layout->abandon_button, fg);
 	}
@@ -503,7 +504,7 @@ void draw_shelf(const RenderCtx &ctx) {
 	int left = shelf.front().box.x, right = shelf.back().box.x + shelf.back().box.width;
 	int top = shelf.front().box.y, bottom = shelf.front().box.y + shelf.front().box.height;
 	draw_logical_rect(ctx, left - 10, top - 10, right - left + 20, bottom - top + 20,
-		color_rgba(config::color_panel));
+		color_rgba(ctx.output->server.theme.colors().panel));
 
 	for (std::size_t i = 0; i < shelf.size(); i++) {
 		View *view = shelf[i].view;
@@ -542,7 +543,7 @@ void draw_shelf(const RenderCtx &ctx) {
 		const char *title = view->wlr->title;
 		if (title != nullptr && title[0] != '\0') {
 			TextTexture t = draw_text(ctx.output->server.renderer, title, config::ui_font,
-				config::color_panel_text, 0x00000000u, ctx.scale, 0, 0);
+				ctx.output->server.theme.colors().panel_text, 0x00000000u, ctx.scale, 0, 0);
 			if (t.texture != nullptr && t.width > 0 && t.height > 0) {
 				double w = std::fmin(t.width, static_cast<double>(box.width));
 				draw_ui_texture(ctx, t.texture.get(),
@@ -569,7 +570,8 @@ HelpSlot &help_texture(const RenderCtx &ctx) {
 	HelpSlot &slot = ctx.help_cache[(*ctx.help_clock)++ % ctx.help_cache.size()];
 	slot.texture.reset();
 	TextTexture t = draw_text(ctx.output->server.renderer, help_text, config::ui_font,
-		config::color_panel_text, config::color_panel, ctx.scale, 10, 5);
+		ctx.output->server.theme.colors().panel_text,
+		ctx.output->server.theme.colors().panel, ctx.scale, 10, 5);
 	slot.texture = std::move(t.texture);
 	slot.w = t.width;
 	slot.h = t.height;
@@ -599,7 +601,8 @@ void draw_hint(const RenderCtx &ctx, int help_h) {
 	if (hint.texture == nullptr || hint.scale != ctx.scale) {
 		hint.texture.reset();
 		TextTexture t = draw_text(o.server.renderer, hint.text.c_str(), config::ui_font,
-			config::color_panel_text, config::color_panel, ctx.scale, 10, 5);
+			o.server.theme.colors().panel_text, o.server.theme.colors().panel,
+			ctx.scale, 10, 5);
 		hint.texture = std::move(t.texture);
 		hint.w = t.width;
 		hint.h = t.height;
@@ -704,7 +707,7 @@ DesktopLabel Painter::desktop_label(DesktopId id, int number, float scale) {
 	TexturePtr texture;
 	if (len > 0) {
 		TextTexture t = draw_text(server_.renderer, buf, config::ui_font_bold,
-			config::color_panel_text, 0x00000000u, scale, 0, 0);
+			server_.theme.colors().panel_text, 0x00000000u, scale, 0, 0);
 		texture = std::move(t.texture);
 		w = t.width;
 		h = t.height;
@@ -823,6 +826,11 @@ void Hint::clear() {
 	scale = 0;
 }
 
+void Hint::theme_changed() {
+	texture.reset();
+	scale = 0; // redraw at the output's scale, in the new palette
+}
+
 void Hint::finish() {
 	timer_.reset();
 	texture.reset();
@@ -868,7 +876,7 @@ void Painter::render(Output &output) {
 
 	// clear
 	draw_logical_rect(ctx, 0, 0, output.width, output.height,
-		color_rgba(config::color_canvas));
+		color_rgba(server_.theme.colors().canvas));
 
 	// background + bottom layers, screen space
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
@@ -878,7 +886,7 @@ void Painter::render(Output &output) {
 	bool wallpaper = output.has_wallpaper();
 	if (zoomed && wallpaper) {
 		draw_logical_rect(ctx, 0, 0, output.width, output.height,
-			color_rgba(config::color_dim));
+			color_rgba(server_.theme.colors().dim));
 	}
 	if (ctx.overview || zoomed || !wallpaper) {
 		draw_grid(ctx);
@@ -917,7 +925,7 @@ void Painter::render(Output &output) {
 		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
 	if (std::optional<Launcher::Panel> panel = server_.launcher.panel(output)) {
 		draw_logical_rect(ctx, 0, 0, output.width, output.height,
-			color_rgba(config::color_launcher_backdrop));
+			color_rgba(server_.theme.colors().launcher_backdrop));
 		draw_ui_texture(ctx, panel->texture, panel->box.x, panel->box.y,
 			panel->box.width, panel->box.height, 1.0);
 	}
@@ -929,6 +937,15 @@ void Painter::render(Output &output) {
 	wlr_output_state_finish(&state);
 
 	send_surface_feedback(ctx);
+}
+
+void Painter::theme_changed() {
+	for (HelpSlot &slot : help_cache_) {
+		slot.texture.reset();
+	}
+	for (LabelSlot &slot : label_cache_) {
+		slot.texture.reset();
+	}
 }
 
 void Painter::finish() {

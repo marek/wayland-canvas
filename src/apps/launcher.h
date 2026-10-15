@@ -43,6 +43,8 @@ public:
 
 	// Before `output` is destroyed: closes the launcher if it is open there.
 	void output_destroyed(Output &output);
+	// Redraws the open panel in the new palette.
+	void theme_changed();
 	void finish(); // releases the panel texture, apps and icons before the renderer goes
 
 private:

@@ -10,6 +10,7 @@
 #include "input/input.h"
 #include "platform/ipc.h"
 #include "apps/launcher.h"
+#include "core/theme.h"
 #include "render/render.h"
 #include "core/util.h"
 #include "windows/view.h"
@@ -46,6 +47,9 @@ public:
 	Output *output_at(double lx, double ly);
 	Output *output_under_cursor();
 	void update_visibility();
+
+	// server.cpp: switches the palette, repaints, tells the subscribers.
+	void set_theme(ThemeMode mode);
 
 	// canvas.cpp
 	void reveal_view(View &view);
@@ -98,6 +102,7 @@ public:
 	Hint hint;
 	Launcher launcher;
 	Painter painter;
+	Theme theme;
 	Decorations decorations;
 	Canvas canvas;
 	Ipc ipc;

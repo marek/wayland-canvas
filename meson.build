@@ -58,6 +58,7 @@ libinput = dependency('libinput', include_type: 'system')
 libdrm = dependency('libdrm', include_type: 'system').partial_dependency(compile_args: true, includes: true)
 librsvg = dependency('librsvg-2.0', include_type: 'system')
 glib = dependency('glib-2.0', include_type: 'system')
+json_glib = dependency('json-glib-1.0', include_type: 'system')
 
 protocol_headers = []
 foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
@@ -111,7 +112,7 @@ core_lib = static_library(
 	include_directories: src_inc,
 	link_with: [geometry_lib, desktop_entry_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
-		glib, libinput, libdrm],
+		glib, json_glib, libinput, libdrm],
 )
 
 wayland_canvas = executable(
@@ -216,7 +217,7 @@ if foot_prog.found() and grim_prog.found()
 				include_directories: src_inc,
 				link_with: core_lib,
 				dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
-					libinput, libdrm],
+					json_glib, libinput, libdrm],
 			),
 			suite: 'scenarios',
 			is_parallel: false,

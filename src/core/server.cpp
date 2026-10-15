@@ -355,6 +355,22 @@ void Server::start_bar() {
 	spawn(cmd.c_str());
 }
 
+void Server::set_theme(ThemeMode mode) {
+	if (theme.mode() == mode) {
+		return; // no change: no event, no repaint
+	}
+	theme.set_mode(mode);
+	// Every cached texture was drawn with the old palette.
+	painter.theme_changed();
+	hint.theme_changed();
+	launcher.theme_changed();
+	for (std::unique_ptr<View> &view : toplevels) {
+		view->deco.theme_changed();
+	}
+	damage_all();
+	ipc.emit_theme();
+}
+
 void Server::handle_new_surface(wlr_surface *surface) {
 	trackers_.push_back(std::make_unique<SurfaceTracker>(*this, surface));
 }
