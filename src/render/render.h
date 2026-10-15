@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 #include "canvas/desktop.h"
-#include "core/util.h"
+#include "canvas/items.h"
 
 class Output;
 class Server;
@@ -56,6 +56,12 @@ struct HelpSlot {
 struct DesktopLabel {
 	wlr_texture *texture = nullptr; // null when the text failed to render
 	int w = 0, h = 0; // logical px
+};
+
+// A canvas item's card texture, drawn at the scale it was rendered at.
+struct ItemTexture {
+	wlr_texture *texture = nullptr; // null when the card failed to render
+	int w = 0, h = 0; // logical px (canvas px)
 };
 
 // Transient banner at the bottom of every output.
@@ -106,6 +112,12 @@ public:
 	std::optional<TabLayout> overview_tab_layout(const Output &output,
 		const Desktop &desktop) const;
 
+	// The item's card at `scale` (the output's scale times the zoom it is
+	// shown at). Re-rendered when its content changed, or once `settled`
+	// when the shown scale changed; a moving camera stretches the cached
+	// card instead of re-rendering every frame.
+	ItemTexture item_texture(const Item &item, float scale, bool settled);
+
 private:
 	static constexpr std::size_t help_slots = 4;
 
@@ -128,4 +140,16 @@ private:
 	std::array<HelpSlot, help_slots> help_cache_{}; // help-line texture, one per scale
 	std::vector<LabelSlot> label_cache_; // desktop tab labels, dropped with their desktops
 	unsigned help_clock_ = 0; // round-robin over help_cache_
+
+	// One slot of the item-card cache.
+	struct ItemSlot {
+		std::string id;
+		TexturePtr texture;
+		std::string text;
+		uint32_t color = 0;
+		int w = 0, h = 0;
+		float scale = 0;
+	};
+	std::vector<ItemSlot> item_cache_; // item cards, dropped with their items
+
 };

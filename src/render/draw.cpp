@@ -1,9 +1,10 @@
+#include <algorithm>
 #include <cmath>
 #include <drm_fourcc.h>
 #include <pango/pangocairo.h>
 
+#include "core/config.h"
 #include "render/draw.h"
-
 namespace {
 
 using PangoLayoutPtr = Handle<PangoLayout, g_object_unref>;
@@ -15,6 +16,27 @@ PangoLayoutPtr make_layout(cairo_t *cr, const char *text, const char *font) {
 	pango_font_description_free(desc);
 	pango_layout_set_text(layout.get(), text, -1);
 	pango_layout_set_single_paragraph_mode(layout.get(), true);
+	return layout;
+}
+
+// `rgba` with the colour channels scaled by `factor`, the alpha kept.
+constexpr uint32_t scale_rgba(uint32_t rgba, double factor) {
+	const auto channel = [rgba, factor](int shift) -> uint32_t {
+		return static_cast<uint32_t>(((rgba >> shift) & 0xff) * factor);
+	};
+	return channel(24) << 24 | channel(16) << 16 | channel(8) << 8 | (rgba & 0xff);
+}
+
+// A wrapping layout: item text wraps to `width` logical px, unlike the
+// single-line labels make_layout() measures.
+PangoLayoutPtr wrap_layout(cairo_t *cr, const char *text, int width) {
+	PangoLayoutPtr layout{pango_cairo_create_layout(cr)};
+	PangoFontDescription *desc = pango_font_description_from_string(config::item_font);
+	pango_layout_set_font_description(layout.get(), desc);
+	pango_font_description_free(desc);
+	pango_layout_set_text(layout.get(), text, -1);
+	pango_layout_set_width(layout.get(), pango_units_from_double(width));
+	pango_layout_set_wrap(layout.get(), PANGO_WRAP_WORD);
 	return layout;
 }
 
@@ -75,4 +97,34 @@ TexturePtr texture_from_cairo(wlr_renderer *renderer, cairo_surface_t *surface) 
 		static_cast<uint32_t>(cairo_image_surface_get_width(surface)),
 		static_cast<uint32_t>(cairo_image_surface_get_height(surface)),
 		cairo_image_surface_get_data(surface))};
+}
+
+TextTexture draw_item_card(wlr_renderer *renderer, const char *text, uint32_t color,
+		int width, int height, float scale) {
+	if (width <= 0 || height <= 0 || text == nullptr) {
+		return {};
+	}
+	// The surface is the card, so text past its bounds is clipped.
+	CairoSurfacePtr surf{cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+		std::max(1, static_cast<int>(std::ceil(width * scale))),
+		std::max(1, static_cast<int>(std::ceil(height * scale))))};
+	CairoPtr cr{cairo_create(surf.get())};
+	cairo_scale(cr.get(), scale, scale);
+
+	set_source_rgba32(cr.get(), color);
+	cairo_paint(cr.get());
+	set_source_rgba32(cr.get(), scale_rgba(color, config::item_strip_darken));
+	cairo_rectangle(cr.get(), 0, 0, width, config::item_strip_height);
+	cairo_fill(cr.get());
+
+	if (*text != '\0') {
+		PangoLayoutPtr layout = wrap_layout(cr.get(), text,
+			width - 2 * config::item_text_padding);
+		set_source_rgba32(cr.get(), config::item_text_color);
+		cairo_move_to(cr.get(), config::item_text_padding,
+			config::item_strip_height + config::item_text_padding);
+		pango_cairo_show_layout(cr.get(), layout.get());
+	}
+
+	return {texture_from_cairo(renderer, surf.get()), width, height};
 }

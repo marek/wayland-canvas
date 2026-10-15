@@ -50,6 +50,7 @@ namespace {
 std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
+bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
 wlr_pointer ptr{};
@@ -93,6 +94,7 @@ constexpr int brightness_panel = 240;
 constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
+constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
 
 // The shell's own colours the theme phase samples (the UI kit's palette;
 // the compositor's half comes from config.h's palettes). Keep in sync with
@@ -103,6 +105,17 @@ constexpr uint32_t shell_panel_light = 0xf4f5f8ff;
 
 // Output geometry the headless backend gives: 1280x720, one output.
 constexpr int screen_w = 1280, screen_h = 720;
+
+// The toolbar strip's geometry the plugin commits (docs/intents/shell/
+// toolbar.md): a 44 px square per button, 8 px from the right edge,
+// vertically centred on the output. The flyout and a toolbar-opened
+// panel hang a further 8 px left of the strip, and both the scratch
+// panel and the flyout are 200 px wide.
+constexpr int toolbar_button = 44;
+constexpr int toolbar_margin = 8;
+constexpr int strip_left = screen_w - toolbar_margin - toolbar_button;
+constexpr int beside_gap = toolbar_margin;
+constexpr int scratch_card = 200;
 
 enum CloseMode { close_outside, close_escape, close_icon };
 
@@ -122,10 +135,10 @@ std::size_t current = 0;
 int phase = 0;
 wlr_box popup_box{}; // the open panel's card, from the walk's phase 1
 wlr_box field_box{}; // where the Wi-Fi password field ended up
-double clock_x = 0, network_x = 0;
-double action_x = 0, action_y = 0; // an action row's click point: a click
-// can be lost while the bar's render loop is stalled on a screenshot, so
-// the proof phases re-issue it until the mock records the call
+double clock_x = 0, network_x = 0; // where the walk found the clock, network
+double tb_x = 0, tb_y = 0; // the toolbar's own re-issued click point: a
+// click can be lost while the bar's render loop is stalled on a
+// screenshot, so the proof phase re-issues it until the storage says so
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -456,6 +469,13 @@ void tap(uint32_t code) {
 	key(code, false);
 }
 
+// A key with modifiers held: Super+Tab toggles the overview.
+void chord(uint32_t code, uint32_t mod) {
+	key(mod, true);
+	tap(code);
+	key(mod, false);
+}
+
 // Letters and digits, enough for a password-shaped string.
 void type(std::string_view s) {
 	struct KeyMap {
@@ -494,6 +514,26 @@ void click(double x, double y, int button = BTN_LEFT) {
 	}
 }
 
+// The scratch plugin's storage file, read back as text: the proof an
+// action ran is what it wrote (api.storage writes JSON under the
+// scratch state dir).
+std::string read_storage(const char *name) {
+	std::string path = std::format(
+		"{}/xdg/state/wayland-canvas/plugins/canvas.scratch/{}", shot_dir, name);
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return {};
+	}
+	std::string out;
+	char buf[512];
+	std::size_t n = 0;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	return out;
+}
+
 void shot(const char *name) {
 	std::string path = std::format("{}/{}.png", shot_dir, name);
 	grim_pid = fork();
@@ -519,18 +559,24 @@ constexpr uint32_t SUPER[] = {KEY_LEFTMETA};
 
 // ---- the bar client and its surfaces ----
 
-LayerSurface *bar_layer() {
+// The mapped layer surface with this namespace: the shell client's
+// surfaces are told apart by name (the bar, each panel, the toolbar).
+LayerSurface *named_layer(const char *ns) {
 	for (const std::unique_ptr<Output> &output : server->outputs) {
 		for (auto &vec : output->layers) {
 			for (const std::unique_ptr<LayerSurface> &l : vec) {
 				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& std::strcmp(l->wlr->namespace_, bar_namespace) == 0) {
+						&& std::strcmp(l->wlr->namespace_, ns) == 0) {
 					return l.get();
 				}
 			}
 		}
 	}
 	return nullptr;
+}
+
+LayerSurface *bar_layer() {
+	return named_layer(bar_namespace);
 }
 
 wl_client *bar_client() {
@@ -549,17 +595,13 @@ int bar_h() {
 // names its surface; the shell and this suite agree on the names).
 LayerSurface *panel_layer(const char *name) {
 	std::string ns = std::format("wayland-canvas-panel-{}", name);
-	for (const std::unique_ptr<Output> &output : server->outputs) {
-		for (auto &vec : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &l : vec) {
-				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& ns == l->wlr->namespace_) {
-					return l.get();
-				}
-			}
-		}
-	}
-	return nullptr;
+	return named_layer(ns.c_str());
+}
+
+// The overview toolbar surface, shown only while its output is in the
+// overview.
+LayerSurface *toolbar_layer() {
+	return named_layer(toolbar_namespace);
 }
 
 // Mapped panels of any name: the one-at-a-time rule counts them.
@@ -597,17 +639,23 @@ struct Band {
 	double centre() const { return (top + bottom - 1) / 2.0; }
 };
 
-std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+std::vector<Band> tb_buttons; // the toolbar's button bands, from the shot
+
+// The lit row bands inside a rectangle of the screen, top to bottom: one
+// per line of glyphs or text, so positions are read off the screenshot
+// instead of assumed from the layout. Clamped to the image on every side.
+std::vector<Band> bands_in(cairo_surface_t *s, const wlr_box &rect) {
 	std::vector<Band> bands;
 	if (s == nullptr) {
 		return bands;
 	}
 	unsigned char *data = cairo_image_surface_get_data(s);
 	int stride = cairo_image_surface_get_stride(s);
-	int x0 = card.x + 8, x1 = card.x + card.width - 8;
+	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
+	int x0 = std::max(0, rect.x), x1 = std::min(w, rect.x + rect.width);
 	bool in_band = false;
 	int band_top = 0, band_lit = 0;
-	for (int y = card.y; y < screen_h; y++) {
+	for (int y = std::max(0, rect.y); y < std::min(h, rect.y + rect.height); y++) {
 		int lit = 0;
 		for (int x = x0; x < x1; x++) {
 			unsigned char *p = data + y * stride + x * 4;
@@ -627,9 +675,15 @@ std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
 		}
 	}
 	if (in_band) { // a band running to the scan's end
-		bands.push_back({band_top, screen_h, band_lit});
+		bands.push_back({band_top, std::min(h, rect.y + rect.height), band_lit});
 	}
 	return bands;
+}
+
+// The lit text bands inside a card's column, top to bottom: one per row,
+// header or field of the panel's content.
+std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+	return bands_in(s, {card.x + 8, card.y, card.width - 16, screen_h - card.y});
 }
 
 cairo_surface_t *load_png(const char *name); // defined with the screenshots
@@ -656,6 +710,57 @@ std::vector<Band> panel_rows(const char *name) {
 	return rows;
 }
 
+// ---- waiting for a panel to stop changing ----
+
+// The panel's shape: each band's extent and a coarse lit count. The caret
+// blinking in the password field lights a few pixels inside one band; the
+// shape stays put, and a stable shape means the rows the flows aim at are
+// where the screenshot says.
+std::string band_shape(cairo_surface_t *panel) {
+	std::string shape;
+	for (const Band &b : text_bands(panel, popup_box)) {
+		shape += std::format("{}:{}:{},", b.top, b.bottom, b.lit / 16);
+	}
+	return shape;
+}
+
+int settle_stage = 0; // 0: idle, 1: first shot taken, 2: sampling pairs
+int settle_retries = 0;
+std::string settle_bytes; // the previous shot's shape
+
+// Shots `name` on each call and reports whether two consecutive shots
+// showed the same shape. Call it on successive ticks (a tick is enough
+// time for grim to finish: handle_timer waits for it first) and click
+// only once it says yes — the shot on disk is then current, so the aim
+// comes from it. Under load the bar renders late; clicking at a stale
+// screenshot lands wrong or out of order, and a re-issued click can
+// toggle a row twice, so the flows wait instead of retrying.
+bool settle_advance(const char *name) {
+	if (settle_stage == 0) {
+		shot(name);
+		settle_stage = 1;
+		settle_retries = 0;
+		return false;
+	}
+	cairo_surface_t *panel = load_png(name); // the previous call's shot
+	std::string shape = panel != nullptr ? band_shape(panel) : std::string();
+	if (panel != nullptr) {
+		cairo_surface_destroy(panel);
+	}
+	bool same = shape == settle_bytes;
+	settle_bytes = shape;
+	if (settle_stage == 1) {
+		settle_stage = 2;
+		shot(name);
+		return false;
+	}
+	if (!same && ++settle_retries < 25) { // a changing panel; keep watching
+		shot(name);
+		return false;
+	}
+	settle_stage = 0; // matched (or given up waiting): the shot is stable
+	return true;
+}
 // ---- the stand-ins' own record: what the mocks received ----
 
 constexpr const char *NM_NAME = "org.freedesktop.NetworkManager";
@@ -1085,32 +1190,30 @@ int walk() {
 		phase = 17; // on to Connect: the flow continues against the mock
 		return 300;
 	}
-	case 17: { // submit the typed password: Connect is the bottom band
-		cairo_surface_t *panel = load_png("network-typed");
-		std::vector<Band> bands = text_bands(panel, popup_box);
-		cairo_surface_destroy(panel);
+	case 17: { // submit the typed password: Connect is the bottom band —
+		// but only once the panel has stopped changing, and exactly once
+		if (!settle_advance("network-typed")) {
+			return 400; // the panel is still settling under load
+		}
+		std::vector<Band> bands = panel_bands("network-typed");
 		if (bands.size() < 8) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = bands.back().centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, bands.back().centre());
 		phase = 18;
 		return 400;
 	}
 	case 18: { // the mock NetworkManager received the activation with the PSK
 		bool sent = mock_called(NM_NAME, NM_MANAGER, "AddAndActivateConnection",
 			"correctbattery");
-		if (!sent && retries++ < 100) { // the click's round trip takes its time
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!sent && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(sent, "Connect sent CafeGuest's activation with the typed password "
-			"to the stand-in NetworkManager");
+		check(sent, sent ? "Connect sent CafeGuest's activation with the "
+			"typed password to the stand-in NetworkManager"
+			: "the Connect click was lost under load");
 		shot("network-connected");
 		phase = 19;
 		return 400;
@@ -1135,33 +1238,27 @@ int walk() {
 		phase = 21;
 		return 400;
 	case 21: { // a connected network's action row is Disconnect
-		std::vector<Band> bands = panel_bands("network-home");
-		if (bands.size() < 5 && retries++ < 10) {
-			shot("network-home");
-			return 400;
+		if (!settle_advance("network-home")) {
+			return 400; // the panel is still settling under load
 		}
-		retries = 0;
-		if (bands.size() < 5) {
+		std::vector<Band> bands = panel_bands("network-home");
+		if (bands.size() < 5) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = bands.back().centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, bands.back().centre());
 		phase = 22;
 		return 400;
 	}
 	case 22: {
 		bool dropped = mock_called(NM_NAME, NM_DEVICE, "Disconnect");
-		if (!dropped && retries++ < 100) {
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!dropped && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(dropped, "Disconnect deactivated the connection on the "
-			"stand-in's Wi-Fi device");
+		check(dropped, dropped ? "Disconnect deactivated the connection on "
+			"the stand-in's Wi-Fi device"
+			: "the Disconnect click was lost under load");
 		phase = 2;
 		return 300;
 	}
@@ -1170,11 +1267,10 @@ int walk() {
 		phase = 31;
 		return 400;
 	case 31: { // the paired device's row: Scenario Headphones, the first one
-		std::vector<Band> rows = panel_rows("bluetooth-devices");
-		if (rows.size() < 4 && retries++ < 15) {
-			shot("bluetooth-devices");
-			return 400;
+		if (!settle_advance("bluetooth-devices")) {
+			return 400; // the rows are still settling after the scan
 		}
+		std::vector<Band> rows = panel_rows("bluetooth-devices");
 		retries = 0;
 		check(rows.size() >= 4, std::format("the bluetooth panel lists the "
 			"stand-in's two devices ({} rows: switch, scan, 2 devices)",
@@ -1185,9 +1281,7 @@ int walk() {
 		}
 		// known devices come first, so the paired one is the second row
 		// from the bottom; the found one is last
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[rows.size() - 2].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[rows.size() - 2].centre());
 		phase = 32;
 		return 400;
 	}
@@ -1195,33 +1289,28 @@ int walk() {
 		bool connected = mock_property(BT_NAME, BT_HEADPHONES, "org.bluez.Device1",
 			"Connected").find("true") != std::string::npos;
 		bool called = mock_called(BT_NAME, BT_HEADPHONES, "Connect");
-		if (!(called && connected) && retries++ < 100) {
-			if (!called && retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!(called && connected) && retries++ < 150) { // in flight, not lost
+			return 400;
 		}
 		retries = 0;
-		check(called && connected, "clicking the paired device connected it on "
-			"the stand-in (Connect called, Connected reported)");
+		check(called && connected, called || connected
+			? "clicking the paired device connected it on the stand-in "
+			"(Connect called, Connected reported)"
+			: "the paired-device click was lost under load");
 		shot("bluetooth-connected");
 		phase = 33;
 		return 400;
 	}
 	case 33: { // the same row again: a connected device disconnects
-		std::vector<Band> rows = panel_rows("bluetooth-connected");
-		if (rows.size() < 4 && retries++ < 10) {
-			shot("bluetooth-connected");
-			return 400;
+		if (!settle_advance("bluetooth-connected")) {
+			return 400; // the row is still settling after the connect
 		}
-		retries = 0;
-		if (rows.size() < 4) {
+		std::vector<Band> rows = panel_rows("bluetooth-connected");
+		if (rows.size() < 4) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[rows.size() - 2].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[rows.size() - 2].centre());
 		phase = 34;
 		return 400;
 	}
@@ -1229,47 +1318,38 @@ int walk() {
 		bool off = mock_called(BT_NAME, BT_HEADPHONES, "Disconnect")
 			&& mock_property(BT_NAME, BT_HEADPHONES, "org.bluez.Device1",
 				"Connected").find("false") != std::string::npos;
-		if (!off && retries++ < 100) {
-			if (retries % 10 == 3
-				&& !mock_called(BT_NAME, BT_HEADPHONES, "Disconnect")) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!off && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(off, "clicking the connected device disconnected it on the stand-in "
-			"(Disconnect called, Connected false)");
+		check(off, off ? "clicking the connected device disconnected it on "
+			"the stand-in (Disconnect called, Connected false)"
+			: "the disconnect click was lost under load");
 		shot("bluetooth-after");
 		phase = 35;
 		return 400;
 	}
 	case 35: { // the found device's row: Scenario Speaker, the last one
-		std::vector<Band> rows = panel_rows("bluetooth-after");
-		if (rows.size() < 4 && retries++ < 10) {
-			shot("bluetooth-after");
-			return 400;
+		if (!settle_advance("bluetooth-after")) {
+			return 400; // the rows are still settling after the scan
 		}
-		retries = 0;
-		if (rows.size() < 4) {
+		std::vector<Band> rows = panel_rows("bluetooth-after");
+		if (rows.size() < 4) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[rows.size() - 1].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[rows.size() - 1].centre());
 		phase = 36;
 		return 400;
 	}
 	case 36: {
 		bool paired = mock_called(BT_NAME, BT_SPEAKER, "Pair");
-		if (!paired && retries++ < 100) {
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (!paired && retries++ < 150) { // in flight under load, not lost
+			return 400;
 		}
 		retries = 0;
-		check(paired, "clicking the found device called Pair on the stand-in");
+		check(paired, paired ? "clicking the found device called Pair on "
+			"the stand-in" : "the found-device click was lost under load");
 		phase = 2;
 		return 300;
 	}
@@ -1280,30 +1360,23 @@ int walk() {
 	case 41: { // "Power saver" is the second row: the battery block above it
 		// and nothing below it is ever clicked — the Session rows (Suspend,
 		// Restart, Power off, Log out) sit below the other two profiles.
-		std::vector<Band> rows = panel_rows("power-profiles");
-		if (rows.size() < 8 && retries++ < 10) {
-			shot("power-profiles");
-			return 400;
+		if (!settle_advance("power-profiles")) {
+			return 400; // the rows are still settling under load
 		}
-		retries = 0;
-		if (rows.size() < 8) {
+		std::vector<Band> rows = panel_rows("power-profiles");
+		if (rows.size() < 8) { // the panel moved on without us
 			phase = 2;
 			return 300;
 		}
 		// rows: battery, Power saver, Balanced, Performance, 4 session rows
-		action_x = popup_box.x + popup_box.width / 2.0;
-		action_y = rows[1].centre();
-		click(action_x, action_y);
+		click(popup_box.x + popup_box.width / 2.0, rows[1].centre());
 		phase = 42;
 		return 400;
 	}
 	case 42: {
 		std::string profile = mock_property(PPD_NAME, PPD_PATH, PPD_IFACE, "ActiveProfile");
-		if (profile.find("power-saver") == std::string::npos && retries++ < 100) {
-			if (retries % 10 == 3) {
-				click(action_x, action_y); // a lost click: send it again
-			}
-			return 300;
+		if (profile.find("power-saver") == std::string::npos && retries++ < 150) {
+			return 400; // in flight under load, not lost
 		}
 		retries = 0;
 		check(profile.find("power-saver") != std::string::npos,
@@ -1662,9 +1735,385 @@ int run_step() {
 		check(!idle_spawned && bar_pid > 0, std::format("an idle shell spawned no "
 			"processes ({} samples over {} s)", idle_sample_count,
 			idle_sample_count * idle_sample_ms / 1000));
-		step = 59; // the theme phase sits at 60..81; 19..59 stay open for
-		// the overview and toolbar phases the merged scenario adds
-		return 100; // on to the theme: the switch, both palettes, the reload
+		step = 20; // on to the overview: shell surfaces take input over it
+		return -100; // without the advance: every other step moves on alone
+	// ---- the overview: shell surfaces take input over it ----
+	// A step range of its own, after the walk and the plugin world.
+	case 20: // Super+Tab, the overview's chord, over the bar's world
+		key(KEY_LEFTMETA, true);
+		key(KEY_TAB, true);
+		key(KEY_TAB, false);
+		key(KEY_LEFTMETA, false);
+		return 400;
+	case 21: {
+		Output &o = *server->outputs.front();
+		check(o.overview.active(), "Super+Tab opened the overview over the bar");
+		shot("overview");
+		return 400;
+	}
+	case 22: // a click on the bar's own background: not the logo, which
+		// sends launcher.toggle over the control socket
+		click(300.0, 13);
+		return 400;
+	case 23:
+		check(server->outputs.front()->overview.active(),
+			"a click on the bar did not leave the overview");
+		return 300;
+	case 24: // the network indicator opens its panel inside the overview
+		click(network_x, 13);
+		return 400;
+	case 25: { // then a click outside the card closes it
+		LayerSurface *panel = panel_layer("network");
+		if (panel == nullptr && retries++ < 150) { // in flight under load
+			return -100;
+		}
+		retries = 0;
+		check(panel != nullptr, "the bar opens a panel inside the overview");
+		if (panel == nullptr) {
+			step = 99;
+			return 100;
+		}
+		shot("overview-network-first");
+		click(60.0, 700.0); // the panel's overlay takes it, not the canvas
+		return 400;
+	}
+	case 26: { // and the same indicator opens it again: a panel that closed
+		// itself is forgotten as the open one, so the next click reopens it
+		if (panel_layers() > 0 && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0 && server->outputs.front()->overview.active(),
+			"a click outside closed the panel and the overview stayed");
+		click(network_x, 13);
+		return 400;
+	}
+	case 27: {
+		LayerSurface *panel = panel_layer("network");
+		if (panel == nullptr && retries++ < 150) { // in flight under load
+			return -100;
+		}
+		retries = 0;
+		check(panel != nullptr, "the network indicator reopened its panel after "
+			"the panel closed itself");
+		if (panel == nullptr) {
+			step = 99;
+			return 100;
+		}
+		check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
+			"the overview's network panel belongs to the bar client");
+		if (server->seat->keyboard_state.focused_surface != panel->wlr->surface
+				&& retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(server->seat->keyboard_state.focused_surface == panel->wlr->surface,
+			"the panel holds the keyboard while the overview is active");
+		popup_box = card_box(network_x, network_panel);
+		// The overview's toolbar sits over this card's right edge, the
+		// card drawn above it: keep the scan column short of the strip,
+		// or the toolbar's glyphs pose as the card's rows.
+		popup_box.width = std::min(popup_box.width, strip_left - popup_box.x);
+		shot("overview-network");
+		return 700;
+	}
+	case 28: { // select CafeGuest: the first row, band 2 on the raw scan
+		if (!settle_advance("overview-network")) {
+			return -400; // the rows are still settling under load
+		}
+		std::vector<Band> bands = panel_bands("overview-network");
+		if (bands.size() < 5) { // the panel moved on without us
+			step = 99;
+			return 100;
+		}
+		check(bands.size() >= 5,
+			"the panel lists the stand-in's networks in the overview");
+		click(popup_box.x + popup_box.width / 2.0, bands[2].centre());
+		return 500;
+	}
+	case 29: // the shot must come a tick after the selection click
+		shot("overview-selected");
+		return 400;
+	case 30: {
+		if (!settle_advance("overview-selected")) {
+			return -400; // the panel is still settling under load
+		}
+		std::vector<Band> bands = panel_bands("overview-selected");
+		if (bands.size() < 8) { // the panel moved on without us
+			step = 99;
+			return 100;
+		}
+		check(bands.size() >= 8, "selecting the network armed its password "
+			"field in the overview");
+		const Band &field = bands[bands.size() - 2];
+		field_box = {popup_box.x, field.top, popup_box.width, field.bottom - field.top};
+		click(popup_box.x + popup_box.width / 2.0, field.centre());
+		return 500;
+	}
+	case 31: // type only once the click has focused the field
+		type("correctbattery"); // never Enter: nothing is submitted
+		return 400;
+	case 32:
+		shot("overview-typed");
+		return 400;
+	case 33: {
+		cairo_surface_t *typed = load_png("overview-typed");
+		wlr_box rect{
+			field_box.x, field_box.y - 10,
+			field_box.width, field_box.height + 20,
+		};
+		int dots = bright_count(typed, rect);
+		cairo_surface_destroy(typed);
+		if (dots < 80 && retries++ < 10) { // the panel may render the dots late
+			shot("overview-typed");
+			return -400;
+		}
+		retries = 0;
+		// each of the 14 dots lights ~9 px; a bare cursor lights under 40
+		check(dots >= 80, std::format("typing reached the Wi-Fi password "
+			"field inside the overview ({} bright pixels in it)", dots));
+		return 300;
+	}
+	case 34: // the panel holds the keyboard: it takes the Escape
+		tap(KEY_ESC);
+		return 400;
+	case 35: {
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0,
+			"Escape closed the panel while the overview stayed");
+		check(server->outputs.front()->overview.active(),
+			"the panel took Escape: the overview is still active");
+		return 300;
+	}
+	case 36: // with the panel gone, the overview hears the next Escape
+		tap(KEY_ESC);
+		return 400;
+	case 37: {
+		Output &o = *server->outputs.front();
+		if (o.overview.active() && retries++ < 20) {
+			return -100;
+		}
+		check(!o.overview.active(), "the second Escape left the overview");
+		step = 40; // on to the toolbar: the same world, in the overview
+		return -100; // without the advance: every other step moves on alone
+	}
+	// ---- the overview's toolbar ----
+	// A step range of its own, after the overview phase.
+	case 40: // the toolbar shows only in the overview: none yet
+		check(toolbar_layer() == nullptr,
+			"the toolbar is not mapped while the output is out of the overview");
+		chord(KEY_TAB, KEY_LEFTMETA); // Super+Tab enters the overview again
+		return 400;
+	case 41: {
+		LayerSurface *toolbar = toolbar_layer();
+		if (toolbar == nullptr && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(toolbar != nullptr, "entering the overview mapped the toolbar "
+			"(a layer surface of the shell client)");
+		if (toolbar != nullptr) {
+			check(wl_resource_get_client(toolbar->wlr->surface->resource) == bar_client(),
+				"the toolbar belongs to the shell client");
+		}
+		shot("toolbar");
+		return 700;
+	}
+	case 42: { // the buttons, read off the screenshot: the strip's column
+		// is opaque — its own glyphs are the only lit pixels in it — and
+		// the strip is the cluster of bands closest to the output's
+		// vertical centre, so stray lit pixels cannot pose as buttons.
+		cairo_surface_t *s = load_png("toolbar");
+		std::vector<Band> all = bands_in(s, {strip_left, 0, toolbar_button, screen_h});
+		cairo_surface_destroy(s);
+		std::vector<Band> best;
+		double best_distance = screen_h;
+		for (std::size_t i = 0; i < all.size();) {
+			std::vector<Band> cluster{all[i]};
+			for (std::size_t j = i + 1; j < all.size()
+					&& all[j].top - cluster.back().bottom <= toolbar_button; j++) {
+				cluster.push_back(all[j]);
+			}
+			double distance = std::abs((cluster.front().top + cluster.back().bottom) / 2.0
+				- screen_h / 2.0);
+			if (cluster.size() > best.size()
+					|| (cluster.size() == best.size() && distance < best_distance)) {
+				best = cluster;
+				best_distance = distance;
+			}
+			i += cluster.size();
+		}
+		if (best.size() < 3 && retries++ < 20) { // the slide-in may still finish
+			shot("toolbar");
+			return -700;
+		}
+		retries = 0;
+		check(best.size() >= 3, std::format("the toolbar holds every registered "
+			"button ({} glyph bands in its column: act, panel, menu)", best.size()));
+		if (best.size() < 3) {
+			step = 99; // positions cannot be trusted; nothing more to check
+			return 300;
+		}
+		check(std::abs((best.front().top + best.back().bottom) / 2.0
+				- screen_h / 2.0) <= toolbar_button,
+			"the strip is vertically centred on the output");
+		tb_buttons = best;
+		// The action button is the first (order 0): click it.
+		tb_x = strip_left + toolbar_button / 2.0;
+		tb_y = tb_buttons[0].centre();
+		click(tb_x, tb_y);
+		return 400;
+	}
+	case 43: { // the proof the action ran: its storage, read back
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"button\"") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			return -300;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"button\"") != std::string::npos,
+			"the action button ran its action with its args (the plugin's "
+			"storage says so)");
+		check(toolbar_layer() != nullptr, "the toolbar stays after an action");
+		// The pointer rests on the action button: its label shows beside
+		// it, left of the strip.
+		shot("toolbar-hover");
+		return 700;
+	}
+	case 44: { // the label, beside the strip on hover
+		cairo_surface_t *s = load_png("toolbar-hover");
+		std::vector<Band> labels = bands_in(s,
+			{strip_left - 160, int(tb_buttons[0].top) - 20, 160 - beside_gap, 40});
+		cairo_surface_destroy(s);
+		check(!labels.empty(), "hovering a button shows its label beside the strip");
+		// The panel button is the second (order 1).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[1].centre());
+		return 400;
+	}
+	case 45: {
+		LayerSurface *panel = panel_layer("scratch");
+		if (panel == nullptr && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel != nullptr, "the panel button opened the panel through the "
+			"common trigger");
+		if (panel != nullptr) {
+			check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
+				"the toolbar's panel belongs to the shell client");
+		}
+		shot("toolbar-panel");
+		return 700;
+	}
+	case 46: { // the panel card: left of the strip, level with the button
+		// The card sits left of the strip, centred on the panel button;
+		// scan that window, so overview content elsewhere cannot pose as
+		// rows.
+		cairo_surface_t *s = load_png("toolbar-panel");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[1].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		if (rows.size() < 2 && retries++ < 10) {
+			shot("toolbar-panel");
+			return -700;
+		}
+		retries = 0;
+		check(rows.size() >= 2, "the panel opened beside the toolbar (its two rows "
+			"are left of the strip)");
+		if (!rows.empty()) {
+			double level = (rows.front().top + rows.back().bottom) / 2.0;
+			check(std::abs(level - tb_buttons[1].centre()) <= 32,
+				"the panel is level with the panel button");
+		}
+		// Escape closes the panel itself (it holds the keyboard); a click
+		// on the empty canvas would instead leave the overview.
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 47: {
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0, "the toolbar's panel closed on Escape");
+		// The menu button is the third (order 2).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[2].centre());
+		return 400;
+	}
+	case 48: // the flyout, out of the toolbar to the left of the button
+		shot("toolbar-flyout");
+		return 700;
+	case 49: { // its rows: a glyph row and a colour-swatch row
+		// The flyout sits left of the strip, centred on the menu button.
+		cairo_surface_t *s = load_png("toolbar-flyout");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[2].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		if (rows.size() < 2 && retries++ < 10) {
+			shot("toolbar-flyout");
+			return -700;
+		}
+		retries = 0;
+		check(rows.size() >= 2, "the menu button expanded a flyout beside the "
+			"toolbar (a glyph row and a swatch row)");
+		if (rows.size() < 2) {
+			// Nothing was clicked: the fold shot still happens, the
+			// choice proof is skipped.
+			shot("toolbar-folded");
+			step = 50;
+			return 700;
+		}
+		// Choose the first entry: its action runs and the flyout folds.
+		tb_x = strip_left - beside_gap - scratch_card / 2.0;
+		tb_y = rows[0].centre();
+		click(tb_x, tb_y);
+		return 400;
+	}
+	case 50: { // the choice's proof, and the fold
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"menu-one\"") == std::string::npos && retries++ < 100) {
+			if (retries % 10 == 3) {
+				click(tb_x, tb_y); // a lost click: send it again
+			}
+			return -300;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"menu-one\"") != std::string::npos,
+			"choosing a flyout entry ran its action with its args (the "
+			"plugin's storage says so)");
+		shot("toolbar-folded");
+		return 700;
+	}
+	case 51: { // the flyout must have folded; leaving the overview ends it
+		cairo_surface_t *s = load_png("toolbar-folded");
+		wlr_box card{strip_left - beside_gap - scratch_card,
+			int(tb_buttons[2].centre()) - 80, scratch_card, 160};
+		std::vector<Band> rows = bands_in(s, card);
+		cairo_surface_destroy(s);
+		check(rows.empty(), "choosing an entry folded the flyout");
+		check(toolbar_layer() != nullptr, "the toolbar stays after a menu choice");
+		tap(KEY_ESC); // Escape leaves the overview, folding everything
+		return 400;
+	}
+	case 52: { // the slide out unmaps the toolbar, panel and flyout with it
+		bool gone = toolbar_layer() == nullptr && panel_layers() == 0;
+		if (!gone && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(toolbar_layer() == nullptr, "leaving the overview slid the toolbar "
+			"out (unmapped)");
+		check(panel_layers() == 0, "no panel and no flyout outlived the toolbar");
+		step = 60; // on to the theme phase: the switch, both palettes, the reload
+		return -100; // without the advance: every other step moves on alone
+	}
 	case 60: // the theme phase: a window for its title bar, then both modes
 		if (theme_x <= 0) {
 			std::println("note: the theme switch was not found on the bar; "
@@ -1924,6 +2373,7 @@ int run_step() {
 		check(panel_layers() == 0, "the last panel closed");
 		return 100; // done: the summary prints and the run ends
 	default:
+		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
 		return -1;
@@ -2006,6 +2456,57 @@ int main() {
 	write_file(plugins_dir + "/bad.plugin/Bad.qml",
 		"import QtQuick\nimport WaylandCanvas.Ui\nBarButton {\n"
 		"\ticon: true\n\ttext: \"\\uf00d\"\n}\n");
+	// The toolbar scenario's own scratch plugin (there from the start; it
+	// contributes no bar widget, so the run accounting keeps holding):
+	// one action button, one panel button and one menu button, whose
+	// action appends its args to the plugin's storage — the read-back is
+	// the proof a click ran what it should. The menu's second row names a
+	// colour, the first a glyph, so the flyout draws both kinds.
+	std::string scratch_plugin = plugins_dir + "/canvas.scratch";
+	mkdir_p(scratch_plugin);
+	write_file(scratch_plugin + "/plugin.json",
+		"{\n\t\"id\": \"canvas.scratch\",\n\t\"name\": \"Scratch\",\n"
+		"\t\"version\": \"1.0.0\",\n\t\"apiVersion\": 1,\n"
+		"\t\"description\": \"The toolbar scenario's plugin: an action, a panel and a menu button\",\n"
+		"\t\"contributes\": {\n"
+		"\t\t\"toolbarButtons\": [\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"act\",\n\t\t\t\t\"icon\": \"A\",\n"
+		"\t\t\t\t\"label\": \"Act\",\n\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\"args\": {\"kind\": \"button\"},\n\t\t\t\t\"order\": 0\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n\t\t\t\t\"icon\": \"P\",\n"
+		"\t\t\t\t\"label\": \"Panel\",\n\t\t\t\t\"panel\": \"panel\",\n"
+		"\t\t\t\t\"order\": 1\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"menu\",\n\t\t\t\t\"icon\": \"M\",\n"
+		"\t\t\t\t\"label\": \"Menu\",\n\t\t\t\t\"menu\": [\n"
+		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"One\",\n\t\t\t\t\t\t\"icon\": \"1\",\n"
+		"\t\t\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-one\"}\n\t\t\t\t\t},\n"
+		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"Yellow\",\n\t\t\t\t\t\t\"color\": \"#e0af68\",\n"
+		"\t\t\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-yellow\"}\n\t\t\t\t\t}\n"
+		"\t\t\t\t],\n\t\t\t\t\"order\": 2\n\t\t\t}\n"
+		"\t\t],\n"
+		"\t\t\"panels\": [\n\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n"
+		"\t\t\t\t\"entry\": \"ScratchPanel.qml\"\n\t\t\t}\n\t\t],\n"
+		"\t\t\"actions\": [\n\t\t\t{\n\t\t\t\t\"id\": \"mark\",\n"
+		"\t\t\t\t\"entry\": \"Mark.qml\"\n\t\t\t}\n\t\t]\n\t}\n}\n");
+	write_file(scratch_plugin + "/Mark.qml",
+		"import QtQuick\n// The scratch action: appends its args to the plugin's\n"
+		"// storage, so the scenario reads back that it ran and what with.\n"
+		"Item {\n\tproperty var api: null\n"
+	"\tfunction run(args) {\n"
+		"\t\tvar marks = api.storage.read(\"marks\")\n"
+		"\t\tif (marks == null) {\n\t\t\tmarks = []\n\t\t}\n"
+		"\t\tmarks.push(args == null ? {} : args)\n"
+		"\t\tapi.storage.write(\"marks\", marks)\n\t}\n}\n");
+	write_file(scratch_plugin + "/ScratchPanel.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\n"
+		"// The scratch panel: two labelled rows, so the scenario finds the\n"
+		"// card where it should be on the screenshot.\n"
+		"PanelCard {\n\tpanelWidth: 200\n\tpanelName: \"scratch\"\n"
+		"\tPanelRow { glyph: \"1\"; label: \"Scratch one\"; clickable: false }\n"
+		"\tPanelRow { glyph: \"2\"; label: \"Scratch two\"; clickable: false }\n}\n");
+
 	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
 	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);
 	setenv("XDG_STATE_HOME", (xdg + "/state").c_str(), 1);
@@ -2046,6 +2547,11 @@ int main() {
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display);
+	// A compositor that stops by itself (its own shutdown, a lost backend)
+	// ends the run early: without this the scenario would still exit 0.
+	if (!finished) {
+		check(false, std::format("the run ended at step {}, before its last step", step));
+	}
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);

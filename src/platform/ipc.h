@@ -9,6 +9,7 @@
 
 class Output;
 class Server;
+struct Item;
 typedef struct _JsonObject JsonObject;
 
 // The compositor's control socket: JSON lines as
@@ -32,12 +33,15 @@ public:
 
 	// The event entry points, called from where the compositor's state
 	// actually changes. Each serializes its part of the state and pushes one
-	// event line to every subscriber. The canvas-items slice adds the
-	// item.moved / item.activated emitters beside these.
+	// event line to every subscriber.
 	void emit_overview(const Output &output, bool active);
 	void emit_outputs(); // an output appeared, went, or changed size or scale
 	void emit_desktops(); // a desktop was created, moved, combined or abandoned
 	void emit_theme(); // the mode changed
+	void emit_item_moved(const Item &item); // the user dropped a dragged item
+	// The user double-clicked an item; `box` is the item on `output` in
+	// output-local logical px.
+	void emit_item_activated(const Item &item, const Output &output);
 
 private:
 	struct Client {
@@ -56,8 +60,7 @@ private:
 	};
 
 	// One method of the protocol: `run` returns the result's JSON text or an
-	// error message. The canvas-items slice adds item.set / item.remove rows
-	// to the table in dispatch_method().
+	// error message.
 	using MethodFn = std::expected<std::string, std::string> (Ipc::*)(Client &,
 		JsonObject *params);
 	std::expected<std::string, std::string> dispatch_method(Client &client,
@@ -74,6 +77,10 @@ private:
 	std::expected<std::string, std::string> m_quit(Client &client,
 		JsonObject *params);
 	std::expected<std::string, std::string> m_theme_set(Client &client,
+		JsonObject *params);
+	std::expected<std::string, std::string> m_item_set(Client &client,
+		JsonObject *params);
+	std::expected<std::string, std::string> m_item_remove(Client &client,
 		JsonObject *params);
 	// An `output` param by name; nullptr when absent and none is under the
 	// cursor. An error names a bad or unknown param.

@@ -87,23 +87,48 @@ PanelWindow {
 		? anchorWindow.screen.height : 720
 	readonly property real barH: anchorWindow ? anchorWindow.height : 26
 
-	// The card: centred under the indicator, kept inside the output. The
-	// watcher's transform is the reactive dependency that re-runs the
-	// position when the bar lays its widgets out or moves them — a bare
-	// mapToItem binding would only see the first, pre-layout position.
+	// The card: placed by its anchor, kept inside the output. A bar
+	// widget hangs centred under its indicator. An anchor that the
+	// compositor places where Qt cannot see — the overview toolbar's
+	// button, whose window covers its whole output, so it can map itself
+	// into output coordinates — names the spot itself: panelRight, where
+	// the card's right edge belongs in output coordinates, and
+	// panelCentreY, the button's vertical centre; the card hangs to the
+	// left of the toolbar, level with the button. The watcher's transform
+	// is the reactive dependency that re-runs the position when the bar
+	// lays its widgets out or moves them — a bare mapToItem binding would
+	// only see the first, pre-layout position.
 	TransformWatcher {
 		id: anchorWatcher
 		a: root.anchorWindow ? root.anchorWindow.contentItem : null
 		b: root.anchorItem
 	}
 
+	// True when the anchor names its own spot (the toolbar's buttons);
+	// a bar widget names neither property.
+	readonly property bool beside: anchorItem != null
+		&& anchorItem.panelRight !== undefined
+
 	readonly property real cardX: {
 		anchorWatcher.transform
+		if (beside) {
+			return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
+				anchorItem.panelRight - panelWidth,
+				screenW - panelWidth - UiTheme.edgeMargin)))
+		}
 		var centre = anchorItem ? anchorItem.mapToItem(null, anchorItem.width / 2, 0).x : 0
 		return Math.round(Math.max(UiTheme.edgeMargin, Math.min(centre - panelWidth / 2,
 			screenW - panelWidth - UiTheme.edgeMargin)))
 	}
-	readonly property real cardY: barH
+	readonly property real cardY: {
+		anchorWatcher.transform
+		if (beside) {
+			return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
+				anchorItem.panelCentreY - card.height / 2,
+				screenH - card.height - UiTheme.edgeMargin)))
+		}
+		return barH
+	}
 
 	Item {
 		anchors.fill: parent
