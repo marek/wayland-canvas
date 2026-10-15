@@ -14,12 +14,18 @@ Panel {
 	readonly property var adapter: model ? model.adapter : null
 	readonly property bool radioOn: adapter != null && adapter.enabled
 
-	// Paired devices ahead of mere findings, each half alphabetical.
+	// A device the system keeps: paired (with its keys stored, or not) or
+	// trusted. BlueZ sets Bonded only when the pairing keys are stored.
+	function known(device) {
+		return device.paired || device.bonded || device.trusted
+	}
+
+	// Known devices ahead of mere findings, each half alphabetical.
 	readonly property var devices: {
 		var list = adapter && adapter.devices ? adapter.devices.values.slice() : []
 		list.sort(function(a, b) {
-			if (a.bonded !== b.bonded) {
-				return a.bonded ? -1 : 1
+			if (known(a) !== known(b)) {
+				return known(a) ? -1 : 1
 			}
 			return a.deviceName.localeCompare(b.deviceName)
 		})
@@ -27,7 +33,7 @@ Panel {
 	}
 
 	function actOn(device) {
-		if (device.bonded) {
+		if (known(device)) {
 			if (device.connected) {
 				device.disconnect()
 			} else {
@@ -45,7 +51,7 @@ Panel {
 		if (device.pairing) {
 			return "Pairing…"
 		}
-		if (device.bonded) {
+		if (known(device)) {
 			return "Paired"
 		}
 		return "Found"

@@ -1,0 +1,1035 @@
+// End-to-end bar-panels scenario: the real compositor on the headless
+// backend with the real bar client (qs — the suite is registered only when
+// qs and the dbusmock stand-in environment are present), fake pointer and
+// keyboard devices, grim screenshots. The bar never touches the machine:
+// it starts on a private system and session D-Bus pair under tmp/ (a
+// startup failure of either means no bar at all) carrying stand-in
+// services — NetworkManager, BlueZ, UPower, power-profiles-daemon and one
+// StatusNotifierItem with a menu (tests/scenarios/bar-standins.py) — so
+// the scenario's clicks and typing can only ever act on those. Every
+// indicator is clicked with the pointer and its panel must appear as a new
+// surface of the bar client, then close again — by a click outside, by
+// Escape and by a second click of its icon. The Wi-Fi password field must
+// receive typing (never submitted), and only one panel may be open at a
+// time. Writes only under $CANVAS_TMP (meson passes the repo's tmp/).
+#include <cairo.h>
+#include <cerrno>
+#include <cmath>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <dirent.h>
+#include <format>
+#include <linux/input-event-codes.h>
+#include <optional>
+#include <poll.h>
+#include <print>
+#include <source_location>
+#include <string>
+#include <sys/prctl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+#include <vector>
+#include "core/config.h"
+#include "platform/output.h"
+#include "core/server.h"
+#include "core/wlr.h"
+
+namespace {
+
+std::optional<Server> server;
+wl_event_source *timer = nullptr;
+int step = 0, failures = 0, retries = 0;
+uint32_t t = 90000;
+pid_t grim_pid = -1;
+wlr_pointer ptr{};
+wlr_keyboard kbd{};
+const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
+const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
+std::string shot_dir;
+
+// ---- isolation: private buses and the stand-in services on them ----
+
+struct PrivateBus {
+	pid_t pid = -1;
+	std::string address; // what DBUS_*_BUS_ADDRESS becomes for the bar
+};
+
+PrivateBus system_bus, session_bus;
+pid_t standins_pid = -1;
+
+// The panel widths shell/Panel.qml commits, one distinct width per panel so
+// a panel can be told apart by its surface. Keep in sync with the panels.
+constexpr int network_panel = 340;
+constexpr int weather_panel = 320;
+constexpr int bluetooth_panel = 300;
+constexpr int audio_panel = 280;
+constexpr int power_panel = 260;
+constexpr int brightness_panel = 240;
+constexpr int clock_panel = 220;
+constexpr int tray_panel = 200;
+constexpr const char *bar_namespace = "wayland-canvas-bar";
+
+// Output geometry the headless backend gives: 1280x720, one output.
+constexpr int screen_w = 1280, screen_h = 720;
+
+enum CloseMode { close_outside, close_escape, close_icon };
+
+struct Indicator {
+	const char *name;
+	int width;
+	double x = 0; // centre of the bar run that opens it
+	int button = BTN_LEFT;
+	CloseMode close_mode = close_outside;
+	bool typing = false; // the Wi-Fi password flow
+};
+
+std::vector<Indicator> indicators;
+std::size_t current = 0;
+int phase = 0;
+wlr_box popup_box{}; // the open panel's card, from the walk's phase 1
+wlr_box field_box{}; // where the Wi-Fi password field ended up
+double clock_x = 0, network_x = 0;
+
+// Prints PASS/FAIL with the note; a failure counts and names its source line.
+void check(bool cond, std::string_view note,
+	std::source_location where = std::source_location::current()) {
+	std::println("{}: {} ({}:{})", cond ? "PASS" : "FAIL", note,
+		where.file_name(), where.line());
+	if (!cond) {
+		failures++;
+	}
+}
+
+void mkdir_p(const std::string &path) {
+	for (std::size_t i = 1; i < path.size(); i++) {
+		if (path[i] == '/') {
+			mkdir(path.substr(0, i).c_str(), 0755);
+		}
+	}
+	if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) {
+		std::fprintf(stderr, "mkdir %s: %s\n", path.c_str(), std::strerror(errno));
+	}
+}
+
+// ---- machine state: which indicators the bar shows ----
+
+// The stand-ins decide almost all of it: their world always has a battery
+// (UPower's discharging display device), a Wi-Fi device (NetworkManager)
+// and a Bluetooth adapter (BlueZ), so those indicators are unconditional.
+// The backlight is the one real-machine signal left — no stand-in can
+// provide sysfs, and the bar's brightness widget checks for one with
+// brightnessctl before it shows.
+
+// Any entry under /sys/class/<name> besides the dot entries.
+bool has_sysfs_class(const char *name) {
+	std::string root = std::format("/sys/class/{}", name);
+	DIR *d = opendir(root.c_str());
+	if (d == nullptr) {
+		return false;
+	}
+	bool found = false;
+	for (dirent *e = readdir(d); e != nullptr; e = readdir(d)) {
+		if (e->d_name[0] != '.') {
+			found = true;
+			break;
+		}
+	}
+	closedir(d);
+	return found;
+}
+
+
+// ---- bringing up the private buses and the stand-ins ----
+
+// A forked child that keeps running: its stdout on a pipe, its death tied
+// to the scenario process so nothing outlives a killed run.
+struct Spawned {
+	pid_t pid = -1;
+	int out = -1; // its stdout, or -1 once drained
+};
+
+Spawned spawn(const char *const argv[]) {
+	int fds[2];
+	if (pipe(fds) != 0) {
+		return {};
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		close(fds[0]);
+		dup2(fds[1], STDOUT_FILENO);
+		close(fds[1]);
+		sigset_t set;
+		sigemptyset(&set);
+		sigprocmask(SIG_SETMASK, &set, nullptr);
+		prctl(PR_SET_PDEATHSIG, SIGKILL); // a killed scenario must not leak buses
+		execvp(argv[0], const_cast<char *const *>(argv));
+		_exit(127);
+	}
+	close(fds[1]);
+	return pid > 0 ? Spawned{pid, fds[0]} : Spawned{};
+}
+
+// The child's first stdout line, or empty when it ends without one.
+std::string first_line(Spawned &child) {
+	std::string line;
+	char c = 0;
+	while (read(child.out, &c, 1) == 1 && c != '\n') {
+		line += c;
+	}
+	close(child.out);
+	child.out = -1;
+	return line;
+}
+
+// True when the child prints the line within the timeout; false when it
+// exits or stalls first.
+bool prints_line(Spawned &child, std::string_view want, int timeout_s) {
+	std::string buffer;
+	char chunk[256];
+	for (int tick = 0; tick < timeout_s * 2; tick++) { // ticks of 500 ms
+		pollfd p = {.fd = child.out, .events = POLLIN, .revents = 0};
+		if (poll(&p, 1, 500) > 0 && (p.revents & (POLLIN | POLLHUP)) != 0) {
+			ssize_t n = read(child.out, chunk, sizeof chunk);
+			if (n <= 0) {
+				break;
+			}
+			buffer.append(chunk, static_cast<std::size_t>(n));
+			if (buffer.find(want) != std::string::npos) {
+				return true;
+			}
+		}
+		if (waitpid(child.pid, nullptr, WNOHANG) == child.pid) {
+			break;
+		}
+	}
+	return false;
+}
+
+// A dbus-daemon of our own on a private socket under tmp/: everything on
+// it is allowed, it exists for this run only, and no machine service is
+// reachable through it.
+bool start_private_bus(PrivateBus &bus, const char *type, const char *name) {
+	std::string dir = shot_dir + "/bus";
+	mkdir_p(dir);
+	std::string socket = std::format("{}/{}", dir, name);
+	std::string conf = socket + ".conf";
+	unlink(socket.c_str()); // a stale socket from a killed run
+	std::string xml = std::format(
+		"<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\"\n"
+		" \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n"
+		"<busconfig>\n"
+		"  <type>{}</type>\n"
+		"  <listen>unix:path={}</listen>\n"
+		"  <auth>EXTERNAL</auth>\n"
+		"  <policy context=\"default\">\n"
+		"    <allow own=\"*\"/>\n"
+		"    <allow send_destination=\"*\" eavesdrop=\"true\"/>\n"
+		"    <allow eavesdrop=\"true\"/>\n"
+		"  </policy>\n"
+		"</busconfig>\n",
+		type, socket);
+	FILE *f = std::fopen(conf.c_str(), "w");
+	if (f == nullptr) {
+		std::fprintf(stderr, "cannot write %s\n", conf.c_str());
+		return false;
+	}
+	std::fwrite(xml.data(), 1, xml.size(), f);
+	std::fclose(f);
+	const char *const argv[] = {"dbus-daemon", "--config-file", conf.c_str(), "--print-address=1",
+		static_cast<const char *>(nullptr)};
+	Spawned child = spawn(argv);
+	if (child.pid <= 0) {
+		return false;
+	}
+	// The printed address only says the daemon is serving; the address the
+	// bar and the stand-ins get is the plain listen form — dbus-python
+	// never finishes connecting to the guid-decorated one.
+	std::string printed = first_line(child);
+	if (!printed.starts_with("unix:")) {
+		std::fprintf(stderr, "the private %s bus did not start: %s\n", type,
+			printed.c_str());
+		kill(child.pid, SIGKILL);
+		waitpid(child.pid, nullptr, 0);
+		return false;
+	}
+	bus.pid = child.pid;
+	bus.address = "unix:path=" + socket;
+	return true;
+}
+
+// The dbusmock stand-ins on the private buses (tests/scenarios/
+// bar-standins.py). READY means their four system-bus names are up; the
+// tray item registers with the bar's own watcher once the bar appears.
+bool start_standins() {
+	const char *py = std::getenv("CANVAS_BAR_STANDIN_PY");
+	const char *script = std::getenv("CANVAS_BAR_STANDINS");
+	if (py == nullptr || *py == '\0' || script == nullptr || *script == '\0') {
+		std::fprintf(stderr, "CANVAS_BAR_STANDIN_PY or CANVAS_BAR_STANDINS is unset: "
+			"the stand-in environment is missing\n");
+		return false;
+	}
+	const char *const argv[] = {py, script, static_cast<const char *>(nullptr)};
+	Spawned child = spawn(argv);
+	if (child.pid <= 0) {
+		return false;
+	}
+	if (!prints_line(child, "READY\n", 30)) {
+		std::fprintf(stderr, "the stand-in services did not become ready\n");
+		kill(child.pid, SIGTERM);
+		waitpid(child.pid, nullptr, 0);
+		return false;
+	}
+	close(child.out);
+	child.out = -1;
+	standins_pid = child.pid;
+	return true;
+}
+
+// Waits for a child up to two seconds, then kills it.
+void reap(pid_t pid) {
+	if (pid <= 0) {
+		return;
+	}
+	for (int i = 0; i < 200; i++) {
+		if (waitpid(pid, nullptr, WNOHANG) == pid) {
+			return;
+		}
+		timespec ts = {.tv_sec = 0, .tv_nsec = 10'000'000};
+		nanosleep(&ts, nullptr);
+	}
+	kill(pid, SIGKILL);
+	waitpid(pid, nullptr, 0);
+}
+
+// Everything the scenario started, in reverse order: the launcher (which
+// terminates the dbusmock mocks with it), then the buses.
+void stop_isolation() {
+	reap(standins_pid);
+	reap(system_bus.pid);
+	reap(session_bus.pid);
+}
+
+// One variable of a live process's environment, as /proc tells it — the
+// isolation proof straight from the bar's own process.
+std::string proc_env_value(pid_t pid, const char *key) {
+	if (pid <= 0) {
+		return {};
+	}
+	FILE *f = std::fopen(std::format("/proc/{}/environ", pid).c_str(), "r");
+	if (f == nullptr) {
+		return {};
+	}
+	std::string blob;
+	char buf[4096];
+	std::size_t n = 0;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) { // environ may exceed 8 KiB
+		blob.append(buf, n);
+	}
+	std::fclose(f);
+	std::string prefix = std::format("{}=", key);
+	std::size_t start = 0;
+	while (start < blob.size()) {
+		std::size_t end = blob.find('\0', start);
+		if (end == std::string::npos) {
+			end = blob.size();
+		}
+		if (blob.compare(start, prefix.size(), prefix) == 0) {
+			return blob.substr(start + prefix.size(), end - start - prefix.size());
+		}
+		start = end + 1;
+	}
+	return {};
+}
+// ---- input, through the same fake devices libinput events reach ----
+
+void key(uint32_t code, bool pressed) {
+	t += 8;
+	wlr_keyboard_key_event ev = {.time_msec = t, .keycode = code, .update_state = true,
+		.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED};
+	wlr_keyboard_notify_key(&kbd, &ev);
+}
+
+void tap(uint32_t code) {
+	key(code, true);
+	key(code, false);
+}
+
+// Letters and digits, enough for a password-shaped string.
+void type(std::string_view s) {
+	struct KeyMap {
+		char c;
+		uint32_t code;
+	};
+	constexpr KeyMap map[] = {
+		{'a', KEY_A}, {'b', KEY_B}, {'c', KEY_C}, {'d', KEY_D}, {'e', KEY_E}, {'f', KEY_F},
+		{'g', KEY_G}, {'h', KEY_H}, {'i', KEY_I}, {'j', KEY_J}, {'k', KEY_K}, {'l', KEY_L},
+		{'m', KEY_M}, {'n', KEY_N}, {'o', KEY_O}, {'p', KEY_P}, {'q', KEY_Q}, {'r', KEY_R},
+		{'s', KEY_S}, {'t', KEY_T}, {'u', KEY_U}, {'v', KEY_V}, {'w', KEY_W}, {'x', KEY_X},
+		{'y', KEY_Y}, {'z', KEY_Z}, {'0', KEY_0}, {'1', KEY_1}, {'2', KEY_2}, {'3', KEY_3},
+		{'4', KEY_4}, {'5', KEY_5}, {'6', KEY_6}, {'7', KEY_7}, {'8', KEY_8}, {'9', KEY_9},
+	};
+	for (char c : s) {
+		for (const KeyMap &m : map) {
+			if (m.c == c) {
+				tap(m.code);
+			}
+		}
+	}
+}
+
+void click(double x, double y, int button = BTN_LEFT) {
+	t += 8;
+	wlr_pointer_motion_absolute_event m = {
+		.pointer = &ptr, .time_msec = t, .x = x / double(screen_w), .y = y / double(screen_h)};
+	wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	for (int pressed = 1; pressed >= 0; pressed--) {
+		t += 8;
+		wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t, .button = uint32_t(button),
+			.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED};
+		wl_signal_emit_mutable(&ptr.events.button, &b);
+		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	}
+}
+
+void shot(const char *name) {
+	std::string path = std::format("{}/{}.png", shot_dir, name);
+	grim_pid = fork();
+	if (grim_pid == 0) {
+		execlp("grim", "grim", path.c_str(), static_cast<char *>(nullptr));
+		_exit(127);
+	}
+}
+
+// ---- the bar client and its surfaces ----
+
+LayerSurface *bar_layer() {
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (auto &vec : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &l : vec) {
+				if (l->mapped && l->wlr->namespace_ != nullptr
+						&& std::strcmp(l->wlr->namespace_, bar_namespace) == 0) {
+					return l.get();
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+wl_client *bar_client() {
+	LayerSurface *l = bar_layer();
+	return l == nullptr ? nullptr
+		: wl_resource_get_client(l->wlr->surface->resource);
+}
+
+// The bar strip's height: panels hang directly under it.
+int bar_h() {
+	LayerSurface *l = bar_layer();
+	return l != nullptr ? l->geo.height : 26;
+}
+
+// The bar client's mapped panel layer surface with this name (each panel
+// names its surface; the shell and this suite agree on the names).
+LayerSurface *panel_layer(const char *name) {
+	std::string ns = std::format("wayland-canvas-panel-{}", name);
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (auto &vec : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &l : vec) {
+				if (l->mapped && l->wlr->namespace_ != nullptr
+						&& ns == l->wlr->namespace_) {
+					return l.get();
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+// Mapped panels of any name: the one-at-a-time rule counts them.
+int panel_layers() {
+	int n = 0;
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (auto &vec : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &l : vec) {
+				if (l->mapped && l->wlr->namespace_ != nullptr
+						&& std::strncmp(l->wlr->namespace_, "wayland-canvas-panel",
+							20) == 0) {
+					n++;
+				}
+			}
+		}
+	}
+	return n;
+}
+
+// The card a panel draws, on screen: centred under the indicator and
+// clamped exactly the way Panel.qml clamps it.
+wlr_box card_box(double icon_x, int width) {
+	double x = icon_x - width / 2.0;
+	x = std::max(8.0, std::min(x, double(screen_w - width - 8)));
+	return wlr_box{static_cast<int>(std::round(x)), bar_h(), width, 0};
+}
+
+// The lit text bands inside a card's column, top to bottom: one per row,
+// header or field of the panel's content, so positions are read off the
+// screenshot instead of assumed from the layout.
+struct Band {
+	int top, bottom;
+	double centre() const { return (top + bottom - 1) / 2.0; }
+};
+
+std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
+	std::vector<Band> bands;
+	if (s == nullptr) {
+		return bands;
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	int x0 = card.x + 8, x1 = card.x + card.width - 8;
+	bool in_band = false;
+	int band_top = 0;
+	for (int y = card.y; y < screen_h; y++) {
+		bool lit = false;
+		for (int x = x0; x < x1; x++) {
+			unsigned char *p = data + y * stride + x * 4;
+			if (p[0] + p[1] + p[2] > 300) {
+				lit = true;
+				break;
+			}
+		}
+		if (lit && !in_band) {
+			in_band = true;
+			band_top = y;
+		} else if (!lit && in_band) {
+			in_band = false;
+			bands.push_back({band_top, y});
+		}
+	}
+	if (in_band) { // a band running to the scan's end
+		bands.push_back({band_top, screen_h});
+	}
+	return bands;
+}
+
+// The keyboard is on a surface of the bar client (so panel keystrokes land).
+bool keyboard_on_bar() {
+	wlr_surface *s = server->seat->keyboard_state.focused_surface;
+	return s != nullptr && bar_client() != nullptr
+		&& wl_resource_get_client(s->resource) == bar_client();
+}
+
+// ---- screenshots: decode, find the indicator runs ----
+
+cairo_surface_t *load_png(const char *name) {
+	std::string path = std::format("{}/{}.png", shot_dir, name);
+	cairo_surface_t *s = cairo_image_surface_create_from_png(path.c_str());
+	if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+		check(false, std::format("decoding {}", path));
+		cairo_surface_destroy(s);
+		return nullptr;
+	}
+	return s;
+}
+
+struct Run {
+	double x0, x1;
+	double centre() const { return (x0 + x1) / 2; }
+};
+
+// The lit column runs of the bar strip: each run is one widget's glyphs on
+// the bar's own flat background. Gaps of 8 px or less stay inside a widget
+// (letter spacing); widget boundaries are wider.
+std::vector<Run> bar_runs(cairo_surface_t *s, const wlr_box &bar) {
+	std::vector<Run> runs;
+	if (s == nullptr) {
+		return runs;
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	std::vector<bool> lit(bar.width);
+	for (int x = 0; x < bar.width; x++) {
+		for (int y = 0; y < bar.height; y++) {
+			unsigned char *p = data + (bar.y + y) * stride + (bar.x + x) * 4;
+			// ARGB32 little-endian: B, G, R, A. The bar background is
+			// #1a1b26 (channel sum 91); glyph pixels are far brighter.
+			if (p[0] + p[1] + p[2] > 300) {
+				lit[x] = true;
+				break;
+			}
+		}
+	}
+	constexpr int merge_gap = 8;
+	int start = -1, gap = 0;
+	for (int x = 0; x <= bar.width; x++) {
+		bool on = x < bar.width && lit[x];
+		if (on && start < 0) {
+			start = x;
+			gap = 0;
+		} else if (on) {
+			gap = 0;
+		} else if (start >= 0 && ++gap > merge_gap) {
+			if (x - gap - start >= 3) { // drop sub-pixel noise
+				runs.push_back({double(start), double(x - gap)});
+			}
+			start = -1;
+		}
+	}
+	return runs;
+}
+
+// Bright pixels (text-coloured) inside a rectangle of the screen: password
+// dots, or a cursor sliver when nothing was typed.
+int bright_count(cairo_surface_t *s, const wlr_box &rect) {
+	if (s == nullptr) {
+		return -1;
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
+	int n = 0;
+	for (int y = rect.y; y < rect.y + rect.height; y++) {
+		if (y < 0 || y >= h) {
+			continue;
+		}
+		for (int x = rect.x; x < rect.x + rect.width; x++) {
+			if (x < 0 || x >= w) {
+				continue;
+			}
+			unsigned char *p = data + y * stride + x * 4;
+			if (p[0] + p[1] + p[2] > 400) {
+				n++;
+			}
+		}
+	}
+	return n;
+}
+
+// ---- the indicator walk: one phase machine on step 4 ----
+
+// Phase 0 opens the panel, 1 verifies and screenshots it, 2 closes it, 3
+// verifies it closed. The typing flow (10-13) runs between 1 and 2; 14 is
+// its screenshot-analysis step.
+int walk() {
+	if (current >= indicators.size()) {
+		step = 5; // on to the one-at-a-time check
+		return 100;
+	}
+	Indicator &ind = indicators[current];
+	switch (phase) {
+	case 0:
+		click(ind.x, 13, ind.button);
+		phase = 1;
+		return 400;
+	case 1: {
+		LayerSurface *panel = panel_layer(ind.name);
+		// Service-backed panels take longer than one tick to build their
+		// content: give each a generous window to map.
+		if (panel == nullptr && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		if (panel == nullptr && ind.button == BTN_RIGHT) {
+			// A tray item without a menu secondary-activates instead: by
+			// design, nothing to check — but say so.
+			std::println("note: the tray item at x={} has no menu of its own; "
+				"its panel is not checked", static_cast<int>(ind.x));
+			current++;
+			return 300;
+		}
+		check(panel != nullptr, std::format("the {} panel appeared as a layer surface",
+			ind.name));
+	if (panel != nullptr) {
+		check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
+			std::format("the {} panel belongs to the bar client", ind.name));
+		// The panel's surface holds the keyboard the moment it maps (the
+		// seat enters an on-demand layer surface on its own): no click may
+		// be needed before its field is typeable, so check before poking.
+		if (server->seat->keyboard_state.focused_surface != panel->wlr->surface
+				&& retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(server->seat->keyboard_state.focused_surface == panel->wlr->surface,
+			std::format("the {} panel holds the keyboard as it opens", ind.name));
+		popup_box = card_box(ind.x, ind.width);
+		shot(ind.name);
+	}
+		if (ind.typing) {
+			phase = 10;
+		} else {
+			phase = 2;
+		}
+		return 700; // let grim finish (handle_timer waits for it)
+	}
+	case 10: // re-shoot the panel: the rows settle only once the scanner runs
+		shot("network");
+		phase = 14;
+		return 700;
+	case 14: { // select the stand-in's unknown secured network: row 0
+		cairo_surface_t *panel = load_png("network");
+		std::vector<Band> bands = text_bands(panel, popup_box);
+		cairo_surface_destroy(panel);
+		// Wi-Fi switch row, "Networks" header, then the three stand-in
+		// networks — strongest first, so band 2 is CafeGuest, the secured
+		// unknown one that asks for a password.
+		if (bands.size() < 5 && retries++ < 20) {
+			phase = 10; // rows not on screen yet
+			return 400;
+		}
+		retries = 0;
+		check(bands.size() >= 5, std::format("the network panel lists the "
+			"stand-in's three networks ({} bands: switch row, header, 3 rows)",
+			bands.size()));
+		if (bands.size() < 5) {
+			phase = 2; // nothing was clicked: close without poking the panel
+			return 300;
+		}
+		click(popup_box.x + popup_box.width / 2.0, bands[2].centre());
+		phase = 15; // the shot must come a tick later: the panel renders the
+		// selection only after the click was delivered
+		return 400;
+	}
+	case 15:
+		shot("network-selected");
+		phase = 11;
+		return 300;
+	case 11: { // focus the field and type into it — never Connect
+		check(keyboard_on_bar(), "the keyboard is on the bar client while "
+			"the network panel is open");
+		// Selecting appends the SSID header, the password field and the
+		// Connect/Disconnect row below the list. The field is the second
+		// band from the bottom; the bottom band — Connect or Disconnect —
+		// is never clicked, and nothing is ever submitted.
+		cairo_surface_t *panel = load_png("network-selected");
+		std::vector<Band> bands = text_bands(panel, popup_box);
+		cairo_surface_destroy(panel);
+		if (bands.size() < 8 && retries++ < 15) { // the selection UI settles
+			phase = 15;
+			return 400;
+		}
+		retries = 0;
+		check(bands.size() >= 8, std::format("selecting the network armed "
+			"its password field ({} bands: 5 above, header, field, connect)",
+			bands.size()));
+		if (bands.size() < 8) {
+			phase = 2;
+			return 300;
+		}
+		const Band &field = bands[bands.size() - 2];
+		field_box = {popup_box.x, field.top, popup_box.width, field.bottom - field.top};
+		click(popup_box.x + popup_box.width / 2.0, field.centre());
+		phase = 16; // type only once the click has focused the field
+		return 400;
+	}
+	case 16:
+		type("correctbattery"); // never Enter: nothing is submitted
+		phase = 12;
+		return 400;
+	case 12:
+		shot("network-typed");
+		phase = 13;
+		return 400;
+	case 13: { // the dots must be on screen: keystrokes reached the field
+		cairo_surface_t *typed = load_png("network-typed");
+		wlr_box rect{
+			field_box.x, field_box.y - 10,
+			field_box.width, field_box.height + 20,
+		};
+		int dots = bright_count(typed, rect);
+		cairo_surface_destroy(typed);
+		if (dots < 80 && retries++ < 10) { // the panel may render the dots late
+			phase = 12;
+			return 400;
+		}
+		// each of the 14 dots lights ~9 px; a bare cursor lights under 40
+		check(dots >= 80, std::format("typing reached the Wi-Fi password "
+			"field ({} bright pixels in it; a bare cursor is under 40)", dots));
+		phase = 2;
+		return 300;
+	}
+	case 2:
+		switch (ind.close_mode) {
+		case close_escape:
+			tap(KEY_ESC);
+			break;
+		case close_icon:
+			click(ind.x, 13, ind.button);
+			break;
+		default:
+			click(60.0, 700.0); // corner of the output, outside every card
+			break;
+		}
+		phase = 3;
+		retries = 0;
+		return 400;
+	default:
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		check(panel_layers() == 0, std::format("the {} panel closed ({})", ind.name,
+			ind.close_mode == close_escape ? "Escape"
+				: ind.close_mode == close_icon ? "a second click of its icon"
+				: "a click outside"));
+		current++;
+		phase = 0;
+		retries = 0;
+		return 300;
+	}
+}
+
+int run_step() {
+	switch (step) {
+	case 0:
+		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
+		wlr_keyboard_init(&kbd, &kbd_impl, "fake-keyboard");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
+		return 300;
+	case 1: {
+		if (bar_layer() == nullptr && retries++ < 150) {
+			return -100;
+		}
+		check(bar_layer() != nullptr, "the bar client mapped its layer surface");
+		// The isolation proof: what the bar process itself carries. A
+		// journal check after the run (`journalctl -u NetworkManager -u
+		// bluetooth --since <run start>`) confirms no bar traffic reached
+		// the machine's services.
+		pid_t bar_pid = 0;
+		if (bar_client() != nullptr) {
+			wl_client_get_credentials(bar_client(), &bar_pid, nullptr, nullptr);
+		}
+		std::string sys = proc_env_value(bar_pid, "DBUS_SYSTEM_BUS_ADDRESS");
+		std::string ses = proc_env_value(bar_pid, "DBUS_SESSION_BUS_ADDRESS");
+		std::println("note: the bar (pid {}) runs with DBUS_SYSTEM_BUS_ADDRESS={} "
+			"DBUS_SESSION_BUS_ADDRESS={}", bar_pid, sys, ses);
+		check(sys == system_bus.address && ses == session_bus.address,
+			"the bar's bus addresses are the private pair (from /proc/environ)");
+		// A weather fetch (5 s max) decides whether its widget shows at all;
+		// give it room so the indicator positions are final before reading.
+		return 15000;
+	}
+	case 2:
+		shot("bar");
+		return 500;
+	case 3: {
+		cairo_surface_t *s = load_png("bar");
+		LayerSurface *layer = bar_layer();
+		std::vector<Run> runs = s != nullptr && layer != nullptr
+			? bar_runs(s, layer->geo) : std::vector<Run>{};
+		cairo_surface_destroy(s);
+
+		// Which indicators the bar shows, right to left, in the order the
+		// right section lays them out. The stand-ins' fixed world carries a
+		// battery, a Wi-Fi device and a Bluetooth adapter; only the
+		// backlight comes from this machine.
+		std::vector<Indicator> mandatory;
+		mandatory.push_back({"power", power_panel});
+		if (has_sysfs_class("backlight")) {
+			mandatory.push_back({"brightness", brightness_panel});
+		}
+		mandatory.push_back({"audio", audio_panel});
+		mandatory.push_back({"network", network_panel});
+		mandatory.push_back({"bluetooth", bluetooth_panel});
+
+		// The logo is the leftmost run. drop it before matching the rest.
+		if (!runs.empty()) {
+			runs.erase(runs.begin());
+		}
+		check(runs.size() >= 1 + mandatory.size(),
+			std::format("every indicator of this machine is on the bar "
+				"({} runs past the logo; the clock and {} indicators)",
+				runs.size(), mandatory.size()));
+		if (runs.size() < 1 + mandatory.size()) {
+			step = 99; // positions cannot be trusted; nothing more to check
+			return 300;
+		}
+
+		// The right section's indicators are the rightmost runs: `mandatory`
+		// lists them right to left, so the i-th counts from the right edge.
+		std::size_t keep = runs.size() - mandatory.size();
+		std::size_t first_mandatory = 0;
+		for (std::size_t i = 0; i < mandatory.size(); i++) {
+			Indicator &ind = mandatory[i];
+			ind.x = runs[runs.size() - 1 - i].centre();
+			if (std::strcmp(ind.name, "network") == 0) {
+				ind.typing = true;
+				network_x = ind.x;
+			}
+		}
+
+		// Between logo and the indicators: the tray items (right-click
+		// menus), then the centred clock and weather (left to right).
+		std::vector<double> centre;
+		for (std::size_t i = 0; i < keep; i++) {
+			double x = runs[i].centre();
+			if (std::abs(x - screen_w / 2.0) <= 250) {
+				centre.push_back(x);
+			} else {
+				indicators.push_back({"tray", tray_panel, x, BTN_RIGHT, close_outside});
+			}
+		}
+		check(!centre.empty(), "the clock widget is on the bar");
+		std::size_t clock_index = indicators.size();
+		if (!centre.empty()) {
+			clock_x = centre.front();
+			indicators.push_back({"clock", clock_panel, clock_x, BTN_LEFT, close_outside});
+			if (centre.size() > 1) {
+				indicators.push_back({"weather", weather_panel, centre.back()});
+			} else {
+				std::println("note: no weather run (no successful fetch yet) — "
+					"the widget hides until one; its panel is not checked");
+			}
+		}
+		first_mandatory = indicators.size();
+		for (const Indicator &ind : mandatory) {
+			indicators.push_back(ind);
+		}
+
+		// Spread the close styles over panels that exist: the rightmost
+		// indicator proves the second-click close, another proves Escape.
+		if (!mandatory.empty()) {
+			indicators[first_mandatory].close_mode = close_icon;
+		}
+		bool escape_set = false;
+		if (mandatory.size() > 1) {
+			indicators.back().close_mode = close_escape;
+			escape_set = true;
+		}
+		if (!escape_set && clock_index < indicators.size()) {
+			indicators[clock_index].close_mode = close_escape;
+		}
+
+		check(network_x > 0, "the network indicator is present (the typing "
+			"check needs its panel)");
+		return 300; // step advances to the walk
+	}
+	case 4:
+		return walk();
+	case 5: // one panel at a time: opening a second closes the first
+		if (clock_x > 0 && network_x > 0) {
+			click(clock_x, 13);
+			return 400;
+		}
+		step = 99;
+		return 100;
+	case 6: {
+		if (panel_layer("clock") == nullptr && retries++ < 20) {
+			return -100;
+		}
+		check(panel_layer("clock") != nullptr, "the clock panel opened");
+		click(network_x, 13);
+		return 400;
+	}
+	case 7: {
+		if (!(panel_layer("network") != nullptr && panel_layer("clock") == nullptr)
+				&& retries++ < 40) {
+			return -100;
+		}
+		check(panel_layer("network") != nullptr && panel_layer("clock") == nullptr,
+			"opening the network panel closed the clock panel (one at a time)");
+		shot("one-at-a-time");
+		return 700;
+	}
+	case 8:
+		click(60.0, 700.0);
+		return 400;
+	case 9:
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		check(panel_layers() == 0, "the last panel closed on a click outside");
+		step = 99;
+		return 100;
+	default:
+		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
+		wl_display_terminate(server->display);
+		return -1;
+	}
+}
+
+int handle_timer() {
+	if (grim_pid > 0) {
+		if (waitpid(grim_pid, nullptr, WNOHANG) == 0) {
+			wl_event_source_timer_update(timer, 30);
+			return 0;
+		}
+		grim_pid = -1;
+	}
+	t += 1000;
+	int before = step;
+	int delay = run_step();
+	if (delay < -1) {
+		wl_event_source_timer_update(timer, -delay);
+		return 0;
+	}
+	if (delay == -1) {
+		return 0;
+	}
+	// The walk manages its own progression inside step 4; every other step
+	// moves on when it returns.
+	if (before != 4) {
+		step++;
+		retries = 0;
+	}
+	wl_event_source_timer_update(timer, delay > 0 ? delay : 1);
+	return 0;
+}
+
+} // namespace
+
+int main() {
+	std::setvbuf(stdout, nullptr, _IONBF, 0); // PASS/FAIL lines must survive a kill
+	const char *env = std::getenv("CANVAS_TMP");
+	std::string root = env && *env ? env : "tmp"; // meson passes the repo's tmp/ via env
+	shot_dir = std::format("{}/scenarios/bar", root);
+	mkdir_p(shot_dir);
+	setenv("WLR_BACKENDS", "headless", 1);
+	setenv("WLR_RENDERER", "gles2", 1);
+	// Isolation first: the bar may only ever start on the private buses
+	// with their stand-ins — when either cannot come up, no bar runs at
+	// all, and the machine's buses are never touched. The stand-ins and
+	// every later child (the bar above all) inherit the addresses.
+	if (!start_private_bus(system_bus, "system", "system")
+			|| !start_private_bus(session_bus, "session", "session")) {
+		std::println("FAILED: the private buses did not start; the bar did not run");
+		stop_isolation();
+		return 2;
+	}
+	// Python children must never drop bytecode into the source tree
+	setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
+	setenv("DBUS_SYSTEM_BUS_ADDRESS", system_bus.address.c_str(), 1);
+	setenv("DBUS_SESSION_BUS_ADDRESS", session_bus.address.c_str(), 1);
+	if (!start_standins()) {
+		std::println("FAILED: the stand-in services did not start; the bar did not run");
+		stop_isolation();
+		return 2;
+	}
+	// The bar is the point of this scenario: it starts with the compositor
+	// (qs on PATH and the config beside the binary — the meson guard checked
+	// qs, the dbus daemon and the stand-in environment before registering
+	// the suite).
+	server.emplace();
+	Options options;
+	if (!server->init(options) || !server->start()) {
+		server.reset();
+		stop_isolation();
+		return 2;
+	}
+	timer = wl_event_loop_add_timer(server->loop, [](void *data) { return handle_timer(); },
+		nullptr);
+	wl_event_source_timer_update(timer, 200);
+	wl_display_run(server->display);
+	wl_event_source_remove(timer);
+	wlr_pointer_finish(&ptr);
+	wlr_keyboard_finish(&kbd);
+	server.reset();
+	stop_isolation();
+	return failures != 0;
+}

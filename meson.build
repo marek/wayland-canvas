@@ -177,15 +177,36 @@ test(
 
 # End-to-end scenarios: the real compositor on the headless backend, real
 # foot clients, fake input devices, grim screenshots. Registered only when
-# foot and grim are on PATH; they still need a GPU render node at run time
-# (headless GLES2 rendering). Serial: each owns the display namespace.
+# foot and grim are on PATH; the bar scenario additionally needs qs (the
+# bar's own client), dbus-daemon and the dbusmock stand-in environment.
+# They still need a GPU render node at run time (headless GLES2 rendering).
+# Serial: each owns the display namespace.
 foot_prog = find_program('foot', required: false)
 grim_prog = find_program('grim', required: false)
 if foot_prog.found() and grim_prog.found()
 	scenario_env = environment()
 	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
-	foreach scenario : ['gestures', 'input', 'launcher', 'ipc']
+	scenarios = ['gestures', 'input', 'launcher', 'ipc']
+	# The bar scenario drives the real bar client against stand-in services,
+	# so it also needs qs, a dbus-daemon to build its private buses from,
+	# and the dbusmock stand-in environment (provisioned under tmp/ by the
+	# ensure script at configure time).
+	qs_prog = find_program('qs', required: false)
+	dbus_daemon_prog = find_program('dbus-daemon', required: false)
+	bar_standins = run_command(
+		'tests/scenarios/ensure-bar-standins.sh',
+		check: false,
+	)
+	if qs_prog.found() and dbus_daemon_prog.found() and bar_standins.returncode() == 0
+		scenarios += ['bar']
+		scenario_env.set('CANVAS_BAR_STANDIN_PY', bar_standins.stdout().strip().split('\n')[-1])
+		scenario_env.set(
+			'CANVAS_BAR_STANDINS',
+			meson.project_source_root() / 'tests/scenarios/bar-standins.py',
+		)
+	endif
+	foreach scenario : scenarios
 		test(
 			scenario,
 			executable(

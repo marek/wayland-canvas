@@ -33,10 +33,40 @@ Wayland display namespace and GPU.
   name, launched with Enter, and verified by the marker file its spec-quoted
   `Exec` touches plus the foot window it opens.
 
+- **`bar.cpp`** — the top bar's panels, on a private world: before the
+  compositor starts, the scenario brings up its own `dbus-daemon` system and
+  session buses on sockets under `tmp/scenarios/bar/bus/` (a bar process must
+  never touch the machine's buses) and launches
+  `tests/scenarios/bar-standins.py` on them, which provides deterministic
+  stand-ins — NetworkManager with one Wi-Fi device and three networks
+  (`HomeNet` connected, `CafeGuest` secured-unknown, `LibraryFree` open),
+  BlueZ with a powered adapter plus one paired and one unpaired device,
+  UPower with a discharging 55 % battery, power-profiles-daemon, and a
+  status-notifier tray item with a five-item menu. The scenario proves the
+  bar's own process runs with exactly those bus addresses (read from
+  `/proc/<pid>/environ`). Then, with the real bar client (qs) started by the
+  compositor on those buses: every indicator is clicked with the fake pointer
+  and its panel must map as a layer surface of the bar client (panels are
+  told apart by their layer namespace, `wayland-canvas-panel-<name>`), hold
+  the keyboard on its own surface while open, and close
+  again — by an outside click, by Escape, or by a second click of the icon;
+  opening one panel closes the last. The typing check selects `CafeGuest`,
+  focuses its password field, types into it, and verifies password dots on
+  the screenshot — the Connect row is never clicked and no Enter is ever
+  sent, so nothing is ever submitted. Indicator positions are read off the
+  bar screenshot itself; brightness stays the one machine-read widget (the
+  bar hides it without a sysfs backlight, and the scenario follows that rule).
+  Weather is not required: its widget hides until a first successful fetch,
+  and the scenario skips it with a note when it did not load.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only
-  registered when both are found).
+  registered when both are found; `bar` also needs `qs`).
+- `bar` also needs `dbus-daemon` and Python with `dbus`/`gi` bindings: at
+  configure time `tests/scenarios/ensure-bar-standins.sh` provisions a
+  python-dbusmock venv under the git-ignored `tmp/bar-standins/` (or finds
+  one already there); without them the bar scenario is skipped, not failed.
 - A GPU render node at run time (the headless backend still renders with
   GLES2); CI containers without `/dev/dri` cannot run them.
 - Nothing else: they write only under `$CANVAS_TMP` (default: the repo's
