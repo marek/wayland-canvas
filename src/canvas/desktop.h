@@ -24,6 +24,7 @@ public:
 	const wlr_box &frame() const; // canvas coordinates
 	Rect rect() const;
 	Point centre() const;
+	bool tiling() const; // the switch: while on, the desktop keeps its windows in a grid
 	bool contains(double cx, double cy) const;
 
 private:
@@ -31,6 +32,7 @@ private:
 	DesktopId id_;
 	int number_;
 	wlr_box frame_;
+	bool tiling_ = false; // off on a new desktop
 };
 
 // Every desktop on the canvas, topmost first; the only owner of Desktop objects.
@@ -42,7 +44,9 @@ public:
 	Desktop &create(wlr_box frame);
 	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
-	void move(DesktopId id, int x, int y); // the frame only; damages
+	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows
+	// Flips the switch only; the grid that follows is Canvas::toggle_tiling's.
+	void set_tiling(DesktopId id, bool on);
 
 	// A removed desktop resolves to nullptr.
 	Desktop *find(DesktopId id);

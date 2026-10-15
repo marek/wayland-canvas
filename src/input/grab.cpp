@@ -337,6 +337,10 @@ void PointerGrab::release() {
 		[this](TitleButton &s) { release_title_button(s); },
 		[this](OverviewPress &s) { overview_click(s); },
 		[this](DesktopDrag &s) { drop_desktop_drag(s); },
+		// A user move or resize ends in the grid: back into the slot
+		// nearest the drop, or out of the tiling when dropped outside.
+		[this](Move &s) { server_.canvas.settle(*s.view); },
+		[this](Resize &s) { server_.canvas.settle(*s.view); },
 		[](auto &) {},
 	}, state_);
 	cancel();
