@@ -24,14 +24,16 @@ const Camera &CameraMotion::current() const {
 
 Camera CameraMotion::drawn() const {
 	Camera cam = cam_;
-	if (cam.zoom == 1) {
-		// At 1:1 keep window pixels on the output's pixel grid: no blur.
-		double scale = output_.wlr->scale;
-		double left = std::round((cam.cx - output_.width / 2.0) * scale) / scale;
-		double top = std::round((cam.cy - output_.height / 2.0) * scale) / scale;
-		cam.cx = left + output_.width / 2.0;
-		cam.cy = top + output_.height / 2.0;
-	}
+	// Snap the top-left corner onto the output's pixel grid at this zoom:
+	// a window rendered for its desktop's scale then maps its buffer
+	// pixels onto device pixels one to one, never subpixel-blurry. Hit
+	// testing goes through the same snapped camera.
+	double z = cam.zoom > 0 ? cam.zoom : 1.0;
+	double k = z * output_.wlr->scale; // device pixels per canvas unit
+	double left = cam.cx - output_.width / (2.0 * z);
+	double top = cam.cy - output_.height / (2.0 * z);
+	cam.cx = std::round(left * k) / k + output_.width / (2.0 * z);
+	cam.cy = std::round(top * k) / k + output_.height / (2.0 * z);
 	return cam;
 }
 
@@ -168,10 +170,10 @@ bool CameraMotion::zooming() const {
 	return anim_.kind == AnimKind::zoom;
 }
 
-Camera camera_for_box(wlr_box box) {
+Camera camera_for_box(wlr_box box, double zoom) {
 	return Camera{
 		.cx = box.x + box.width / 2.0,
 		.cy = box.y + box.height / 2.0,
-		.zoom = 1,
+		.zoom = zoom,
 	};
 }

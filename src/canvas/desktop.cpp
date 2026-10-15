@@ -7,7 +7,8 @@
 #include "core/server.h"
 
 Desktop::Desktop(DesktopId id, int number, wlr_box frame)
-	: id_(id), number_(number), frame_(frame) {
+	: id_(id), number_(number), base_w_(frame.width), base_h_(frame.height),
+		frame_(frame) {
 }
 
 DesktopId Desktop::id() const {
@@ -40,6 +41,27 @@ Point Desktop::centre() const {
 
 bool Desktop::contains(double cx, double cy) const {
 	return wlr_box_contains_point(&frame_, cx, cy);
+}
+
+double Desktop::scale() const {
+	return scale_;
+}
+
+void Desktop::set_scale(double scale) {
+	// The frame fills the screen at the desktop's scale: the base size
+	// (the output's logical size when the desktop was made) divided by
+	// the scale, resized around the centre. Windows never move.
+	double cx = frame_.x + frame_.width / 2.0;
+	double cy = frame_.y + frame_.height / 2.0;
+	int w = static_cast<int>(std::lround(base_w_ / scale));
+	int h = static_cast<int>(std::lround(base_h_ / scale));
+	frame_ = wlr_box{
+		static_cast<int>(std::lround(cx - w / 2.0)),
+		static_cast<int>(std::lround(cy - h / 2.0)),
+		w,
+		h,
+	};
+	scale_ = scale;
 }
 
 Desktops::Desktops(Server &server)
@@ -81,6 +103,17 @@ void Desktops::move(DesktopId id, int x, int y) {
 	}
 	desktop->frame_.x = x;
 	desktop->frame_.y = y;
+	// A moved frame takes windows in with it: their desktop may change.
+	server_.visibility_dirty = true;
+	server_.damage_all();
+}
+
+void Desktops::set_scale(DesktopId id, double scale) {
+	Desktop *desktop = find(id);
+	if (desktop == nullptr) {
+		return;
+	}
+	desktop->set_scale(scale);
 	server_.damage_all();
 }
 

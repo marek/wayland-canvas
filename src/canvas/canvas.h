@@ -23,6 +23,10 @@ public:
 	void tile(wlr_box area, const Output &output);
 	// The views in `from_area` move into `into`, keeping their offsets; `from` is removed.
 	void combine(DesktopId into, DesktopId from, wlr_box from_area);
+	// The desktop's scale settled at a new value: its windows are told the
+	// scale they are shown at. A tiling grid re-flows on a settled change;
+	// that call (marek/tiling-mode) wires in beside this at merge.
+	void scale_settled(const Desktop &desktop);
 	// The desktop frame at the point, or an output-sized box centred on it.
 	wlr_box spot_at(double cx, double cy, const Output &output);
 

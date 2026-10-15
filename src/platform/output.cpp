@@ -46,28 +46,44 @@ void update_output_geometry(Output &output) {
 void view_update_outputs(View &view, uint32_t mask) {
 	uint32_t old = view.output_mask;
 	view.output_mask = mask;
+	// The scale the view is shown at: the output's scale times the scale
+	// of the desktop it belongs to (1 off every desktop).
+	double desktop_scale = 1;
+	if (Desktop *desktop = view.server.canvas.desktop_of(view)) {
+		desktop_scale = desktop->scale();
+	}
+	double scale = desktop_scale;
+	for (const std::unique_ptr<Output> &output : view.server.outputs) {
+		if ((mask & output->bit) && output->wlr->scale * desktop_scale > scale) {
+			scale = output->wlr->scale * desktop_scale;
+		}
+	}
 	// Like wlr_scene: a view scrolled off every output keeps its last
 	// outputs, so panning away and back never makes clients re-render.
-	if (mask == 0 || mask == old) {
-		return;
-	}
-	double scale = 1;
-	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if ((mask & output->bit) && output->wlr->scale > scale) {
-			scale = output->wlr->scale;
-		}
-	}
-	view.for_each_surface([&](wlr_surface *surface, int, int) {
-		for (const std::unique_ptr<Output> &output : view.server.outputs) {
-			if (mask & output->bit) {
-				wlr_surface_send_enter(surface, output->wlr);
-			} else {
-				wlr_surface_send_leave(surface, output->wlr);
+	if (mask != 0 && mask != old) {
+		view.for_each_surface([&](wlr_surface *surface, int, int) {
+			for (const std::unique_ptr<Output> &output : view.server.outputs) {
+				if (mask & output->bit) {
+					wlr_surface_send_enter(surface, output->wlr);
+				} else {
+					wlr_surface_send_leave(surface, output->wlr);
+				}
 			}
-		}
-		wlr_fractional_scale_v1_notify_scale(surface, scale);
-		wlr_surface_set_preferred_buffer_scale(surface, (int32_t)std::ceil(scale));
-	});
+			wlr_fractional_scale_v1_notify_scale(surface, scale);
+			wlr_surface_set_preferred_buffer_scale(surface,
+				(int32_t)std::ceil(scale));
+		});
+		view.told_scale = scale;
+	} else if (mask != 0 && scale != view.told_scale) {
+		// Same outputs, a new scale: the desktop's scale settled, or the
+		// window moved onto a desktop of another scale.
+		view.for_each_surface([&](wlr_surface *surface, int, int) {
+			wlr_fractional_scale_v1_notify_scale(surface, scale);
+			wlr_surface_set_preferred_buffer_scale(surface,
+				(int32_t)std::ceil(scale));
+		});
+		view.told_scale = scale;
+	}
 	// The foreign handle, when the view has one, follows the same outputs.
 	for (const std::unique_ptr<Output> &output : view.server.outputs) {
 		bool was = old & output->bit, is = mask & output->bit;
@@ -216,7 +232,7 @@ bool Output::interactive() const {
 	if (overview.active()) {
 		return false;
 	}
-	if (camera.current().zoom != 1) {
+	if (camera.current().zoom != resting_zoom()) {
 		return false;
 	}
 	if (camera.zooming()) {
@@ -234,6 +250,25 @@ Desktop *Output::desktop_showing() const {
 	return server.canvas.desktops.best_overlap(viewport);
 }
 
+double Output::resting_zoom() const {
+	// The camera rests at the zoom of what it shows: the scale of the
+	// desktop whose frame fills the screen, else 1 (a free view).
+	if (overview.active()) {
+		return overview.home().zoom;
+	}
+	Camera c = camera.current();
+	Rect vp = c.viewport(width, height);
+	for (const Desktop &d : server.canvas.desktops.all()) {
+		Rect frame = d.rect();
+		if (std::fabs(vp.x - frame.x) <= 1.0 && std::fabs(vp.y - frame.y) <= 1.0
+				&& std::fabs(vp.w - frame.w) <= 1.0
+				&& std::fabs(vp.h - frame.h) <= 1.0) {
+			return d.scale();
+		}
+	}
+	return 1;
+}
+
 void Output::pan(double dx, double dy) {
 	Camera next = camera.current();
 	next.cx += dx;
@@ -241,15 +276,14 @@ void Output::pan(double dx, double dy) {
 	camera.jump(next);
 }
 
-void Output::goto_box(wlr_box box) {
+void Output::goto_desktop(const Desktop &desktop) {
 	if (overview.active()) {
-		Point centre = box_centre(box);
-		overview.set_target(box,
-			id_of(server.canvas.desktops.at(centre.x, centre.y)), false);
+		overview.set_target(desktop.frame(), desktop.id(), false);
 		overview.exit();
 		return;
 	}
-	camera.animate_to(camera_for_box(box));
+	// Going to a desktop eases onto it, at its scale.
+	camera.animate_to(camera_for_box(desktop.frame(), desktop.scale()));
 }
 
 void Output::goto_direction(double dx, double dy) {
@@ -259,7 +293,7 @@ void Output::goto_direction(double dx, double dy) {
 	Desktop *found = server.canvas.desktops.in_direction(camera.current().cx,
 		camera.current().cy, dx, dy, id_of(desktop_showing()));
 	if (found != nullptr) {
-		camera.animate_to(camera_for_box(found->frame()));
+		goto_desktop(*found);
 		return;
 	}
 	Compass q = nav_quantize_direction(dx, dy);
@@ -309,7 +343,8 @@ void Server::reveal_view(View &view) {
 		output->overview.exit();
 		return;
 	}
-	output->camera.animate_to(camera_for_box(box));
+	output->camera.animate_to(
+		camera_for_box(box, desktop != nullptr ? desktop->scale() : 1.0));
 }
 
 void Server::damage_all() {

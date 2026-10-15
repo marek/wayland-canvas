@@ -26,6 +26,9 @@ public:
 	const OverviewTarget &target() const;
 	const Camera &home() const; // the camera before entering
 	double zoom() const;
+	// The camera that leaves into the target: centred on its box at the
+	// target desktop's scale, else 1 (a free spot).
+	Camera target_camera() const;
 	// The zoomed-out camera that shows the home viewport and every desktop
 	// and window around it.
 	Camera camera_for(const Camera &home) const;
@@ -37,7 +40,7 @@ public:
 	void finish_enter(const Camera &far, double t);
 	void exit();
 	// Gesture release: deactivate and animate path parameter t -> 0, landing
-	// on `near` (camera_for_box(target().box)).
+	// on `near` (`target_camera()`).
 	void finish_exit(const Camera &near, const Camera &far, double t);
 	void cancel();
 	void hop(double dx, double dy);

@@ -130,3 +130,13 @@ wlr_box Canvas::spot_at(double cx, double cy, const Output &output) {
 	}
 	return centred_box(output, cx, cy);
 }
+
+void Canvas::scale_settled(const Desktop &desktop) {
+	// A settled scale is a completed action: name it, and tell the
+	// desktop's windows the scale they are shown at on the next visibility
+	// pass. A tiling grid re-flows on a settled change too; that call
+	// wires in beside this when marek/tiling-mode merges.
+	server_.hint.set(std::format("Desktop {} · {} %", desktop.number(),
+		static_cast<int>(std::round(desktop.scale() * 100))));
+	server_.visibility_dirty = true;
+}

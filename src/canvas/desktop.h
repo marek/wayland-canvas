@@ -24,12 +24,19 @@ public:
 	const wlr_box &frame() const; // canvas coordinates
 	Rect rect() const;
 	Point centre() const;
+	double scale() const; // the desktop's display scale; its frame fills the screen at it
 	bool contains(double cx, double cy) const;
 
 private:
 	friend class Desktops; // the frame changes only through Desktops
+	// Sets the scale and resizes the frame around its centre: base size /
+	// scale. Windows never move. Callers tell the desktop's windows only
+	// when the change settles.
+	void set_scale(double scale);
 	DesktopId id_;
 	int number_;
+	double scale_ = 1.0;
+	int base_w_ = 0, base_h_ = 0; // the output's logical size when the desktop was made
 	wlr_box frame_;
 };
 
@@ -43,6 +50,7 @@ public:
 	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
 	void move(DesktopId id, int x, int y); // the frame only; damages
+	void set_scale(DesktopId id, double scale); // resizes the frame around its centre; damages
 
 	// A removed desktop resolves to nullptr.
 	Desktop *find(DesktopId id);
