@@ -34,8 +34,8 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 
 - [ ] `canvas.toolbar`: the toolbar on the right edge in the overview, with action, panel and submenu buttons from every manifest
 - [ ] `canvas.notes`: the note button with its colour submenu, notes as canvas items, the editor over a note, moving, recolouring, deleting, kept across restarts
-- [ ] `canvas.theme`: the switch in the bar's top-right corner, both palettes for the shell, the compositor told
-- [ ] Light mode keeps text readable on accent-coloured tabs and buttons, in the compositor and the shell
+- [x] `canvas.theme`: the switch in the bar's top-right corner, both palettes for the shell, the compositor told
+- [x] Light mode keeps text readable on accent-coloured tabs and buttons, in the compositor and the shell
 - [ ] (the user to decide) Whether the switch also sets the applications' light/dark preference, a system-wide setting other sessions share
 
 ## Verification
@@ -43,6 +43,6 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 - [ ] The IPC scenario covers the methods, errors, events and canvas items
 - [ ] A scenario shows the toolbar only in the overview, runs an action, opens a panel and a submenu from it
 - [ ] A scenario creates a note from the toolbar, moves it, and finds it again after a shell restart
-- [ ] The switch flips the shell and the compositor, seen in screenshots of both modes
+- [x] The switch flips the shell and the compositor, seen in screenshots of both modes
 - [ ] Screenshots of the toolbar, the colour submenu, notes in the normal view and the overview, and both modes, inspected
 - [ ] Warning-free build, every suite green, the intents and README name the plugin layout

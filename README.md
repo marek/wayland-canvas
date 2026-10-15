@@ -195,7 +195,7 @@ beside it.
 |---|---|
 | `src/` | Compositor source, one folder per area: `core/`, `canvas/`, `windows/`, `input/`, `render/`, `platform/`, `apps/` (`src/core/config.h` holds the tunables) |
 | `shell/` | The Quickshell shell: the plugin host and the `WaylandCanvas.Ui` kit its plugins draw with |
-| `plugins/` | The built-in plugins (`canvas.bar`, the indicators with their panels, …) the host loads beside the shell |
+| `plugins/` | The built-in plugins (`canvas.bar`, the indicators with their panels, the `canvas.theme` light/dark switch, …) the host loads beside the shell |
 | `tests/` | Unit tests and headless scenario sources (`tests/scenarios/`) |
 | `tools/` | `check.sh` (build + test), `check-plans.sh`, hooks |
 | `scripts/` | `agent-setup.sh` (links skills, roles and hooks into `.claude/`) |

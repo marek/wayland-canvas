@@ -24,11 +24,13 @@ through the control IPC and standard system services.
   for power actions); the only compositor-specific actions (opening the
   launcher, ending the session) go through the control socket
   ([../platform/ipc.md](../platform/ipc.md)).
-- **Own theme.** The palette, font, glyphs and panel metrics live in the
-  shell's UI kit (`shell/ui/WaylandCanvas/Ui/`, the `WaylandCanvas.Ui`
-  module every plugin imports): a dark theme — background `#1a1b26`, text
-  `#a9b1d6`, attention `#f7768e` — with the bar 26 logical px high. The
-  bar never reads another shell's configuration.
+- **Own theme, both modes.** The palette, font, glyphs and panel metrics
+  live in the shell's UI kit (`shell/ui/WaylandCanvas/Ui/`, the
+  `WaylandCanvas.Ui` module every plugin imports): the dark and light
+  palettes of [theme.md](theme.md) — background `#1a1b26` / `#e1e2e7`,
+  text `#a9b1d6` / `#3760bf`, attention `#f7768e` / `#f52a65` — with the
+  bar 26 logical px high. The bar never reads another shell's
+  configuration.
 - **Icons are font glyphs**, not images: the bar renders in the fontconfig
   `monospace` family (12 px text, 13 px icons) so it follows the system
   font, and the icon shapes come from that font's icon ranges.
@@ -50,7 +52,7 @@ sit in 27 px slots.
 |---|---|
 | Left | logo button |
 | Center | clock, weather |
-| Right | tray, bluetooth, network, audio, brightness, power |
+| Right | tray, bluetooth, network, audio, brightness, power, theme |
 
 Widgets and what a click does:
 
@@ -65,6 +67,7 @@ Widgets and what a click does:
 | Audio | default-sink glyph, crossed when muted | open the audio panel | wheel: volume ±5 % |
 | Brightness | display glyph | open the brightness panel | wheel: brightness ±5 % (`brightnessctl`) |
 | Power | battery level and charging state | open the power panel | right: toggle the percentage |
+| Theme | a sun in dark mode, a moon in light mode | switch light/dark ([theme.md](theme.md)) | — |
 
 Widgets without a working source hide themselves: weather until the first
 successful fetch, bluetooth without an adapter, brightness without a
