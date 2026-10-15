@@ -107,7 +107,9 @@ Camera Overview::camera_for(const Camera &home) const {
 Camera Overview::prepare() {
 	output_.camera.stop();
 	Camera home = output_.camera.current();
-	home.zoom = 1;
+	// Home is where the camera came from: resting at the shown desktop's
+	// scale, or 1 in a free view.
+	home.zoom = output_.resting_zoom();
 	home_ = home;
 	if (Desktop *desktop = output_.desktop_showing()) {
 		target_ = OverviewTarget{.box = desktop->frame(), .desktop = desktop->id()};
@@ -139,9 +141,13 @@ void Overview::finish_enter(const Camera &far, double t) {
 	output_.damage();
 }
 
+Camera Overview::target_camera() const {
+	Desktop *desktop = output_.server.canvas.desktops.find(target_.desktop);
+	return camera_for_box(target_.box, desktop != nullptr ? desktop->scale() : 1.0);
+}
+
 void Overview::exit() {
-	Camera near = camera_for_box(target_.box);
-	finish_exit(near, output_.camera.current(), 1);
+	finish_exit(target_camera(), output_.camera.current(), 1);
 }
 
 void Overview::finish_exit(const Camera &near, const Camera &far, double t) {

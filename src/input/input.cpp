@@ -661,7 +661,10 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	// Scrolling over the empty canvas pans; libinput already applied the
 	// natural-scroll direction.
 	if (output->interactive()) {
-		double delta = event->delta * config::scroll_pan_speed;
+		// A scroll pans the canvas at the camera's zoom: the screen moves
+		// by the scrolled distance whatever the zoom.
+		double delta = event->delta * config::scroll_pan_speed
+			/ output->camera.current().zoom;
 		if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
 			output->pan(0, delta);
 		} else {

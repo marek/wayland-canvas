@@ -35,6 +35,10 @@ public:
 	void settle(View &view);
 	// The views in `from_area` move into `into`, keeping their offsets; `from` is removed.
 	void combine(DesktopId into, DesktopId from, wlr_box from_area);
+	// The desktop's scale settled at a new value: its windows are told the
+	// scale they are shown at, and a tiled grid re-flows into the resized
+	// frame.
+	void scale_settled(const Desktop &desktop);
 	// The desktop frame at the point, or an output-sized box centred on it.
 	wlr_box spot_at(double cx, double cy, const Output &output);
 

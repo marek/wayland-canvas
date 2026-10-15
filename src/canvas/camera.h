@@ -5,8 +5,8 @@
 
 class Output;
 
-// Camera that shows a desktop-sized box at zoom 1.
-Camera camera_for_box(wlr_box box);
+// The camera that shows `box` filling the screen at `zoom` (1: a free area).
+Camera camera_for_box(wlr_box box, double zoom = 1);
 
 // How one output's camera moves: jumps, eased pans, zoom transitions, momentum.
 class CameraMotion {

@@ -120,7 +120,7 @@ void act_move_dir(Server &server, Output *output, KeyArg arg) {
 		Point centre = target->centre();
 		view->move(static_cast<int>(std::round(view->x + centre.x - ox)),
 			static_cast<int>(std::round(view->y + centre.y - oy)));
-		output->goto_box(target->frame());
+		output->goto_desktop(*target);
 	} else {
 		view->move(static_cast<int>(std::round(view->x + dir.dx * output->width)),
 			static_cast<int>(std::round(view->y + dir.dy * output->height)));
@@ -133,8 +133,11 @@ void act_move_dir(Server &server, Output *output, KeyArg arg) {
 void act_pan(Server &, Output *output, KeyArg arg) {
 	Dir dir = std::get<Dir>(arg);
 	if (output != nullptr) {
-		output->pan(dir.dx * output->width / 3.0,
-			dir.dy * output->height / 3.0);
+		// A third of the screen at the camera's zoom: the canvas moves a
+		// third of what it shows.
+		double zoom = output->camera.current().zoom;
+		output->pan(dir.dx * output->width / (3.0 * zoom),
+			dir.dy * output->height / (3.0 * zoom));
 	}
 }
 
@@ -175,7 +178,7 @@ void act_goto_desktop(Server &server, Output *output, KeyArg arg) {
 	}
 	Desktop *desktop = server.canvas.desktops.by_number(std::get<int>(arg));
 	if (desktop != nullptr) {
-		output->goto_box(desktop->frame());
+		output->goto_desktop(*desktop);
 	}
 }
 

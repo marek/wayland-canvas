@@ -236,3 +236,13 @@ wlr_box Canvas::spot_at(double cx, double cy, const Output &output) {
 	}
 	return centred_box(output, cx, cy);
 }
+
+void Canvas::scale_settled(const Desktop &desktop) {
+	// A settled scale is a completed action: name it, tell the desktop's
+	// windows the scale they are shown at on the next visibility pass, and
+	// re-flow a tiled grid into the resized frame.
+	server_.hint.set(std::format("Desktop {} · {} %", desktop.number(),
+		static_cast<int>(std::round(desktop.scale() * 100))));
+	reflow(desktop.id());
+	server_.visibility_dirty = true;
+}

@@ -56,6 +56,7 @@ public:
 	uint32_t resize_end_serial = 0;
 	wlr_box resize_start{};
 	uint32_t output_mask = 0; // outputs the view is visible on
+	double told_scale = 0; // the scale its surfaces were last told they are shown at
 	uint64_t minimize_seq = 0;
 
 	Decoration deco;
