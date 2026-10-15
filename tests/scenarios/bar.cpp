@@ -1662,8 +1662,10 @@ int run_step() {
 		check(!idle_spawned && bar_pid > 0, std::format("an idle shell spawned no "
 			"processes ({} samples over {} s)", idle_sample_count,
 			idle_sample_count * idle_sample_ms / 1000));
+		step = 59; // the theme phase sits at 60..81; 19..59 stay open for
+		// the overview and toolbar phases the merged scenario adds
 		return 100; // on to the theme: the switch, both palettes, the reload
-	case 19: // the theme phase: a window for its title bar, then both modes
+	case 60: // the theme phase: a window for its title bar, then both modes
 		if (theme_x <= 0) {
 			std::println("note: the theme switch was not found on the bar; "
 				"the theme phase is skipped");
@@ -1672,7 +1674,7 @@ int run_step() {
 		}
 		::spawn("foot -T themed sh -c 'exec sleep 600'"); // Server's double-forked spawn
 		return 500;
-	case 20:
+	case 61:
 		if (titled("themed") == nullptr && retries++ < 100) {
 			return -300;
 		}
@@ -1680,7 +1682,7 @@ int run_step() {
 		check(titled("themed") != nullptr, "the themed window mapped");
 		shot("dark-window");
 		return 700;
-	case 21: { // the title bar the compositor draws, in dark
+	case 62: { // the title bar the compositor draws, in dark
 		bool dark = title_bar_is("dark-window", config::palette_dark.title_active,
 			config::palette_dark.title_inactive);
 		if (!dark && retries++ < 10) {
@@ -1692,7 +1694,7 @@ int run_step() {
 		chord(KEY_TAB, SUPER); // the overview, with its tabs
 		return 400;
 	}
-	case 22: { // the overview opens; the target's tab is the accent fill
+	case 63: { // the overview opens; the target's tab is the accent fill
 		Output *o = out();
 		if (!(o != nullptr && o->overview.active()) && retries++ < 40) {
 			return -300;
@@ -1706,7 +1708,7 @@ int run_step() {
 		shot("dark-overview");
 		return 700;
 	}
-	case 23: { // the target tab's fill is the dark accent
+	case 64: { // the target tab's fill is the dark accent
 		bool accent = target_tab_is("dark-overview", config::palette_dark.accent);
 		if (!accent && retries++ < 10) {
 			shot("dark-overview");
@@ -1717,14 +1719,14 @@ int run_step() {
 		tap(KEY_ESC);
 		return 400;
 	}
-	case 24:
+	case 65:
 		if (out() != nullptr && out()->overview.active() && retries++ < 20) {
 			return -300;
 		}
 		check(out() != nullptr && !out()->overview.active(), "the overview closed");
 		click(theme_x, 13); // the switch: dark -> light
 		return 500;
-	case 25: { // the switch's two promises: the config and the compositor
+	case 66: { // the switch's two promises: the config and the compositor
 		std::string cfg = read_file(shell_config);
 		bool written = cfg.find("\"mode\": \"light\"") != std::string::npos;
 		bool told = server->theme.mode() == ThemeMode::light;
@@ -1737,7 +1739,7 @@ int run_step() {
 		shot("light-bar");
 		return 700;
 	}
-	case 26: { // the bar itself follows: its background is the light one
+	case 67: { // the bar itself follows: its background is the light one
 		LayerSurface *l = bar_layer();
 		bool light = l != nullptr
 			&& shot_pixel_is("light-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
@@ -1750,7 +1752,7 @@ int run_step() {
 		click(power_x, 13); // a panel, to see the light panel surface
 		return 400;
 	}
-	case 27:
+	case 68:
 		if (panel_layer("power") == nullptr && retries++ < 40) {
 			return -300;
 		}
@@ -1758,7 +1760,7 @@ int run_step() {
 		check(panel_layer("power") != nullptr, "the power panel opened in light mode");
 		shot("light-panel");
 		return 700;
-	case 28: { // the panel's card, against the palette
+	case 69: { // the panel's card, against the palette
 		wlr_box card = card_box(power_x, power_panel);
 		bool light = shot_pixel_is("light-panel", card.x + 5, card.y + 5, shell_panel_light);
 		if (!light && retries++ < 10) {
@@ -1770,14 +1772,14 @@ int run_step() {
 		click(60.0, 700.0); // outside: closed again
 		return 400;
 	}
-	case 29:
+	case 70:
 		if (panel_layers() > 0 && retries++ < 20) {
 			return -300;
 		}
 		check(panel_layers() == 0, "the light panel closed on a click outside");
 		shot("light-window");
 		return 700;
-	case 30: { // the title bar followed too
+	case 71: { // the title bar followed too
 		bool light = title_bar_is("light-window", config::palette_light.title_active,
 			config::palette_light.title_inactive);
 		if (!light && retries++ < 10) {
@@ -1789,7 +1791,7 @@ int run_step() {
 		chord(KEY_TAB, SUPER);
 		return 400;
 	}
-	case 31: { // the overview again, now in light
+	case 72: { // the overview again, now in light
 		Output *o = out();
 		if (!(o != nullptr && o->overview.active()) && retries++ < 40) {
 			return -300;
@@ -1803,7 +1805,7 @@ int run_step() {
 		shot("light-overview");
 		return 700;
 	}
-	case 32: { // the target tab's fill is the light accent
+	case 73: { // the target tab's fill is the light accent
 		bool accent = target_tab_is("light-overview", config::palette_light.accent);
 		if (!accent && retries++ < 10) {
 			shot("light-overview");
@@ -1814,7 +1816,7 @@ int run_step() {
 		tap(KEY_ESC);
 		return 400;
 	}
-	case 33: { // a reload must keep the mode: an edit the shell reloads on
+	case 74: { // a reload must keep the mode: an edit the shell reloads on
 		if (out() != nullptr && out()->overview.active() && retries++ < 20) {
 			return -300;
 		}
@@ -1823,7 +1825,7 @@ int run_step() {
 		shot("light-prereload");
 		return 700;
 	}
-	case 34: {
+	case 75: {
 		// Re-enable the user plugin in the config: different bytes, so the
 		// shell reloads — and its widget coming back (its files are still in
 		// the scratch data dir, its label pushing the left section's ink edge
@@ -1837,7 +1839,7 @@ int run_step() {
 		write_file(shell_config, cfg);
 		return 500;
 	}
-	case 35: { // the reload's two proofs: the widget back, the bar still light
+	case 76: { // the reload's two proofs: the widget back, the bar still light
 		LayerSurface *l = bar_layer();
 		cairo_surface_t *pre = load_png("light-prereload");
 		cairo_surface_t *re = load_png("light-reloaded");
@@ -1869,7 +1871,7 @@ int run_step() {
 		click(theme_x, 13); // and back: light -> dark
 		return 500;
 	}
-	case 36: { // the switch's promises, the other way round
+	case 77: { // the switch's promises, the other way round
 		std::string cfg = read_file(shell_config);
 		bool written = cfg.find("\"mode\": \"dark\"") != std::string::npos;
 		bool told = server->theme.mode() == ThemeMode::dark;
@@ -1882,7 +1884,7 @@ int run_step() {
 		shot("dark-restored-bar");
 		return 700;
 	}
-	case 37: { // the bar is dark again
+	case 78: { // the bar is dark again
 		LayerSurface *l = bar_layer();
 		bool dark = l != nullptr
 			&& shot_pixel_is("dark-restored-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_dark);
@@ -1895,7 +1897,7 @@ int run_step() {
 		click(power_x, 13); // and the panel with it
 		return 400;
 	}
-	case 38:
+	case 79:
 		if (panel_layer("power") == nullptr && retries++ < 40) {
 			return -300;
 		}
@@ -1903,7 +1905,7 @@ int run_step() {
 		check(panel_layer("power") != nullptr, "the power panel opened in dark mode");
 		shot("dark-restored-panel");
 		return 700;
-	case 39: { // the panel's card is the dark surface again
+	case 80: { // the panel's card is the dark surface again
 		wlr_box card = card_box(power_x, power_panel);
 		bool dark = shot_pixel_is("dark-restored-panel", card.x + 5, card.y + 5, shell_bg_dark);
 		if (!dark && retries++ < 10) {
@@ -1915,7 +1917,7 @@ int run_step() {
 		click(60.0, 700.0);
 		return 400;
 	}
-	case 40:
+	case 81:
 		if (panel_layers() > 0 && retries++ < 20) {
 			return -300;
 		}
