@@ -46,7 +46,7 @@ What `contributes` may hold:
 | `barWidgets` | `id`, `entry`, `section` (`left`, `center`, `right`), `order`, optional `panel` | In the bar, whichever plugin provides it |
 | `panels` | `id`, `entry` | Through the common trigger; the id names the panel's layer surface, `wayland-canvas-panel-<id>` |
 | `toolbarButtons` | `id`, `icon`, `label`, and one of `action`, `panel`, `menu` ([toolbar.md](toolbar.md)) | In the overview toolbar |
-| `actions` | `id`, `entry` (a component whose `run(args)` performs it) | Wherever a button, a menu entry or the control socket names it |
+| `actions` | `id`, `entry` (a component whose `run(args)` performs it) | Wherever a button, a menu entry or the control socket's `action.run` names it |
 
 `apiVersion` is an integer. A plugin asking for a newer API than the shell
 offers is not loaded.
@@ -87,6 +87,11 @@ second toggle. A bar widget whose manifest names a `panel` opens it on click
 without code of its own. A toolbar button names an `action` (it runs), a
 `panel` (it opens beside the toolbar) or a `menu` (a list of label and
 action entries opening beside the toolbar).
+
+An action also runs from outside the shell: the compositor's `action.run`
+method pushes an `action` event, and the host runs the named plugin
+action with its args ([../platform/ipc.md](../platform/ipc.md)) — so a
+script or a keybinding can create a note without speaking to the shell.
 
 ### The API
 

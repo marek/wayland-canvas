@@ -133,7 +133,7 @@ own the machine's Wayland display namespace and GPU.
   no panel or flyout outliving it. Screenshots of the toolbar, the
   flyout and the panel beside it are inspected on the way.
 
-  Last, adoption and the applications' preference. The machine's real
+  Then adoption and the applications' preference. The machine's real
   color-scheme is read first through a child with the run's isolation
   undone (nothing else may see that environment), then an outside client
   sends `theme.set` light on the control socket — the compositor's own
@@ -147,6 +147,25 @@ own the machine's Wayland display namespace and GPU.
   config), and the machine's color-scheme must read exactly as it started
   (today `prefer-dark`). The write itself is proven by the unit test
   `theme-prefs` against that same private backend.
+
+  Last, the `canvas.notes` plugin end to end, driven
+  only through the public socket: `msg action.run canvas.notes/create`
+  puts a `canvas.notes/...` item in the state, and the plugin's editor
+  must map as a layer surface of the shell client (`namespace
+  wayland-canvas-note-editor`) holding the keyboard on its own surface as
+  it opens — its card checked, pixel by pixel on the screenshot, to sit
+  exactly at the activated box in the note's colour with the darker strip
+  on top. Typing then Escape keeps the text in the state and in the
+  plugin's storage (scratch state); a fake-pointer drag's new place
+  reaches the storage through `item.moved`; a config-rewrite reload
+  leaves exactly the one note in the state (nothing doubled), and once
+  `msg item.remove` took it off the canvas, another reload must put it
+  back from storage — the restart proof. In the overview, the settled
+  camera's own math gives the note's on-screen box; a double-click there
+  opens the editor and typed keys reach it; back in the normal view, a
+  colour dot on the strip recolours the note (state and storage), a click
+  outside closes the editor, the strip's × deletes the note from canvas
+  and storage, and a second note closed with no text is removed too.
 
 ## What they need
 

@@ -42,6 +42,10 @@ constexpr char usage_text[] =
 	"  launcher.toggle    toggle the app launcher (\"output\" param optional)\n"
 	"  overview.toggle    toggle the overview there (\"output\" param optional)\n"
 	"  theme.set          {\"mode\": \"light\"} or {\"mode\": \"dark\"}\n"
+	"  item.set           put or update a canvas item (id, color, text, size, place)\n"
+	"  item.remove        remove a canvas item by id\n"
+	"  item.activate      report an item as double-clicked, by id\n"
+	"  action.run         {\"name\": \"<plugin action>\", \"args\": {...}}\n"
 	"  quit               end the session\n"
 	"\n"
 	"See the keyboard bindings in src/core/config.h and src/input/input.cpp.\n";

@@ -104,6 +104,13 @@ Item {
 
 	Compositor {
 		id: compositor
+
+		// A script's or keybinding's action.run arrives as an event: the
+		// host runs the named plugin action, exactly as a toolbar button
+		// would.
+		onEvent: if (name === "action") {
+			actions.run(params.name, params.args)
+		}
 	}
 
 	// api.theme (and any plugin that wants the mode) talks to this one
@@ -316,8 +323,16 @@ Item {
 		// not compile skips the whole plugin, before anything registers.
 		var compiled = []
 		var problem = ""
+		// A toolbar button is manifest data — icon, label, an action, a
+		// panel or a menu — and names no file, so it compiles nothing.
 		for (var j = 0; j < byKind.length && problem === ""; j++) {
 			var entries = byKind[j][1] || []
+			if (byKind[j][0] === "toolbarButtons") {
+				for (var k = 0; k < entries.length; k++) {
+					compiled.push(["toolbarButtons", entries[k], null])
+				}
+				continue
+			}
 			for (var k = 0; k < entries.length && problem === ""; k++) {
 				var entry = entries[k]
 				if (typeof entry.entry !== "string" || entry.entry === "") {

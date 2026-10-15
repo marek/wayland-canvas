@@ -551,6 +551,8 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"theme.set"}, &Ipc::m_theme_set},
 		std::pair{std::string_view{"item.set"}, &Ipc::m_item_set},
 		std::pair{std::string_view{"item.remove"}, &Ipc::m_item_remove},
+		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
+		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
 	};
 	for (const auto &[method, run] : table) {
 		if (method == name) {
@@ -784,6 +786,75 @@ std::expected<std::string, std::string> Ipc::m_item_remove(Client &, JsonObject 
 	return std::string{"true"};
 }
 
+std::expected<std::string, std::string> Ipc::m_item_activate(Client &,
+		JsonObject *params) {
+	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
+	if (!id.has_value()) {
+		return std::unexpected(id.error());
+	}
+	if (!id->has_value() || (*id)->empty()) {
+		return std::unexpected(std::string{"params: id must be a non-empty string"});
+	}
+	Item *item = server_.items.find(**id);
+	if (item == nullptr) {
+		return std::unexpected(std::format("unknown item id '{}'", **id));
+	}
+	// The output the item is activated on: the one under the cursor when
+	// it shows the item — where a just-placed item sits — else the first
+	// output that does.
+	Rect box{
+		.x = static_cast<double>(item->x),
+		.y = static_cast<double>(item->y),
+		.w = static_cast<double>(item->width),
+		.h = static_cast<double>(item->height),
+	};
+	Output *chosen = nullptr;
+	if (Output *under = server_.output_under_cursor();
+			under != nullptr && under->viewport().intersects(box)) {
+		chosen = under;
+	} else {
+		for (const std::unique_ptr<Output> &output : server_.outputs) {
+			if (output->viewport().intersects(box)) {
+				chosen = output.get();
+				break;
+			}
+		}
+	}
+	if (chosen == nullptr) {
+		return std::unexpected(
+			std::format("the item '{}' is on no output's screen", **id));
+	}
+	emit_item_activated(*item, *chosen);
+	return std::string{"true"};
+}
+
+std::expected<std::string, std::string> Ipc::m_action_run(Client &,
+		JsonObject *params) {
+	constexpr std::string_view usage =
+		"params: name must be a non-empty string, args an object";
+	if (params == nullptr || !json_object_has_member(params, "name")) {
+		return std::unexpected(std::string{usage});
+	}
+	JsonNode *name = json_object_get_member(params, "name");
+	const char *name_text = name != nullptr
+			&& json_node_get_node_type(name) == JSON_NODE_VALUE
+			&& json_node_get_value_type(name) == G_TYPE_STRING
+		? json_node_get_string(name) : nullptr;
+	if (name_text == nullptr || *name_text == '\0') {
+		return std::unexpected(std::string{usage});
+	}
+	std::string args_json = "{}";
+	if (json_object_has_member(params, "args")) {
+		JsonNode *args = json_object_get_member(params, "args");
+		if (json_node_get_node_type(args) != JSON_NODE_OBJECT) {
+			return std::unexpected(std::string{usage});
+		}
+		args_json = node_text(args);
+	}
+	emit_action(name_text, args_json);
+	return std::string{"true"};
+}
+
 // --------------------------------------------------------------- writing
 
 void Ipc::queue(Client &client, std::string_view line) {
@@ -926,6 +997,16 @@ void Ipc::emit_item_activated(const Item &item, const Output &output) {
 		json_builder_add_double_value(builder, item.height * zoom);
 		json_builder_end_object(builder);
 	}));
+}
+
+void Ipc::emit_action(std::string_view name, std::string_view args_json) {
+	// Spliced by hand: a builder cannot hold a bare object as a value.
+	std::string params = "{\"name\":";
+	params += quote(name);
+	params += ",\"args\":";
+	params += args_json;
+	params += "}";
+	push_event("action", params);
 }
 
 // ------------------------------------------------------------ the source

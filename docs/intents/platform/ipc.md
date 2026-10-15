@@ -59,12 +59,20 @@ request; responses come in request order.
 | `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (a seat session) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
 | `item.set` | `id`; `color` (`#rrggbb`); `text`; `width`, `height` (canvas px); `x`, `y` (canvas, the top-left) | The item as placed: `{"id", "x", "y", "width", "height"}` |
 | `item.remove` | `id` | `true`; an error for an unknown id |
+| `item.activate` | `id` | `true`; the compositor reports the item exactly as a double-click does — the `item.activated` event with its output and output-local box — so a plugin can open an editor over an item it just placed. An error for an unknown id, or when the item is on no output's screen |
+| `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
 
 `item.set` creates the item or updates the one with that id. Without `x`
 and `y`, a new item is centred on what the output under the cursor shows
 (the overview's target there, when that output is in the overview); an
 update keeps its place. Ids are the plugin's own strings, named
 `<plugin id>/<item id>` by the shell.
+
+`action.run` is the compositor's way into the shell: it only delivers the
+event (the action itself belongs to a plugin), so a script or a
+keybinding can run a shell action without speaking to the shell directly —
+`wayland-canvas msg action.run '{"name":"canvas.notes/create",
+"args":{"color":"#ffd866"}}'`.
 
 ### State
 
@@ -83,7 +91,8 @@ update keeps its place. Ids are the plugin's own strings, named
 | `desktops` | `desktops`, as in the state | A desktop is created, moved, combined or abandoned |
 | `theme` | `mode` | The mode changes, by any client; the shell adopts it — [../shell/theme.md](../shell/theme.md) |
 | `item.moved` | `id`, `x`, `y` | The user dropped a dragged item |
-| `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item |
+| `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item, or a client ran `item.activate` |
+| `action` | `name`, `args` | A client ran `action.run`; the host runs the named plugin action |
 
 ### Canvas items
 

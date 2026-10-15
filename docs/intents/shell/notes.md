@@ -26,12 +26,17 @@ were put across restarts.
 - **Editing happens over the note**: the editor opens exactly where the
   note is on screen and has the keyboard at once, so editing feels in
   place.
+- **One event opens the editor**: the compositor's `item.activated` —
+  whether a double-click or the create action's `item.activate` caused it
+  — carries the output and the note's box on it, so the editor always
+  opens exactly at the note, in the normal view and the overview alike.
 
 ## Behavior
 
 | Subject | Rule |
 |---|---|
 | Create | The toolbar's note button expands into colour swatches; choosing one puts a note of that colour at the centre of what the overview is aimed at, and opens its editor |
+| Action | `canvas.notes/create {color}`: the one action behind it all — the toolbar's entries run it, and so does the control socket's `action.run`, so a script or a keybinding can put a note too. It places the note (no place of its own, so the compositor centres it), keeps it, and activates it |
 | Colours | Yellow, green, blue, pink, purple and orange; the values are the plugin's settings |
 | Size | 220 × 220 canvas px, a plugin setting |
 | Look | A card of the note's colour, a darker strip along the top, the text in dark ink |
@@ -49,6 +54,8 @@ were put across restarts.
   from storage, so none is lost or doubled.
 - A note dragged while its editor is open: the editor closes first, keeping
   the text.
+- A note not on any output's screen cannot be activated: `item.activate`
+  answers an error and no editor opens.
 
 ## Cross-links
 
