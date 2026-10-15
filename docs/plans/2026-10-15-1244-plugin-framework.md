@@ -20,7 +20,7 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 - [x] Methods and events as the IPC intent lists them (the canvas items' aside), the state report, and `wayland-canvas msg <method> [params]` with `msg subscribe`
 - [x] Canvas items: drawn above windows in canvas space, dragged in the normal view and the overview, double-click reported; their methods, events and state
 - [x] The compositor's two palettes (title bars, canvas, overview UI, launcher, hints), switched by `theme.set`
-- [ ] In the overview, shell surfaces above the windows (the bar, the toolbar, panels, the note editor) take the pointer, and one holding the keyboard takes the keys before the overview's own
+- [x] In the overview, shell surfaces above the windows (the bar, the toolbar, panels, the note editor) take the pointer, and one holding the keyboard takes the keys before the overview's own
 
 ## Plugin host
 
