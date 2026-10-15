@@ -108,8 +108,10 @@ Item {
 		// A script's or keybinding's action.run arrives as an event: the
 		// host runs the named plugin action, exactly as a toolbar button
 		// would.
-		onEvent: if (name === "action") {
-			actions.run(params.name, params.args)
+		onEvent: function(name, params) {
+			if (name === "action") {
+				actions.run(params.name, params.args)
+			}
 		}
 	}
 
