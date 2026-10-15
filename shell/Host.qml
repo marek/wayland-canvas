@@ -40,7 +40,8 @@ Item {
 	// <datadir>/wayland-canvas once installed.
 	readonly property string builtinDir: Quickshell.shellPath("../plugins")
 	readonly property string userDir: xdgHome("XDG_DATA_HOME", ".local/share") + "/wayland-canvas/plugins"
-	readonly property string configPath: xdgHome("XDG_CONFIG_HOME", ".config") + "/wayland-canvas/shell.json"
+	readonly property string configDir: xdgHome("XDG_CONFIG_HOME", ".config") + "/wayland-canvas"
+	readonly property string configPath: configDir + "/shell.json"
 
 	function xdgHome(variable, fallback) {
 		var value = Quickshell.env(variable)
@@ -60,9 +61,13 @@ Item {
 	// ---- the config: $XDG_CONFIG_HOME/wayland-canvas/shell.json ----
 
 	property var config: ({})
-	// True just after the host itself wrote the config: the next change the
-	// watcher sees is that write, not an edit to reload on.
-	property bool configWritePending: false
+
+	// The config file is watched for edits like everything else, with one
+	// difference: the host writes it itself (setSetting, setMode), and one
+	// such write is seen as several inotify events — a change inside this
+	// window is taken to be that write, not an edit to reload on.
+	readonly property int ownWriteGraceMs: 250
+	property double lastConfigWrite: 0
 
 	FileView {
 		id: configFile
@@ -71,6 +76,8 @@ Item {
 		blockAllReads: true
 		blockWrites: true
 		printErrors: false
+		watchChanges: true
+		onFileChanged: host.requestReload()
 	}
 
 	function loadConfig() {
@@ -88,8 +95,8 @@ Item {
 	// Persists the config; the shell keeps running on the values it already
 	// applied, and the write is not mistaken for an edit.
 	function writeConfig() {
+		lastConfigWrite = Date.now()
 		configFile.setText(JSON.stringify(config, null, "\t") + "\n")
-		configWritePending = true
 	}
 
 	// ---- the shared api pieces ----
@@ -200,6 +207,7 @@ Item {
 
 	function loadPlugins() {
 		var loaded = []
+		var storageDirs = []
 		var ids = Object.keys(candidates)
 		for (var i = 0; i < ids.length; i++) {
 			var id = ids[i]
@@ -219,7 +227,7 @@ Item {
 				{host: host, pluginId: id, manifest: manifest})
 			var storage = storageApiComponent.createObject(host,
 				{dir: xdgHome("XDG_STATE_HOME", ".local/state") + "/wayland-canvas/plugins/" + id})
-			makeStorageDir(storage.dir)
+			storageDirs.push(storage.dir)
 			loaded.push({
 				id: id,
 				dir: candidate.dir,
@@ -234,13 +242,22 @@ Item {
 				},
 			})
 		}
+		// Each plugin's storage directory appears when its api does.
+		ensureDirs(storageDirs)
 		plugins = loaded
 		buildRegistry()
 	}
 
-	// A plugin's storage directory appears when its api does.
-	function makeStorageDir(dir) {
-		mkdir.command = ["/bin/sh", "-c", "mkdir -p " + shellQuote(dir)]
+	// The directories the shell owns, made with one process, once.
+	function ensureDirs(dirs) {
+		if (dirs.length === 0) {
+			return
+		}
+		var script = "mkdir -p"
+		for (var i = 0; i < dirs.length; i++) {
+			script += " " + shellQuote(dirs[i])
+		}
+		mkdir.command = ["/bin/sh", "-c", script]
 		mkdir.running = true
 	}
 
@@ -440,7 +457,7 @@ Item {
 	function start() {
 		theme.start()
 		startSurfaces()
-		captureDigest()
+		installWatchers()
 	}
 
 	function startSurfaces() {
@@ -487,55 +504,84 @@ Item {
 
 	// ---- edits apply while the shell runs ----
 
-	// A digest of the config and every file under every plugin directory,
-	// taken when the shell comes up and then polled: any change — an edit,
-	// a file, a whole plugin folder appearing — reloads the shell with it.
-	// (qs itself watches the host's QML files and reloads on their own.)
-	property string digest: ""
+	// Quickshell itself watches only the root shell.qml: a module the
+	// engine loaded from QML_IMPORT_PATH (the UI kit) and the plugins'
+	// files, compiled with Qt.createComponent from outside the shell
+	// dir, are not on its lists, so the host watches them itself. A
+	// FileView with watchChanges rides on inotify: pointed at a file it
+	// reports edits to it (a directory's watcher stays quiet on those),
+	// pointed at a directory it reports entries appearing or going (a
+	// plugin folder dropped in, a file added, an editor's rename-over).
+	// Every path under every plugin root, under the shell's own dir and
+	// under the config's dir gets one.
+
+	// One change is seen as several inotify events, and a file written
+	// in place is seen mid-write: reloading waits out a short settle
+	// that any further event re-arms, so one burst of events — one
+	// human edit, one finished write — becomes one reload. The settle
+	// runs only while a change is landing: an idle shell has nothing
+	// running, no timer, no process.
+	readonly property int settleMs: 200
 
 	Timer {
-		id: watch
-		interval: 1500
-		repeat: true
-		onTriggered: if (!digestProcess.running) digestProcess.running = true
+		id: settle
+		interval: host.settleMs
+		onTriggered: {
+			console.log("[plugins] the config or a plugin changed: reloading")
+			Quickshell.reload(false)
+		}
 	}
 
+	function requestReload() {
+		if (Date.now() - lastConfigWrite < ownWriteGraceMs) {
+			// The host's own config write, however the watcher saw it.
+			return
+		}
+		settle.restart()
+	}
+
+	Component {
+		id: fileWatcher
+		FileView {
+			watchChanges: true
+			preload: false
+			blockWrites: true
+			printErrors: false
+			onFileChanged: host.requestReload()
+		}
+	}
+
+	// One process, once, when the shell comes up: every path worth
+	// watching under the plugin roots, the shell's dir and the config's
+	// dir (the config file itself has its own watcher above, which tells
+	// the host's writes from edits).
 	Process {
-		id: digestProcess
+		id: watchLister
 		stdout: StdioCollector {
 			waitForEnd: true
-			onStreamFinished: host.digestTaken(text)
+			onStreamFinished: host.watchListed(text)
 		}
 	}
 
-	function captureDigest() {
-		var roots = [builtinDir, userDir].concat(config.pluginPaths || [])
+	function installWatchers() {
+		var dirs = [builtinDir, userDir, Quickshell.shellPath(""), configDir]
+			.concat(config.pluginPaths || [])
 		var script = []
-		for (var i = 0; i < roots.length; i++) {
-			script.push("find " + shellQuote(roots[i]) + " -type f -printf '%p %s %T@\\n' 2>/dev/null")
+		for (var i = 0; i < dirs.length; i++) {
+			script.push("find " + shellQuote(dirs[i]) + " 2>/dev/null")
 		}
-		script.push("stat -c '%n %s %Y' " + shellQuote(configPath) + " 2>/dev/null")
-		digestProcess.command = ["/bin/sh", "-c", script.join("; ")]
-		digestProcess.running = true
+		watchLister.command = ["/bin/sh", "-c", script.join("; ")]
+		watchLister.running = true
 	}
 
-	function digestTaken(raw) {
-		if (digest === "") {
-			// The baseline: this is what the shell came up with.
-			digest = raw
-			watch.running = true
-			return
+	function watchListed(raw) {
+		var lines = String(raw).split("\n")
+		for (var i = 0; i < lines.length; i++) {
+			var path = lines[i]
+			if (path === "" || path === configPath) {
+				continue
+			}
+			fileWatcher.createObject(host, {path: path})
 		}
-		if (raw === digest) {
-			return
-		}
-		if (configWritePending) {
-			// The host's own config write: adopt the new state, keep running.
-			digest = raw
-			configWritePending = false
-			return
-		}
-		console.log("[plugins] the config or a plugin changed: reloading")
-		Quickshell.reload(false)
 	}
 }

@@ -57,6 +57,13 @@ std::string user_plugin; // the canvas.hello plugin staged for step 11
 std::string staged_plugin; // where its files wait until the drop-in
 std::size_t base_runs = 0; // the bar's run count before the user plugin
 int plugin_retries = 0; // the plugin phase's own retry counter (steps move)
+double user_x1 = 0; // the user widget's right edge, before the QML edit
+pid_t bar_pid = 0; // the shell client, for the idle spawn watch
+int idle_ticks = 0; // samples left of the idle watch
+bool idle_spawned = false; // any child of the shell seen while idle
+constexpr int idle_sample_count = 1000; // 10 s of samples
+constexpr int idle_sample_ms = 10;
+constexpr double widen_px = 20; // how much the edited widget must grow
 
 // ---- isolation: private buses and the stand-in services on them ----
 
@@ -367,6 +374,44 @@ std::string proc_env_value(pid_t pid, const char *key) {
 	}
 	return {};
 }
+
+// Whether a live process has any child right now, as /proc tells it —
+// the idle watch: a shell that reloads by change notifications must
+// spawn nothing while it just sits there.
+bool proc_has_children(pid_t pid) {
+	if (pid <= 0) {
+		return false;
+	}
+	std::string tasks = std::format("/proc/{}/task", pid);
+	DIR *dir = opendir(tasks.c_str());
+	if (dir == nullptr) {
+		return false;
+	}
+	bool any = false;
+	struct dirent *e = nullptr;
+	while (!any && (e = readdir(dir)) != nullptr) {
+		if (e->d_name[0] == '.') {
+			continue;
+		}
+		FILE *f = std::fopen((tasks + "/" + e->d_name + "/children").c_str(), "r");
+		if (f == nullptr) {
+			continue;
+		}
+		char buf[512];
+		while (!any && std::fgets(buf, sizeof buf, f) != nullptr) {
+			for (const char *p = buf; *p != '\0'; p++) {
+				if (*p != ' ' && *p != '\n') {
+					any = true;
+					break;
+				}
+			}
+		}
+		std::fclose(f);
+	}
+	closedir(dir);
+	return any;
+}
+
 // ---- input, through the same fake devices libinput events reach ----
 
 void key(uint32_t code, bool pressed) {
@@ -1342,9 +1387,9 @@ int run_step() {
 		cairo_surface_destroy(s);
 		bool appeared = runs.size() == base_runs + 1 && runs.size() >= 2
 			&& runs[1].x1 < 300; // the new run sits beside the logo, left of centre
-		// The reload takes a digest poll and a remap, and the walk's own
-		// retry counter is reset on every step move, so this phase keeps its
-		// own: re-shoot and look again until the widget shows (or gives up).
+		// A reload takes its own remap, and the walk's own retry counter
+		// is reset on every step move, so this phase keeps its own:
+		// re-shoot and look again until the widget shows (or gives up).
 		if (!appeared && plugin_retries++ < 40) {
 			shot("bar-user");
 			step = 12; // stay on this check (handle_timer steps forward again)
@@ -1352,17 +1397,55 @@ int run_step() {
 		}
 		check(appeared, std::format("the user plugin's bar widget appeared after it "
 			"was dropped into the data dir ({} runs, was {})", runs.size(), base_runs));
-		// Disable it in the scratch config: the shell reloads without it.
+		user_x1 = runs.size() >= 2 ? runs[1].x1 : 0;
+		// Edit the loaded plugin's own QML while the shell runs: the
+		// shell reloads with it — the widget becomes a labelled one.
+		write_file(user_plugin + "/Hello.qml",
+			"import QtQuick\nimport WaylandCanvas.Ui\nBarButton {\n"
+			"\ttext: \"HELLO SHELL\"\n}\n");
+		return 500;
+	}
+	case 14: // the shell reloads with the edited plugin
+		plugin_retries = 0;
+		shot("bar-wide");
+		return 700;
+	case 15: {
+		cairo_surface_t *s = load_png("bar-wide");
+		LayerSurface *layer = bar_layer();
+		std::vector<Run> runs = s != nullptr && layer != nullptr
+			? bar_runs(s, layer->geo) : std::vector<Run>{};
+		cairo_surface_destroy(s);
+		// The widget may now merge into the logo's run, so what is
+		// measured is the left section's right edge — the rightmost lit
+		// pixel short of the centred widgets — which the wider widget
+		// must have pushed right.
+		double left_right = 0;
+		for (std::size_t i = 0; i < runs.size(); i++) {
+			if (runs[i].x1 < screen_w / 2.0 - 250 && runs[i].x1 > left_right) {
+				left_right = runs[i].x1;
+			}
+		}
+		bool widened = layer != nullptr && left_right >= user_x1 + widen_px;
+		if (!widened && plugin_retries++ < 40) {
+			shot("bar-wide");
+			step = 14;
+			return 700;
+		}
+		check(widened, std::format("editing the loaded plugin's QML file while the "
+			"shell runs changed the bar (the left section's right edge {} to {} px)",
+			user_x1, left_right));
+		// Disable the plugin in the scratch config: the shell reloads
+		// without it.
 		write_file(shot_dir + "/xdg/config/wayland-canvas/shell.json",
 			"{\n\t\"plugins\": {\n\t\t\"canvas.hello\": {\n\t\t\t\"enabled\": false\n"
 			"\t\t}\n\t}\n}\n");
 		return 500;
 	}
-	case 14: // the shell reloads again, without the disabled plugin
+	case 16: // the shell reloads again, without the disabled plugin
 		plugin_retries = 0;
 		shot("bar-disabled");
 		return 700;
-	case 15: {
+	case 17: {
 		cairo_surface_t *s = load_png("bar-disabled");
 		LayerSurface *layer = bar_layer();
 		std::vector<Run> runs = s != nullptr && layer != nullptr
@@ -1372,13 +1455,33 @@ int run_step() {
 			&& (runs.size() < 2 || runs[1].x1 >= 300); // no run beside the logo
 		if (!gone && plugin_retries++ < 40) {
 			shot("bar-disabled");
-			step = 14;
+			step = 16;
 			return 700;
 		}
 		check(gone, std::format("disabling the user plugin in the config removed its "
 			"widget ({} runs, was {} after the drop-in)", runs.size(), base_runs + 1));
-		return 100; // done: the summary prints and the run ends
+		// Then the idle watch: the reloads above were change
+		// notifications, so a shell that just sits there must spawn
+		// nothing — no watcher poll, ever.
+		bar_pid = 0;
+		if (bar_client() != nullptr) {
+			wl_client_get_credentials(bar_client(), &bar_pid, nullptr, nullptr);
+		}
+		idle_ticks = idle_sample_count;
+		idle_spawned = false;
+		return idle_sample_ms;
 	}
+	case 18: // every few milliseconds, one look at the shell's children
+		if (proc_has_children(bar_pid)) {
+			idle_spawned = true;
+		}
+		if (idle_ticks-- > 0) {
+			return -idle_sample_ms; // same step again: the watch continues
+		}
+		check(!idle_spawned && bar_pid > 0, std::format("an idle shell spawned no "
+			"processes ({} samples over {} s)", idle_sample_count,
+			idle_sample_count * idle_sample_ms / 1000));
+		return 100; // done: the summary prints and the run ends
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);

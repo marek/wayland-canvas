@@ -81,9 +81,13 @@ Wayland display namespace and GPU.
   accounted for — logo, clock and weather, one tray item, this machine's
   indicators, nothing more), a user plugin dropped in while the shell runs
   appears as the bar's second run without anything of the shell being
-  touched, and disabling it in the scratch `shell.json` removes it again —
-  both through the shell's own reload, with the skip reasons visible as
-  `[plugins]` lines in the test log.
+  touched, editing the loaded plugin's QML turns its widget into a
+  labelled one and pushes the bar's left edge further right, and
+  disabling it in the scratch `shell.json` removes it again — every one
+  through the shell's own reload, with the skip reasons visible as
+  `[plugins]` lines in the test log. Last, an idle watch: the shell is
+  sampled about every 10 ms for 10 s and must have spawned no process at
+  all, because the reloads ride on change notifications, not on a poll.
 
 ## What they need
 
