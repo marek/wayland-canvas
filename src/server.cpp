@@ -2,16 +2,100 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <format>
+#include <limits.h>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "layer.h"
 #include "output.h"
 #include "server.h"
 #include "view.h"
 
 namespace {
+
+bool is_dir(const std::string &path) {
+	struct stat st{};
+	return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// True when `name` names an executable on $PATH.
+bool program_on_path(const char *name) {
+	if (strchr(name, '/') != nullptr) {
+		return access(name, X_OK) == 0;
+	}
+	const char *path = getenv("PATH");
+	if (path == nullptr) {
+		return false;
+	}
+	std::string_view rest = path;
+	while (!rest.empty()) {
+		std::string_view entry;
+		std::size_t colon = rest.find(':');
+		if (colon == std::string_view::npos) {
+			entry = rest;
+			rest = {};
+		} else {
+			entry = rest.substr(0, colon);
+			rest.remove_prefix(colon + 1);
+		}
+		if (entry.empty()) {
+			entry = ".";
+		}
+		std::string candidate = std::string(entry) + "/" + name;
+		if (access(candidate.c_str(), X_OK) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// The directory holding the bar's Quickshell config: $WAYLAND_CANVAS_SHELL_DIR
+// when set, else beside the compositor binary — the build tree's shell/, then
+// the installed share/wayland-canvas/shell.
+std::optional<std::string> bar_shell_dir() {
+	if (const char *env = getenv("WAYLAND_CANVAS_SHELL_DIR")) {
+		if (is_dir(env)) {
+			return env;
+		}
+	}
+	char self[PATH_MAX];
+	ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+	if (n <= 0) {
+		return std::nullopt;
+	}
+	std::string dir(self, static_cast<std::size_t>(n));
+	if (std::size_t slash = dir.rfind('/'); slash != std::string::npos) {
+		dir.resize(slash);
+	}
+	for (const char *rel : {config::bar_shell_build_dir, config::bar_shell_install_dir}) {
+		std::string candidate = dir + "/" + rel;
+		if (is_dir(candidate)) {
+			return candidate;
+		}
+	}
+	return std::nullopt;
+}
+
+// Single-quotes `text` for /bin/sh.
+std::string shell_quote(std::string_view text) {
+	std::string out = "'";
+	for (char c : text) {
+		if (c == '\'') {
+			out += "'\\''";
+		} else {
+			out += c;
+		}
+	}
+	out += '\'';
+	return out;
+}
 
 // Keeps the idle notifier inhibited while at least one inhibitor is alive;
 // `delta` adjusts for the one whose destroy signal is running.
@@ -114,13 +198,14 @@ struct Server::Inhibitor {
 
 Server::Server()
 	: input(*this), gestures(*this), hint(*this), launcher(*this),
-	painter(*this), decorations(*this), canvas(*this) {
+	painter(*this), decorations(*this), canvas(*this), ipc(*this) {
 }
 
 Server::~Server() {
 	if (display != nullptr) {
 		wl_display_destroy_clients(display);
 	}
+	ipc.finish();
 	launcher.finish();
 	painter.finish();
 	hint.finish();
@@ -236,11 +321,38 @@ bool Server::start() {
 	}
 	setenv("WAYLAND_DISPLAY", socket, true);
 	unsetenv("DISPLAY");
+	// A nested run inherits the host compositor's control sockets; unset them
+	// so no client of ours reaches the host.
+	unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
+	unsetenv("SWAYSOCK");
+	unsetenv("I3SOCK");
+	unsetenv("NIRI_SOCKET");
+	// Before any client is spawned, so they inherit the socket path.
+	ipc.init();
 	wlr_log(WLR_INFO, "Running wayland-canvas on WAYLAND_DISPLAY=%s", socket);
+	if (options.start_bar) {
+		start_bar();
+	}
 	if (options.startup_cmd != nullptr) {
 		spawn(options.startup_cmd);
 	}
 	return true;
+}
+
+// Autostarts the top bar when its client and its config are both present.
+void Server::start_bar() {
+	if (!program_on_path(config::bar_program)) {
+		wlr_log(WLR_INFO, "%s is not on PATH: no top bar", config::bar_program);
+		return;
+	}
+	std::optional<std::string> dir = bar_shell_dir();
+	if (!dir) {
+		wlr_log(WLR_INFO,
+			"no bar config beside the binary or at $WAYLAND_CANVAS_SHELL_DIR: no top bar");
+		return;
+	}
+	std::string cmd = std::format("{} -p {}", config::bar_program, shell_quote(*dir));
+	spawn(cmd.c_str());
 }
 
 void Server::handle_new_surface(wlr_surface *surface) {

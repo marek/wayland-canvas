@@ -91,6 +91,7 @@ core_lib = static_library(
 		'src/gesture.cpp',
 		'src/icons.cpp',
 		'src/input.cpp',
+		'src/ipc.cpp',
 		'src/launcher.cpp',
 		'src/overview.cpp',
 		'src/layer.cpp',
@@ -105,13 +106,20 @@ core_lib = static_library(
 		glib, libinput, libdrm],
 )
 
-executable(
+wayland_canvas = executable(
 	'wayland-canvas',
 	'src/main.cpp',
 	protocol_headers,
 	link_with: core_lib,
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, libinput, libdrm],
 	install: true,
+)
+
+# The top bar's Quickshell config: found beside the binary in the build tree,
+# and under <prefix>/share/wayland-canvas once installed.
+install_subdir(
+	'shell',
+	install_dir: get_option('datadir') / 'wayland-canvas',
 )
 
 test(
@@ -145,7 +153,8 @@ grim_prog = find_program('grim', required: false)
 if foot_prog.found() and grim_prog.found()
 	scenario_env = environment()
 	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
-	foreach scenario : ['gestures', 'input', 'launcher']
+	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
+	foreach scenario : ['gestures', 'input', 'launcher', 'ipc']
 		test(
 			scenario,
 			executable(

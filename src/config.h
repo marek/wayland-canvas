@@ -90,4 +90,16 @@ inline constexpr uint32_t color_launcher_text = 0xffffffff;
 inline constexpr uint32_t color_launcher_dim_text = 0x9a9a9aff;
 inline constexpr uint32_t color_launcher_backdrop = 0x00000060;
 
+// Top bar: a Quickshell client autostarted by Server::start() when qs is on
+// PATH. Its config is found beside the compositor binary at one of the two
+// relative paths below (build tree, install prefix), or at
+// $WAYLAND_CANVAS_SHELL_DIR when set. -B starts the compositor without it.
+inline constexpr const char *bar_program = "qs";
+inline constexpr const char *bar_shell_build_dir = "../shell";
+inline constexpr const char *bar_shell_install_dir = "../share/wayland-canvas/shell";
+
+// Control socket for shell clients and `wayland-canvas msg`, created in
+// $XDG_RUNTIME_DIR as <prefix>-<wayland display>.sock and exported to
+// spawned clients as $WAYLAND_CANVAS_SOCKET.
+inline constexpr const char *ipc_socket_prefix = "wayland-canvas";
 } // namespace config

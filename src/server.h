@@ -9,6 +9,7 @@
 #include "geometry.h"
 #include "gesture.h"
 #include "input.h"
+#include "ipc.h"
 #include "launcher.h"
 #include "render.h"
 #include "util.h"
@@ -19,6 +20,7 @@ class Output;
 
 struct Options {
 	const char *startup_cmd = nullptr;
+	bool start_bar = true; // autostart the top bar when qs is available
 	double scale = 0; // 0: pick per output
 };
 
@@ -98,6 +100,7 @@ public:
 	Painter painter;
 	Decorations decorations;
 	Canvas canvas;
+	Ipc ipc;
 
 private:
 	// output.cpp
@@ -126,6 +129,7 @@ private:
 	void handle_new_surface(wlr_surface *surface);
 	void handle_request_activate(wlr_xdg_activation_v1_request_activate_event *event);
 	static int handle_terminate_signal(int signal, void *data);
+	void start_bar();
 	void handle_new_inhibitor(wlr_idle_inhibitor_v1 *inhibitor);
 	std::vector<std::unique_ptr<SurfaceTracker>> trackers_;
 	std::vector<std::unique_ptr<Inhibitor>> inhibitors_;

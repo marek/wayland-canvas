@@ -1,13 +1,16 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 
+#include "ipc.h"
 #include "server.h"
 
 namespace {
 
 constexpr char usage_text[] =
-	"usage: wayland-canvas [-s <startup command>] [-S <scale>] [-d] [-h]\n"
+	"usage: wayland-canvas [-s <startup command>] [-S <scale>] [-d] [-B] [-h]\n"
+	"       wayland-canvas msg <command>\n"
 	"\n"
 	"An infinite-canvas Wayland compositor: virtual desktops are dashed\n"
 	"frames you drag around freely on an unbounded zoomable canvas.\n"
@@ -17,6 +20,7 @@ constexpr char usage_text[] =
 	"  -S <scale>    fixed output scale (default: picked per output;\n"
 	"                can also be set via $WAYLAND_CANVAS_SCALE)\n"
 	"  -d            enable debug logging\n"
+	"  -B            start without the top bar\n"
 	"  -h            show this help and exit\n"
 	"\n"
 	"Touchpad gestures:\n"
@@ -32,6 +36,11 @@ constexpr char usage_text[] =
 	"    4-finger swipe sideways  swipe a desktop away (abandon it)\n"
 	"    2-finger pinch     zoom the overview around the cursor\n"
 	"\n"
+	"Control commands, over $WAYLAND_CANVAS_SOCKET (wayland-canvas msg):\n"
+	"  launcher      toggle the app launcher on the output under the cursor\n"
+	"  overview      toggle the overview there\n"
+	"  quit          end the session\n"
+	"\n"
 	"See the keyboard bindings in src/config.h and src/input.cpp.\n";
 
 } // namespace
@@ -42,6 +51,21 @@ int main(int argc, char *argv[]) {
 	double scale = 0;
 	bool have_scale = false;
 
+	// The one non-compositor mode: send a control command to a running
+	// compositor through $WAYLAND_CANVAS_SOCKET.
+	if (argc > 1 && strcmp(argv[1], "msg") == 0) {
+		if (argc != 3 || *argv[2] == '\0') {
+			std::fputs("usage: wayland-canvas msg <command>\n", stderr);
+			return 2;
+		}
+		std::optional<std::string> response = send_ipc_message(argv[2]);
+		if (!response) {
+			return 1;
+		}
+		std::printf("%s\n", response->c_str());
+		return response->rfind("error", 0) == 0 ? 1 : 0;
+	}
+
 	// The environment variable is the default; -S overrides it.
 	const char *scale_env = getenv("WAYLAND_CANVAS_SCALE");
 	if (scale_env != nullptr) {
@@ -50,7 +74,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	int opt;
-	while ((opt = getopt(argc, argv, "s:S:dh")) != -1) {
+	while ((opt = getopt(argc, argv, "s:S:dBh")) != -1) {
 		switch (opt) {
 		case 's':
 			options.startup_cmd = optarg;
@@ -61,6 +85,9 @@ int main(int argc, char *argv[]) {
 			break;
 		case 'd':
 			debug = true;
+			break;
+		case 'B':
+			options.start_bar = false;
 			break;
 		case 'h':
 			std::fputs(usage_text, stdout);

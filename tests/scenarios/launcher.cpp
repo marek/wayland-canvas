@@ -279,6 +279,7 @@ int main() {
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();
 	Options options;
+	options.start_bar = false; // the suites never spawn the bar
 	if (!server->init(options) || !server->start()) {
 		server.reset();
 		return 2;
