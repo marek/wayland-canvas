@@ -56,7 +56,7 @@ request; responses come in request order.
 | `launcher.toggle` | `output` (optional; default the output under the cursor) | `true` |
 | `overview.toggle` | `output` (optional, as above) | `true`; an error without an output |
 | `quit` | — | `true`, then the session ends |
-| `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (the DRM backend) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
+| `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (a seat session) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
 | `item.set` | `id`; `color` (`#rrggbb`); `text`; `width`, `height` (canvas px); `x`, `y` (canvas, the top-left) | The item as placed: `{"id", "x", "y", "width", "height"}` |
 | `item.remove` | `id` | `true`; an error for an unknown id |
 

@@ -21,10 +21,10 @@ choice is kept across restarts.
 - **The applications' preference is the compositor's to write**: every
   `theme.set` — the shell's switch, the shell's start push, an outside
   client's call — makes the compositor set `org.gnome.desktop.interface`
-  `color-scheme` to match, but only when it is the real session (the DRM
-  backend, started from a TTY). The compositor alone knows its own
-  backend, so the shell needs to know nothing; a nested or headless run
-  never writes the setting.
+  `color-scheme` to match, but only when it is the real session (it opened
+  a seat session, from a TTY). The compositor alone knows whether it
+  opened one, so the shell needs to know nothing; a nested or headless
+  run never writes the setting.
 - **The switch is a plugin** (`canvas.theme`, the right-most bar widget)
   like every bar widget, so another plugin can read the mode, follow it or
   offer its own switch.

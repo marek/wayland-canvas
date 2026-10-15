@@ -648,9 +648,10 @@ std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *p
 	server_.set_theme(resolved);
 	// Every theme.set — the shell's switch, the shell's start push, an
 	// outside client's call — also sets the applications' preference, but
-	// only when this compositor is the real session (docs/intents/shell/
-	// theme.md): it alone knows its own backend.
-	theme_prefs::apply(resolved, wlr_backend_is_drm(server_.backend));
+	// only when this compositor is the real session, which here means it
+	// opened a seat session from a TTY (docs/intents/shell/theme.md):
+	// nested and headless runs never get one.
+	theme_prefs::apply(resolved, server_.session != nullptr);
 	return std::string{"true"};
 }
 
