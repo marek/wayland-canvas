@@ -438,8 +438,9 @@ void Gesture::hold_begin(uint32_t time, uint32_t fingers) {
 	if (out == nullptr) {
 		return;
 	}
-	// Touching the pad halts any coasting momentum.
-	out->camera.halt();
+	// Touching the pad stops any coasting momentum; an eased pan or zoom
+	// keeps running and lands.
+	out->camera.stop_coast();
 	if (out->interactive()) {
 		wlr_pointer_gestures_v1_send_hold_begin(server_.pointer_gestures,
 			server_.seat, time, fingers);

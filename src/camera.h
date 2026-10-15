@@ -23,7 +23,8 @@ public:
 	void animate_to(const Camera &to); // eased pan over config::anim_ms
 	void animate_zoom(const Camera &near, const Camera &far, double p0, double p1);
 	void coast(double vx, double vy); // momentum, canvas units per ms
-	void halt(); // stops animation and momentum
+	void stop(); // stops animation and momentum
+	void stop_coast(); // touching the pad: stops the momentum only
 	bool tick(double now); // advances; true while still moving
 	bool coasting() const;
 	bool panning() const; // coasting or an eased pan running

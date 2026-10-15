@@ -105,7 +105,7 @@ Camera Overview::camera_for(const Camera &home) const {
 }
 
 Camera Overview::prepare() {
-	output_.camera.halt();
+	output_.camera.stop();
 	Camera home = output_.camera.current();
 	home.zoom = 1;
 	home_ = home;

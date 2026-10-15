@@ -35,7 +35,7 @@ Camera CameraMotion::drawn() const {
 	return cam;
 }
 
-void CameraMotion::halt() {
+void CameraMotion::stop() {
 	anim_.kind = AnimKind::none;
 	coasting_ = false;
 	vel_x_ = 0;
@@ -44,8 +44,14 @@ void CameraMotion::halt() {
 	last_tick_ = now_ms();
 }
 
+void CameraMotion::stop_coast() {
+	coasting_ = false;
+	vel_x_ = 0;
+	vel_y_ = 0;
+}
+
 void CameraMotion::jump(const Camera &to) {
-	halt();
+	stop();
 	cam_ = to;
 	output_.server.visibility_dirty = true;
 	output_.server.pointer_focus_stale = true;
@@ -53,7 +59,7 @@ void CameraMotion::jump(const Camera &to) {
 }
 
 void CameraMotion::animate_to(const Camera &to) {
-	halt();
+	stop();
 	anim_.kind = AnimKind::lerp;
 	anim_.a = cam_;
 	anim_.b = to;
@@ -64,7 +70,7 @@ void CameraMotion::animate_to(const Camera &to) {
 
 void CameraMotion::animate_zoom(const Camera &near, const Camera &far,
 		double p0, double p1) {
-	halt();
+	stop();
 	anim_.kind = AnimKind::zoom;
 	anim_.a = near;
 	anim_.b = far;
