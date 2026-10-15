@@ -1,0 +1,24 @@
+{
+	"id": "canvas.power",
+	"name": "Power",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The power indicator: battery level and charging state, with the power panel",
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "power",
+				"entry": "Power.qml",
+				"section": "right",
+				"order": 5,
+				"panel": "power"
+			}
+		],
+		"panels": [
+			{
+				"id": "power",
+				"entry": "PowerPanel.qml"
+			}
+		]
+	}
+}
