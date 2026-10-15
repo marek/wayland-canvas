@@ -11,8 +11,16 @@
 // surface of the bar client, then close again — by a click outside, by
 // Escape and by a second click of its icon. The Wi-Fi password field must
 // receive typing (never submitted), and only one panel may be open at a
-// time. Writes only under $CANVAS_TMP (meson passes the repo's tmp/).
+// time. The same world then carries the canvas.notes plugin: a note
+// created through the public action.run, its editor mapping over it with
+// the keyboard, typing kept in the state and the plugin's storage, a
+// pointer drag's new place, a shell reload that neither loses nor doubles
+// the note (and puts it back once it was removed), the overview's
+// double-click reaching the editor, a colour dot recolouring, the ×
+// deleting, and a note closed empty being removed. Writes only under
+// $CANVAS_TMP (meson passes the repo's tmp/).
 #include <cairo.h>
+#include <json-glib/json-glib.h>
 #include <cerrno>
 #include <cmath>
 #include <csignal>
@@ -64,6 +72,36 @@ bool idle_spawned = false; // any child of the shell seen while idle
 constexpr int idle_sample_count = 1000; // 10 s of samples
 constexpr int idle_sample_ms = 10;
 constexpr double widen_px = 20; // how much the edited widget must grow
+
+// ---- the notes phase, over the public control socket ----
+
+// The plugin's settings defaults, kept in sync with
+// plugins/canvas.notes/plugin.json (the swatch colours the test creates
+// and looks for on screen).
+constexpr const char *note_yellow = "#ffd866";
+constexpr const char *note_green = "#a6e3a1";
+constexpr const char *note_blue = "#7dcfff";
+constexpr int note_size = 220;
+constexpr int note_strip = 26; // canvas px, the darker strip
+constexpr const char *note_editor_namespace = "wayland-canvas-note-editor";
+constexpr int colour_tune = 8; // channel tolerance when matching a colour on a screenshot
+constexpr int edge_tune = 4; // px tolerance where a box on a screenshot may sit
+// The scratch shell.json the plugin phase wrote: rewritten as-is, an edit
+// the shell sees, so it reloads.
+constexpr std::string_view plugin_config =
+	"{\n\t\"plugins\": {\n\t\t\"canvas.hello\": {\n\t\t\t\"enabled\": false\n"
+	"\t\t}\n\t}\n}\n";
+
+struct NoteEntry {
+	std::string id, color, text;
+	double x = 0, y = 0;
+	long long width = 0, height = 0;
+};
+
+NoteEntry note; // the note under test
+int note_retries = 0; // the notes phase's retry counter
+LayerSurface *bar_before_reload = nullptr;
+std::vector<pid_t> msg_children; // `wayland-canvas msg` runs, swept when done
 
 // ---- isolation: private buses and the stand-in services on them ----
 
@@ -121,6 +159,25 @@ void check(bool cond, std::string_view note,
 	if (!cond) {
 		failures++;
 	}
+}
+
+// Reads a small text file whole (the msg clients' captured output).
+std::string read_file(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return {};
+	}
+	std::string out;
+	char buf[4096];
+	std::size_t n = 0;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+		out.pop_back();
+	}
+	return out;
 }
 
 void mkdir_p(const std::string &path) {
@@ -426,13 +483,15 @@ void tap(uint32_t code) {
 	key(code, false);
 }
 
-// Letters and digits, enough for a password-shaped string.
+// Lower-case letters, digits and the space, enough for a password or a
+// note's text.
 void type(std::string_view s) {
 	struct KeyMap {
 		char c;
 		uint32_t code;
 	};
 	constexpr KeyMap map[] = {
+		{' ', KEY_SPACE},
 		{'a', KEY_A}, {'b', KEY_B}, {'c', KEY_C}, {'d', KEY_D}, {'e', KEY_E}, {'f', KEY_F},
 		{'g', KEY_G}, {'h', KEY_H}, {'i', KEY_I}, {'j', KEY_J}, {'k', KEY_K}, {'l', KEY_L},
 		{'m', KEY_M}, {'n', KEY_N}, {'o', KEY_O}, {'p', KEY_P}, {'q', KEY_Q}, {'r', KEY_R},
@@ -461,6 +520,44 @@ void click(double x, double y, int button = BTN_LEFT) {
 			.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED};
 		wl_signal_emit_mutable(&ptr.events.button, &b);
 		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	}
+}
+
+// Two clicks close together in device time: the compositor's double-click.
+void double_click(double x, double y) {
+	click(x, y);
+	click(x, y);
+}
+
+// A drag with the fake pointer: move, press, ten moves, release. No click
+// first — a click ahead of the press would read as one half of a
+// double-click on the item.
+void drag_note(double x0, double y0, double x1, double y1) {
+	t += 8;
+	wlr_pointer_motion_absolute_event start = {
+		.pointer = &ptr, .time_msec = t,
+		.x = x0 / double(screen_w), .y = y0 / double(screen_h)};
+	wl_signal_emit_mutable(&ptr.events.motion_absolute, &start);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	for (int pressed = 1; pressed >= 0; pressed--) {
+		t += 8;
+		wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t,
+			.button = BTN_LEFT,
+			.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+				: WL_POINTER_BUTTON_STATE_RELEASED};
+		wl_signal_emit_mutable(&ptr.events.button, &b);
+		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+		if (pressed) {
+			for (int i = 1; i <= 10; i++) {
+				t += 8;
+				double x = x0 + (x1 - x0) * i / 10, y = y0 + (y1 - y0) * i / 10;
+				wlr_pointer_motion_absolute_event m = {
+					.pointer = &ptr, .time_msec = t,
+					.x = x / double(screen_w), .y = y / double(screen_h)};
+				wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
+				wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+			}
+		}
 	}
 }
 
@@ -768,6 +865,378 @@ int bright_count(cairo_surface_t *s, const wlr_box &rect) {
 		}
 	}
 	return n;
+}
+
+// ---- notes: the msg client, the plugin's state, its storage ----
+
+// Runs `wayland-canvas msg <method> [<params>]` through /bin/sh, with
+// stdout, stderr and the exit code captured under `name` (.out, .err,
+// .code); a stale capture from an earlier run is unlinked first. The
+// compositor runs in this process, so the child is never waited on here.
+void run_msg(std::string_view method, std::string_view params, const char *name) {
+	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
+	for (const char *suffix : {".out", ".err", ".code"}) {
+		unlink(std::format("{}/{}{}", shot_dir, name, suffix).c_str());
+	}
+	std::string cmd = std::format("\"{}\" msg {}", bin, method);
+	if (!params.empty()) {
+		cmd += std::format(" '{}'", params);
+	}
+	cmd += std::format(" > {}/{}.out 2> {}/{}.err; echo $? > {}/{}.code",
+		shot_dir, name, shot_dir, name, shot_dir, name);
+	const char *const argv[] = {"/bin/sh", "-c", cmd.c_str(),
+		static_cast<const char *>(nullptr)};
+	Spawned child = spawn(argv);
+	if (child.pid > 0) {
+		msg_children.push_back(child.pid);
+	}
+	if (child.out >= 0) {
+		close(child.out); // the captures go to files, not this pipe
+	}
+}
+
+bool msg_done(const char *name) {
+	struct stat st{};
+	return stat(std::format("{}/{}.code", shot_dir, name).c_str(), &st) == 0;
+}
+
+std::string msg_out(const char *name) {
+	return read_file(std::format("{}/{}.out", shot_dir, name));
+}
+
+std::string msg_err(const char *name) {
+	return read_file(std::format("{}/{}.err", shot_dir, name));
+}
+
+int msg_code(const char *name) {
+	return std::atoi(read_file(std::format("{}/{}.code", shot_dir, name)).c_str());
+}
+
+// Reaps the msg children that finished, so none is left a zombie.
+void sweep_children() {
+	std::erase_if(msg_children, [](pid_t pid) {
+		return waitpid(pid, nullptr, WNOHANG) == pid;
+	});
+}
+
+// Nothing the scenario started outlives it: a msg child still running at
+// the end is killed and reaped.
+void stop_children() {
+	for (pid_t pid : msg_children) {
+		kill(pid, SIGKILL);
+		waitpid(pid, nullptr, 0);
+	}
+	msg_children.clear();
+}
+
+// One JSON object member as a string, or "" when it is absent.
+std::string json_string(JsonObject *object, const char *name) {
+	if (object == nullptr || !json_object_has_member(object, name)) {
+		return {};
+	}
+	JsonNode *node = json_object_get_member(object, name);
+	return node != nullptr && json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_STRING
+		? std::string{json_node_get_string(node)} : std::string{};
+}
+
+// One JSON object member as a whole number, or 0 when it is absent.
+long long json_int(JsonObject *object, const char *name) {
+	if (object == nullptr || !json_object_has_member(object, name)) {
+		return 0;
+	}
+	JsonNode *node = json_object_get_member(object, name);
+	return node != nullptr && json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_INT64
+		? json_node_get_int(node) : 0;
+}
+
+void fill_note(NoteEntry &entry, JsonObject *object) {
+	entry.color = json_string(object, "color");
+	entry.text = json_string(object, "text");
+	entry.x = json_int(object, "x");
+	entry.y = json_int(object, "y");
+	entry.width = json_int(object, "width");
+	entry.height = json_int(object, "height");
+}
+
+// The canvas.notes items a `msg state` capture reports.
+std::vector<NoteEntry> state_notes(const char *name) {
+	std::vector<NoteEntry> out;
+	std::string text = msg_out(name);
+	JsonParser *parser = json_parser_new();
+	if (json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		JsonNode *root = json_parser_get_root(parser);
+		JsonObject *state = root != nullptr
+				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
+			? json_node_get_object(root) : nullptr;
+		JsonNode *items = state != nullptr && json_object_has_member(state, "items")
+			? json_object_get_member(state, "items") : nullptr;
+		if (items != nullptr && json_node_get_node_type(items) == JSON_NODE_ARRAY) {
+			JsonArray *array = json_node_get_array(items);
+			for (guint i = 0; i < json_array_get_length(array); i++) {
+				JsonNode *element = json_array_get_element(array, i);
+				JsonObject *item = json_node_get_node_type(element) == JSON_NODE_OBJECT
+					? json_node_get_object(element) : nullptr;
+				NoteEntry entry;
+				entry.id = json_string(item, "id");
+				if (item == nullptr || entry.id.rfind("canvas.notes/", 0) != 0) {
+					continue;
+				}
+				fill_note(entry, item);
+				out.push_back(entry);
+			}
+		}
+	}
+	g_object_unref(parser);
+	return out;
+}
+
+// The plugin's stored notes, from its notes.json in the scratch state.
+std::vector<NoteEntry> stored_notes() {
+	std::vector<NoteEntry> out;
+	std::string text = read_file(
+		shot_dir + "/xdg/state/wayland-canvas/plugins/canvas.notes/notes.json");
+	JsonParser *parser = json_parser_new();
+	if (json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		JsonNode *root = json_parser_get_root(parser);
+		JsonObject *saved = root != nullptr
+				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
+			? json_node_get_object(root) : nullptr;
+		JsonObject *notes = saved != nullptr && json_object_has_member(saved, "notes")
+				&& json_node_get_node_type(json_object_get_member(saved, "notes"))
+					== JSON_NODE_OBJECT
+			? json_node_get_object(json_object_get_member(saved, "notes")) : nullptr;
+		if (notes != nullptr) {
+			for (GList *member = json_object_get_members(notes); member != nullptr;
+					member = member->next) {
+				const char *id = static_cast<const char *>(member->data);
+				JsonNode *element = json_object_get_member(notes, id);
+				JsonObject *fields = element != nullptr
+						&& json_node_get_node_type(element) == JSON_NODE_OBJECT
+					? json_node_get_object(element) : nullptr;
+				NoteEntry entry;
+				entry.id = id;
+				if (fields == nullptr) {
+					continue;
+				}
+				fill_note(entry, fields);
+				out.push_back(entry);
+			}
+		}
+	}
+	g_object_unref(parser);
+	return out;
+}
+
+std::optional<NoteEntry> stored_note(const std::string &id) {
+	for (const NoteEntry &entry : stored_notes()) {
+		if (entry.id == id) {
+			return entry;
+		}
+	}
+	return std::nullopt;
+}
+
+// The mapped editor layer surface of the shell client.
+LayerSurface *editor_layer() {
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (auto &vec : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &l : vec) {
+				if (l->mapped && l->wlr->namespace_ != nullptr
+						&& std::strcmp(l->wlr->namespace_, note_editor_namespace) == 0) {
+					return l.get();
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+// True when the editor maps and holds the keyboard on its own surface.
+bool editor_open_with_keyboard() {
+	LayerSurface *editor = editor_layer();
+	return editor != nullptr && bar_client() != nullptr
+		&& wl_resource_get_client(editor->wlr->surface->resource) == bar_client()
+		&& server->seat->keyboard_state.focused_surface == editor->wlr->surface;
+}
+
+// The one output, as the compositor has it.
+Output *the_output() {
+	return server->outputs.empty() ? nullptr : server->outputs.front().get();
+}
+
+// A note's box on screen right now: the compositor's own camera math, so
+// the editor and the pictures are checked against what is drawn, not
+// against a guess.
+wlr_box note_box_on_screen(const NoteEntry &entry) {
+	Output *output = the_output();
+	if (output == nullptr) {
+		return {};
+	}
+	Point top_left = output->canvas_to_local(entry.x, entry.y);
+	double zoom = output->camera.drawn().zoom;
+	return wlr_box{
+		static_cast<int>(std::round(top_left.x)),
+		static_cast<int>(std::round(top_left.y)),
+		static_cast<int>(std::round(entry.width * zoom)),
+		static_cast<int>(std::round(entry.height * zoom)),
+	};
+}
+
+// True once the overview is where the test wants it and the camera has
+// stopped easing: positions read off the screen are stable then.
+bool overview_settled(bool active) {
+	Output *output = the_output();
+	return output != nullptr && output->overview.active() == active
+		&& !output->camera.panning() && !output->camera.zooming();
+}
+
+// "#rrggbb" to its channels; false when it is not that shape.
+bool hex_colour(std::string_view text, unsigned char out[3]) {
+	auto hex = [](char ch) -> int {
+		if (ch >= '0' && ch <= '9') {
+			return ch - '0';
+		}
+		if (ch >= 'a' && ch <= 'f') {
+			return ch - 'a' + 10;
+		}
+		return -1;
+	};
+	if (text.size() != 7 || text.front() != '#') {
+		return false;
+	}
+	for (int channel = 0; channel < 3; channel++) {
+		int hi = hex(text[1 + channel * 2]);
+		int lo = hex(text[2 + channel * 2]);
+		if (hi < 0 || lo < 0) {
+			return false;
+		}
+		out[channel] = static_cast<unsigned char>(hi * 16 + lo);
+	}
+	return true;
+}
+
+// The bounding box of the pixels within `tune` of `rgb` inside `region`,
+// with how many matched.
+struct ColourBox {
+	int x0 = 0, y0 = 0, x1 = -1, y1 = -1; // inclusive; empty when count is 0
+	int count = 0;
+	double cx() const { return count > 0 ? (x0 + x1) / 2.0 : 0; }
+	double cy() const { return count > 0 ? (y0 + y1) / 2.0 : 0; }
+	int w() const { return count > 0 ? x1 - x0 + 1 : 0; }
+	int h() const { return count > 0 ? y1 - y0 + 1 : 0; }
+};
+
+ColourBox find_colour(cairo_surface_t *s, const wlr_box &region,
+		const unsigned char rgb[3], int tune) {
+	ColourBox box;
+	if (s == nullptr) {
+		return box;
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
+	for (int y = region.y; y < region.y + region.height; y++) {
+		if (y < 0 || y >= h) {
+			continue;
+		}
+		for (int x = region.x; x < region.x + region.width; x++) {
+			if (x < 0 || x >= w) {
+				continue;
+			}
+			// ARGB32 little-endian: B, G, R, A.
+			unsigned char *p = data + y * stride + x * 4;
+			if (std::abs(p[2] - rgb[0]) <= tune && std::abs(p[1] - rgb[1]) <= tune
+					&& std::abs(p[0] - rgb[2]) <= tune) {
+				if (box.count == 0 || x < box.x0) {
+					box.x0 = x;
+				}
+				if (box.count == 0 || x > box.x1) {
+					box.x1 = x;
+				}
+				if (box.count == 0 || y < box.y0) {
+					box.y0 = y;
+				}
+				if (box.count == 0 || y > box.y1) {
+					box.y1 = y;
+				}
+				box.count++;
+			}
+		}
+	}
+	return box;
+}
+
+// Where the strip's controls sit on screen, for clicking them: the dots
+// row on its left, the × square on its right.
+double strip_h_on_screen(const NoteEntry &entry) {
+	wlr_box box = note_box_on_screen(entry);
+	return std::round(note_strip * box.width / double(note_size));
+}
+
+// The note's card below its darker strip, on a screenshot: the colour's
+// bounding box there, expected where the compositor draws it. The strip
+// is searched apart because the editor's colour dots sit on it, and one
+// of them is the card's own colour.
+ColourBox card_on_shot(const char *name, const NoteEntry &entry) {
+	unsigned char rgb[3];
+	if (!hex_colour(entry.color, rgb)) {
+		return {};
+	}
+	cairo_surface_t *s = load_png(name);
+	wlr_box box = note_box_on_screen(entry);
+	int strip_h = static_cast<int>(std::round(strip_h_on_screen(entry)));
+	wlr_box below{box.x, box.y + strip_h, box.width, box.height - strip_h};
+	ColourBox found = s != nullptr
+		? find_colour(s, below, rgb, colour_tune) : ColourBox{};
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return found;
+}
+
+// The darker strip of the note's card on a screenshot.
+ColourBox strip_on_shot(const char *name, const NoteEntry &entry) {
+	unsigned char rgb[3], darker[3];
+	if (!hex_colour(entry.color, rgb)) {
+		return {};
+	}
+	for (int channel = 0; channel < 3; channel++) {
+		// the compositor's strip shade: the card's ink at 85 percent
+		darker[channel] = static_cast<unsigned char>(rgb[channel] * 0.85);
+	}
+	cairo_surface_t *s = load_png(name);
+	wlr_box box = note_box_on_screen(entry);
+	wlr_box strip{box.x, box.y, box.width,
+		static_cast<int>(std::round(note_strip * box.width / double(note_size)))};
+	ColourBox found = s != nullptr
+		? find_colour(s, strip, darker, colour_tune) : ColourBox{};
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return found;
+}
+
+// One colour dot of the strip on a screenshot: the blob of `colour`
+// inside the card's strip, where the editor lays its dots out.
+ColourBox dot_on_shot(const char *name, const NoteEntry &entry, const char *colour) {
+	unsigned char rgb[3];
+	if (!hex_colour(colour, rgb)) {
+		return {};
+	}
+	cairo_surface_t *s = load_png(name);
+	wlr_box box = note_box_on_screen(entry);
+	wlr_box strip{box.x, box.y, box.width,
+		static_cast<int>(std::round(strip_h_on_screen(entry)))};
+	ColourBox found = s != nullptr
+		? find_colour(s, strip, rgb, colour_tune) : ColourBox{};
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return found;
 }
 
 // ---- the indicator walk: one phase machine on step 4 ----
@@ -1481,7 +1950,448 @@ int run_step() {
 		check(!idle_spawned && bar_pid > 0, std::format("an idle shell spawned no "
 			"processes ({} samples over {} s)", idle_sample_count,
 			idle_sample_count * idle_sample_ms / 1000));
+		step = 110; // on to the notes: the sticky-notes plugin end to end
+		return -100; // without the advance: every other step moves on alone
+	case 110: // a note created the way any script would: action.run over the socket
+		run_msg("action.run",
+			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
+				+ R"("}})",
+			"note-create");
+		return 400;
+	case 111: {
+		sweep_children();
+		if (!msg_done("note-create") && note_retries++ < 60) {
+			return -300;
+		}
+		note_retries = 0;
+		check(msg_code("note-create") == 0 && msg_out("note-create") == "true",
+			std::format("`msg action.run` canvas.notes/create answered true and "
+				"exited 0 ({})", msg_err("note-create")));
+		run_msg("state", "", "note-state");
+		return 400;
+	}
+	case 112: { // the item in the state, the editor mapped over it
+		sweep_children();
+		if (!msg_done("note-state") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-state");
+		if (notes.empty() && note_retries++ < 80) {
+			run_msg("state", "", "note-state"); // the note may not have landed yet
+			return -400;
+		}
+		note_retries = 0;
+		check(!notes.empty(), "`msg action.run` create put a canvas.notes/... "
+			"item in the state");
+		if (notes.empty()) {
+			step = 99; // nothing to test further
+			return 100;
+		}
+		note = notes.front();
+		check(note.color == note_yellow && note.width == note_size
+				&& note.height == note_size && note.text.empty(),
+			std::format("the new note is {} in its settings' size ({}x{} at {},{})",
+				note.color.empty() ? "of no colour" : note.color.c_str(),
+				note.width, note.height, static_cast<int>(note.x),
+				static_cast<int>(note.y)));
+		LayerSurface *editor = editor_layer();
+		if (editor == nullptr && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(editor != nullptr, "the editor mapped as a layer surface");
+		if (editor != nullptr) {
+			check(wl_resource_get_client(editor->wlr->surface->resource) == bar_client(),
+				"the editor belongs to the shell client");
+			if (!editor_open_with_keyboard() && note_retries++ < 50) {
+				return -100;
+			}
+			note_retries = 0;
+			check(editor_open_with_keyboard(),
+				"the editor holds the keyboard on its own surface as it opens");
+		}
+		shot("note-editor");
+		return 700;
+	}
+	case 113: { // the editor's card, exactly at the note, in its colour
+		wlr_box box = note_box_on_screen(note);
+		int strip_h = static_cast<int>(std::round(strip_h_on_screen(note)));
+		ColourBox card = card_on_shot("note-editor", note);
+		ColourBox strip = strip_on_shot("note-editor", note);
+		check(card.count > 1000 && std::abs(card.x0 - box.x) <= edge_tune
+				&& std::abs(card.y0 - (box.y + strip_h)) <= edge_tune
+				&& std::abs(card.w() - box.width) <= edge_tune
+				&& std::abs(card.h() - (box.height - strip_h)) <= edge_tune,
+			std::format("the editor's card sits exactly at the note in its colour "
+				"({}x{} at {},{}; want {}x{} at {},{})", card.w(), card.h(), card.x0,
+				card.y0, box.width, box.height - strip_h, box.x, box.y + strip_h));
+		check(strip.count > 200 && std::abs(strip.x0 - box.x) <= edge_tune
+				&& std::abs(strip.y0 - box.y) <= edge_tune
+				&& std::abs(strip.w() - box.width) <= edge_tune
+				&& std::abs(strip.h() - strip_h) <= edge_tune,
+			std::format("the darker strip runs along the card's top ({}x{} at "
+				"{},{}; want {}x{} at {},{})", strip.w(), strip.h(), strip.x0,
+				strip.y0, box.width, strip_h, box.x, box.y));
+		type("buy oats"); // straight into the field: the editor has the keyboard
+		return 400;
+	}
+	case 114: // close it: Escape keeps the text
+		tap(KEY_ESC);
+		run_msg("state", "", "note-text");
+		return 400;
+	case 115: {
+		sweep_children();
+		if (!msg_done("note-text") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-text");
+		if ((notes.size() != 1 || notes.front().text != "buy oats")
+				&& note_retries++ < 80) {
+			run_msg("state", "", "note-text");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().text == "buy oats",
+			std::format("typing then Escape kept the text in the state ({})",
+				notes.size() == 1 ? notes.front().text.c_str() : "no note"));
+		std::optional<NoteEntry> stored = stored_note(note.id);
+		check(stored.has_value() && stored->text == "buy oats"
+				&& stored->color == note_yellow && stored->width == note_size,
+			std::format("the closed note is in the plugin's storage with its "
+				"colour, text and size ({})", stored.has_value() ? "as typed" : "absent"));
+		shot("note-view");
+		return 700;
+	}
+	case 116: { // the note on the canvas in the normal view, then dragged
+		wlr_box box = note_box_on_screen(note);
+		ColourBox card = card_on_shot("note-view", note);
+		ColourBox strip = strip_on_shot("note-view", note);
+		check(card.count > 1000 && std::abs(card.x0 - box.x) <= edge_tune
+				&& std::abs(card.w() - box.width) <= edge_tune,
+			std::format("the note draws on the canvas in the normal view "
+				"({}x{} at {},{}; want {} wide at {},{})", card.w(), card.h(),
+				card.x0, card.y0, box.width, box.x, box.y + note_strip));
+		check(strip.count > 200, "the canvas note carries its darker strip");
+		drag_note(box.x + box.width / 2.0, box.y + box.height / 2.0,
+			box.x + box.width / 2.0 + 120, box.y + box.height / 2.0 + 80);
+		run_msg("state", "", "note-drag");
+		return 500;
+	}
+	case 117: { // the dragged place in the state and the plugin's storage
+		sweep_children();
+		if (!msg_done("note-drag") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-drag");
+		if ((notes.size() != 1 || notes.front().x != note.x + 120
+				|| notes.front().y != note.y + 80) && note_retries++ < 80) {
+			run_msg("state", "", "note-drag");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().x == note.x + 120
+				&& notes.front().y == note.y + 80,
+			std::format("the fake pointer's drag moved the note to {},{}",
+				notes.size() == 1 ? static_cast<int>(notes.front().x) : -1,
+				notes.size() == 1 ? static_cast<int>(notes.front().y) : -1));
+		note.x += 120;
+		note.y += 80;
+		std::optional<NoteEntry> stored = stored_note(note.id);
+		if ((!stored.has_value() || stored->x != note.x || stored->y != note.y)
+				&& note_retries++ < 40) {
+			return -400; // the storage write lands with the event
+		}
+		note_retries = 0;
+		check(stored.has_value() && stored->x == note.x && stored->y == note.y,
+			std::format("the dragged place is in the plugin's storage ({})",
+				stored.has_value() ? "as dragged" : "absent"));
+		// An edit to the scratch config, as-is: the shell reloads with it.
+		bar_before_reload = bar_layer();
+		write_file(shot_dir + "/xdg/config/wayland-canvas/shell.json", plugin_config);
+		return 800;
+	}
+	case 118: { // the shell reloaded: a new bar surface of the same client
+		if ((bar_layer() == nullptr || bar_layer() == bar_before_reload)
+				&& note_retries++ < 100) {
+			return -300;
+		}
+		note_retries = 0;
+		check(bar_layer() != nullptr && bar_layer() != bar_before_reload,
+			"the shell reloaded on the config edit (a fresh bar surface)");
+		run_msg("state", "", "note-reload");
+		return 1500; // let the reloading plugin put its notes back
+	}
+	case 119: { // the same one note, same place, same text: nothing lost or doubled
+		sweep_children();
+		if (!msg_done("note-reload") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-reload");
+		if ((notes.size() != 1 || notes.front().id != note.id) && note_retries++ < 80) {
+			run_msg("state", "", "note-reload");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().id == note.id
+				&& notes.front().x == note.x && notes.front().y == note.y
+				&& notes.front().text == "buy oats",
+			std::format("a shell reload kept exactly the one note, place and "
+				"text ({} canvas.notes items)", notes.size()));
+		// The stronger proof: take the note off the compositor, reload
+		// again — only the plugin's re-send from storage can bring it back.
+		run_msg("item.remove", std::format(R"({{"id":"{}"}})", note.id), "note-remove");
+		return 400;
+	}
+	case 120: { // gone from the compositor; then another reload
+		sweep_children();
+		if (!msg_done("note-remove") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-remove");
+		if (!notes.empty() && note_retries++ < 80) {
+			run_msg("state", "", "note-remove");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.empty(), "`msg item.remove` took the note off the canvas");
+		bar_before_reload = bar_layer();
+		write_file(shot_dir + "/xdg/config/wayland-canvas/shell.json", plugin_config);
+		return 800;
+	}
+	case 121: // the second reload, quiet: on to the re-send proof
+		if ((bar_layer() == nullptr || bar_layer() == bar_before_reload)
+				&& note_retries++ < 100) {
+			return -300;
+		}
+		note_retries = 0;
+		run_msg("state", "", "note-back");
+		return 1500;
+	case 122: { // the stored note, re-sent by the reloading plugin
+		sweep_children();
+		if (!msg_done("note-back") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-back");
+		if ((notes.size() != 1 || notes.front().id != note.id) && note_retries++ < 80) {
+			run_msg("state", "", "note-back");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().id == note.id
+				&& notes.front().x == note.x && notes.front().y == note.y,
+			std::format("the reloading shell put the stored note back on the "
+				"canvas, place and all ({} canvas.notes items)", notes.size()));
+		run_msg("overview.toggle", "", "overview-open");
+		return 400;
+	}
+	case 123: { // the overview settles before anything is read off the screen
+		if (!overview_settled(true) && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		shot("note-overview");
+		return 700;
+	}
+	case 124: { // the note in the overview, then a double-click on it
+		wlr_box box = note_box_on_screen(note);
+		ColourBox card = card_on_shot("note-overview", note);
+		ColourBox strip = strip_on_shot("note-overview", note);
+		check(card.count > 500 && std::abs(card.x0 - box.x) <= edge_tune + 2
+				&& std::abs(card.y0 - (box.y + box.height * note_strip / double(note_size)))
+					<= edge_tune + 2
+				&& std::abs(card.w() - box.width) <= edge_tune + 2,
+			std::format("the note shows in the overview where it was put "
+				"({}x{} at {},{}; want {} wide at {},{})", card.w(), card.h(),
+				card.x0, card.y0, box.width, box.x,
+				static_cast<int>(box.y + box.height * note_strip / double(note_size))));
+		check(strip.count > 30, "the overview note carries its darker strip");
+		double_click(box.x + box.width / 2.0, box.y + box.height / 2.0);
+		return 400;
+	}
+	case 125: { // the overview's double-click opened the editor
+		if (!editor_open_with_keyboard() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(editor_open_with_keyboard(),
+			"double-clicking the note in the overview opened the editor, "
+			"holding the keyboard");
+		if (!editor_open_with_keyboard()) {
+			step = 99; // nothing further can be trusted
+			return 100;
+		}
+		type(" hi");
+		return 400;
+	}
+	case 126: // close it and ask for the text
+		tap(KEY_ESC);
+		run_msg("state", "", "note-typed");
+		return 400;
+	case 127: {
+		sweep_children();
+		if (!msg_done("note-typed") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-typed");
+		if ((notes.size() != 1 || notes.front().text != "buy oats hi")
+				&& note_retries++ < 80) {
+			run_msg("state", "", "note-typed");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().text == "buy oats hi",
+			std::format("typed keys reached the overview's editor (the text is "
+				"now '{}')", notes.size() == 1 ? notes.front().text.c_str() : "gone"));
+		run_msg("overview.toggle", "", "overview-close");
+		return 400;
+	}
+	case 128: { // back in the normal view, the editor gone, the note clickable
+		if ((!overview_settled(false) || editor_layer() != nullptr)
+				&& note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		if (editor_layer() != nullptr) {
+			check(false, "the overview's editor closed on Escape");
+			step = 99;
+			return 100;
+		}
+		wlr_box box = note_box_on_screen(note);
+		double_click(box.x + box.width / 2.0, box.y + box.height / 2.0);
+		return 400;
+	}
+	case 129: { // the editor again, over the note in the normal view
+		if (!editor_open_with_keyboard() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(editor_open_with_keyboard(),
+			"double-clicking the note in the normal view opened the editor");
+		shot("note-dots");
+		return 700;
+	}
+	case 130: { // the colour dots on the strip: the green one recolours
+		ColourBox dot = dot_on_shot("note-dots", note, note_green);
+		check(dot.count >= 30, std::format("the editor's colour dots show on the "
+			"strip ({} green pixels)", dot.count));
+		if (dot.count < 30) {
+			step = 133; // nothing to click; on to closing and the ×
+			return -100; // without the advance
+		}
+		click(dot.cx(), dot.cy());
+		run_msg("state", "", "note-recolour");
+		return 400;
+	}
+	case 131: { // recoloured, and a click outside closes without losing it
+		sweep_children();
+		if (!msg_done("note-recolour") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-recolour");
+		if ((notes.size() != 1 || notes.front().color != note_green)
+				&& note_retries++ < 80) {
+			run_msg("state", "", "note-recolour");
+			return -400;
+		}
+		note_retries = 0;
+		note.color = note_green;
+		check(notes.size() == 1 && notes.front().color == note_green,
+			"a colour dot recoloured the note");
+		std::optional<NoteEntry> stored = stored_note(note.id);
+		check(stored.has_value() && stored->color == note_green,
+			"the new colour is in the plugin's storage");
+		click(60.0, 700.0); // a corner of the output, outside the card
+		return 400;
+	}
+	case 132: { // closed by the outside click, then opened once more
+		if (editor_layer() != nullptr && note_retries++ < 50) {
+			return -100;
+		}
+		note_retries = 0;
+		check(editor_layer() == nullptr, "a click outside closed the editor");
+		wlr_box box = note_box_on_screen(note);
+		double_click(box.x + box.width / 2.0, box.y + box.height / 2.0);
+		return 400;
+	}
+	case 133: { // the × at the strip's right deletes the note
+		if (!editor_open_with_keyboard() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		if (!editor_open_with_keyboard()) {
+			check(false, "the editor reopened for the ×");
+			step = 99;
+			return 100;
+		}
+		wlr_box box = note_box_on_screen(note);
+		double strip_h = strip_h_on_screen(note);
+		click(box.x + box.width - strip_h / 2, box.y + strip_h / 2);
+		run_msg("state", "", "note-deleted");
+		return 400;
+	}
+	case 134: { // gone from the canvas and from the storage
+		sweep_children();
+		if (!msg_done("note-deleted") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-deleted");
+		if (!notes.empty() && note_retries++ < 80) {
+			run_msg("state", "", "note-deleted");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.empty(), "the × deleted the note from the canvas");
+		bool storage_gone = stored_notes().empty();
+		check(storage_gone, "the deleted note is gone from the plugin's storage");
+		// One more, in another colour, closed empty: it must not survive.
+		run_msg("action.run",
+			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_blue}
+				+ R"("}})",
+			"note-empty");
+		run_msg("state", "", "note-blue");
+		return 400;
+	}
+	case 135: { // created in the second colour, its editor open
+		sweep_children();
+		if (!msg_done("note-blue") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-blue");
+		if ((notes.size() != 1 || notes.front().color != note_blue)
+				&& note_retries++ < 80) {
+			run_msg("state", "", "note-blue");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.size() == 1 && notes.front().color == note_blue,
+			std::format("a second note was created in another settings colour ({})",
+				notes.size() == 1 ? notes.front().color.c_str() : "none"));
+		if (!editor_open_with_keyboard() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(editor_open_with_keyboard(), "the empty note's editor opened for it");
+		return 400;
+	}
+	case 136: // closed with no text at all
+		tap(KEY_ESC);
+		run_msg("state", "", "note-removed");
+		return 400;
+	case 137: {
+		sweep_children();
+		if (!msg_done("note-removed") && note_retries++ < 60) {
+			return -300;
+		}
+		std::vector<NoteEntry> notes = state_notes("note-removed");
+		if (!notes.empty() && note_retries++ < 80) {
+			run_msg("state", "", "note-removed");
+			return -400;
+		}
+		note_retries = 0;
+		check(notes.empty(), "a note closed with no text was removed from the canvas");
+		check(stored_notes().empty(), "nothing is left in the plugin's storage");
 		return 100; // done: the summary prints and the run ends
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		wl_display_terminate(server->display);
@@ -1606,6 +2516,7 @@ int main() {
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);
 	server.reset();
+	stop_children();
 	stop_isolation();
 	return failures != 0;
 }

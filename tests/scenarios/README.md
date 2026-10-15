@@ -89,6 +89,25 @@ Wayland display namespace and GPU.
   sampled about every 10 ms for 10 s and must have spawned no process at
   all, because the reloads ride on change notifications, not on a poll.
 
+  The same world then carries the `canvas.notes` plugin end to end, driven
+  only through the public socket: `msg action.run canvas.notes/create`
+  puts a `canvas.notes/...` item in the state, and the plugin's editor
+  must map as a layer surface of the shell client (`namespace
+  wayland-canvas-note-editor`) holding the keyboard on its own surface as
+  it opens — its card checked, pixel by pixel on the screenshot, to sit
+  exactly at the activated box in the note's colour with the darker strip
+  on top. Typing then Escape keeps the text in the state and in the
+  plugin's storage (scratch state); a fake-pointer drag's new place
+  reaches the storage through `item.moved`; a config-rewrite reload
+  leaves exactly the one note in the state (nothing doubled), and once
+  `msg item.remove` took it off the canvas, another reload must put it
+  back from storage — the restart proof. In the overview, the settled
+  camera's own math gives the note's on-screen box; a double-click there
+  opens the editor and typed keys reach it; back in the normal view, a
+  colour dot on the strip recolours the note (state and storage), a click
+  outside closes the editor, the strip's × deletes the note from canvas
+  and storage, and a second note closed with no text is removed too.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only
