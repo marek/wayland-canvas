@@ -22,19 +22,21 @@ submenu.
   it slides out of the toolbar beside its button, so the choice stays
   attached to what was clicked.
 - **The toolbar never takes the keyboard**: the overview's keys keep
-  working while it shows.
+  working while it shows, and Escape in the overview therefore leaves it
+  — the overview is Escape's to act on, and leaving folds the flyout,
+  the panel and the toolbar together.
 
 ## Behavior
 
 | Subject | Rule |
 |---|---|
-| Place | The right edge of each screen in the overview, vertically centred, 8 px from the edge, above the canvas and below panels |
+| Place | The right edge of each screen in the overview, vertically centred, 8 px from the edge, above the canvas and below panels (the surface's namespace: `wayland-canvas-toolbar`) |
 | When | Slides in as that screen enters the overview and out as it leaves; each screen on its own |
 | Button | A glyph in a 44 px square; hovering shows its label beside it |
 | Order | The config's `toolbar.order`, then the rest by plugin id and manifest order |
 | Action button | Runs the named action; the toolbar stays |
 | Panel button | Opens the named panel to the left of the toolbar, level with the button, through the common trigger |
-| Submenu button | Expands a flyout from the toolbar, to the left of the button: rows of a glyph or colour swatch and a label. Choosing an entry runs its action and folds the flyout; a second click of the button, Escape or a click outside folds it |
+| Submenu button | Expands a flyout from the toolbar, to the left of the button: rows of a glyph or colour swatch and a label. Choosing an entry runs its action and folds the flyout; a second click of the button or a click outside folds it (Escape is not the toolbar's to catch: it never takes the keyboard, so in the overview Escape leaves the overview, folding everything) |
 
 A toolbar button's manifest entry:
 
