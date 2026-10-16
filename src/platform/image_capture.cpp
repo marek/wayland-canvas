@@ -1,5 +1,6 @@
 #include "platform/image_capture.h"
 
+#include <algorithm>
 #include <cstring>
 #include <drm_fourcc.h>
 
@@ -23,6 +24,9 @@ struct ImageCapture::ToplevelSource {
 	Listener commit_, unmap_, destroy_;
 
 	bool started = false;
+	// The last render failed (no buffer of that size, or the pass): its
+	// frame is still announced, and copying it fails the client's frame.
+	bool failed = false;
 
 	~ToplevelSource() {
 		wlr_ext_image_capture_source_v1_finish(&base); // frees the formats too
@@ -51,42 +55,30 @@ static uint32_t *source_formats() {
 	return copy;
 }
 
-// The device-pixel frame of a window: what its surfaces were last told.
-static void source_device_size(const wlr_box &frame, double told_scale,
-		int &width, int &height) {
-	float scale = told_scale > 0 ? static_cast<float>(told_scale) : 1.0f;
-	width = std::max(1, static_cast<int>(std::lround(frame.width * scale)));
-	height = std::max(1, static_cast<int>(std::lround(frame.height * scale)));
-}
-
 // Renders the window at its told scale and pushes the frame to the sessions.
 // The one entry point that produces frames: called for a frame request, and
-// again whenever the window commits while a session is started.
+// again whenever the window commits while a session is started. A frame that
+// cannot be rendered is still announced, so every request is answered.
 static void source_emit_frame(ImageCapture::ToplevelSource *s) {
 	if (!s->view->mapped) {
 		return;
 	}
 	Server &server = s->view->server;
 	float scale = s->view->told_scale > 0 ? static_cast<float>(s->view->told_scale) : 1.0f;
-	wlr_box frame = s->view->frame_box();
-	// The device-pixel frame: what the window's surfaces were last told.
-	int width = 0, height = 0;
-	source_device_size(frame, s->view->told_scale, width, height);
-	if (s->buffer == nullptr || s->buffer->width != width || s->buffer->height != height) {
-		s->buffer.reset(make_capture_buffer(server, width, height));
-		if (s->buffer == nullptr) {
-			return;
-		}
-	}
+	// The device-pixel frame, rounded exactly as the render draws it.
+	wlr_box size = view_device_size(*s->view, scale);
+	int width = std::max(1, size.width);
+	int height = std::max(1, size.height);
 	if (s->base.width != static_cast<uint32_t>(width)
 			|| s->base.height != static_cast<uint32_t>(height)) {
 		s->base.width = width;
 		s->base.height = height;
 		wl_signal_emit_mutable(&s->base.events.constraints_update, nullptr);
 	}
-	if (!render_view_offscreen(*s->view, scale, s->buffer.get())) {
-		return;
+	if (s->buffer == nullptr || s->buffer->width != width || s->buffer->height != height) {
+		s->buffer.reset(make_capture_buffer(server, width, height));
 	}
+	s->failed = !render_view_offscreen(*s->view, scale, s->buffer.get());
 	// A whole new buffer: full damage, every time.
 	pixman_region32_t damage{};
 	pixman_region32_init_rect(&damage, 0, 0, width, height);
@@ -117,8 +109,17 @@ static void source_copy_frame(wlr_ext_image_capture_source_v1 *source,
 		wlr_ext_image_copy_capture_frame_v1 *frame,
 		wlr_ext_image_capture_source_v1_frame_event *event) {
 	auto *s = source_of(source);
-	wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, s->buffer.get(),
-		s->view->server.renderer);
+	if (s->failed) {
+		wlr_ext_image_copy_capture_frame_v1_fail(frame,
+			EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_UNKNOWN);
+		return;
+	}
+	// A client buffer that does not fit fails the frame inside copy_buffer,
+	// which destroys it: ready only follows a copy that worked.
+	if (!wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, s->buffer.get(),
+			s->view->server.renderer)) {
+		return;
+	}
 	wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &s->when);
 }
 
@@ -177,11 +178,10 @@ void ImageCapture::handle_new_request(
 	wlr_ext_image_capture_source_v1_init(&source->base, &SOURCE_IMPL);
 	source->base.shm_formats = source_formats();
 	source->base.shm_formats_len = source->base.shm_formats != nullptr ? 2 : 0;
-	wlr_box frame = view->frame_box();
-	int width = 0, height = 0;
-	source_device_size(frame, view->told_scale, width, height);
-	source->base.width = width;
-	source->base.height = height;
+	float scale = view->told_scale > 0 ? static_cast<float>(view->told_scale) : 1.0f;
+	wlr_box size = view_device_size(*view, scale);
+	source->base.width = std::max(1, size.width);
+	source->base.height = std::max(1, size.height);
 	ToplevelSource *s = source.get();
 	s->commit_.connect<&ToplevelSource::handle_commit>(
 		view->wlr->base->surface->events.commit, s);

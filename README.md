@@ -79,6 +79,16 @@ as usual — the hand-over happens on your normal session bus, so the keyring
 exits, the portal goes back to the session it was taken from (Hyprland on
 another VT shares its own screens again).
 
+Apps pick what to share with wayland-canvas's own picker (a screen, or a window
+by clicking it). A package installs the portal backend's config for that; a run
+from the build tree needs it once, with the build's binary as the chooser:
+
+```sh
+mkdir -p ~/.config/xdg-desktop-portal-wlr
+sed "s|= wayland-canvas msg|= $PWD/build/wayland-canvas msg|" \
+    packaging/xdg-desktop-portal-wlr.conf > ~/.config/xdg-desktop-portal-wlr/wayland-canvas
+```
+
 The portal is one per login. While wayland-canvas runs nested inside another
 compositor, apps share through *that* compositor's portal: pick the
 wayland-canvas window in its picker. Don't start wayland-canvas under

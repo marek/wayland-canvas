@@ -43,7 +43,7 @@ wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
 wlr_box over_apart{}; // where "over" sat when the reference captures were taken
 bool portal_skip = false; // the portal pieces are not on this machine
-pid_t portal_pid = -1; // the dbus-run-session the portal phase rides on
+pid_t portal_pid = -1; // the portal session's shell, its process group's leader
 std::string portal_runtime; // the session's short-lived runtime dir in /tmp
 pid_t portal_bus_pid = -1; // the dbus-daemon this run owns, killed by pid
 std::string portal_dir; // its scratch world, under the shot directory
@@ -57,6 +57,32 @@ void check(bool cond, std::string_view note,
 		failures++;
 		std::println(stderr, "  at {}:{} in {}", where.file_name(), where.line(),
 			where.function_name());
+	}
+}
+
+// Ends the portal phase: the session's group, then the bus's (SIGKILL: test
+// processes with nothing to save, and a TERM may leave the bus waiting on a
+// client), the document portal's FUSE mount (its own unmount runs detached
+// after the kill), and the runtime dir. From the phase's last step, and from
+// main() when the run ends early: a timeout's SIGTERM only ends the loop.
+void stop_portal() {
+	int status = 0;
+	if (portal_pid > 0) {
+		kill(-portal_pid, SIGTERM); // ask first: the script's trap reaps
+		usleep(100000);
+		kill(-portal_pid, SIGKILL); // then the group, whatever is left
+		waitpid(portal_pid, &status, 0);
+		portal_pid = -1;
+	}
+	if (portal_bus_pid > 0) {
+		kill(-portal_bus_pid, SIGKILL);
+		waitpid(portal_bus_pid, &status, 0);
+		portal_bus_pid = -1;
+	}
+	if (!portal_runtime.empty()) {
+		std::system(std::format("fusermount3 -uz {0}/doc 2>/dev/null"
+			" || fusermount -uz {0}/doc 2>/dev/null; rm -rf {0}", portal_runtime).c_str());
+		portal_runtime.clear();
 	}
 }
 
@@ -671,11 +697,19 @@ int run_step() {
 		// msg client: xdpw offers its monitor and window lines on stdin,
 		// `capture.pick` opens the picker, and the scenario (case 12) clicks
 		// the source the client asked for by the mode file it wrote first.
+		// The config is the one the package ships, byte for byte, under the
+		// name xdpw reads for this desktop; the build's binary is first on
+		// the session's PATH, as an installed one would be.
+		const char *source = std::getenv("CANVAS_SOURCE");
+		std::string shipped = read_file(std::format("{}/packaging/xdg-desktop-portal-wlr.conf",
+			source != nullptr && *source ? source : "."));
+		check(shipped.find("chooser_cmd = wayland-canvas msg capture.pick") != std::string::npos,
+			"the shipped xdpw config names the compositor's picker as the chooser");
+		write_file(std::format("{}/config/xdg-desktop-portal-wlr/wayland-canvas", portal_dir),
+			shipped);
 		const char *canvas_bin = std::getenv("WAYLAND_CANVAS_BIN");
-		write_file(std::format("{}/config/xdg-desktop-portal-wlr/config", portal_dir),
-			std::format("[screencast]\nchooser_type = dmenu\n"
-				"chooser_cmd = {} msg capture.pick\n",
-				canvas_bin != nullptr && *canvas_bin ? canvas_bin : "wayland-canvas"));
+		std::string bin = canvas_bin != nullptr ? canvas_bin : "";
+		std::string bin_dir = bin.substr(0, bin.rfind('/'));
 		write_file(std::format("{}/client.py", portal_dir), PORTAL_CLIENT);
 		// The compositor's socket as an absolute path, for the session's
 		// portal and backend to find this compositor and nothing else.
@@ -684,13 +718,19 @@ int run_step() {
 		std::string wayland = std::format("{}/{}", runtime, display);
 		// The bus of its own: started here, killed here — and dead even if
 		// this run itself is killed, by PDEATHSIG. Nothing relies on a
-		// wrapper cleaning up after itself. gvfs stays off the bus so no
-		// FUSE mount ever happens under the runtime dir.
+		// wrapper cleaning up after itself. gvfs stays off the bus; the
+		// document portal still mounts FUSE under the runtime dir, which
+		// stop_portal() unmounts.
 		std::string bus = std::format("{}/bus", portal_runtime);
 		portal_bus_pid = fork();
 		if (portal_bus_pid == 0) {
 			prctl(PR_SET_PDEATHSIG, SIGKILL);
 			setpgid(0, 0); // the bus and everything it activates die together
+			// The compositor blocks the signals it watches; the bus and what it
+			// starts must not inherit that mask.
+			sigset_t unblocked;
+			sigemptyset(&unblocked);
+			sigprocmask(SIG_SETMASK, &unblocked, nullptr);
 			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
 			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
 			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
@@ -708,12 +748,19 @@ int run_step() {
 		if (portal_pid == 0) {
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			setpgid(0, 0); // the session dies as a group, leaving no one behind
+			sigset_t unblocked; // a TERM must reach the script's trap
+			sigemptyset(&unblocked);
+			sigprocmask(SIG_SETMASK, &unblocked, nullptr);
 			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
 			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
 			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
 			setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", 1);
 			setenv("WAYLAND_DISPLAY", wayland.c_str(), 1);
 			setenv("DBUS_SESSION_BUS_ADDRESS", std::format("unix:path={}", bus).c_str(), 1);
+			// A service the session bus starts knows only what the session
+			// hands over: never the control socket's own variable.
+			unsetenv("WAYLAND_CANVAS_SOCKET");
+			setenv("PATH", std::format("{}:{}", bin_dir, std::getenv("PATH")).c_str(), 1);
 			setenv("GIO_USE_VFS", "local", 1);
 			setenv("GVFS_DISABLE_FUSE", "1", 1);
 			setenv("CHOOSER_MODE_FILE", std::format("{}/chooser-mode", portal_dir).c_str(), 1);
@@ -770,21 +817,10 @@ int run_step() {
 			}
 		}
 		int status = 0;
-		if (waitpid(portal_pid, &status, WNOHANG) == 0) {
-			if (retries++ < 120) {
-				return -500; // still sharing; the whole session gets a minute
-			}
-			kill(-portal_pid, SIGTERM); // ask first: the script's trap reaps
-			usleep(100000);
-			kill(-portal_pid, SIGKILL); // then the group, whatever is left
-			waitpid(portal_pid, &status, 0);
+		if (waitpid(portal_pid, &status, WNOHANG) == 0 && retries++ < 120) {
+			return -500; // still sharing; the whole session gets a minute
 		}
-		// The bus this run started goes too — SIGKILL: it is a private test bus
-		// with nothing to save, and a TERM may leave it waiting on a client.
-		if (portal_bus_pid > 0) {
-			kill(-portal_bus_pid, SIGKILL);
-			waitpid(portal_bus_pid, &status, 0);
-		}
+		stop_portal();
 		// What the ScreenCast client saw, one line per source kind.
 		std::string out = read_file(std::format("{}/client.out", portal_dir));
 		auto node_of = [&out](std::string_view kind) {
@@ -802,8 +838,7 @@ int run_step() {
 		check(code == 0 && window_node > 0,
 			std::format("the portal shares a window: the ScreenCast client "
 				"got a PipeWire stream (node {}, exit {})", window_node, code));
-		// The short-lived runtime dir: nothing of this run stays in /tmp.
-		std::system(std::format("rm -rf {}", portal_runtime).c_str());
+		// stop_portal() left nothing of this run in /tmp.
 		return 300;
 	}
 	default:
@@ -868,6 +903,7 @@ int main() {
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display); // `msg quit` ends it
+	stop_portal(); // a run ended early still leaves no session behind
 	if (!finished) {
 		check(false, std::format("the run ended at step {}, before its last step", step));
 	}

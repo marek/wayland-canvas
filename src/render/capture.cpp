@@ -143,6 +143,11 @@ CairoSurfacePtr buffer_to_cairo(wlr_renderer *renderer, wlr_buffer *buffer) {
 	return surface;
 }
 
+wlr_box view_device_size(const View &view, float scale) {
+	wlr_box frame = view.frame_box();
+	return device_box({0, 0, frame.width, frame.height}, scale);
+}
+
 bool render_view_offscreen(View &view, float scale, wlr_buffer *buffer) {
 	if (!view.mapped || buffer == nullptr) {
 		return false;
@@ -153,6 +158,14 @@ bool render_view_offscreen(View &view, float scale, wlr_buffer *buffer) {
 		wlr_log(WLR_ERROR, "capture: failed to begin the window's render pass");
 		return false;
 	}
+	// Window sources reuse their buffer frame after frame, and the renderer
+	// keeps a target's old contents: start from transparent.
+	const wlr_render_rect_options clear = {
+		.box = {0, 0, buffer->width, buffer->height},
+		.color = {0, 0, 0, 0},
+		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+	};
+	wlr_render_pass_add_rect(pass, &clear);
 
 	// The frame's top-left corner is the capture's origin; the layout is the
 	// one the renderer's draw_view() draws and deco_hit() hit-tests: the
@@ -196,8 +209,7 @@ CairoSurfacePtr capture_view(View &view, float scale) {
 	if (!view.mapped) {
 		return {};
 	}
-	wlr_box frame = view.frame_box();
-	wlr_box dev = device_box({0, 0, frame.width, frame.height}, scale);
+	wlr_box dev = view_device_size(view, scale);
 	Handle<wlr_buffer, wlr_buffer_drop> buffer{
 		make_capture_buffer(view.server, dev.width, dev.height)};
 	if (buffer == nullptr) {
@@ -216,7 +228,8 @@ CairoSurfacePtr capture_output(Output &output, wlr_box local_area) {
 	if (wlr_box_empty(&clipped)) {
 		return {};
 	}
-	wlr_box dev = device_box(clipped, output.wlr->scale);
+	// Sized from the area's own origin, the way render_area() rounds it.
+	wlr_box dev = device_box({0, 0, clipped.width, clipped.height}, output.wlr->scale);
 	Handle<wlr_buffer, wlr_buffer_drop> buffer{
 		make_capture_buffer(output.server, dev.width, dev.height)};
 	if (buffer == nullptr) {

@@ -178,8 +178,9 @@ install_subdir(
 )
 
 # What the distribution packages carry beyond the binary: the session file
-# the display managers list, the default-session tool, and the portals
-# config that sends screen sharing to the wlroots backend.
+# the display managers list, the default-session tool, the portals config
+# that sends screen sharing to the wlroots backend, and that backend's
+# config naming the compositor's picker as its chooser.
 install_data(
 	'packaging/wayland-canvas.desktop',
 	install_dir: get_option('datadir') / 'wayland-sessions',
@@ -190,8 +191,8 @@ install_data(
 )
 install_data(
 	'packaging/xdg-desktop-portal-wlr.conf',
-	rename: 'config',
-	install_dir: get_option('sysconfdir') / 'xdg' / 'xdg-desktop-portal-wlr' / 'wayland-canvas',
+	rename: 'wayland-canvas',
+	install_dir: get_option('sysconfdir') / 'xdg' / 'xdg-desktop-portal-wlr',
 )
 install_data(
 	'packaging/wayland-canvas-session',
@@ -281,6 +282,8 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env = environment()
 	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
+	# The source tree, for scenarios that install a shipped file as-is.
+	scenario_env.set('CANVAS_SOURCE', meson.project_source_root())
 	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture']
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.

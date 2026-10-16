@@ -73,10 +73,10 @@ struct RenderCtx {
 	// for an on-screen frame, the captured area for an offscreen one.
 	double origin_x = 0, origin_y = 0;
 	int vw = 0, vh = 0;
-	// Whether the compositor's own UI is drawn: true for an on-screen frame;
-	// false for an offscreen capture, which shows the desktop, not the
-	// picker or toolbar that asked for it.
-	bool show_ui = true;
+	// Whether the capture UI (picker, toolbar, thumbnail) is drawn: true for
+	// an on-screen frame; false for an offscreen capture, which shows what the
+	// output shows, minus the capture UI that asked for it.
+	bool show_capture_ui = true;
 	bool overview;
 	std::vector<DrawnSurface> *drawn; // Painter's reused per-frame buffer
 	std::span<HelpSlot> help_cache; // Painter's help-line texture cache

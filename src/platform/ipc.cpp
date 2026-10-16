@@ -50,6 +50,25 @@ bool fill_address(sockaddr_un &addr, const std::string &path) {
 	return true;
 }
 
+// The control socket of the compositor `display` names — a socket name
+// under `runtime_dir`, or an absolute path as $WAYLAND_DISPLAY allows:
+// <dir>/wayland-canvas-<name>.sock. Empty when either part is missing.
+std::string socket_path_for(const char *runtime_dir, const char *display) {
+	if (display == nullptr || *display == '\0') {
+		return {};
+	}
+	std::string_view name = display;
+	std::string dir = runtime_dir != nullptr ? runtime_dir : "";
+	if (std::size_t slash = name.rfind('/'); slash != std::string_view::npos) {
+		dir = std::string(name.substr(0, slash));
+		name = name.substr(slash + 1);
+	}
+	if (dir.empty() || name.empty()) {
+		return {};
+	}
+	return std::format("{}/{}-{}.sock", dir, config::ipc_socket_prefix, name);
+}
+
 // ------------------------------------------------------ json-glib wrappers
 
 // json-glib is C, so it is safe under -fno-exceptions; the RAII handles follow
@@ -293,11 +312,16 @@ void add_items_array(JsonBuilder *builder, Server &server) {
 
 // ------------------------------------------------------------ the client
 
-// Connects to $WAYLAND_CANVAS_SOCKET; -1 (explained on stderr) on failure.
+// Connects to $WAYLAND_CANVAS_SOCKET, else to the socket of the compositor
+// $WAYLAND_DISPLAY names: a service the session bus starts (the portal's
+// chooser) knows only the display. -1 (explained on stderr) on failure.
 int connect_to_socket() {
-	const char *path = std::getenv("WAYLAND_CANVAS_SOCKET");
-	if (path == nullptr || *path == '\0') {
-		std::fputs("wayland-canvas: $WAYLAND_CANVAS_SOCKET is not set\n", stderr);
+	const char *exported = std::getenv("WAYLAND_CANVAS_SOCKET");
+	std::string path = exported != nullptr && *exported != '\0' ? std::string(exported)
+		: socket_path_for(std::getenv("XDG_RUNTIME_DIR"), std::getenv("WAYLAND_DISPLAY"));
+	if (path.empty()) {
+		std::fputs("wayland-canvas: neither $WAYLAND_CANVAS_SOCKET nor $WAYLAND_DISPLAY"
+			" names a compositor\n", stderr);
 		return -1;
 	}
 	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -308,7 +332,7 @@ int connect_to_socket() {
 	sockaddr_un addr{};
 	if (!fill_address(addr, path) ||
 			connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0) {
-		std::fprintf(stderr, "wayland-canvas: cannot reach the compositor at %s\n", path);
+		std::fprintf(stderr, "wayland-canvas: cannot reach the compositor at %s\n", path.c_str());
 		close(fd);
 		return -1;
 	}
@@ -384,11 +408,12 @@ Ipc::~Ipc() {
 bool Ipc::init() {
 	const char *runtime = getenv("XDG_RUNTIME_DIR");
 	const char *display = getenv("WAYLAND_DISPLAY");
-	if (runtime == nullptr || *runtime == '\0' || display == nullptr || *display == '\0') {
+	path_ = socket_path_for(runtime, display);
+	if (runtime == nullptr || *runtime == '\0' || path_.empty()) {
 		wlr_log(WLR_ERROR, "no $XDG_RUNTIME_DIR or $WAYLAND_DISPLAY: no control socket");
+		path_.clear();
 		return false;
 	}
-	path_ = std::string(runtime) + "/" + config::ipc_socket_prefix + "-" + display + ".sock";
 	// A socket left behind by a crashed run would block this one.
 	unlink(path_.c_str());
 	// Nonblocking, so accepting pending connections can never stall the loop.

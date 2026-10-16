@@ -17,9 +17,14 @@ CairoSurfacePtr capture_output(Output &output, wlr_box local_area);
 // the canvas zoom; at `scale` device pixels per logical pixel.
 CairoSurfacePtr capture_view(View &view, float scale);
 
+// The device-pixel size of `view`'s frame at `scale`, rounded the way
+// render_view_offscreen() draws it: the buffer it fills edge to edge.
+wlr_box view_device_size(const View &view, float scale);
+
 // Renders the window alone — the same pixels capture_view returns — into
-// `buffer`, sized frame * scale device pixels. The capture protocols' window
-// source renders through this same path.
+// `buffer`, sized view_device_size(). The capture protocols' window source
+// renders through this same path; the buffer is cleared first, so a reused
+// one never shows an earlier frame through translucent content.
 bool render_view_offscreen(View &view, float scale, wlr_buffer *buffer);
 
 // A fresh ARGB8888 render target `width` x `height` device pixels, or null.
