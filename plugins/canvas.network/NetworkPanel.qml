@@ -1,3 +1,4 @@
+import Quickshell
 import Quickshell.Networking
 import Quickshell.Io
 import QtQuick
@@ -92,7 +93,7 @@ PanelCard {
 
 	property bool hasQrencode: false
 	property string speedTool: "" // "speedtest" or "speedtest-cli", "" without one
-	property string qrText: ""
+	property var qrRows: [] // the encoded matrix, one "01" string a row
 	property bool qrActive: false
 	property var speedResult: null
 	property bool speedRunning: false
@@ -137,6 +138,7 @@ PanelCard {
 		pingSamples = []
 		closePrompt()
 		dnsEditing = false
+		qrRows = []
 		qrActive = false
 		speedResult = null
 	}
@@ -246,8 +248,11 @@ PanelCard {
 		if (value === "") {
 			return
 		}
-		copyProc.command = ["sh", "-c", 'printf %s "$1" | wl-copy', "copy", value]
-		copyProc.running = true
+		// Detached, like the reference shell: a managed child's forked
+		// wl-copy daemon would stay in the shell's own process tree and
+		// never come to serve its selection.
+		Quickshell.execDetached(["sh", "-c",
+			'printf %s "$1" | wl-copy', "copy", value])
 	}
 
 	// A PSK network shares as a WIFI: QR payload; an enterprise one has no
@@ -381,13 +386,13 @@ PanelCard {
 					return
 				}
 				var now = Date.now() / 1000
-				if (root.prevSample > 0 && rx >= root.prevRx && tx >= root.prevTx) {
-					var dt = now - root.prevSample
-					if (dt > 0) {
-						root.downRate = Math.max(0, (rx - root.prevRx) / dt)
-						root.upRate = Math.max(0, (tx - root.prevTx) / dt)
-					}
+				var dt = now - root.prevSample
+				if (root.prevSample > 0 && dt > 0
+						&& rx >= root.prevRx && tx >= root.prevTx) {
+					root.downRate = Math.max(0, (rx - root.prevRx) / dt)
+					root.upRate = Math.max(0, (tx - root.prevTx) / dt)
 				} else {
+					// a fresh window or a counter reset: no rate from it
 					root.downRate = 0
 					root.upRate = 0
 				}
@@ -560,6 +565,15 @@ PanelCard {
 		dnsEditing = false
 	}
 
+	function forget(network) {
+		if (network.connected || network.name === "") {
+			return
+		}
+		// fire-and-forget, like the copy: no output to collect
+		Quickshell.execDetached(["sh", "-c",
+			'nmcli connection delete "$1"', "forget", network.name])
+	}
+
 	Process {
 		id: action
 		stdout: StdioCollector { waitForEnd: true }
@@ -582,7 +596,10 @@ PanelCard {
 				if (secret === "" || root.net == null) {
 					return
 				}
-				qr.command = ["qrencode", "-t", "UTF8i",
+				// ASCII with its quiet zone: the matrix is read back as
+				// rows, then drawn as modules — block text renders with
+				// the font's own spacing and stops scanning
+				qr.command = ["qrencode", "-t", "ASCII", "-m", "4",
 					"WIFI:T:WPA;S:" + root.net.name + ";P:" + secret + ";;"]
 				qr.running = true
 			}
@@ -594,13 +611,33 @@ PanelCard {
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
-				qrText = String(text).trim()
-				if (qrText !== "") {
+				// the ASCII type prints two characters a module: "##"
+				// dark, "  " light. Only the final newline may go: the
+				// quiet zone's all-space rows are modules too, and a
+				// whole-string trim would eat them and skew the matrix
+				var lines = String(text).replace(/\r/g, "").split("\n")
+				while (lines.length > 0 && lines[lines.length - 1] === "") {
+					lines.pop()
+				}
+				var rows = []
+				for (var i = 0; i < lines.length; i++) {
+					var line = lines[i]
+					var row = ""
+					for (var j = 0; j + 1 < line.length; j += 2) {
+						row += line.charAt(j) === "#" ? "1" : "0"
+					}
+					if (row !== "") {
+						rows.push(row)
+					}
+				}
+				if (rows.length > 0 && rows.length === rows[0].length) {
+					qrRows = rows
 					qrActive = true
 				}
 			}
 		}
 	}
+
 
 	Process {
 		id: speed
@@ -627,17 +664,14 @@ PanelCard {
 		}
 	}
 
-	Process {
-		id: copyProc
-	}
-
 	// The tool probes run once at load: presence does not change while the
 	// shell runs, and a button whose tool is missing is hidden.
 	Component.onCompleted: {
 		probe.command = ["sh", "-c",
 			"command -v qrencode >/dev/null && echo QR;" +
 			" command -v speedtest >/dev/null && echo SPEEDTEST;" +
-			" command -v speedtest-cli >/dev/null && echo SPEEDTEST_CLI"]
+			" command -v speedtest-cli >/dev/null && echo SPEEDTEST_CLI;" +
+			" true"] // the last probe's failure must not fail the process
 		probe.running = true
 	}
 
@@ -646,11 +680,12 @@ PanelCard {
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
-				var text = String(text)
-				hasQrencode = text.indexOf("QR") >= 0
-				if (text.indexOf("SPEEDTEST\n") >= 0) {
+				var answer = String(text) // not "var text": a local of
+				// that name would shadow the collector's own property
+				hasQrencode = answer.indexOf("QR") >= 0
+				if (answer.indexOf("SPEEDTEST\n") >= 0) {
 					speedTool = "speedtest"
-				} else if (text.indexOf("SPEEDTEST_CLI") >= 0) {
+				} else if (answer.indexOf("SPEEDTEST_CLI") >= 0) {
 					speedTool = "speedtest-cli"
 				}
 			}
@@ -766,6 +801,7 @@ PanelCard {
 	// The panel in its normal shape; the QR and speed-test answers each
 	// replace it with their own rows while they are shown.
 	Item {
+		id: normalView
 		width: parent.width
 		height: normal.implicitHeight
 		visible: !qrActive && speedResult == null
@@ -773,6 +809,7 @@ PanelCard {
 		Column {
 			id: normal
 			width: parent.width
+			spacing: UiTheme.panelSpacing
 
 			PanelHero {
 				width: parent.width
@@ -834,30 +871,54 @@ PanelCard {
 
 			// The live figures, two columns; every row stays mounted whether
 			// or not its sample has landed, so a late answer never reflows.
+			// The left column takes the wider share: the IP Address pair
+			// would not fit an equal half of this panel's width.
 			Grid {
 				visible: root.connected
 				width: parent.width
 				columns: 2
 				spacing: 6
 
-				Figure { label: "Ping"; value: root.formatPing() }
-				Figure { label: "Packet Loss"; value: root.formatLoss() }
-				Figure { label: "Receiving"; value: root.formatRate(root.downRate) }
-				Figure { label: "Sending"; value: root.formatRate(root.upRate) }
 				Figure {
+					share: 0.55
+					label: "Ping"
+					value: root.formatPing()
+				}
+				Figure {
+					share: 0.45
+					label: "Packet Loss"
+					value: root.formatLoss()
+				}
+				Figure {
+					share: 0.55
+					label: "Receiving"
+					value: root.formatRate(root.downRate)
+				}
+				Figure {
+					share: 0.45
+					label: "Sending"
+					value: root.formatRate(root.upRate)
+				}
+				Figure {
+					share: 0.55
 					label: "Downloaded"
-					value: root.hasStats ? root.formatBytes(root.rxTotal) : "--"
+					value: root.hasStats ? root.formatBytes(root.rxTotal)
+						: "--"
 				}
 				Figure {
+					share: 0.45
 					label: "Uploaded"
-					value: root.hasStats ? root.formatBytes(root.txTotal) : "--"
+					value: root.hasStats ? root.formatBytes(root.txTotal)
+						: "--"
 				}
 				Figure {
+					share: 0.55
 					label: "IP Address"
 					value: root.ipAddress !== "" ? root.ipAddress : "--"
 					copyable: root.ipAddress !== ""
 				}
 				Figure {
+					share: 0.45
 					label: "Gateway"
 					value: root.gateway !== "" ? root.gateway : "--"
 					copyable: root.gateway !== ""
@@ -977,11 +1038,13 @@ PanelCard {
 					visible: root.dnsEditing
 					y: 54
 					width: parent.width
-					height: 30
 					placeholderText: "DNS servers"
 					onTextChanged: if (root.dnsEditing) root.dnsServers = text
 					onAccepted: root.submitDns()
-					onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
+					TapHandler { onTapped: dnsField.forceActiveFocus() }
+					onVisibleChanged: if (!visible && root.open) {
+						normalView.forceActiveFocus()
+					}
 				}
 			}
 
@@ -1035,8 +1098,10 @@ PanelCard {
 
 					PanelRow {
 						width: parent.width
+						onClicked: root.rowClicked(entry.network)
 						glyph: model.wifiGlyph(model.percent(network))
-						label: network.name !== "" ? network.name : "Hidden network"
+						label: network.name !== "" ? network.name
+							: "Hidden network"
 						detail: root.stateName(network)
 						selected: network.connected
 
@@ -1106,7 +1171,16 @@ PanelCard {
 								root.promptIdentity = text
 							}
 							onAccepted: passphrase.forceActiveFocus()
-							onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
+							TapHandler {
+								onTapped: identity.forceActiveFocus()
+							}
+							onVisibleChanged: {
+								if (visible) {
+									Qt.callLater(forceActiveFocus)
+								} else if (root.open) {
+									normalView.forceActiveFocus()
+								}
+							}
 						}
 
 						PanelField {
@@ -1122,38 +1196,68 @@ PanelCard {
 								root.promptPassword = text
 							}
 							onAccepted: root.submitJoin()
-							onVisibleChanged: if (visible
-									&& !root.enterprise(entry.network)) {
-								Qt.callLater(forceActiveFocus)
+							TapHandler {
+								onTapped: passphrase.forceActiveFocus()
+							}
+							onVisibleChanged: {
+								if (visible
+										&& !root.enterprise(entry.network)) {
+									Qt.callLater(forceActiveFocus)
+								} else if (!visible && root.open) {
+									// the panel keeps the keys: Escape still
+									// closes after a prompt folded away
+									normalView.forceActiveFocus()
+								}
 							}
 						}
-					}
+						}
 				}
 			}
 		}
 	}
 
 	// The share view: the QR of the network in use, the payload fetched
-	// through NetworkManager's secrets and drawn as the encoder's blocks.
+	// through NetworkManager's secrets and drawn module by module on a
+	// light card — dark on light with its quiet zone, the way scanners
+	// read it, and never as text: fonts put their own spacing between
+	// block characters and the code stops scanning.
 	Column {
 		visible: root.qrActive
 		width: parent.width
+		spacing: UiTheme.panelSpacing
 
 		PanelSectionHeader {
 			text: root.net != null && root.net.name !== ""
 				? "Share " + root.net.name : "Share network"
 		}
 
-		Text {
-			width: parent.width
-			text: root.qrText
-			textFormat: Text.PlainText
-			renderType: Text.NativeRendering
-			horizontalAlignment: Text.AlignHCenter
-			color: UiTheme.text
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.fontSmall
+		Rectangle {
+			id: qrCard
+			readonly property int size: root.qrRows.length
+			readonly property int module: size > 0
+				? Math.max(4, Math.floor(240 / size)) : 4
+			anchors.horizontalCenter: parent.horizontalCenter
+			width: size * module
+			height: width
+			radius: 4
+			color: "#ffffff"
+
+			Grid {
+				anchors.centerIn: parent
+				columns: qrCard.size
+
+				Repeater {
+					model: qrCard.size * qrCard.size
+
+					Rectangle {
+						required property int index
+						width: qrCard.module
+						height: qrCard.module
+						color: root.qrRows[Math.floor(index / qrCard.size)]
+							.charAt(index % qrCard.size) === "1"
+							? "#111111" : "transparent"
+					}
+				}
 			}
 		}
 
@@ -1168,6 +1272,7 @@ PanelCard {
 	Column {
 		visible: root.speedResult != null
 		width: parent.width
+		spacing: UiTheme.panelSpacing
 
 		PanelSectionHeader {
 			text: "Speed test"
@@ -1205,14 +1310,18 @@ PanelCard {
 
 	// ---- the panel's own small pieces ----
 
-	// One label-and-value figure, right-aligned in its half of a row; the
-	// value copies itself when it holds something worth copying.
+	// One label-and-value figure, right-aligned in its half of a row;
+	// the value copies itself when it holds something worth copying.
 	component Figure: Item {
 		id: fig
 		property string label: ""
 		property string value: ""
 		property bool copyable: false
-		width: (parent.width - 6) / 2
+		// the row's halves are equal, except where a pair needs more room
+		// than its share: the last row's IP and its label together are
+		// wider than half, so that figure takes a little more of the row
+		property real share: 0.5
+		width: (parent.width - 6) * share
 		height: 16
 
 		Row {
@@ -1220,14 +1329,15 @@ PanelCard {
 			spacing: 4
 
 			PanelText {
+				id: figureLabel
 				dim: true
 				text: fig.label
-				width: 64
-				elide: Text.ElideRight
+				// its own width: a fixed one truncates the longer labels
+				width: implicitWidth
 			}
 
 			Item {
-				width: fig.width - 64 - 4
+				width: fig.width - figureLabel.width - 4
 				height: fig.height
 
 				PanelText {
@@ -1249,6 +1359,7 @@ PanelCard {
 			}
 		}
 	}
+
 
 	// One pill of the band or DNS rows: the one in force carries the tint,
 	// the pinned choice the accent border and weight.
