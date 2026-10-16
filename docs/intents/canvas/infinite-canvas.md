@@ -10,8 +10,8 @@
 ## Requirement
 
 One unbounded plane carries every window, and each output looks at it
-through its own camera. Being on a desktop is never required: panning
-to a free area of the canvas is as easy as going to a desktop.
+through its own camera. Being on a desktop is never required: reaching
+a free area of the canvas is as easy as going to a desktop.
 
 ## Design considerations
 
@@ -25,11 +25,11 @@ to a free area of the canvas is as easy as going to a desktop.
   reaches them through the same camera, so a scaled desktop is as usable
   as one at 100 %.
 - **Only a zoom action changes the zoom.** A Super pinch, Super+0, going
-  to a desktop (it brings its scale) and the overview do; a pan, a scroll
-  or a landing never does, so a free view keeps the zoom the camera
-  brought and stays as usable as the desktop it was panned off. The
-  overview and a transition on its way are the compositor's own, not
-  interactive ([overview.md](overview.md)).
+  to a desktop (a hop onto one included: it brings its scale) and the
+  overview do; a pan, a scroll or a hop into a free area never does, so a
+  free view keeps the zoom the camera brought and stays as usable as the
+  desktop it was left from. The overview and a transition on its way are
+  the compositor's own, not interactive ([overview.md](overview.md)).
 - **A resting camera sits on the pixel grid.** At rest the camera
   position is quantised to the output's pixel grid at its zoom, so a
   window never renders subpixel-blurry. Rendering and hit testing use the
@@ -48,24 +48,29 @@ to a free area of the canvas is as easy as going to a desktop.
 | Interaction gate | An output forwards pointer and gesture events to clients only in normal mode, resting at that zoom, with no zoom transition in progress |
 | Scale of the output itself | [../render/hidpi.md](../render/hidpi.md) |
 
-### Panning
+### Panning and hops
 
 | Input | Rule |
 |---|---|
-| 3-finger swipe | Pans anywhere; the action per mode is in the gesture table ([../input/gestures.md](../input/gestures.md)) |
+| 3-finger swipe | Hops; the action per mode is in the gesture table ([../input/gestures.md](../input/gestures.md)) |
+| Super+Ctrl+arrows | Hops, as a 3-finger swipe does ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
 | Pointer drag on empty canvas | Pans |
 | 2-finger scroll over empty canvas | Pans; over a client, scrolls the client |
 | Super+Alt+arrows | Pans a third of a screen ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
 
-- Pan direction is natural: content follows the fingers, like dragging
+- A drag pans naturally: the content follows the pointer, like dragging
   a map.
-- A released 3-finger pan keeps momentum; the camera coasts and decays
-  (decay time constant and minimum coasting speed are compile-time
-  constants in `src/core/config.h`).
-- A pan that lands close to a desktop (a compile-time fraction of the
-  screen as shown, the same distance on screen at every zoom) snaps onto
-  it, its zoom easing to that desktop's scale; any other landing spot
-  stays wherever the pan stopped, at the zoom it had.
+- A hop goes the way the fingers point, to the nearest desktop in that
+  direction — within a compile-time cone, straight-ahead neighbours
+  beating nearer off-axis ones, as the overview's hop
+  ([overview.md](overview.md)) — easing onto it at its scale. With none
+  that way it moves one screen that way as the view is shown, at the
+  zoom the view has.
+- A hop starts from where the camera is going: a swipe made while a hop
+  still eases walks on from that hop's landing, so quick swipes pass
+  desktop by desktop.
+- A hop never leaves the camera between places: there is no momentum
+  and no landing short of a desktop or a whole screen.
 
 ### Free areas and orientation
 
@@ -73,7 +78,7 @@ to a free area of the canvas is as easy as going to a desktop.
 |---|---|
 | Free areas | Any spot that is not a desktop. First-class: the camera may rest there, windows may live there, the overview may target it ([overview.md](overview.md)) |
 | Grid | A faint grid over the canvas, so panning over empty space is visible: in normal mode only when no wallpaper is mapped, always in the zoomed-out view |
-| Desktop outlines | Dashed frames, faded in faintly while panning in normal mode. How frames and grid are drawn is [../render/rendering.md](../render/rendering.md)'s |
+| Desktop outlines | Dashed frames, faded in faintly while the camera pans or hops in normal mode. How frames and grid are drawn is [../render/rendering.md](../render/rendering.md)'s |
 
 ## Error states, corner cases
 

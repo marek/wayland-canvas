@@ -19,10 +19,10 @@ actions.
 
 | Area | What you get |
 |---|---|
-| Canvas | One unbounded plane; every output has its own camera onto it; a 3-finger swipe pans anywhere with momentum, and a landing near a desktop snaps onto it |
+| Canvas | One unbounded plane; every output has its own camera onto it; a 3-finger swipe hops to the closest desktop in that direction, or one screen that way where none lies |
 | Desktops | Screen-sized dashed frames; a window belongs to the desktop its frame centre lies in; frames are created, abandoned, combined and tiled from the overview |
-| Overview | A 4-finger swipe up zooms out over everything; a target marks the landing spot; a 3-finger swipe jumps to the closest desktop in that direction |
-| Free areas | Anywhere that is not a desktop is still a place to work: pan there, jump there, zoom in there |
+| Overview | A 4-finger swipe up zooms out over everything; a target marks the landing spot; a 3-finger swipe hops its target as it hops the camera in the normal view |
+| Free areas | Anywhere that is not a desktop is still a place to work: pan there, hop there, zoom in there |
 | Windows | Server-side Windows 11 title bars; new windows open centred on the screen you are looking at; restoring a window brings you to it |
 | Opening apps | A tap of Super, or Super+Space, opens a Start-style launcher over the standard XDG desktop entries; adding an item is a `.desktop` file in `~/.local/share/applications` |
 | Displays | Scale 2 on dense panels by the dpi rule, 1 elsewhere; crisp at 1:1; runs from a spare TTY or nested in another compositor |

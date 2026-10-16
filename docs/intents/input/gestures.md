@@ -10,15 +10,16 @@
 ## Requirement
 
 Multi-finger gestures are the compositor's vocabulary for moving over
-the canvas: a 3-finger swipe pans the canvas anywhere, a 4-finger
-swipe up opens the zoomed-out canvas. Only 2-finger gestures and
-finger counts the compositor does not bind are forwarded to clients.
+the canvas: a 3-finger swipe hops to the nearest desktop in its
+direction, the same in the normal view as in the zoomed-out one, and a
+4-finger swipe up opens the zoomed-out canvas. Only 2-finger gestures
+and finger counts the compositor does not bind are forwarded to clients.
 
 ## Behavior
 
 | Mode | Fingers | Motion | Action |
 |---|---|---|---|
-| Normal | 3 | Swipe | Pan the canvas anywhere, with momentum ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
+| Normal | 3 | Swipe | Hop, as in the overview: ease onto the nearest desktop in the swipe's direction, at its scale; none that way, one screen that way ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Normal | 4 | Swipe up | Zoom out into the overview, following the fingers ([../canvas/overview.md](../canvas/overview.md)) |
 | Normal | 3 or 4 | Pinch | Treated as a swipe of the same finger count |
 | Normal | 2 | Pinch with Super held | Scale the desktop shown, following the fingers: pinching in scales it down, spreading scales it up ([../canvas/desktops.md](../canvas/desktops.md)) |
@@ -34,8 +35,8 @@ finger counts the compositor does not bind are forwarded to clients.
 
 Rules that hold across the table:
 
-- **Natural direction.** Content follows the fingers, like dragging a
-  map (a compile-time toggle in `src/core/config.h`).
+- **Hops go where the fingers point.** A 3-finger swipe to the left
+  hops to the desktop on the left, in either mode.
 - **Follow the fingers.** A gesture that drives a zoom transition moves
   the camera along the zoom path continuously; nothing jumps.
 - **Commit or spring back.** Release past a threshold of progress — or
@@ -44,11 +45,12 @@ Rules that hold across the table:
   distance; short of it the frame springs back. All thresholds are
   compile-time constants in `src/core/config.h`.
 - **One action per gesture.** A hop triggers once past its travel
-  threshold; a second jump takes a new gesture.
+  threshold; a second jump takes a new gesture. A swipe made while a
+  hop still eases starts from where that hop lands, so quick swipes walk
+  desktop by desktop.
 - **Previews while pinching.** A 3-finger pinch in tile or combine
   range shows what release will do; backing out of range clears it
   ([../canvas/overview.md](../canvas/overview.md)).
-- **Hold stops momentum.** A hold-gesture begin stops camera coasting.
 - **Super decides a 2-finger pinch at its start.** Held as the pinch
   begins, the pinch scales a desktop and never reaches a client; letting
   Super go mid-pinch changes nothing, and the pinch never counts as a Super
@@ -64,12 +66,15 @@ Rules that hold across the table:
 
 ## Design considerations
 
-- **3-finger pan, 4-finger up** is the primary interface: on one
-  unbounded plane a pan is always meaningful, so it works in both
+- **3-finger hop, 4-finger up** is the primary interface. A hop lands
+  on a desktop or exactly one screen away, never between places, so a
+  swipe cannot lose the user's place; it is the same gesture in both
   modes, and the zoomed-out canvas is where desktops are arranged.
+  Panning freely stays with the pointer: a drag or a 2-finger scroll
+  over empty canvas.
 - **Sloppy pinches are swipes.** At 3 and 4 fingers, touchpad gesture
   classification is unreliable; the finger count decides the intent,
-  so a misclassified pinch still pans.
+  so a misclassified pinch still hops.
 - **3- and 4-finger gestures never reach clients.** They are the
   compositor's navigation vocabulary; a client that grabbed them could
   swallow canvas movement. 2-finger gestures stay the client's.

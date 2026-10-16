@@ -18,14 +18,12 @@ and a narrower one here, the narrower one is given.
 | **Desktop** | A screen-sized dashed frame on the canvas, named "Desktop N" by id ([canvas/desktops.md](canvas/desktops.md)) |
 | **Frame** | A desktop's dashed rectangle. A *window frame* is a window's content plus its title bar and border — a different thing ([windows/title-bars.md](windows/title-bars.md)) |
 | **Tab** | A desktop's label in the overview, carrying its id and the Tile and Abandon buttons; dragging it moves the frame ([canvas/overview.md](canvas/overview.md)) |
-| **Hop** | One overview jump: the 3-finger-swipe move to the closest desktop in the swipe's direction, or one screen that way when no desktop lies there; one hop per swipe ([canvas/overview.md](canvas/overview.md)) |
+| **Hop** | The 3-finger-swipe move, the same in the normal view and the overview: to the closest desktop in the swipe's direction, or one screen that way when no desktop lies there; one hop per swipe ([canvas/infinite-canvas.md](canvas/infinite-canvas.md), [canvas/overview.md](canvas/overview.md)) |
 | **Abandon** | Remove a desktop; its windows stay on the canvas ([canvas/desktops.md](canvas/desktops.md)) |
 | **Combine** | Move another desktop's windows into this one, keeping their relative layout, and remove that desktop ([canvas/desktops.md](canvas/desktops.md)) |
 | **Tile** | Grid-tile the windows whose centre lies in a desktop or target spot, inside the usable area, with gaps ([canvas/desktops.md](canvas/desktops.md)) |
 | **Shelf** | The strip along the bottom of the overview holding minimized windows; clicking one restores it and goes there ([canvas/overview.md](canvas/overview.md)) |
 | **Hint** | A transient message the overview shows briefly, such as "Tiled 2 windows" |
-| **Momentum** | The coast after a released pan: the camera keeps moving while the velocity decays ([canvas/infinite-canvas.md](canvas/infinite-canvas.md)) |
-| **Snap** | Landing close enough to a desktop that the camera animates onto it ([canvas/infinite-canvas.md](canvas/infinite-canvas.md)) |
 | **SSD** | Server-side decorations: the compositor draws the title bar and border ([windows/title-bars.md](windows/title-bars.md)) |
 | **CSD** | Client-side decorations: the client draws its own |
 | **Title bar** | The SSD bar: title text on the left, caption buttons on the right ([windows/title-bars.md](windows/title-bars.md)) |

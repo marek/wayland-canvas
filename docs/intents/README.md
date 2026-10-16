@@ -48,10 +48,10 @@ their values.
 | [workspace/repos.md](workspace/repos.md) | The single repo, identity, pushing, what is committed, the wlroots subproject |
 | [workspace/build-and-run.md](workspace/build-and-run.md) | Build deps, meson, running: TTY, nested, options, scale |
 | [workspace/packaging.md](workspace/packaging.md) | The two package formats, the session file, the default-session rules per display manager, the change journal, install and uninstall guarantees |
-| [canvas/infinite-canvas.md](canvas/infinite-canvas.md) | The plane, per-output cameras, 1:1 vs zoomed, the pixel grid, panning, momentum, snap, free areas, the grid |
+| [canvas/infinite-canvas.md](canvas/infinite-canvas.md) | The plane, per-output cameras, 1:1 vs zoomed, the pixel grid, panning and hops, free areas, the grid |
 | [canvas/desktops.md](canvas/desktops.md) | What a desktop is, membership, frames never move windows, ids, create, abandon, combine, tile |
 | [canvas/overview.md](canvas/overview.md) | Entering and leaving, fit, the target model, hop semantics, the overview UI: tabs, help line, shelf, hints, pointer and key actions |
-| [input/gestures.md](input/gestures.md) | The touchpad gesture table (normal vs overview), finger counts, natural direction, follow-the-fingers transitions, commit/spring-back, forwarding to clients, hold stops momentum, sloppy pinches treated as swipes |
+| [input/gestures.md](input/gestures.md) | The touchpad gesture table (normal vs overview), finger counts, hops going where the fingers point, follow-the-fingers transitions, commit/spring-back, forwarding to clients, sloppy pinches treated as swipes |
 | [input/keyboard-and-pointer.md](input/keyboard-and-pointer.md) | Bindings table, Super tap, why every canvas shortcut includes Super, pointer focus, drags, scroll, touchpad settings, nested-mode notes |
 | [windows/title-bars.md](windows/title-bars.md) | Server-side title bars ("menu bars"): the Windows 11 look, buttons, states, negotiation policy, resize zones |
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |

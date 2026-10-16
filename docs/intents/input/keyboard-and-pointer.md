@@ -46,7 +46,7 @@ reach the client. A lone tap of Super opens the app launcher.
 | Super+Up | Maximize toggle |
 | Super+F | Fullscreen toggle |
 | Super+Tab, Super+W | Overview toggle ([../canvas/overview.md](../canvas/overview.md)) |
-| Super+Ctrl+Arrows | Go to the desktop in that direction, else one screen that way ([../canvas/overview.md](../canvas/overview.md)) |
+| Super+Ctrl+Arrows | Hop, as a 3-finger swipe does: the desktop in that direction, else one screen that way ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Ctrl+Shift+Arrows | Move the focused window to that desktop and follow |
 | Super+Alt+Arrows | Pan a third of a screen ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Ctrl+D | Pin the current view as a new desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
