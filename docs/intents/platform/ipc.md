@@ -34,7 +34,11 @@ The compositor listens on
 `$XDG_RUNTIME_DIR/wayland-canvas-<wayland display>.sock` (the prefix is a
 constant in `src/core/config.h`) and exports the path to every spawned
 client as `$WAYLAND_CANVAS_SOCKET`. The socket is created once the Wayland
-display socket exists and before any client is spawned.
+display socket exists and before any client is spawned. A process the
+compositor did not spawn — a service the session bus starts, the portal's
+chooser among them — finds it by the same rule from `$XDG_RUNTIME_DIR` and
+the `$WAYLAND_DISPLAY` the session hands over (an absolute
+`$WAYLAND_DISPLAY` names the socket's directory itself).
 
 ### Messages
 
@@ -120,7 +124,8 @@ membership).
 ### The `msg` client
 
 `wayland-canvas msg <method> [<params as JSON>]` connects to
-`$WAYLAND_CANVAS_SOCKET`, sends one request, prints the result and exits
+`$WAYLAND_CANVAS_SOCKET`, else to the socket `$WAYLAND_DISPLAY` names, sends
+one request, prints the result and exits
 0, or prints the error to stderr and exits 1 (also on a transport failure).
 `wayland-canvas msg subscribe` prints each event as one line until
 interrupted. `wayland-canvas msg capture.pick`, with the chooser list
