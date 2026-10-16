@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <signal.h>
+#include <sys/prctl.h>
 #include <format>
 #include <optional>
 #include <print>
@@ -44,6 +45,7 @@ wlr_box over_apart{}; // where "over" sat when the reference captures were taken
 bool portal_skip = false; // the portal pieces are not on this machine
 pid_t portal_pid = -1; // the dbus-run-session the portal phase rides on
 std::string portal_runtime; // the session's short-lived runtime dir in /tmp
+pid_t portal_bus_pid = -1; // the dbus-daemon this run owns, killed by pid
 std::string portal_dir; // its scratch world, under the shot directory
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -680,29 +682,56 @@ int run_step() {
 		const char *runtime = std::getenv("XDG_RUNTIME_DIR");
 		const char *display = std::getenv("WAYLAND_DISPLAY");
 		std::string wayland = std::format("{}/{}", runtime, display);
+		// The bus of its own: started here, killed here — and dead even if
+		// this run itself is killed, by PDEATHSIG. Nothing relies on a
+		// wrapper cleaning up after itself. gvfs stays off the bus so no
+		// FUSE mount ever happens under the runtime dir.
+		std::string bus = std::format("{}/bus", portal_runtime);
+		portal_bus_pid = fork();
+		if (portal_bus_pid == 0) {
+			prctl(PR_SET_PDEATHSIG, SIGKILL);
+			setpgid(0, 0); // the bus and everything it activates die together
+			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
+			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
+			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
+			setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", 1);
+			setenv("WAYLAND_DISPLAY", wayland.c_str(), 1);
+			setenv("DBUS_SESSION_BUS_ADDRESS", std::format("unix:path={}", bus).c_str(), 1);
+			setenv("GIO_USE_VFS", "local", 1);
+			setenv("GVFS_DISABLE_FUSE", "1", 1);
+			execl("/usr/bin/dbus-daemon", "dbus-daemon", "--session", "--nofork",
+				"--nopidfile", std::format("--address=unix:path={}", bus).c_str(),
+				static_cast<char *>(nullptr));
+			_exit(127);
+		}
 		portal_pid = fork();
 		if (portal_pid == 0) {
+			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			setpgid(0, 0); // the session dies as a group, leaving no one behind
 			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
 			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
 			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
 			setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", 1);
 			setenv("WAYLAND_DISPLAY", wayland.c_str(), 1);
+			setenv("DBUS_SESSION_BUS_ADDRESS", std::format("unix:path={}", bus).c_str(), 1);
+			setenv("GIO_USE_VFS", "local", 1);
+			setenv("GVFS_DISABLE_FUSE", "1", 1);
 			setenv("CHOOSER_MODE_FILE", std::format("{}/chooser-mode", portal_dir).c_str(), 1);
 			setenv("PORTAL_DIR", portal_dir.c_str(), 1);
-		execl("/bin/sh", "/bin/sh", "-c",
-			"dbus-run-session -- sh -c '"
-			"pipewire >\"$PORTAL_DIR/pipewire.out\" 2>&1 & pw=$!;"
-			"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/pipewire-0\" ]; do"
-			" sleep 0.1; i=$((i+1)); done;"
-			"/usr/lib/xdg-desktop-portal-wlr -l DEBUG"
-			" >\"$PORTAL_DIR/xdpw.out\" 2>&1 & xw=$!;"
-			"trap \"kill $pw $xw 2>/dev/null\" EXIT;"
-			"sleep 1;"
-			"/usr/bin/python3 \"$PORTAL_DIR/client.py\""
-			" >\"$PORTAL_DIR/client.out\" 2>\"$PORTAL_DIR/client.err\";"
-			"echo $? >\"$PORTAL_DIR/client.code\"'"
-			" >\"$PORTAL_DIR/session.out\" 2>\"$PORTAL_DIR/session.err\"", nullptr);
+			execl("/bin/sh", "/bin/sh", "-c",
+				"exec >\"$PORTAL_DIR/session.out\" 2>\"$PORTAL_DIR/session.err\";"
+				"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/bus\" ]; do"
+				" sleep 0.1; i=$((i+1)); done;"
+				"pipewire >\"$PORTAL_DIR/pipewire.out\" 2>&1 & pw=$!;"
+				"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/pipewire-0\" ]; do"
+				" sleep 0.1; i=$((i+1)); done;"
+				"/usr/lib/xdg-desktop-portal-wlr -l DEBUG"
+				" >\"$PORTAL_DIR/xdpw.out\" 2>&1 & xw=$!;"
+				"trap 'kill $pw $xw 2>/dev/null' TERM EXIT;"
+				"sleep 1;"
+				"/usr/bin/python3 \"$PORTAL_DIR/client.py\""
+				" >\"$PORTAL_DIR/client.out\" 2>\"$PORTAL_DIR/client.err\";"
+				"echo $? >\"$PORTAL_DIR/client.code\"", nullptr);
 			_exit(127);
 		}
 		return 300;
@@ -716,12 +745,17 @@ int run_step() {
 			if (retries++ < 120) {
 				return -500; // still sharing; the whole session gets a minute
 			}
-			kill(-portal_pid, SIGKILL); // the group: bus, portal, backend, client
+			kill(-portal_pid, SIGTERM); // ask first: the script's trap reaps
+			usleep(100000);
+			kill(-portal_pid, SIGKILL); // then the group, whatever is left
 			waitpid(portal_pid, &status, 0);
 		}
-		// Anything the session left on the bus — a portal that lingers past its
-		// dbus-run-session — goes with the group.
-		kill(-portal_pid, SIGKILL);
+		// The bus this run started goes too — SIGKILL: it is a private test bus
+		// with nothing to save, and a TERM may leave it waiting on a client.
+		if (portal_bus_pid > 0) {
+			kill(-portal_bus_pid, SIGKILL);
+			waitpid(portal_bus_pid, &status, 0);
+		}
 		// What the ScreenCast client saw, one line per source kind.
 		std::string out = read_file(std::format("{}/client.out", portal_dir));
 		auto node_of = [&out](std::string_view kind) {
