@@ -27,7 +27,8 @@ depends=(
 	'wayland'
 )
 optdepends=('quickshell: the top bar (started automatically when qs is on PATH)'
-	'xdg-desktop-portal-wlr: screen sharing and screenshots for apps (Chrome, video calls)')
+	'xdg-desktop-portal-wlr: screen sharing and screenshots for apps (Chrome, video calls)'
+	'ffmpeg: screen and window recordings (shots never need it)')
 makedepends=(
 	'clang'
 	'git'

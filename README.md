@@ -83,6 +83,34 @@ wayland-canvas window in its picker. Don't start wayland-canvas under
 `dbus-run-session` to get around this: it gets a portal of its own, but the apps
 inside lose the keyring and every other session service.
 
+### Screenshots and recordings
+
+macOS-style, from the keyboard:
+
+| Keys | Action |
+|---|---|
+| Super+Shift+3 | Screenshot of the whole screen |
+| Super+Shift+4 (or Print) | Pick what to shot: drag a region, click a window, Space for windows only, Esc to cancel |
+| Super+Shift+5 | The capture toolbar: shots and recordings of screen, window or region, with options (destination, timer, pointer) |
+| Ctrl + any shot key | Copy to the clipboard instead of saving |
+| Shift+Print | Screenshot of the whole screen |
+| Alt+Print | Stop a running recording, else open the toolbar on its recordings |
+
+A saved shot lands in `~/Pictures/Screenshots` (the XDG pictures dir), is copied
+to the clipboard, and shows as a bottom-right thumbnail for a few seconds —
+click it to open the file, swipe it away. A window is captured alone: title bar
+and content, nothing over it, at the output's scale whatever the canvas zoom.
+Recordings go to `~/Videos` (the XDG videos dir); a red dot in the bar marks a
+running one and stops it on a click. The compositor itself renders every
+recording frame offscreen (the same path a shot takes) and pipes them to
+`ffmpeg`, so recordings work nested and from a TTY alike, and none of the
+capture UI (picker, toolbar, thumbnail) is ever in them. Recordings need
+ffmpeg (optional — shots never depend on it):
+
+```sh
+sudo pacman -S ffmpeg   # Debian: apt install ffmpeg
+```
+
 ## Opening apps
 
 Tap the Windows (logo) key, or press Super+Space: a Start-style launcher lists
@@ -213,6 +241,8 @@ compositor binary (build tree or install prefix) or at
 | Super+1…9 | Go to desktop N |
 | Super+0 | Return the desktop shown, or a free area, to 100 % |
 | Super+Shift+E, Ctrl+Alt+Backspace | Quit |
+| Super+Shift+3 / 4 / 5 | Whole-screen shot / the capture picker / the capture toolbar (Ctrl on a shot: clipboard) |
+| Print / Shift+Print / Alt+Print | The capture picker / whole-screen shot / stop a recording, else the toolbar on its recordings |
 | Ctrl+Alt+F1…F12 | Switch VT |
 | Overview: arrows, Return, Escape, Delete, T, M, N, 0, +/- | Jump, enter, back, abandon, tile, combine, new desktop, target back to 100 %, zoom |
 

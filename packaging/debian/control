@@ -5,7 +5,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: Marek Kudlacz <marek@kudlacz.com>
 Depends: ${shlibs:Depends}
-Recommends: quickshell, xdg-desktop-portal-wlr
+Recommends: quickshell, xdg-desktop-portal-wlr, ffmpeg
 Description: Infinite-canvas Wayland compositor with virtual desktops
  Windows live anywhere on an unbounded zoomable canvas; virtual desktops are
  screen-sized dashed frames you drag over the windows however you like.

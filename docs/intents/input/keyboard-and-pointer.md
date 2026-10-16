@@ -55,9 +55,13 @@ reach the client. A lone tap of Super opens the app launcher.
 | Super+1..9 | Go to desktop N ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+0 | Return the view to 100 %: the desktop shown ([../canvas/desktops.md](../canvas/desktops.md)), or a free view ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Shift+E, Ctrl+Alt+Backspace | Quit the compositor |
-| Ctrl+Alt+F1..F12 | Switch virtual terminal |
+| Super+Shift+3 / 4 / 5 | Whole-screen shot / the capture picker / the capture toolbar, Ctrl on a shot chord copies it ([../apps/capture.md](../apps/capture.md)) |
+| Print / Shift+Print / Alt+Print | The picker / whole-screen shot / stop a recording, else the toolbar on its recording choices ([../apps/capture.md](../apps/capture.md)) |
 | Overview keys | Arrows hop, Return go, Esc back, Delete/BackSpace abandon, `t` switch tiling, `m` combine, `n` new desktop, `0` the target desktop back to 100 %, `+`/`−` zoom ([../canvas/overview.md](../canvas/overview.md)) |
 
+- A binding matches the keysym the layout produces, lower-cased, and —
+  for the shot chords' digits — the key's unshifted symbol as well, so
+  Super+Shift+3 is `3` on a US layout where Shift+3 is `#`.
 - Super+Ctrl+arrows and its kin are Windows' own virtual-desktop keys.
 - Alt+F4 is the one close binding without Super, for Windows parity.
 - Bindings live in a table in the input code next to the actions;
