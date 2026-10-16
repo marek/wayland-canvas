@@ -104,6 +104,12 @@ void update_idle_inhibit(Server &server, int delta) {
 	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier, count > 0);
 }
 
+// SIGPIPE as the compositor found it. The compositor ignores the signal for
+// itself (see Server::init); what it starts gets this back, since an ignored
+// signal stays ignored across exec.
+void (*inherited_sigpipe)(int) = SIG_DFL;
+bool sigpipe_recorded = false;
+
 } // namespace
 
 double now_ms() {
@@ -124,6 +130,7 @@ void spawn(const char *cmd) {
 		sigset_t set;
 		sigemptyset(&set);
 		sigprocmask(SIG_SETMASK, &set, nullptr);
+		std::signal(SIGPIPE, inherited_sigpipe);
 		if (fork() == 0) {
 			execl("/bin/sh", "/bin/sh", "-c", cmd, static_cast<char *>(nullptr));
 			_exit(127);
@@ -245,8 +252,15 @@ bool Server::init(const Options &options) {
 	loop = wl_display_get_event_loop(display);
 	// IPC writes to clients that exit mid-line must fail with EPIPE, not
 	// take the compositor down: Ipc::flush already keeps such writes queued
-	// until the connection's EOF is dispatched.
-	std::signal(SIGPIPE, SIG_IGN);
+	// until the connection's EOF is dispatched. The disposition found here
+	// is what spawned commands get back; a second Server in the same process
+	// would find the first one's ignore instead, so only the first records.
+	void (*previous)(int) = std::signal(SIGPIPE, SIG_IGN);
+	if (!sigpipe_recorded) {
+		// A handler would not survive exec: only an ignore is passed on.
+		inherited_sigpipe = previous == SIG_IGN ? SIG_IGN : SIG_DFL;
+		sigpipe_recorded = true;
+	}
 	wl_event_loop_add_signal(loop, SIGINT, handle_terminate_signal, this);
 	wl_event_loop_add_signal(loop, SIGTERM, handle_terminate_signal, this);
 

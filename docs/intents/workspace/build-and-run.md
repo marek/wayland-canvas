@@ -50,6 +50,21 @@ A C++26 compiler — LLVM's clang, selected by
 The terminal binding (`Super+Return`) and `Terminal=true` desktop
 entries run `$TERMINAL`, falling back to `foot`.
 
+Everything the compositor starts — the startup command, the terminal,
+launcher entries, the shell — runs through `/bin/sh -c` in a session of
+its own: `WAYLAND_DISPLAY` names the compositor's socket, the variables
+that would steer a client to another compositor (`DISPLAY`,
+`HYPRLAND_INSTANCE_SIGNATURE`, `SWAYSOCK`, `I3SOCK`, `NIRI_SOCKET`) are
+unset, the signal mask is empty, and SIGPIPE is as the compositor found
+it — the compositor ignores SIGPIPE for itself (a control-socket client
+may leave mid-write), and that ignore never reaches what it starts.
+
+A single-instance app that is already running in another session — a
+browser or an Electron app open in the host compositor of a nested run,
+or in a session on another VT — hands the launch to that instance, and
+the window opens there. Such an app starts here only once that instance
+has quit, or with a profile of its own (Chrome's `--user-data-dir`).
+
 ## Cross-links
 
 - [repos.md](repos.md) — what is committed and pushed.

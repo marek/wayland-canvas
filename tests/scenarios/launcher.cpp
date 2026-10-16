@@ -2,6 +2,7 @@
 // custom desktop entry installed into $XDG_DATA_HOME before the server starts.
 // Writes only under $CANVAS_TMP (meson passes the repo's tmp/).
 #include <cerrno>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +38,7 @@ const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
 std::string shot_dir;
 std::string xdg_dir;
 std::string marker_path;
+bool harness_ignores_sigpipe = false; // as this process was started; see main()
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -67,6 +69,22 @@ int mapped() {
 		n += v->mapped;
 	}
 	return n;
+}
+
+// The SigIgn mask the custom entry's command wrote into the marker file,
+// once the line is there in full.
+std::optional<unsigned long long> marker_sigign() {
+	FILE *f = std::fopen(marker_path.c_str(), "r");
+	if (f == nullptr) {
+		return std::nullopt;
+	}
+	char line[128] = {};
+	bool read = std::fgets(line, sizeof line, f) != nullptr;
+	std::fclose(f);
+	if (!read || std::strncmp(line, "SigIgn:", 7) != 0 || std::strchr(line, '\n') == nullptr) {
+		return std::nullopt;
+	}
+	return std::strtoull(line + 7, nullptr, 16);
 }
 
 void shot(const char *name) {
@@ -207,9 +225,19 @@ int run_step() {
 		tap(KEY_ENTER);
 		check(!server->launcher.is_open(), "Enter launched the custom entry and closed the launcher");
 		return 400;
-	case 12:
-		if (access(marker_path.c_str(), F_OK) != 0 && retries++ < 100) return -100;
-		check(access(marker_path.c_str(), F_OK) == 0, "the custom entry's Exec touched the marker file");
+	case 12: {
+		std::optional<unsigned long long> ign = marker_sigign();
+		if (!ign && retries++ < 100) return -100;
+		check(ign.has_value(), "the custom entry's Exec wrote the marker file");
+		// The compositor ignores SIGPIPE for itself; what it starts must not
+		// inherit that ignore.
+		bool ignored = ign && (*ign & (1ull << (SIGPIPE - 1))) != 0;
+		check(ign && ignored == harness_ignores_sigpipe, std::format(
+			"the launched command got SIGPIPE as the compositor found it ({}, SigIgn {:x})",
+			harness_ignores_sigpipe ? "ignored" : "default", ign.value_or(0)));
+		return 300;
+	}
+	case 13:
 		if (mapped() <= views_before && retries++ < 200) return -100;
 		check(mapped() == views_before + 1, "the custom entry opened foot (window mapped)");
 		return 0;
@@ -245,7 +273,8 @@ int handle_timer() {
 }
 
 // Installs a spec-valid custom entry into $XDG_DATA_HOME/applications; its
-// Exec uses double quotes, touches the marker file and opens foot.
+// Exec uses double quotes, writes its signal dispositions into the marker
+// file and opens foot.
 void install_custom_entry() {
 	std::string apps = xdg_dir + "/applications";
 	mkdir_p(apps);
@@ -259,7 +288,7 @@ void install_custom_entry() {
 	std::fprintf(f, "[Desktop Entry]\n");
 	std::fprintf(f, "Type=Application\n");
 	std::fprintf(f, "Name=Zydeco Marker\n");
-	std::fprintf(f, "Exec=sh -c \"touch %s; exec foot -T scenariocustom\"\n",
+	std::fprintf(f, "Exec=sh -c \"grep SigIgn /proc/self/status > %s; exec foot -T scenariocustom\"\n",
 		marker_path.c_str());
 	std::fclose(f);
 }
@@ -268,6 +297,9 @@ void install_custom_entry() {
 
 int main() {
 	wlr_log_init(WLR_ERROR, nullptr);
+	struct sigaction found{};
+	sigaction(SIGPIPE, nullptr, &found);
+	harness_ignores_sigpipe = found.sa_handler == SIG_IGN;
 	const char *env = std::getenv("CANVAS_TMP");
 	std::string root = env && *env ? env : "tmp"; // meson passes the repo's tmp/ via env
 	shot_dir = std::format("{}/scenarios/launcher", root);
