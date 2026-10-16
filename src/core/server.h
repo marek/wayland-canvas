@@ -14,6 +14,7 @@
 #include "core/theme.h"
 #include "render/render.h"
 #include "core/util.h"
+#include "platform/session_bus.h"
 #include "windows/launches.h"
 #include "windows/view.h"
 
@@ -144,4 +145,6 @@ private:
 	std::vector<std::unique_ptr<SurfaceTracker>> trackers_;
 	std::vector<std::unique_ptr<Inhibitor>> inhibitors_;
 	Listener new_surface_, request_activate_, new_inhibitor_;
+	// A login's hand-over of the portal, handed back on exit.
+	std::optional<session_bus::HandOver> hand_over_;
 };

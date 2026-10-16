@@ -112,29 +112,84 @@ void update_idle_inhibit(Server &server, int delta) {
 void (*inherited_sigpipe)(int) = SIG_DFL;
 bool sigpipe_recorded = false;
 
+// The desktop name every client sees; "wlroots" lets the portal pick its
+// wlroots backend where our portals config is not installed.
+constexpr const char *desktop_name = "wayland-canvas:wlroots";
+// The portals a hand-over and a hand-back restart, so they serve the display
+// the systemd environment now names.
+constexpr const char *portal_units =
+	"xdg-desktop-portal.service xdg-desktop-portal-wlr.service xdg-desktop-portal-gtk.service";
+
+// The handed-over values in the user's systemd environment, read now.
+session_bus::Handed systemd_handed() {
+	FILE *pipe = popen("systemctl --user show-environment", "r");
+	if (pipe == nullptr) {
+		return {};
+	}
+	std::string out;
+	char chunk[4096];
+	std::size_t n = 0;
+	while ((n = std::fread(chunk, 1, sizeof chunk, pipe)) > 0) {
+		out.append(chunk, n);
+	}
+	pclose(pipe);
+	return session_bus::handed_in(out);
+}
+
 // Puts this compositor's WAYLAND_DISPLAY and desktop name into the
 // activation environment of the services the session bus starts — the
 // screen-sharing portal and its wlroots backend first among them — when
-// the bus is this run's to take (docs/intents/platform/protocols.md).
-void hand_over_session_bus(bool login) {
+// the bus is this run's to take (docs/intents/platform/protocols.md). A
+// login returns the values it replaced, for the hand-back on exit.
+std::optional<session_bus::Handed> hand_over_session_bus(bool login) {
 	const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
 	const char *runtime = getenv("XDG_RUNTIME_DIR");
 	switch (session_bus::owner(address ? address : "", runtime ? runtime : "", login)) {
 	case session_bus::Owner::none:
 	case session_bus::Owner::host:
-		return;
+		return std::nullopt;
 	case session_bus::Owner::own:
 		spawn("dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP");
-		return;
-	case session_bus::Owner::login:
+		return std::nullopt;
+	case session_bus::Owner::login: {
+		session_bus::Handed before = systemd_handed();
 		// Portals an earlier session left running still serve that
 		// session's display: restart the ones that run.
-		spawn("dbus-update-activation-environment --systemd WAYLAND_DISPLAY"
-			" XDG_CURRENT_DESKTOP && systemctl --user try-restart"
-			" xdg-desktop-portal.service xdg-desktop-portal-wlr.service"
-			" xdg-desktop-portal-gtk.service");
+		spawn(std::format("dbus-update-activation-environment --systemd WAYLAND_DISPLAY"
+			" XDG_CURRENT_DESKTOP && systemctl --user try-restart {}", portal_units).c_str());
+		return before;
+	}
+	}
+	return std::nullopt;
+}
+
+// Gives the portal back to the session a login took it from: the values it
+// replaced restored (unset ones unset) and the portals restarted, unless
+// another session has taken it since.
+void hand_back_session_bus(const session_bus::HandOver &hand_over) {
+	std::optional<session_bus::Handed> restore =
+		session_bus::hand_back(hand_over, systemd_handed());
+	if (!restore.has_value()) {
 		return;
 	}
+	std::string set, unset;
+	auto add = [&set, &unset](const char *name, const std::optional<std::string> &value) {
+		if (value.has_value()) {
+			set += " " + shell_quote(std::format("{}={}", name, *value));
+			return;
+		}
+		unset += std::format(" {}", name);
+	};
+	add("WAYLAND_DISPLAY", restore->wayland_display);
+	add("XDG_CURRENT_DESKTOP", restore->current_desktop);
+	std::string cmd;
+	if (!set.empty()) {
+		cmd += "dbus-update-activation-environment --systemd" + set + " && ";
+	}
+	if (!unset.empty()) {
+		cmd += "systemctl --user unset-environment" + unset + " && ";
+	}
+	spawn((cmd + "systemctl --user try-restart " + portal_units).c_str());
 }
 
 } // namespace
@@ -257,6 +312,9 @@ Server::Server()
 }
 
 Server::~Server() {
+	if (hand_over_.has_value()) {
+		hand_back_session_bus(*hand_over_);
+	}
 	if (display != nullptr) {
 		wl_display_destroy_clients(display);
 	}
@@ -400,10 +458,14 @@ bool Server::start() {
 	unsetenv("NIRI_SOCKET");
 	// Before any client is spawned, so they inherit the socket path.
 	ipc.init();
-	// Every client is in a wayland-canvas session; "wlroots" lets the portal
-	// pick its wlroots backend where our portals config is not installed.
-	setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", true);
-	hand_over_session_bus(session != nullptr);
+	// Every client is in a wayland-canvas session.
+	setenv("XDG_CURRENT_DESKTOP", desktop_name, true);
+	if (std::optional<session_bus::Handed> before = hand_over_session_bus(session != nullptr)) {
+		hand_over_ = session_bus::HandOver{
+			.ours = {.wayland_display = socket, .current_desktop = desktop_name},
+			.before = *before,
+		};
+	}
 	wlr_log(WLR_INFO, "Running wayland-canvas on WAYLAND_DISPLAY=%s", socket);
 	if (options.start_bar) {
 		start_bar();

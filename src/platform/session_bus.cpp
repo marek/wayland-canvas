@@ -20,6 +20,22 @@ bool is_user_bus(std::string_view address, std::string_view runtime_dir) {
 	return rest.empty() || rest.front() == ',';
 }
 
+// The value of `name` in `systemctl --user show-environment` output.
+std::optional<std::string> value_of(std::string_view env, std::string_view name) {
+	while (!env.empty()) {
+		std::size_t end = env.find('\n');
+		std::string_view line = env.substr(0, end);
+		if (line.size() > name.size() && line.starts_with(name) && line[name.size()] == '=') {
+			return std::string(line.substr(name.size() + 1));
+		}
+		if (end == std::string_view::npos) {
+			break;
+		}
+		env.remove_prefix(end + 1);
+	}
+	return std::nullopt;
+}
+
 } // namespace
 
 Owner owner(std::string_view address, std::string_view runtime_dir, bool login) {
@@ -32,6 +48,20 @@ Owner owner(std::string_view address, std::string_view runtime_dir, bool login) 
 		return Owner::own;
 	}
 	return login ? Owner::login : Owner::host;
+}
+
+Handed handed_in(std::string_view show_environment) {
+	return {
+		.wayland_display = value_of(show_environment, "WAYLAND_DISPLAY"),
+		.current_desktop = value_of(show_environment, "XDG_CURRENT_DESKTOP"),
+	};
+}
+
+std::optional<Handed> hand_back(const HandOver &hand_over, const Handed &now) {
+	if (now != hand_over.ours) {
+		return std::nullopt;
+	}
+	return hand_over.before;
 }
 
 }

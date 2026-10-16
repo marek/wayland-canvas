@@ -142,7 +142,7 @@ struct PrivateBus {
 	std::string address; // what DBUS_*_BUS_ADDRESS becomes for the bar
 };
 
-PrivateBus system_bus, session_bus;
+PrivateBus private_system, private_session; // the world's own buses
 pid_t standins_pid = -1;
 
 // The panel widths shell/Panel.qml commits, one distinct width per panel so
@@ -1000,8 +1000,8 @@ bool dns_pill_lit(const char *name, int pill) {
 // terminates the dbusmock mocks with it), then the buses.
 void stop_isolation() {
 	reap(usage_standin_pid);
-	reap(system_bus.pid);
-	reap(session_bus.pid);
+	reap(private_system.pid);
+	reap(private_session.pid);
 }
 
 // One variable of a live process's environment, as /proc tells it — the
@@ -1468,7 +1468,7 @@ std::string child_output(Spawned &child, int timeout_s) {
 // explicit, so nothing can ever reach the machine's bus.
 std::string busctl(const char *verb, const char *name, const char *path,
 	const char *interface, const char *member) {
-	const char *const argv[] = {"busctl", "--address", system_bus.address.c_str(),
+	const char *const argv[] = {"busctl", "--address", private_system.address.c_str(),
 		verb, name, path, interface, member, static_cast<const char *>(nullptr)};
 	Spawned child = spawn(argv);
 	if (child.pid <= 0) {
@@ -2813,7 +2813,7 @@ int run_step() {
 		std::string ses = proc_env_value(bar_pid, "DBUS_SESSION_BUS_ADDRESS");
 		std::println("note: the bar (pid {}) runs with DBUS_SYSTEM_BUS_ADDRESS={} "
 			"DBUS_SESSION_BUS_ADDRESS={}", bar_pid, sys, ses);
-		check(sys == system_bus.address && ses == session_bus.address,
+		check(sys == private_system.address && ses == private_session.address,
 			"the bar's bus addresses are the private pair (from /proc/environ)");
 		// The weather fetch is answered at once by the curl stand-in, so
 		// the widget is up quickly; a short wait still lets the bar lay
@@ -5772,16 +5772,16 @@ int main() {
 	// with their stand-ins — when either cannot come up, no bar runs at
 	// all, and the machine's buses are never touched. The stand-ins and
 	// every later child (the bar above all) inherit the addresses.
-	if (!start_private_bus(system_bus, "system", "system")
-			|| !start_private_bus(session_bus, "session", "session")) {
+	if (!start_private_bus(private_system, "system", "system")
+			|| !start_private_bus(private_session, "session", "session")) {
 		std::println("FAILED: the private buses did not start; the bar did not run");
 		stop_isolation();
 		return 2;
 	}
 	// Python children must never drop bytecode into the source tree
 	setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
-	setenv("DBUS_SYSTEM_BUS_ADDRESS", system_bus.address.c_str(), 1);
-	setenv("DBUS_SESSION_BUS_ADDRESS", session_bus.address.c_str(), 1);
+	setenv("DBUS_SYSTEM_BUS_ADDRESS", private_system.address.c_str(), 1);
+	setenv("DBUS_SESSION_BUS_ADDRESS", private_session.address.c_str(), 1);
 	if (!start_standins()) {
 		std::println("FAILED: the stand-in services did not start; the bar did not run");
 		stop_isolation();

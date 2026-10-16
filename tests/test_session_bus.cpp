@@ -16,6 +16,8 @@ void check(bool cond, std::source_location loc = std::source_location::current()
 	}
 }
 
+using session_bus::Handed;
+using session_bus::HandOver;
 using session_bus::Owner;
 using session_bus::owner;
 
@@ -56,6 +58,35 @@ void test_no_bus() {
 	check(owner("", run, true) == Owner::none);
 }
 
+// The two values among the rest of systemd's environment; a longer name
+// that starts the same is another variable.
+void test_handed_in() {
+	Handed both = session_bus::handed_in(
+		"HOME=/home/marek\nWAYLAND_DISPLAYX=no\nWAYLAND_DISPLAY=wayland-1\n"
+		"XDG_CURRENT_DESKTOP=Hyprland\nXDG_SESSION_TYPE=wayland\n");
+	check(both.wayland_display == "wayland-1" && both.current_desktop == "Hyprland");
+	Handed last_line = session_bus::handed_in("PATH=/usr/bin\nXDG_CURRENT_DESKTOP=Hyprland");
+	check(!last_line.wayland_display.has_value() && last_line.current_desktop == "Hyprland");
+	Handed none = session_bus::handed_in("HOME=/home/marek\n");
+	check(!none.wayland_display.has_value() && !none.current_desktop.has_value());
+}
+
+// On exit the replaced values come back, unset ones included, unless
+// another session has taken the portal since.
+void test_hand_back() {
+	Handed ours{.wayland_display = "wayland-0", .current_desktop = "wayland-canvas:wlroots"};
+	Handed hyprland{.wayland_display = "wayland-1", .current_desktop = "Hyprland"};
+	HandOver from_hyprland{.ours = ours, .before = hyprland};
+	check(session_bus::hand_back(from_hyprland, ours) == hyprland);
+	HandOver from_nothing{.ours = ours, .before = {}};
+	check(session_bus::hand_back(from_nothing, ours) == Handed{});
+	// A session started since took it: theirs stays.
+	Handed later{.wayland_display = "wayland-2", .current_desktop = "sway"};
+	check(!session_bus::hand_back(from_hyprland, later).has_value());
+	Handed half_taken{.wayland_display = "wayland-0", .current_desktop = "sway"};
+	check(!session_bus::hand_back(from_hyprland, half_taken).has_value());
+}
+
 } // namespace
 
 int main() {
@@ -64,6 +95,8 @@ int main() {
 	test_own_bus();
 	test_near_misses_are_other_buses();
 	test_no_bus();
+	test_handed_in();
+	test_hand_back();
 	if (failures != 0) {
 		std::printf("%d session-bus test failure(s)\n", failures);
 		return 1;

@@ -75,7 +75,9 @@ wayland-canvas names itself `wayland-canvas:wlroots` (`XDG_CURRENT_DESKTOP`) and
 hands its display to the portal at start. Sharing works from a wayland-canvas
 login (a TTY, or the session at the login screen): run `./build/wayland-canvas`
 as usual — the hand-over happens on your normal session bus, so the keyring
-(saved passwords and logins), notifications and the rest keep working.
+(saved passwords and logins), notifications and the rest keep working. When it
+exits, the portal goes back to the session it was taken from (Hyprland on
+another VT shares its own screens again).
 
 The portal is one per login. While wayland-canvas runs nested inside another
 compositor, apps share through *that* compositor's portal: pick the
