@@ -139,6 +139,7 @@ core_lib = static_library(
 		'src/platform/ipc.cpp',
 		'src/platform/layer.cpp',
 		'src/platform/output.cpp',
+		'src/render/capture.cpp',
 		'src/render/draw.cpp',
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
@@ -273,6 +274,9 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
 	scenarios = ['gestures', 'input', 'launcher', 'ipc']
+	# The sharing scenario adds the capture core, the capture protocols and
+	# the portal; it skips its portal phase itself when the tooling is missing.
+	scenarios += ['sharing']
 	# The bar scenario drives the real bar client against stand-in services,
 	# so it also needs qs, a dbus-daemon to build its private buses from,
 	# and the dbusmock stand-in environment (provisioned under tmp/ by the

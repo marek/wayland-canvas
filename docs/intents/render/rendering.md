@@ -37,6 +37,7 @@ output's scale, and is told a frame only when its surface is shown.
 | Draw order | canvas clear; wallpaper and bottom layer, in screen space; a dim over a wallpaper while zoomed; the grid; windows bottom-to-top with border, title bar and surfaces including popups; desktop frames; the top layer, skipped when a fullscreen window covers the output; the overview UI — tabs, target highlight, previews, shelf, help line; the transient hint; the overlay layer; the drag icon; software cursors |
 | Grid | a faint grid on the canvas, spacing kept at 48 screen px or more; drawn in the overview always, and in normal mode only when no wallpaper is mapped |
 | Desktop frames | dashed outlines: always in the overview; in normal mode they fade in while panning ([../canvas/desktops.md](../canvas/desktops.md)) |
+| Offscreen capture | `capture_output`/`capture_view` (render/capture.h) re-render offscreen what an output area or one window shows: the same drawing an on-screen frame does — at the output's scale, no cursors, and no surface enter/frame feedback, which the output's own frames still own. A window is rendered alone: title bar, border, content, nothing that overlaps it, whatever the canvas zoom ([../platform/protocols.md](../platform/protocols.md) owns the capture protocols fed from it) |
 | Zoom scaling | boxes scale with the zoom, and edges are rounded from canvas coordinates individually, so neighbours leave no seams |
 
 ## Error states, corner cases
@@ -45,6 +46,8 @@ output's scale, and is told a frame only when its surface is shown.
   the `needs_frame` path, not damage.
 - A window on no output keeps its buffers and its last outputs; it is
   not unmapped, hidden or re-laid-out.
+- An offscreen capture is a re-render, not a readback of the last committed
+  frame: what it shows is what the output would show now.
 
 ## Cross-links
 

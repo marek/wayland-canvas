@@ -72,6 +72,18 @@ own the machine's Wayland display namespace and GPU.
   the scenario process itself was started (the compositor's own ignore never
   reaches what it launches), and the desktop name `wayland-canvas:wlroots`.
 
+- **`sharing.cpp`** — the capture core, its protocols and the portal. The
+  offscreen captures first: two foot windows mapped (they start overlapped
+  at the centre), pulled apart with a title-bar drag, then the offscreen
+  whole-output capture and a region capture compared pixel for pixel
+  against grim's screenshot and `grim -g` crop of the same areas, and a
+  window capture checked to be exactly the frame at the output's scale.
+  "Over" is then dropped back over most of "under": the window shot of
+  "under" must be pixel-identical to the one taken while nothing covered
+  it (what overlaps a window leaves no trace), while the whole-output
+  capture changes inside the overlap and nowhere outside the moved
+  window's old or new frame.
+
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and
   session buses on sockets under `tmp/scenarios/bar/bus/` (a bar process must

@@ -12,25 +12,8 @@
 namespace {
 
 // ---------------------------------------------------------------- context
-
-// Everything one output's frame is drawn with.
-struct RenderCtx {
-	Output *output;
-	wlr_render_pass *pass;
-	Camera cam; // output->camera(): quantized, same as hit testing
-	Rect viewport; // visible canvas rectangle
-	double left, top; // canvas coords shown at output-local (0, 0)
-	float scale;
-	// What title bars are drawn for: the output's scale times the zoom the
-	// camera rests at, so they stay sharp on a scaled desktop.
-	double deco_scale;
-	wl_output_transform transform; // inverse of output->wlr->transform
-	int tw, th; // transformed (buffer) resolution
-	bool overview;
-	std::vector<DrawnSurface> *drawn; // Painter's reused per-frame buffer
-	std::span<HelpSlot> help_cache; // Painter's help-line texture cache
-	unsigned *help_clock;
-};
+// RenderCtx is in render.h: an output's on-screen frame and an offscreen
+// capture of a rectangle of it are drawn through the same one.
 
 void record_surface(const RenderCtx &ctx, wlr_surface *surface, bool frame_done) {
 	ctx.drawn->push_back({.surface = surface, .frame_done = frame_done});
@@ -38,13 +21,14 @@ void record_surface(const RenderCtx &ctx, wlr_surface *surface, bool frame_done)
 
 // ------------------------------------------------------ box/rect drawing
 
-// Output-local logical box -> buffer pixels. Edges are scaled and rounded
-// individually so adjacent boxes never leave a seam.
+// Output-local logical box -> buffer pixels of the render target, offset by
+// the target's origin. Edges are scaled and rounded individually so adjacent
+// boxes never leave a seam.
 wlr_box logical_box(const RenderCtx &ctx, double x, double y, double w, double h) {
-	int x0 = static_cast<int>(std::round(x * ctx.scale));
-	int y0 = static_cast<int>(std::round(y * ctx.scale));
-	int x1 = static_cast<int>(std::round((x + w) * ctx.scale));
-	int y1 = static_cast<int>(std::round((y + h) * ctx.scale));
+	int x0 = static_cast<int>(std::round((x - ctx.origin_x) * ctx.scale));
+	int y0 = static_cast<int>(std::round((y - ctx.origin_y) * ctx.scale));
+	int x1 = static_cast<int>(std::round((x + w - ctx.origin_x) * ctx.scale));
+	int y1 = static_cast<int>(std::round((y + h - ctx.origin_y) * ctx.scale));
 	wlr_box box{x0, y0, x1 - x0, y1 - y0};
 	if (!wlr_box_empty(&box)) {
 		wlr_box_transform(&box, &box, ctx.transform, ctx.tw, ctx.th);
@@ -70,11 +54,12 @@ Rect box_rect(const wlr_box &box) {
 	return r;
 }
 
-// Screen-space rect, clipped to the output; empty rects are skipped.
+// Screen-space rect, clipped to the render target; empty rects are skipped.
 void draw_logical_rect(const RenderCtx &ctx, double x, double y, double w, double h,
 		wlr_render_color color) {
-	double x0 = std::fmax(x, 0.0), y0 = std::fmax(y, 0.0);
-	double x1 = std::fmin(x + w, ctx.output->width), y1 = std::fmin(y + h, ctx.output->height);
+	double x0 = std::fmax(x, ctx.origin_x), y0 = std::fmax(y, ctx.origin_y);
+	double x1 = std::fmin(x + w, ctx.origin_x + ctx.vw),
+		y1 = std::fmin(y + h, ctx.origin_y + ctx.vh);
 	if (x1 <= x0 || y1 <= y0) {
 		return;
 	}
@@ -114,7 +99,7 @@ void draw_ui_texture(const RenderCtx &ctx, wlr_texture *texture,
 		.texture = texture,
 		.src_box = src,
 		.dst_box = dst,
-		.transform = ctx.output->wlr->transform,
+		.transform = ctx.out_transform,
 		.filter_mode = WLR_SCALE_FILTER_BILINEAR,
 		.blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
 	};
@@ -192,7 +177,7 @@ void draw_surface_logical(const RenderCtx &ctx, wlr_surface *surface,
 	wlr_surface_get_buffer_source_box(surface, &src);
 	wl_output_transform transform = wlr_output_transform_compose(
 		wlr_output_transform_invert(surface->current.transform),
-		ctx.output->wlr->transform);
+		ctx.out_transform);
 	float a = alpha;
 	wlr_render_texture_options opts = {
 		.texture = texture,
@@ -217,10 +202,11 @@ struct ScreenIter {
 
 void screen_surface_iter(wlr_surface *surface, int sx, int sy, void *data) {
 	ScreenIter &it = *static_cast<ScreenIter *>(data);
-	const Output &o = *it.ctx->output;
+	const RenderCtx &ctx = *it.ctx;
 	double x = it.ox + sx, y = it.oy + sy;
 	double w = surface->current.width, h = surface->current.height;
-	if (x >= o.width || y >= o.height || x + w <= 0 || y + h <= 0) {
+	if (x >= ctx.origin_x + ctx.vw || y >= ctx.origin_y + ctx.vh
+			|| x + w <= ctx.origin_x || y + h <= ctx.origin_y) {
 		return;
 	}
 	draw_surface_logical(*it.ctx, surface, x, y, w, h, 1.0f, true);
@@ -932,17 +918,7 @@ Painter::Painter(Server &server) : server_(server) {}
 
 Painter::~Painter() = default;
 
-void Painter::render(Output &output) {
-	wlr_output *wlr_output = output.wlr;
-
-	wlr_output_state state;
-	wlr_output_state_init(&state);
-	wlr_render_pass *pass = wlr_output_begin_render_pass(wlr_output, &state, nullptr);
-	if (pass == nullptr) {
-		wlr_output_state_finish(&state);
-		return;
-	}
-
+RenderCtx Painter::make_ctx(Output &output, wlr_render_pass *pass) {
 	RenderCtx ctx{};
 	ctx.output = &output;
 	ctx.pass = pass;
@@ -950,27 +926,34 @@ void Painter::render(Output &output) {
 	ctx.viewport = ctx.cam.viewport(output.width, output.height);
 	ctx.left = ctx.cam.cx - output.width / (2.0 * ctx.cam.zoom);
 	ctx.top = ctx.cam.cy - output.height / (2.0 * ctx.cam.zoom);
-	ctx.scale = wlr_output->scale;
-	ctx.deco_scale = wlr_output->scale * output.resting_zoom();
-	ctx.transform = wlr_output_transform_invert(wlr_output->transform);
-	wlr_output_transformed_resolution(wlr_output, &ctx.tw, &ctx.th);
+	ctx.scale = output.wlr->scale;
+	ctx.deco_scale = output.wlr->scale * output.resting_zoom();
+	ctx.transform = wlr_output_transform_invert(output.wlr->transform);
+	ctx.out_transform = output.wlr->transform;
+	wlr_output_transformed_resolution(output.wlr, &ctx.tw, &ctx.th);
+	ctx.vw = output.width;
+	ctx.vh = output.height;
 	ctx.overview = output.overview.active();
 	ctx.drawn = &drawn_;
 	ctx.help_cache = help_cache_;
 	ctx.help_clock = &help_clock_;
-	drawn_.clear();
+	return ctx;
+}
+
+void Painter::draw_scene(const RenderCtx &ctx) {
+	Output &output = *ctx.output;
+	ctx.drawn->clear(); // no-op for a capture's scratch buffer
 	// Drop the labels of desktops that are gone.
 	std::erase_if(label_cache_, [this](const LabelSlot &slot) {
 		return server_.canvas.desktops.find(slot.id) == nullptr;
+	});
+	std::erase_if(item_cache_, [this](const ItemSlot &slot) {
+		return server_.items.find(slot.id) == nullptr;
 	});
 
 	// clear
 	draw_logical_rect(ctx, 0, 0, output.width, output.height,
 		color_rgba(server_.theme.colors().canvas));
-
-	std::erase_if(item_cache_, [this](const ItemSlot &slot) {
-		return server_.items.find(slot.id) == nullptr;
-	});
 
 	// background + bottom layers, screen space
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
@@ -1021,7 +1004,7 @@ void Painter::render(Output &output) {
 	}
 	draw_hint(ctx, help_h);
 
-	// overlay layer, launcher, drag icon, cursors
+	// overlay layer, launcher, drag icon
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
 		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
 	if (std::optional<Launcher::Panel> panel = server_.launcher.panel(output)) {
@@ -1031,6 +1014,22 @@ void Painter::render(Output &output) {
 			panel->box.width, panel->box.height, 1.0);
 	}
 	draw_drag_icon(ctx);
+}
+
+void Painter::render(Output &output) {
+	wlr_output *wlr_output = output.wlr;
+
+	wlr_output_state state;
+	wlr_output_state_init(&state);
+	wlr_render_pass *pass = wlr_output_begin_render_pass(wlr_output, &state, nullptr);
+	if (pass == nullptr) {
+		wlr_output_state_finish(&state);
+		return;
+	}
+
+	RenderCtx ctx = make_ctx(output, pass);
+	drawn_.clear();
+	draw_scene(ctx);
 
 	wlr_output_add_software_cursors_to_render_pass(wlr_output, pass, nullptr);
 	wlr_render_pass_submit(pass);
@@ -1038,6 +1037,41 @@ void Painter::render(Output &output) {
 	wlr_output_state_finish(&state);
 
 	send_surface_feedback(ctx);
+}
+
+bool Painter::render_area(Output &output, wlr_box local_area, wlr_buffer *target) {
+	if (target == nullptr) {
+		return false;
+	}
+	// Clip the area to the output; an empty one is nothing to draw.
+	wlr_box bounds{0, 0, output.width, output.height};
+	wlr_box clipped{};
+	wlr_box_intersection(&clipped, &local_area, &bounds);
+	if (wlr_box_empty(&clipped)) {
+		return false;
+	}
+	wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(server_.renderer, target, nullptr);
+	if (pass == nullptr) {
+		wlr_log(WLR_ERROR, "capture: failed to begin the offscreen render pass");
+		return false;
+	}
+	RenderCtx ctx = make_ctx(output, pass);
+	// The capture target: the clipped area, untransformed, at the output's
+	// scale — an upright image of it whatever the output's own transform.
+	// Cursors stay out: an on-screen frame owns them, and paint-cursor
+	// capture sessions get them through that frame.
+	ctx.transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	ctx.out_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	ctx.origin_x = clipped.x;
+	ctx.origin_y = clipped.y;
+	ctx.vw = clipped.width;
+	ctx.vh = clipped.height;
+	ctx.tw = target->width;
+	ctx.th = target->height;
+	std::vector<DrawnSurface> drawn; // a capture sends no surface feedback
+	ctx.drawn = &drawn;
+	draw_scene(ctx);
+	return wlr_render_pass_submit(pass);
 }
 
 void Painter::theme_changed() {
