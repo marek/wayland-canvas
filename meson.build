@@ -187,6 +187,11 @@ install_data(
 	install_dir: get_option('datadir') / 'xdg-desktop-portal',
 )
 install_data(
+	'packaging/xdg-desktop-portal-wlr.conf',
+	rename: 'config',
+	install_dir: get_option('sysconfdir') / 'xdg' / 'xdg-desktop-portal-wlr' / 'wayland-canvas',
+)
+install_data(
 	'packaging/wayland-canvas-session',
 	install_dir: get_option('bindir'),
 	install_mode: 'rwxr-xr-x',

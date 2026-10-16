@@ -994,26 +994,32 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 			ZWLR_LAYER_SHELL_V1_LAYER_TOP);
 	}
 
-	// overview UI
-	int help_h = 0;
-	if (ctx.overview) {
-		draw_pinch_preview(ctx);
-		draw_tabs(ctx);
-		draw_shelf(ctx);
-		help_h = draw_help_line(ctx);
-	}
-	draw_hint(ctx, help_h);
+	// The compositor's own UI — overview chrome, the hint, the launcher, the
+	// drag icon, and (in the capture-ui branch) the picker, toolbar and
+	// thumbnail. An offscreen capture shows the desktop, not the UI that
+	// asked for it.
+	if (ctx.show_ui) {
+		// overview UI
+		int help_h = 0;
+		if (ctx.overview) {
+			draw_pinch_preview(ctx);
+			draw_tabs(ctx);
+			draw_shelf(ctx);
+			help_h = draw_help_line(ctx);
+		}
+		draw_hint(ctx, help_h);
 
-	// overlay layer, launcher, drag icon
-	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
-		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
-	if (std::optional<Launcher::Panel> panel = server_.launcher.panel(output)) {
-		draw_logical_rect(ctx, 0, 0, output.width, output.height,
-			color_rgba(server_.theme.colors().launcher_backdrop));
-		draw_ui_texture(ctx, panel->texture, panel->box.x, panel->box.y,
-			panel->box.width, panel->box.height, 1.0);
+		// overlay layer, launcher, drag icon
+		draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+			ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
+		if (std::optional<Launcher::Panel> panel = server_.launcher.panel(output)) {
+			draw_logical_rect(ctx, 0, 0, output.width, output.height,
+				color_rgba(server_.theme.colors().launcher_backdrop));
+			draw_ui_texture(ctx, panel->texture, panel->box.x, panel->box.y,
+				panel->box.width, panel->box.height, 1.0);
+		}
+		draw_drag_icon(ctx);
 	}
-	draw_drag_icon(ctx);
 }
 
 void Painter::render(Output &output) {
@@ -1070,6 +1076,7 @@ bool Painter::render_area(Output &output, wlr_box local_area, wlr_buffer *target
 	ctx.th = target->height;
 	std::vector<DrawnSurface> drawn; // a capture sends no surface feedback
 	ctx.drawn = &drawn;
+	ctx.show_ui = false; // a capture shows the desktop, not the asking UI
 	draw_scene(ctx);
 	return wlr_render_pass_submit(pass);
 }

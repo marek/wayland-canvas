@@ -34,13 +34,17 @@ without a policy is not added.
 
 Apps share a screen — a Chrome presentation, a video call — through
 xdg-desktop-portal's ScreenCast over PipeWire, and the portal's wlroots
-backend (xdg-desktop-portal-wlr) captures the outputs through screencopy.
+backend (xdg-desktop-portal-wlr) captures through the ext-image-copy-capture
+protocols: monitors from the outputs' committed frames, windows from the
+compositor's own window sources ([above](#requirement)).
 
 | Subject | Rule |
 |---|---|
 | Desktop name | every client sees `XDG_CURRENT_DESKTOP=wayland-canvas:wlroots`; the session file names the same two ([../workspace/packaging.md](../workspace/packaging.md)) |
 | Backends | `wayland-canvas-portals.conf`, installed beside the portal's own configs, sends ScreenCast and Screenshot to the wlroots backend and the rest to the GTK one; where it is not installed (a run from the build tree) the portal finds the wlroots backend by the `wlroots` desktop name |
 | Activation environment | the services the session bus starts (the portal and its backends) learn this compositor's `WAYLAND_DISPLAY` and desktop name at start, when the bus is this run's: a login session hands them over through systemd and restarts the portals an earlier session left running; a run on a bus of its own (`dbus-run-session`) hands them over on that bus; a run on the user's systemd bus that is not a login (nested, headless) leaves them to the host |
+| Sharing chooser | the xdpw config shipped in the per-desktop directory (`sysconfdir/xdg/xdg-desktop-portal-wlr/wayland-canvas/config`) runs the compositor's own picker as the chooser: `chooser_type = dmenu`, `chooser_cmd = wayland-canvas msg capture.pick`; per-desktop, so another compositor's xdpw on the same bus never reads it |
+| Proof | the sharing scenario drives a private `dbus-run-session` portal — scratch XDG dirs, its own PipeWire, never the user's bus or portal — and its ScreenCast client must receive a PipeWire stream for a monitor and for a window; a machine without the portal pieces skips the phase |
 
 The portal is one service per bus: while another session owns the user's
 bus — a host compositor of a nested run, or a login on another VT — it shares

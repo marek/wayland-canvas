@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <signal.h>
 #include <format>
 #include <optional>
 #include <print>
@@ -40,6 +41,10 @@ std::string shot_dir;
 wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
 wlr_box over_apart{}; // where "over" sat when the reference captures were taken
+bool portal_skip = false; // the portal pieces are not on this machine
+pid_t portal_pid = -1; // the dbus-run-session the portal phase rides on
+std::string portal_runtime; // the session's short-lived runtime dir in /tmp
+std::string portal_dir; // its scratch world, under the shot directory
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -72,6 +77,24 @@ void write_file(const std::string &path, std::string_view text) {
 	}
 	std::fwrite(text.data(), 1, text.size(), f);
 	std::fclose(f);
+}
+
+std::string read_file(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return "";
+	}
+	std::string out;
+	char buf[256];
+	std::size_t n;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+		out.pop_back();
+	}
+	return out;
 }
 
 
@@ -258,6 +281,106 @@ View *view_titled(std::string_view title) {
 	}
 	return nullptr;
 }
+// The ScreenCast client the portal phase runs: CreateSession, SelectSources
+// (a monitor, then a window), Start, and OpenPipeWireRemote, on the private
+// session bus. It prints one "portal-<kind> node=<id>" line per source.
+constexpr std::string_view PORTAL_CLIENT = R"(import os
+import sys
+
+import gi
+gi.require_version('Gio', '2.0')
+from gi.repository import Gio, GLib
+
+BUS = 'org.freedesktop.portal.Desktop'
+OBJ = '/org/freedesktop/portal/desktop'
+IFACE = 'org.freedesktop.portal.ScreenCast'
+MODE_FILE = os.environ['CHOOSER_MODE_FILE']
+
+conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+loop = GLib.MainLoop()
+serial = [0]
+
+
+def call(method, params, reply):
+    return conn.call_sync(BUS, OBJ, IFACE, method, params,
+        GLib.VariantType(reply), Gio.DBusCallFlags.NONE, -1, None)
+
+
+def request(method, fmt, args, options):
+    # A portal call: the reply is a request handle, the answer comes as the
+    # Response signal on that handle's path.
+    serial[0] += 1
+    options = dict(options)
+    token = 'req%d' % serial[0]
+    options['handle_token'] = GLib.Variant('s', token)
+    sender = conn.get_unique_name()[1:].replace('.', '_')
+    path = '%s/request/%s/%s' % (OBJ, sender, token)
+    box = []
+
+    def on_response(c, s, p, i, m, response, user_data=None):
+        if p == path and not box:
+            box.append(response)
+            # The subscription callback runs on GDBus's worker thread: quit
+            # through the main context, or the loop sleeps on to its timeout.
+            GLib.idle_add(loop.quit)
+
+    def on_timeout():
+        loop.quit()
+        return False
+
+    sid = conn.signal_subscribe(BUS, 'org.freedesktop.portal.Request', 'Response',
+        path, None, Gio.DBusSignalFlags.NONE, on_response, None)
+    tid = GLib.timeout_add(25000, on_timeout)
+    values = tuple(args) + (options,)
+    call(method, GLib.Variant(fmt, values), '(o)')
+    loop.run()
+    if box:
+        GLib.Source.remove(tid) # the timeout source only lives while pending
+    conn.signal_unsubscribe(sid)
+    if not box:
+        raise RuntimeError('no Response for %s' % method)
+    code, results = box[0].unpack()
+    if code != 0:
+        raise RuntimeError('%s refused: %s' % (method, results))
+    return results
+
+
+def screencast(source_type, kind):
+    # The chooser stand-in answers for the compositor's picker; it reads its
+    # mode from CHOOSER_MODE_FILE, so set it before the selection.
+    with open(MODE_FILE, 'w') as mode:
+        mode.write(kind)
+    results = request('CreateSession', '(a{sv})', [],
+        {'session_handle_token': GLib.Variant('s', 'ses%d' % serial[0])})
+    session = results['session_handle']
+    request('SelectSources', '(oa{sv})', [session], {
+        'types': GLib.Variant('u', source_type),
+        'multiple': GLib.Variant('b', False),
+        'cursor_mode': GLib.Variant('u', 1)})
+    results = request('Start', '(osa{sv})', [session, ''], {})
+    streams = results.get('streams', [])
+    if len(streams) != 1:
+        raise RuntimeError('%s: expected one stream, got %d' % (kind, len(streams)))
+    node = streams[0][0]
+    if not node or node <= 0:
+        raise RuntimeError('%s: no PipeWire node in the stream' % kind)
+    handle, fds = conn.call_with_unix_fd_list_sync(BUS, OBJ, IFACE,
+        'OpenPipeWireRemote',
+        GLib.Variant('(oa{sv})', (session,
+            {'handle_token': GLib.Variant('s', 'pwr%d' % serial[0])})),
+        GLib.VariantType('(h)'), Gio.DBusCallFlags.NONE, -1, None, None)
+    os.close(fds.get(handle.unpack()[0]))
+    print('portal-%s node=%d' % (kind, node))
+
+
+try:
+    screencast(1, 'monitor')
+    screencast(2, 'window')
+except Exception:
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+)";
 
 // The view's frame where the output shows it, output-local logical px.
 wlr_box view_on_screen(View &view) {
@@ -490,6 +613,134 @@ int run_step() {
 			std::format("grim -T <identifier> captures the window alone "
 				"({} of {} px differ)", bad, total));
 		cairo_surface_destroy(ref);
+		return 300;
+	}
+	case 11: { // the portal: sharing through xdg-desktop-portal-wlr
+		// Only with everything a private portal session needs; a run without
+		// them skips this phase (the capture proofs above still ran).
+		const char *const needed[] = {"dbus-run-session", "pipewire"};
+		std::string absent;
+		for (const char *cmd : needed) {
+			if (std::system(std::format("command -v {} >/dev/null 2>&1", cmd).c_str()) != 0) {
+				absent += std::format(" {}", cmd);
+			}
+		}
+		// The portal and its backends install outside $PATH, and the system
+		// python carries gi (a virtualenv's does not).
+		const char *const tucked[] = {"/usr/lib/xdg-desktop-portal",
+			"/usr/lib/xdg-desktop-portal-wlr"};
+		for (const char *path : tucked) {
+			if (std::system(std::format("[ -x {} ]", path).c_str()) != 0) {
+				absent += std::format(" {}", std::strrchr(path, '/') + 1);
+			}
+		}
+		if (std::system("/usr/bin/python3 -c 'import gi' >/dev/null 2>&1") != 0) {
+			absent += " python3-gi";
+		}
+		if (!absent.empty()) {
+			std::println("SKIP: portal phase, not installed:{}", absent);
+			portal_skip = true;
+			return 300;
+		}
+		// The scratch world: a bus and XDG dirs of its own, so the machine's
+		// portal, PipeWire and config are never touched.
+		portal_dir = std::format("{}/portal", shot_dir);
+		mkdir_p(std::format("{}/share", portal_dir));
+		mkdir_p(std::format("{}/config/xdg-desktop-portal", portal_dir));
+		mkdir_p(std::format("{}/config/xdg-desktop-portal-wlr", portal_dir));
+		// PipeWire's socket must fit a unix socket name (107 chars), and the
+		// worktree's tmp is deeper than that: only the runtime dir rides in
+		// /tmp, under a name of this run's own, and is removed afterwards.
+		std::string pattern = "/tmp/canvas-sharing-runtime-XXXXXX";
+		portal_runtime = mkdtemp(pattern.data());
+		write_file(std::format("{}/config/xdg-desktop-portal/portals.conf", portal_dir),
+			"[preferred]\ndefault=gtk\n"
+			"org.freedesktop.impl.portal.ScreenCast=wlr\n"
+			"org.freedesktop.impl.portal.Screenshot=wlr\n");
+		// The chooser xdpw runs is the compositor's own picker; until its
+		// capture.pick lands here, a stand-in answers for it: it echoes back
+		// the first monitor (or window) line xdpw offers.
+		std::string chooser = std::format("{}/chooser.sh", portal_dir);
+		write_file(chooser,
+			"#!/bin/sh\n"
+			"mode=$(cat \"$CHOOSER_MODE_FILE\" 2>/dev/null || echo monitor)\n"
+			"prefix=Monitor:\n"
+			"[ \"$mode\" = window ] && prefix='Window:'\n"
+			"match=\n"
+			"while IFS= read -r line; do\n"
+			"  case \"$line\" in \"$prefix\"*) [ -z \"$match\" ] && match=$line;; esac\n"
+			"done\n"
+			"[ -n \"$match\" ] && printf '%s\\n' \"$match\"\n");
+		std::system(std::format("chmod +x {}", chooser).c_str());
+		write_file(std::format("{}/config/xdg-desktop-portal-wlr/config", portal_dir),
+			std::format("[screencast]\nchooser_type = dmenu\nchooser_cmd = {}\n", chooser));
+		write_file(std::format("{}/client.py", portal_dir), PORTAL_CLIENT);
+		// The compositor's socket as an absolute path, for the session's
+		// portal and backend to find this compositor and nothing else.
+		const char *runtime = std::getenv("XDG_RUNTIME_DIR");
+		const char *display = std::getenv("WAYLAND_DISPLAY");
+		std::string wayland = std::format("{}/{}", runtime, display);
+		portal_pid = fork();
+		if (portal_pid == 0) {
+			setpgid(0, 0); // the session dies as a group, leaving no one behind
+			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
+			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
+			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
+			setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", 1);
+			setenv("WAYLAND_DISPLAY", wayland.c_str(), 1);
+			setenv("CHOOSER_MODE_FILE", std::format("{}/chooser-mode", portal_dir).c_str(), 1);
+			setenv("PORTAL_DIR", portal_dir.c_str(), 1);
+		execl("/bin/sh", "/bin/sh", "-c",
+			"dbus-run-session -- sh -c '"
+			"pipewire >\"$PORTAL_DIR/pipewire.out\" 2>&1 & pw=$!;"
+			"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/pipewire-0\" ]; do"
+			" sleep 0.1; i=$((i+1)); done;"
+			"/usr/lib/xdg-desktop-portal-wlr -l DEBUG"
+			" >\"$PORTAL_DIR/xdpw.out\" 2>&1 & xw=$!;"
+			"trap \"kill $pw $xw 2>/dev/null\" EXIT;"
+			"sleep 1;"
+			"/usr/bin/python3 \"$PORTAL_DIR/client.py\""
+			" >\"$PORTAL_DIR/client.out\" 2>\"$PORTAL_DIR/client.err\";"
+			"echo $? >\"$PORTAL_DIR/client.code\"'"
+			" >\"$PORTAL_DIR/session.out\" 2>\"$PORTAL_DIR/session.err\"", nullptr);
+			_exit(127);
+		}
+		return 300;
+	}
+	case 12: {
+		if (portal_skip || portal_pid <= 0) {
+			return 300;
+		}
+		int status = 0;
+		if (waitpid(portal_pid, &status, WNOHANG) == 0) {
+			if (retries++ < 120) {
+				return -500; // still sharing; the whole session gets a minute
+			}
+			kill(-portal_pid, SIGKILL); // the group: bus, portal, backend, client
+			waitpid(portal_pid, &status, 0);
+		}
+		// Anything the session left on the bus — a portal that lingers past its
+		// dbus-run-session — goes with the group.
+		kill(-portal_pid, SIGKILL);
+		// What the ScreenCast client saw, one line per source kind.
+		std::string out = read_file(std::format("{}/client.out", portal_dir));
+		auto node_of = [&out](std::string_view kind) {
+			std::string needle = std::format("portal-{} node=", kind);
+			std::size_t at = out.find(needle);
+			return at == std::string::npos
+				? 0 : std::atoi(out.c_str() + at + needle.size());
+		};
+		int monitor_node = node_of("monitor");
+		int window_node = node_of("window");
+		int code = std::atoi(read_file(std::format("{}/client.code", portal_dir)).c_str());
+		check(code == 0 && monitor_node > 0,
+			std::format("the portal shares a monitor: the ScreenCast client "
+				"got a PipeWire stream (node {}, exit {})", monitor_node, code));
+		check(code == 0 && window_node > 0,
+			std::format("the portal shares a window: the ScreenCast client "
+				"got a PipeWire stream (node {}, exit {})", window_node, code));
+		// The short-lived runtime dir: nothing of this run stays in /tmp.
+		std::system(std::format("rm -rf {}", portal_runtime).c_str());
 		return 300;
 	}
 	default:

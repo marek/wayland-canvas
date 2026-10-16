@@ -87,7 +87,13 @@ own the machine's Wayland display namespace and GPU.
   offered) and its whole-output screenshot is compared pixel-exact against
   the offscreen capture, and `grim -T <ext-foreign-toplevel identifier>`
   captures "under" by name, again pixel-exact against the offscreen window
-  capture taken while "over" still covers most of it.
+  capture taken while "over" still covers most of it. Last, the portal:
+  a private `dbus-run-session` with scratch XDG dirs and its own PipeWire
+  (never the machine's bus, portal or config — a machine without the
+  portal pieces skips the phase) runs a Python+Gio ScreenCast client that
+  must receive a PipeWire stream for a monitor and for a window; until the
+  compositor's own `capture.pick` picker lands, a stand-in script answers
+  xdpw's chooser with the first offered monitor (or window).
 
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and
