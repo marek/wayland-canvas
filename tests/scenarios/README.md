@@ -50,7 +50,13 @@ own the machine's Wayland display namespace and GPU.
   (`HomeNet` connected, `CafeGuest` secured-unknown, `LibraryFree` open),
   BlueZ with a powered adapter plus one paired and one unpaired device,
   UPower with a discharging 55 % battery, power-profiles-daemon, and a
-  status-notifier tray item with a five-item menu. The scenario proves the
+  status-notifier tray item with a five-item menu. The weather fetch stays
+  in the private world too: a curl stand-in sits first on the PATH the bar
+  inherits, answers wttr.in at once from a canned response captured once
+  (`tests/scenarios/bar-standins/wttr-j1.json`, three forecast days) and
+  passes anything else to the real curl, logging every invocation under
+  the run's scratch (`curl-standin.log`) so a run can show it never
+  reached the network. The scenario proves the
   bar's own process runs with exactly those bus addresses (read from
   `/proc/<pid>/environ`). Then, with the real bar client (qs) started by the
   compositor on those buses: every indicator is clicked with the fake pointer
@@ -72,9 +78,9 @@ own the machine's Wayland display namespace and GPU.
   (Suspend, Restart, Power off, Log out) are never clicked. Indicator
   positions are read off the bar screenshot itself; brightness stays the
   one machine-read widget (the bar hides it without a sysfs backlight, and
-  the scenario follows that rule).
-  Weather is not required: its widget hides until a first successful fetch,
-  and the scenario skips it with a note when it did not load.
+  the scenario follows that rule). The weather widget and panel are
+  therefore always checked: the widget shows beside the clock, and the
+  panel lists the fixture's forecast days.
 
   The bar's other half is the plugin host it now runs on, proven in the
   same private world on scratch XDG dirs: a broken manifest sits in the

@@ -24,6 +24,12 @@ if ! command -v dbus-daemon >/dev/null 2>&1; then
 	echo "ensure-bar-standins: dbus-daemon is not on PATH" >&2
 	exit 1
 fi
+# The weather stand-in answers wttr.in from a canned response; every other
+# URL is passed to the real curl, so it must exist.
+if ! command -v curl >/dev/null 2>&1; then
+	echo "ensure-bar-standins: curl is not on PATH" >&2
+	exit 1
+fi
 if ! "$python" -c 'import dbus, gi' >/dev/null 2>&1; then
 	echo "ensure-bar-standins: $python has no dbus-python/PyGObject (distro packages)" >&2
 	exit 1
