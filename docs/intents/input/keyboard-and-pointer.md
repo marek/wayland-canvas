@@ -89,7 +89,8 @@ reach the client. A lone tap of Super opens the app launcher.
 
 | Setting | Rule |
 |---|---|
-| Tap to click | On |
+| Tap to click | On: one finger is a left click, two a right click, three a middle click |
+| Pressing the pad | Two fingers pressed anywhere are a right click, three a middle click (libinput's clickfinger method, as the other desktop sets it); off, the pad's bottom-right corner is the right button |
 | Natural scrolling | On |
 | Disable touchpad while typing | On |
 

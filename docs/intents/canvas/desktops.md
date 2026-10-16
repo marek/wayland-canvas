@@ -61,15 +61,17 @@ windows tiled, and every window opened on it joins the tiling.
 
 | Way | Result |
 |---|---|
-| Two-finger tap (right click) on empty overview canvas or a desktop interior | A new desktop at that spot |
+| Right click (a two-finger tap or press) on empty overview canvas | A new desktop at that spot |
 | `n` in the overview | A new desktop at the target centre if that is a free spot, else at the cursor ([overview.md](overview.md)) |
 | Super+Ctrl+D | Pins the current view as a new desktop |
 
 ### Abandon
 
-Remove the desktop. Its windows stay on the canvas where they are;
-each keeps belonging to whatever desktop's frame covers its centre, or
-to none.
+Remove the desktop — with its tab's Abandon button, a right click on
+its tab or its interior clear of windows, Delete in the overview, or a
+4-finger sideways swipe ([overview.md](overview.md)). Its windows stay
+on the canvas where they are; each keeps belonging to whatever
+desktop's frame covers its centre, or to none.
 
 ### Combine
 

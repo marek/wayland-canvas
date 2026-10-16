@@ -53,7 +53,9 @@ Launching runs the entry's Exec — quoting rules and Terminal=true are
 owned by [desktop-entries.md](desktop-entries.md). A launched window
 is placed like any new window
 ([../windows/window-management.md](../windows/window-management.md)):
-centred on the screen being looked at, or on the overview target.
+centred on the screen being looked at; launched from the overview, on
+the target the overview had at the launch, even when the overview
+closed before the window appeared.
 
 ## Design considerations
 

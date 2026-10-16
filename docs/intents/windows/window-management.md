@@ -15,11 +15,14 @@ the window.
 
 ## Behavior
 
-Placement, on map:
+Placement, from the first commit (so a window that starts maximized or
+fullscreen fills the area around where it opens, whether it asks before
+or after that commit):
 
 | Rule | Behaviour |
 |---|---|
 | Centre | centred in the viewport of the output under the cursor; from the overview, centred on the target (the desktop, or the free spot) |
+| Launched from the overview | centred on the target the overview had at the launch, even when the overview closed or its target moved before the window appeared: a window whose process (or an ancestor) the compositor launched from the overview in the last 30 s (launcher entries, Super+Return). A window handed to an instance already running, or started over D-Bus, cannot be traced and follows the rule above |
 | Bars | inside the area not covered by layer-shell exclusive zones |
 | Title bar | clamped so the title bar is fully on screen |
 | Taken spot | if another window already occupies the position, cascade by 32 px |
@@ -32,6 +35,7 @@ raises) is owned by
 | Rule | Behaviour |
 |---|---|
 | Click-to-focus | clicking a window focuses it and raises it |
+| New window | takes the focus, except a window launched from the overview that opens where no output shows it (the overview closed, or moved on, before it appeared): the keyboard stays with the window in front of you, and a hint says where it opened ("Opened in Desktop 3", "Opened in a free area") |
 | Minimize | focus passes to the topmost visible window |
 | Fullscreen | a fullscreen window is raised above the others |
 
