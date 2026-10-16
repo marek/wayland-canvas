@@ -73,13 +73,15 @@ sudo pacman -S xdg-desktop-portal-wlr   # Debian: apt install xdg-desktop-portal
 
 wayland-canvas names itself `wayland-canvas:wlroots` (`XDG_CURRENT_DESKTOP`) and
 hands its display to the portal at start. Sharing works from a wayland-canvas
-login. The portal is one per session bus, so while another compositor runs on the
-same bus (nesting it, or a login on another VT) the portal shares *that* one; to
-share a nested run's own screen, give it a bus of its own:
+login (a TTY, or the session at the login screen): run `./build/wayland-canvas`
+as usual — the hand-over happens on your normal session bus, so the keyring
+(saved passwords and logins), notifications and the rest keep working.
 
-```sh
-dbus-run-session -- ./build/wayland-canvas
-```
+The portal is one per login. While wayland-canvas runs nested inside another
+compositor, apps share through *that* compositor's portal: pick the
+wayland-canvas window in its picker. Don't start wayland-canvas under
+`dbus-run-session` to get around this: it gets a portal of its own, but the apps
+inside lose the keyring and every other session service.
 
 ## Opening apps
 

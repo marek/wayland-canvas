@@ -40,7 +40,7 @@ A C++26 compiler — LLVM's clang, selected by
 |---|---|---|
 | From a TTY | `./build/wayland-canvas` | DRM/KMS via libseat/logind. Use a spare TTY: a hung compositor holds the keyboard, so VT switching cannot save you — wrapping a first run in `timeout` (for example `timeout 15m`) is the habit |
 | Nested | the same command from a terminal inside another compositor | renders at 1x ([../render/hidpi.md](../render/hidpi.md)); the host may swallow 3- and 4-finger gestures it binds itself, and a lone Super tap passes through ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
-| Nested, sharing its own screen | `dbus-run-session -- ./build/wayland-canvas` | a session bus of the run's own, so the screen-sharing portal serves this compositor rather than the host ([../platform/protocols.md](../platform/protocols.md#screen-sharing)); an app started inside must not already run in the host session (see below) |
+| Screen sharing | apps share through the screen-sharing portal ([../platform/protocols.md](../platform/protocols.md#screen-sharing)): a login shares wayland-canvas's own screens; a nested run shares through the host's portal, where the canvas is the host's window to pick | `dbus-run-session -- ./build/wayland-canvas` gives a nested run a portal of its own, as a test only — the apps in it lose the session's keyring (saved passwords and logins) and its other services |
 | Startup command | `-s <cmd>` | run at startup, for example `-s foot` |
 | Scale | `-S <scale>`, or `$WAYLAND_CANVAS_SCALE` | default by the dpi rule: 2 on dense panels, else 1 ([../render/hidpi.md](../render/hidpi.md)) |
 | Debug | `-d` | debug logging |

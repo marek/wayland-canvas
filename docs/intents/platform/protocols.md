@@ -42,8 +42,10 @@ backend (xdg-desktop-portal-wlr) captures the outputs through screencopy.
 
 The portal is one service per bus: while another session owns the user's
 bus — a host compositor of a nested run, or a login on another VT — it shares
-that session's screens. A nested run shares its own under
-`dbus-run-session` ([../workspace/build-and-run.md](../workspace/build-and-run.md)).
+that session's screens, and a nested run is shared as the host's window.
+Under `dbus-run-session` a run has a portal of its own, as a test only: the
+apps in it lose the session's keyring (saved passwords and logins) and every
+other service of the user's bus.
 
 ## Cross-links
 
