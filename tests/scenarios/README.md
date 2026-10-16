@@ -13,9 +13,9 @@ own the machine's Wayland display namespace and GPU.
 - **`gestures.cpp`** — touchpad gesture semantics through the `Gestures`
   entry points (the same ones the libinput listeners call): mapping three
   foot windows, title-bar button hit-testing, maximize, a 3-finger swipe in
-  the normal view hopping one screen into a free area (one short of the hop
-  threshold moving nothing), pinning that free area as a desktop, moving a
-  window between desktops, 4-finger overview open/exit, 3-finger hops
+  the normal view toward no desktop staying put with a hint (one short of
+  the hop threshold moving nothing), pinning the free area beside it as a
+  desktop, moving a window between desktops, 4-finger overview open/exit, 3-finger hops
   (including onto a free spot), 3-finger spread tiling (on: the windows
   take the board's halves; off: they keep the board's positions and
   are told they are not; back on: a pinch-in combine then joins the
@@ -32,14 +32,15 @@ own the machine's Wayland display namespace and GPU.
   windows' centres, and a window opened at 200 % joining the board
   there by halving the right half, every other window keeping its box. Then,
   views at any zoom: a desktop down at 25 %, where a 2-finger scroll, a
-  plain 2-finger pinch and a 3-finger hop off the desktop leave the zoom
-  alone and the view interactive, the overview opens further out and
+  plain 2-finger pinch and a 3-finger swipe toward no desktop leave the
+  zoom alone and the view interactive, the overview opens further out and
   returns to the free view at its zoom, and Super+0 brings a free view to
   100 %. Last, normal-view hops along a row of three desktops (the middle
   one at 80 %): two quick swipes walking two desktops, a swipe past the
-  last one moving one screen and a swipe back returning onto it, and a long
-  swipe hopping only once, onto the 80 % desktop at its scale, then a
-  3-finger pinch with travel hopping like a swipe.
+  last one staying on it with a hint, a long swipe hopping only once, onto
+  the 80 % desktop at its scale, a 3-finger pinch with travel hopping like
+  a swipe, and from a free view below the row a swipe toward nothing
+  staying and one toward the row landing on it.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

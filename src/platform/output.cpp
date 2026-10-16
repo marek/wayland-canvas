@@ -294,17 +294,14 @@ void Output::goto_direction(double dx, double dy) {
 	Desktop *leaving = server.canvas.desktops.best_overlap(from.viewport(width, height));
 	Desktop *found = server.canvas.desktops.in_direction(from.cx, from.cy, dx, dy,
 		id_of(leaving));
-	if (found != nullptr) {
-		goto_desktop(*found);
+	if (found == nullptr) {
+		// The normal view never hops into empty canvas, so a swipe cannot
+		// lose the user's place: free areas are the overview's to target,
+		// or a drag's or Super+Alt+arrows' to pan to.
+		server.hint.set("No desktop that way");
 		return;
 	}
-	// No desktop that way: one screen that way as it is shown, at the zoom
-	// it has.
-	Compass q = nav_quantize_direction(dx, dy);
-	Camera to = from;
-	to.cx += q.x * width / to.zoom;
-	to.cy += q.y * height / to.zoom;
-	camera.animate_to(to);
+	goto_desktop(*found);
 }
 
 void Output::pin_desktop() {

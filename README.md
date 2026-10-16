@@ -146,7 +146,7 @@ compositor binary (build tree or install prefix) or at
 
 | Where | Gesture | Action |
 |---|---|---|
-| Normal | 3-finger swipe | **Hop** to the closest desktop in that direction, at its zoom; none that way → one screen that way. Same as in the overview, so a swipe never leaves you between desktops; drag or 2-finger scroll on empty canvas to pan freely |
+| Normal | 3-finger swipe | **Hop** to the closest desktop in that direction, at its zoom; none that way → you stay put (a hint says so). A swipe never leaves the desktops: reach a free area from the overview, or drag / 2-finger scroll on empty canvas, or Super+Alt+arrows |
 | Normal | 4-finger swipe up | Zoom out into the overview (follows your fingers; release early to cancel) |
 | Normal | Super + 2-finger pinch | **Zoom** the desktop shown, following your fingers; it settles on 5 % steps. Windows keep their size; Super+0 returns to 100 % |
 | Overview | 3-finger swipe | Jump to the closest desktop in that direction; none that way → move one screen that way (free spot) |
@@ -184,7 +184,7 @@ compositor binary (build tree or install prefix) or at
 | Super+M / Super+Shift+M | Minimize / restore last minimized |
 | Super+arrows / Super+F | Step the focused window's slice on a tiled desktop (Super+Up maximizes on a floating one) / fullscreen |
 | Super+Tab, Super+W | Toggle overview |
-| Super+Ctrl+Arrows | Go to the desktop in that direction (or one screen that way) |
+| Super+Ctrl+Arrows | Go to the desktop in that direction (none that way: stay) |
 | Super+Ctrl+Shift+Arrows | Move the focused window to that desktop and follow |
 | Super+Alt+Arrows | Pan a third of a screen |
 | Super+Ctrl+D / Super+Ctrl+F4 | Make the current view a desktop / abandon the current desktop |

@@ -614,15 +614,19 @@ int run_step() {
 				&& on_slice(d, slice_frame_of(*d2, TL))
 				&& on_slice(f, slice_frame_of(*d2, BL)),
 			"the restored window took its own slice back, still free");
-		// Hop right off Desktop 2 onto a free view, carrying c along.
+		// Nothing lies right of Desktop 2: the swipe events from the device
+		// leave the view where it is.
 		swipe(3, 900, 0);
-		return 1400;
+		return 600;
 	}
 	case 46: {
-		if (o->desktop_showing() != nullptr && retries++ < 100) {
-			return -100;
-		}
-		check(o->desktop_showing() == nullptr, "3-finger swipe hopped onto a free view");
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		check(o->desktop_showing() == d2 && !o->camera.panning()
+				&& server->hint.text == "No desktop that way",
+			"a 3-finger swipe toward no desktop stays on Desktop 2 and says so");
+		// The free view beside it is a pan away.
+		for (int i = 0; i < 3; i++) chord(KEY_RIGHT, SUPER_ALT);
+		check(o->desktop_showing() == nullptr, "Super+Alt+Right three times panned onto a free view");
 		chord(KEY_RIGHT, SUPER_CTRL_SHIFT); // move the focused window here
 		return 600;
 	}
