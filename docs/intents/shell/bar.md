@@ -23,7 +23,13 @@ through the control IPC and standard system services.
   acts through them (plus `brightnessctl` for the backlight and `systemctl`
   for power actions); the only compositor-specific actions (opening the
   launcher, ending the session) go through the control socket
-  ([../platform/ipc.md](../platform/ipc.md)).
+  ([../platform/ipc.md](../platform/ipc.md)). The network panel reads what
+  the backend does not expose through NetworkManager's own CLI (`nmcli`
+  for the connection's profile, addresses, band and DNS), the interface's
+  byte counters in sysfs, `ping` to the gateway, and the head's optional
+  tools: `qrencode` for the share-as-QR, `speedtest`/`speedtest-cli` for
+  the speed test, `wl-copy` for copying an address — every one of them
+  read-only or scoped to the connection the panel names.
 - **Own theme, both modes.** The palette, font, glyphs and panel metrics
   live in the shell's UI kit (`shell/ui/WaylandCanvas/Ui/`, the
   `WaylandCanvas.Ui` module every plugin imports): the dark and light
@@ -83,7 +89,7 @@ anything else being clicked.
 
 | Panel | Offers |
 |---|---|
-| Network | the Wi-Fi switch; the visible networks with signal (in percent) and lock; the connection in use. The Wi-Fi device scans while the panel is open, so networks the system has never joined are listed, and never in the background. Selecting a network arms the connect flow — a password field for secured networks the system has no credentials for, Connect, Disconnect — and never connects by itself: Connect or Enter in the field does |
+| Network | the head: the connection's name (SSID, "Ethernet", "Wi-Fi off"), state and band in use, share-as-QR where `qrencode` exists (the PSK fetched through NetworkManager's secrets), a speed test where `speedtest`/`speedtest-cli` exists — a button whose tool is missing is hidden — and the Wi-Fi switch. Live figures while the panel is open, two columns: ping (to the gateway), packet loss, receiving, sending, downloaded, uploaded, IP address and gateway (each address copies itself via `wl-copy`). The Wi-Fi band in use with an Automatic switch; off, the lock pills for the bands the connection's network offers (2.4, 5, 6 GHz), applied to the connection through NetworkManager. The DNS provider — DHCP, Cloudflare, Google or custom servers typed in — applied to the active connection. The networks: known ones first, the connected one on top (a click on its row disconnects), then what the scan finds (the Wi-Fi device scans while the panel is open, never in the background); each row shows signal and a lock where credentials are needed, known ones not in use carry Forget. A row click joins: an open or known network connects at once, a secured unknown one asks for a password inline — an enterprise one for an identity and passphrase too, fed to NetworkManager over stdin — and nothing is tried without credentials; Enter in the field submits |
 | Bluetooth | the power switch; a scan switch; paired devices first, then found ones, each with its state. A device row's click is its natural action: connect or disconnect a paired device, pair a found one |
 | Audio | a volume slider for the default sink; mute; the output device to make default |
 | Brightness | a slider for the backlight, which never steps below the minimum |
