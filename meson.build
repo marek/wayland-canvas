@@ -251,8 +251,11 @@ if foot_prog.found() and grim_prog.found()
 			suite: 'scenarios',
 			is_parallel: false,
 			# The bar scenario also walks every panel, the plugin reloads,
-			# the idle watch and the theme phase: it needs the wider budget.
-			timeout: scenario == 'bar' ? 240 : 180,
+			# the idle watch and the theme phase, and since the network
+			# and agents panels joined it, its 200-odd steps (step 90's
+			# reload check alone waits out up to 105 s of retries by
+			# design) no longer fit the 240 s budget even unloaded.
+			timeout: scenario == 'bar' ? 420 : 180,
 			env: scenario_env,
 		)
 	endforeach
