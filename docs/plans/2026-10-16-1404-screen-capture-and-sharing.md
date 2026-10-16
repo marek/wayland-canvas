@@ -33,6 +33,7 @@ packages name it as an optional dependency.
 - [ ] Offscreen capture of an output region and of a single window (alone, at the output scale), shared by every path below
 - [ ] ext-image-copy-capture-v1 with output and toplevel sources, and ext-foreign-toplevel-list-v1, proven with a real client
 - [x] The session: `XDG_CURRENT_DESKTOP=wayland-canvas:wlroots` for every client, the activation environment handed over at start (a login through systemd, never the host's bus), `wayland-canvas-portals.conf` shipped (wlr for ScreenCast and Screenshot, gtk for the rest), xdg-desktop-portal-wlr an optional dependency of both packages
+- [x] On exit a login hands the portal back: the systemd values it replaced restored (unset ones unset) and the portals restarted, unless another session took them since — so Hyprland on another VT shares its screens again after a TTY run
 
 ## Shots and recordings
 
