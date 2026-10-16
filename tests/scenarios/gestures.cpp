@@ -49,6 +49,7 @@ wlr_box frame0{}; // Desktop 1's frame at 100 % before any zoom, for the drift c
 Camera scrolled_from{}; // the camera before the 25 % scroll
 Camera hop_from{}; // where the camera was going when a hop began
 std::optional<DesktopId> hop_a, hop_b, hop_c; // the row the normal-view hops walk
+std::vector<View *> launched_before; // the views before the overview launch
 std::string tmp_root;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -1182,6 +1183,64 @@ int run_step() {
 		check(cam.cx == b.cx && cam.cy == b.cy && std::fabs(cam.zoom - 0.8) < 1e-9
 			&& o->desktop_showing() == desk(hop_b),
 			"from a free view, a swipe hops onto the desktop that way, B at its 80 %");
+		// B tiled, so the launch below would show if a tiled desktop the
+		// overview came from captured the new window.
+		key(KEY_LEFTMETA, true);
+		key(KEY_T, true);
+		key(KEY_T, false);
+		key(KEY_LEFTMETA, false);
+		return 400;
+	}
+	case 80:
+		check(desk(hop_b)->tiling(), "Super+T tiled B");
+		o->overview.enter();
+		return 700;
+	case 81:
+		check(o->overview.active() && o->overview.target().desktop == hop_b,
+			"the overview opened over B, its target");
+		swipe(3, 0, 80, 8); // nothing below B: the target moves to a free spot
+		return 500;
+	case 82: {
+		check(o->overview.active() && !o->overview.target().desktop.has_value(),
+			"the overview's target moved to a free spot below B");
+		// Launch an app from the overview: a Super tap opens the launcher.
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		for (uint32_t code : {KEY_F, KEY_O, KEY_O, KEY_T}) {
+			key(code, true);
+			key(code, false);
+		}
+		return 300;
+	}
+	case 83:
+		check(server->launcher.is_open(), "a Super tap opened the launcher over the overview");
+		launched_before.clear();
+		for (View *v : server->views) {
+			launched_before.push_back(v);
+		}
+		key(KEY_ENTER, true);
+		key(KEY_ENTER, false);
+		return 300;
+	case 84: {
+		View *launched = nullptr;
+		for (View *v : server->views) {
+			if (v->mapped && std::find(launched_before.begin(), launched_before.end(), v)
+					== launched_before.end()) {
+				launched = v;
+			}
+		}
+		if (launched == nullptr && retries++ < 100) {
+			return -100;
+		}
+		wlr_box target = o->overview.target().box;
+		Rect fr = launched != nullptr ? launched->frame_rect() : Rect{};
+		check(launched != nullptr && o->overview.active()
+			&& wlr_box_contains_point(&target, fr.cx(), fr.cy())
+			&& !launched->board.has_value(),
+			std::format("an app launched from the overview opened in its target, the free"
+				" spot, not on B (centre {:.0f},{:.0f}; target {},{} {}x{})", fr.cx(), fr.cy(),
+				target.x, target.y, target.width, target.height));
+		shot("31-launched-into-target");
 		return 0;
 	}
 	default:
