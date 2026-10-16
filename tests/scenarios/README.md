@@ -202,6 +202,30 @@ own the machine's Wayland display namespace and GPU.
   outside closes the editor, the strip's × deletes the note from canvas
   and storage, and a second note closed with no text is removed too.
 
+  Last, the `canvas.agents` plugin end to end. The bar's own `HOME` is a
+  scratch one (read back from `/proc/<pid>/environ`), holding the fixture
+  AI world: Claude Code transcripts with the reference screenshot's own
+  day figures (811.5K today, 324.6M yesterday, 246.1M the day before,
+  deduplicated), Codex rollout files and a fake `codex` app-server on the
+  scratch PATH (the real CLI never runs: the fake answers the RPC
+  handshake and account reads, and refuses the rate-limit read so GPT is
+  signed out), a Fireworks-style JSONL, and credentials with the
+  `max_20x` tier. The usage probe is pointed at the run's own loopback
+  stand-in (`tests/scenarios/bar-standins/agent-usage.py`), which answers
+  37 %/68.4 % (later 95 %/72 %) and records the token and beta header it
+  received; the curl stand-in proves no request ever named the real
+  Anthropic endpoint. The run proves the collector's own JSON (four
+  families in order, titles and chips, limits shares, day and model
+  figures, the signed-out texts), the widget appearing left of Bluetooth
+  and hiding again when the world empties, the panel's drawn Claude mark,
+  meters at their probed shares (the 95 % window in the attention
+  colour), the provider-switch chips (a signed-out GPT tab with its
+  sign-in card and no meters, a tokens-only Fireworks tab with the star
+  mark), the signed-out Claude tab after its credentials are removed
+  (card and attention meta, figures kept), the reopen probing again past
+  the probe-reuse window, and both palettes — all on screenshots under
+  `tmp/scenarios/bar/agents*.png`.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only

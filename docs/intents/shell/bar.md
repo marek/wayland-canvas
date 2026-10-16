@@ -52,7 +52,7 @@ sit in 27 px slots.
 |---|---|
 | Left | logo button |
 | Center | clock, weather |
-| Right | tray, bluetooth, network, audio, brightness, power, theme |
+| Right | tray, agents, bluetooth, network, audio, brightness, power, theme |
 
 Widgets and what a click does:
 
@@ -67,11 +67,12 @@ Widgets and what a click does:
 | Audio | default-sink glyph, crossed when muted | open the audio panel | wheel: volume ±5 % |
 | Brightness | display glyph | open the brightness panel | wheel: brightness ±5 % (`brightnessctl`) |
 | Power | battery level and charging state | open the power panel | right: toggle the percentage |
-| Theme | a sun in dark mode, a moon in light mode | switch light/dark ([theme.md](theme.md)) | — |
+| Agents | the robot glyph while any AI provider has usage to show | open the agents panel | middle/right: re-run the collector |
 
 Widgets without a working source hide themselves: weather until the first
 successful fetch, bluetooth without an adapter, brightness without a
-controllable backlight, power without a battery.
+controllable backlight, power without a battery, agents while no provider
+has any usage.
 
 ## Panels
 
@@ -90,12 +91,39 @@ anything else being clicked.
 | Power | battery level, state and time left; the power profile where the system offers one (balanced always, power saver with it, performance where the platform has it); suspend, restart, power off, log out |
 | Weather | the forecast for the coming days, from the same reading the widget shows |
 | Clock | a month calendar with today marked; ‹ and › step the month |
-| Tray | the item's own menu — entries, checkboxes, separators and submenus (with a way back out); triggering an entry closes it. An item without a menu secondary-activates instead |
+| Agents | one tab per AI provider family: the limits windows (meter, share, the moment one resets) for Claude and GPT, and the tokens by day (a bar scaled to the busiest day of the seven, today bold and bright) and by model for every family. A sign-in fault brings the card with the CLI command that restores authoritative usage |
 
 Out of scope: workspace numbers (asked without), a keyboard-layout
-switcher (there is no compositor-side layout-switch surface to drive), and
-state indicators or update/agent status (another shell's own state and
-tooling, no standard source to read).
+switcher (there is no compositor-side layout-switch surface to drive),
+state indicators or update status (another shell's own state and tooling,
+no standard source to read), other tools' prepaid balances, cross-device
+usage sync and a settings UI for the panel.
+
+### The agents panel's family rule
+
+Every provider tab is a family, decided one message at a time: the source
+implies it (Claude Code transcripts are the Claude subscription; Codex
+session files are GPT), and otherwise the provider label does — exactly
+`anthropic` is the Claude subscription (the same rule Omarchy's own
+counter applies, so the two agree), an `openai*` label is GPT, and any
+other label roots its own family by its first segment: `fireworks-300k`
+is Fireworks, `acme-gateway` is Acme, and an `anthropic-*`
+gateway is a Claude (gateway) tab beside the Claude Code tab — the same
+mark, named for what it shows, separate from the subscription figures
+Omarchy's own counter equals. A message with no label of its own is
+placed by its model id (`claude-*`, `gpt*`/`codex-*`, `gemini-*`), and anything
+unplaceable is Other. The same model behind two labels never merges two
+families, but one model id written two ways (`openai/gpt-5.5`,
+`fireworks:…/glm-5p3-fast`) is one row.
+
+The figures come from `wayland-canvas-agent-usage`, a helper the widget
+runs by name on the manifest's refresh interval and on every panel open:
+it reads the tools' own records (Claude Code transcripts, Codex session
+files, pi/omp session logs, the opencode database) under an incremental
+stat-keyed cache, and probes the two limits services only through the
+CLIs' own saved sign-ins — Anthropic's usage endpoint through curl, the
+Codex app-server's JSON-RPC — reusing a fresh answer for a short window
+so an opened-and-shut panel is never a probe per flick.
 
 ## Autostart
 

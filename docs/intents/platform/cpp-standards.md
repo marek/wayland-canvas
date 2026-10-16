@@ -88,6 +88,7 @@ stays at the root.
 | `src/render/` | The painter and text drawing |
 | `src/platform/` | Outputs, layer surfaces, the control socket |
 | `src/apps/` | The launcher, installed applications, icons, desktop entries |
+| `src/shell/` | Helper programs the shell's plugins run as child processes (the agents panel's usage collector) |
 
 A new file goes in the folder of the concept it belongs to. Includes are
 written from `src/` (`#include "canvas/desktop.h"`), so a moved file changes

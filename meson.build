@@ -60,6 +60,7 @@ librsvg = dependency('librsvg-2.0', include_type: 'system')
 glib = dependency('glib-2.0', include_type: 'system')
 gio = dependency('gio-2.0', include_type: 'system')
 json_glib = dependency('json-glib-1.0', include_type: 'system')
+sqlite3 = dependency('sqlite3', include_type: 'system')
 
 protocol_headers = []
 foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
@@ -91,6 +92,26 @@ theme_prefs_lib = static_library(
 	'src/core/theme_prefs.cpp',
 	include_directories: src_inc,
 	dependencies: [glib, gio],
+)
+
+# The AI usage collector the agents panel's widget runs: pure logic over
+# the tools' own records, unit-tested on its own, and a thin helper
+# executable installed beside the compositor for the widget to run by
+# name.
+agent_usage_lib = static_library(
+	'canvas-agent-usage',
+	'src/shell/agent_usage.cpp',
+	include_directories: src_inc,
+	dependencies: [glib, json_glib, sqlite3],
+)
+
+agent_usage = executable(
+	'wayland-canvas-agent-usage',
+	'src/shell/agent_usage_main.cpp',
+	include_directories: src_inc,
+	link_with: agent_usage_lib,
+	dependencies: [glib, json_glib, sqlite3],
+	install: true,
 )
 
 core_lib = static_library(
@@ -205,6 +226,18 @@ test(
 	suite: 'unit',
 )
 
+test(
+	'agent-usage',
+	executable(
+		'test-agent-usage',
+		'tests/test_agent_usage.cpp',
+		include_directories: src_inc,
+		link_with: agent_usage_lib,
+		dependencies: [glib, json_glib, sqlite3],
+	),
+	suite: 'unit',
+)
+
 # End-to-end scenarios: the real compositor on the headless backend, real
 # foot clients, fake input devices, grim screenshots. Registered only when
 # foot and grim are on PATH; the bar scenario additionally needs qs (the
@@ -235,6 +268,9 @@ if foot_prog.found() and grim_prog.found()
 			'CANVAS_BAR_STANDINS',
 			meson.project_source_root() / 'tests/scenarios/bar-standins.py',
 		)
+		# The agents panel's widget runs the collector by name; the bar
+		# scenario points its PATH at the build tree's copy.
+		scenario_env.set('WAYLAND_CANVAS_AGENT_USAGE', agent_usage.full_path())
 	endif
 	foreach scenario : scenarios
 		test(
@@ -251,8 +287,10 @@ if foot_prog.found() and grim_prog.found()
 			suite: 'scenarios',
 			is_parallel: false,
 			# The bar scenario also walks every panel, the plugin reloads,
-			# the idle watch and the theme phase: it needs the wider budget.
-			timeout: scenario == 'bar' ? 240 : 180,
+			# the idle watch, the theme phase, the Wi-Fi phase and the
+			# agents phase (whose probe-reuse window alone waits out 20 s):
+			# it needs the wider budget.
+			timeout: scenario == 'bar' ? 420 : 180,
 			env: scenario_env,
 		)
 	endforeach
