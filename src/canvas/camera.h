@@ -8,7 +8,7 @@ class Output;
 // The camera that shows `box` filling the screen at `zoom` (1: a free area).
 Camera camera_for_box(wlr_box box, double zoom = 1);
 
-// How one output's camera moves: jumps, eased pans, zoom transitions, momentum.
+// How one output's camera moves: jumps, eased pans and zoom transitions.
 class CameraMotion {
 public:
 	explicit CameraMotion(Output &output);
@@ -16,8 +16,7 @@ public:
 	CameraMotion &operator=(const CameraMotion &) = delete;
 
 	const Camera &current() const; // the exact camera
-	// Where the running animation ends, momentum aside; the current camera
-	// when none runs.
+	// Where the running animation ends; the current camera when none runs.
 	Camera destination() const;
 	// Quantized to the output's pixel grid: the camera drawn and hit-tested.
 	Camera drawn() const;
@@ -25,12 +24,9 @@ public:
 	void jump(const Camera &to);
 	void animate_to(const Camera &to); // eased pan over config::anim_ms
 	void animate_zoom(const Camera &near, const Camera &far, double p0, double p1);
-	void coast(double vx, double vy); // momentum, canvas units per ms
-	void stop(); // stops animation and momentum
-	void stop_coast(); // touching the pad: stops the momentum only
+	void stop(); // stops animation
 	bool tick(double now); // advances; true while still moving
-	bool coasting() const;
-	bool panning() const; // coasting or an eased pan running
+	bool panning() const; // an eased pan running
 	bool zooming() const; // a zoom transition running
 
 private:
@@ -49,7 +45,4 @@ private:
 	Output &output_;
 	Camera cam_;
 	Anim anim_;
-	double vel_x_ = 0, vel_y_ = 0; // momentum, canvas units per ms
-	bool coasting_ = false;
-	double last_tick_ = 0;
 };

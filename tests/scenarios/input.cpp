@@ -312,16 +312,18 @@ int run_step() {
 		Desktop *d1 = server->canvas.desktops.by_number(1);
 		check(d1 && o->desktop_showing() == d1, "Super+Ctrl+Left jumped back to Desktop 1");
 		move_to(640, 360);
-		double cx0 = o->camera.current().cx;
-		swipe(3, 300, 0); // fingers right: canvas follows, camera moves left
-		check(o->camera.current().cx < cx0 - 250,
-			std::format("3-finger swipe events from the device panned ({:.0f})",
-				o->camera.current().cx - cx0));
+		swipe(3, 300, 0); // fingers right: hop onto the desktop on the right
 		return 1200;
 	}
-	case 18:
+	case 18: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		check(d2 && o->desktop_showing() == d2
+			&& o->camera.current().cx == d2->frame().x + d2->frame().width / 2.0,
+			std::format("3-finger swipe events from the device hopped onto Desktop 2 ({:.0f})",
+				o->camera.current().cx));
 		swipe(4, 0, -300);
 		return 600;
+	}
 	case 19:
 		check(o->overview.active(), "4-finger swipe events opened the overview");
 		shot("overview");
@@ -551,8 +553,8 @@ int run_step() {
 		shot("tiled-reordered");
 		return 300;
 	}
-	case 47: // pan to a free view, then Super+T: pinned with tiling on
-		swipe(3, 900, 0);
+	case 47: // hop to a free view (nothing left of Desktop 1), then Super+T: pinned with tiling on
+		swipe(3, -900, 0);
 		return 1600;
 	case 48: {
 		check(o->desktop_showing() == nullptr, "panned onto a free view");

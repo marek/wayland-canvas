@@ -16,10 +16,10 @@ public:
 	struct Ignored {};
 	struct Forwarded { bool pinch = false; }; // belongs to the client under the pointer
 	struct Pending { Output *output; uint32_t fingers; bool pinch; double ax, ay; };
-	struct Pan { Output *output; double vx, vy; };
 	struct ZoomOut { Output *output; Camera near, far; double ay, progress, vy; };
 	struct ZoomIn { Output *output; Camera near, far; double ay, progress, vy; };
 	struct ZoomFurther { Output *output; double start_zoom, ay, vy; };
+	// A 3-finger swipe in either mode: one hop past the travel threshold.
 	struct Hop { Output *output; double ax, ay; bool done; };
 	struct Abandon { Output *output; DesktopId desktop; double offset; };
 	struct Pinch { Output *output; std::optional<DesktopId> desktop, merge_from; double scale; bool hinted; };
@@ -33,7 +33,7 @@ public:
 		double scale;       // the pinch scale since begin
 		bool overview;      // the pinch began in the overview
 	};
-	using State = std::variant<Idle, Ignored, Forwarded, Pending, Pan, ZoomOut, ZoomIn,
+	using State = std::variant<Idle, Ignored, Forwarded, Pending, ZoomOut, ZoomIn,
 		ZoomFurther, Hop, Abandon, Pinch, OverviewZoom, DesktopScale>;
 
 	explicit Gestures(Server &server);
@@ -50,7 +50,6 @@ public:
 	void hold_end(uint32_t time, bool cancelled);
 
 	const State &state() const;
-	bool panning(const Output &output) const;
 	bool zooming(const Output &output) const; // a zoom gesture on that output
 	bool opening_overview(const Output &output) const; // the 4-finger zoom out, before it commits
 	double abandon_offset(DesktopId desktop) const; // 0 unless that desktop is being swiped away

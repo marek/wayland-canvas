@@ -113,13 +113,13 @@ inline constexpr int item_text_padding = 10; // canvas px around the text
 inline constexpr const char *item_font = "Sans 10";
 inline constexpr uint32_t item_text_color = 0x1f2430ff; // dark ink on any card colour
 
-// Panning. Touchpad units are libinput's (roughly pointer pixels).
-inline constexpr double pan_speed = 1.0; // canvas px per unit at zoom 1
-inline constexpr bool natural_pan = true; // the canvas follows the fingers like a map
-inline constexpr double inertia_tau_ms = 325.0; // momentum decay time constant
-inline constexpr double inertia_min_speed = 0.25; // px/ms to keep coasting after release
-inline constexpr double snap_radius = 0.10; // landing this close (fraction of screen) to a desktop snaps onto it
+// Panning.
 inline constexpr double scroll_pan_speed = 1.5; // 2-finger scroll over empty canvas
+
+// Hops: a 3-finger swipe, in the normal view and the overview alike.
+// Touchpad units are libinput's (roughly pointer pixels).
+inline constexpr double hop_threshold = 36.0; // 3-finger travel that triggers a jump to the next desktop
+inline constexpr double hop_cone_deg = 60.0; // how far off the swipe direction a desktop may lie
 
 // Per-desktop scale (Super + 2-finger pinch): a desktop's frame is its
 // base size divided by its scale, and its windows are shown at it.
@@ -135,8 +135,6 @@ inline constexpr double overview_commit = 0.25; // progress past which a release
 inline constexpr double overview_max_zoom = 0.30; // relative to a view at 100 %; further out below it
 inline constexpr double overview_min_zoom = 0.02;
 inline constexpr int overview_margin = 80; // logical px kept around the content
-inline constexpr double hop_threshold = 36.0; // 3-finger travel that triggers a jump to the next desktop
-inline constexpr double hop_cone_deg = 60.0; // how far off the swipe direction a desktop may lie
 inline constexpr double abandon_distance = 200.0; // 4-finger sideways travel that abandons a desktop
 inline constexpr double pinch_tile_scale = 1.30; // 3-finger spread past this tiles
 inline constexpr double pinch_combine_scale = 0.72; // 3-finger pinch below this combines

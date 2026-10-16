@@ -18,13 +18,6 @@ struct overloaded : Ts... {
 template <typename... Ts>
 overloaded(Ts...) -> overloaded<Ts...>;
 
-// Touchpad delta -> canvas delta, natural pan sign, scaled by the zoom.
-Point pan_deltas(const Output &output, double dx, double dy) {
-	double sign = config::natural_pan ? -1.0 : 1.0;
-	double zoom = output.camera.current().zoom > 0 ? output.camera.current().zoom : 1.0;
-	return {sign * dx * config::pan_speed / zoom, sign * dy * config::pan_speed / zoom};
-}
-
 // Super held right now (the same query seat_modifiers makes for buttons).
 bool super_held(Server &server) {
 	wlr_keyboard *keyboard = wlr_seat_get_keyboard(server.seat);
@@ -36,7 +29,6 @@ bool super_held(Server &server) {
 Output *state_output(const Gestures::State &state) {
 	return std::visit(overloaded{
 		[](const Gestures::Pending &s) -> Output * { return s.output; },
-		[](const Gestures::Pan &s) -> Output * { return s.output; },
 		[](const Gestures::ZoomOut &s) -> Output * { return s.output; },
 		[](const Gestures::ZoomIn &s) -> Output * { return s.output; },
 		[](const Gestures::ZoomFurther &s) -> Output * { return s.output; },
@@ -69,11 +61,6 @@ std::optional<DesktopId> Gestures::desktop_under(Output &out) {
 
 const Gestures::State &Gestures::state() const {
 	return state_;
-}
-
-bool Gestures::panning(const Output &output) const {
-	const Pan *pan = std::get_if<Pan>(&state_);
-	return pan != nullptr && pan->output == &output;
 }
 
 bool Gestures::zooming(const Output &output) const {
@@ -120,41 +107,41 @@ void Gestures::decide(Pending &pending) {
 	double ax = pending.ax, ay = pending.ay;
 	bool vertical = std::fabs(ay) > std::fabs(ax);
 
-	if (!o->overview.active()) {
-		if (fingers == 3) {
-			// Apply the travel accumulated so far in one go.
-			Point d = pan_deltas(*o, ax, ay);
-			o->pan(d.x, d.y);
-			state_ = Pan{o, 0, 0};
-		} else if (fingers == 4 && vertical && ay < 0) {
-			Camera far = o->overview.prepare();
-			state_ = ZoomOut{o, o->overview.home(), far, ay, 0, 0};
-		} else {
-			state_ = Ignored{};
-		}
+	// A 3-finger swipe hops in either mode.
+	if (fingers == 3) {
+		state_ = Hop{o, ax, ay, false};
+		return;
+	}
+	// The rest is 4 fingers: in the normal view only a swipe up, the zoom
+	// out into the overview.
+	bool overview = o->overview.active();
+	if (!overview && fingers == 4 && vertical && ay < 0) {
+		Camera far = o->overview.prepare();
+		state_ = ZoomOut{o, o->overview.home(), far, ay, 0, 0};
+		return;
+	}
+	if (!overview || fingers != 4) {
+		state_ = Ignored{};
 		return;
 	}
 
-	// Overview mode.
-	if (fingers == 3) {
-		state_ = Hop{o, ax, ay, false};
-	} else if (fingers == 4) {
-		if (vertical && ay > 0) {
-			Camera near = o->overview.target_camera();
-			state_ = ZoomIn{o, near, o->camera.current(), ay, 0, 0};
-		} else if (vertical && ay < 0) {
-			state_ = ZoomFurther{o, o->camera.current().zoom, ay, 0};
-		} else {
-			std::optional<DesktopId> d = desktop_under(*o);
-			if (!d.has_value()) {
-				state_ = Ignored{};
-			} else {
-				state_ = Abandon{o, *d, 0};
-			}
-		}
-	} else {
-		state_ = Ignored{};
+	// Overview, 4 fingers: down zooms into the target, up zooms further
+	// out, sideways abandons a desktop.
+	if (vertical && ay > 0) {
+		Camera near = o->overview.target_camera();
+		state_ = ZoomIn{o, near, o->camera.current(), ay, 0, 0};
+		return;
 	}
+	if (vertical && ay < 0) {
+		state_ = ZoomFurther{o, o->camera.current().zoom, ay, 0};
+		return;
+	}
+	std::optional<DesktopId> d = desktop_under(*o);
+	if (!d.has_value()) {
+		state_ = Ignored{};
+		return;
+	}
+	state_ = Abandon{o, *d, 0};
 }
 
 void Gestures::swipe_begin(uint32_t time, uint32_t fingers) {
@@ -204,26 +191,23 @@ void Gestures::swipe_update(uint32_t time, double dx, double dy) {
 	}
 
 	std::visit(overloaded{
-		[&](Pan &pan) {
-			Point d = pan_deltas(*pan.output, dx, dy);
-			if (dt > 0) {
-				pan.vx = 0.8 * pan.vx + 0.2 * (d.x / dt);
-				pan.vy = 0.8 * pan.vy + 0.2 * (d.y / dt);
-			}
-			// The deciding update already applied the accumulated travel.
-			if (!just_decided) {
-				pan.output->pan(d.x, d.y);
-			}
-		},
 		[&](Hop &hop) {
 			if (!just_decided) {
 				hop.ax += dx;
 				hop.ay += dy;
 			}
-			if (!hop.done && std::hypot(hop.ax, hop.ay) > config::hop_threshold) {
-				hop.output->overview.hop(hop.ax, hop.ay);
-				hop.done = true;
+			if (hop.done || std::hypot(hop.ax, hop.ay) <= config::hop_threshold) {
+				return;
 			}
+			hop.done = true;
+			// The same hop in both modes, the way the fingers point: the
+			// overview moves its target, the normal view its camera.
+			Output &o = *hop.output;
+			if (o.overview.active()) {
+				o.overview.hop(hop.ax, hop.ay);
+				return;
+			}
+			o.goto_direction(hop.ax, hop.ay);
 		},
 		[&](ZoomOut &z) {
 			if (!just_decided) {
@@ -282,35 +266,6 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 	}
 
 	std::visit(overloaded{
-		[&](Pan &pan) {
-			Output &o = *pan.output;
-			// Where the momentum would leave the camera.
-			Camera cam = o.camera.drawn();
-			double lx = cam.cx + pan.vx * config::inertia_tau_ms;
-			double ly = cam.cy + pan.vy * config::inertia_tau_ms;
-			// A fraction of the screen as shown: the same distance on screen
-			// at every zoom.
-			double snap = config::snap_radius * std::fmin(o.width, o.height) / cam.zoom;
-			const Desktop *best = nullptr;
-			double best_dist = HUGE_VAL;
-			for (const Desktop &d : server_.canvas.desktops.all()) {
-				Point centre = d.centre();
-				double dist = std::hypot(lx - centre.x, ly - centre.y);
-				if (dist < best_dist) {
-					best_dist = dist;
-					best = &d;
-				}
-			}
-		if (best != nullptr && best_dist <= snap) {
-			// A landing close to a desktop snaps onto it, its zoom easing
-			// to the desktop's scale.
-			o.camera.animate_to(camera_for_box(best->frame(), best->scale()));
-		} else if (!cancelled && std::hypot(pan.vx, pan.vy) > config::inertia_min_speed) {
-			// Any other landing is a free view, at the zoom the pan had.
-			o.camera.coast(pan.vx, pan.vy);
-		}
-		o.damage();
-		},
 		[&](ZoomOut &z) {
 			Output &o = *z.output;
 			if (!cancelled && (z.progress > config::overview_commit || z.vy < -0.5)) {
@@ -425,7 +380,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 	}
 
 	// Normal mode: sloppy 3/4-finger swipes arrive as pinches; treat the
-	// travel as a swipe so they still pan / open the overview.
+	// travel as a swipe so they still hop / open the overview.
 	if (fingers >= 3) {
 		state_ = Pending{out, fingers, true, 0, 0};
 		return;
@@ -598,9 +553,6 @@ void Gestures::hold_begin(uint32_t time, uint32_t fingers) {
 	if (out == nullptr) {
 		return;
 	}
-	// Touching the pad stops any coasting momentum; an eased pan or zoom
-	// keeps running and lands.
-	out->camera.stop_coast();
 	if (out->interactive()) {
 		wlr_pointer_gestures_v1_send_hold_begin(server_.pointer_gestures,
 			server_.seat, time, fingers);

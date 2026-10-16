@@ -218,9 +218,6 @@ bool Output::is_panning() const {
 	if (camera.panning()) {
 		return true;
 	}
-	if (server.gestures.panning(*this)) {
-		return true;
-	}
 	if (server.input.grab.panning(*this)) {
 		return true;
 	}
@@ -291,8 +288,12 @@ void Output::goto_direction(double dx, double dy) {
 	if (overview.active()) {
 		return;
 	}
-	Desktop *found = server.canvas.desktops.in_direction(camera.current().cx,
-		camera.current().cy, dx, dy, id_of(desktop_showing()));
+	// From where the camera is going: a hop made while the last one still
+	// eases walks on from its landing, desktop by desktop.
+	Camera from = camera.destination();
+	Desktop *leaving = server.canvas.desktops.best_overlap(from.viewport(width, height));
+	Desktop *found = server.canvas.desktops.in_direction(from.cx, from.cy, dx, dy,
+		id_of(leaving));
 	if (found != nullptr) {
 		goto_desktop(*found);
 		return;
@@ -300,7 +301,7 @@ void Output::goto_direction(double dx, double dy) {
 	// No desktop that way: one screen that way as it is shown, at the zoom
 	// it has.
 	Compass q = nav_quantize_direction(dx, dy);
-	Camera to = camera.current();
+	Camera to = from;
 	to.cx += q.x * width / to.zoom;
 	to.cy += q.y * height / to.zoom;
 	camera.animate_to(to);

@@ -6,14 +6,6 @@
 #include "platform/output.h"
 #include "core/server.h"
 
-namespace {
-
-// Momentum slower than this (canvas px per ms) is indistinguishable from
-// still and ends the coast.
-constexpr double coast_stop_speed = 0.02;
-
-} // namespace
-
 CameraMotion::CameraMotion(Output &output)
 	: output_(output) {
 }
@@ -39,17 +31,6 @@ Camera CameraMotion::drawn() const {
 
 void CameraMotion::stop() {
 	anim_.kind = AnimKind::none;
-	coasting_ = false;
-	vel_x_ = 0;
-	vel_y_ = 0;
-	// Restart the tick clock so the next tick's dt is a real interval.
-	last_tick_ = now_ms();
-}
-
-void CameraMotion::stop_coast() {
-	coasting_ = false;
-	vel_x_ = 0;
-	vel_y_ = 0;
 }
 
 void CameraMotion::jump(const Camera &to) {
@@ -83,24 +64,7 @@ void CameraMotion::animate_zoom(const Camera &near, const Camera &far,
 	output_.damage();
 }
 
-void CameraMotion::coast(double vx, double vy) {
-	vel_x_ = vx;
-	vel_y_ = vy;
-	coasting_ = true;
-	last_tick_ = now_ms();
-	output_.damage();
-}
-
 bool CameraMotion::tick(double now) {
-	double dt = now - last_tick_;
-	if (!(dt >= 0)) {
-		dt = 0;
-	}
-	if (dt > 50) {
-		dt = 50;
-	}
-	last_tick_ = now;
-
 	Camera next = cam_;
 	bool busy = false;
 
@@ -128,21 +92,6 @@ bool CameraMotion::tick(double now) {
 		}
 	}
 
-	if (coasting_) {
-		next.cx += vel_x_ * dt;
-		next.cy += vel_y_ * dt;
-		double decay = std::exp(-dt / config::inertia_tau_ms);
-		vel_x_ *= decay;
-		vel_y_ *= decay;
-		if (std::hypot(vel_x_, vel_y_) < coast_stop_speed) {
-			coasting_ = false;
-			vel_x_ = 0;
-			vel_y_ = 0;
-		} else {
-			busy = true;
-		}
-	}
-
 	bool cam_changed = next.cx != cam_.cx || next.cy != cam_.cy || next.zoom != cam_.zoom;
 	cam_ = next;
 
@@ -158,12 +107,8 @@ bool CameraMotion::tick(double now) {
 	return busy;
 }
 
-bool CameraMotion::coasting() const {
-	return coasting_;
-}
-
 bool CameraMotion::panning() const {
-	return coasting_ || anim_.kind == AnimKind::lerp;
+	return anim_.kind == AnimKind::lerp;
 }
 
 bool CameraMotion::zooming() const {

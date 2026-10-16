@@ -146,7 +146,7 @@ compositor binary (build tree or install prefix) or at
 
 | Where | Gesture | Action |
 |---|---|---|
-| Normal | 3-finger swipe | Pan the canvas anywhere (content follows fingers), with momentum; landing near a desktop snaps onto it |
+| Normal | 3-finger swipe | **Hop** to the closest desktop in that direction, at its zoom; none that way → one screen that way. Same as in the overview, so a swipe never leaves you between desktops; drag or 2-finger scroll on empty canvas to pan freely |
 | Normal | 4-finger swipe up | Zoom out into the overview (follows your fingers; release early to cancel) |
 | Normal | Super + 2-finger pinch | **Zoom** the desktop shown, following your fingers; it settles on 5 % steps. Windows keep their size; Super+0 returns to 100 % |
 | Overview | 3-finger swipe | Jump to the closest desktop in that direction; none that way → move one screen that way (free spot) |

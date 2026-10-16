@@ -47,6 +47,8 @@ int zoom_round = 0;
 std::string zoom_changes;
 wlr_box frame0{}; // Desktop 1's frame at 100 % before any zoom, for the drift check
 Camera scrolled_from{}; // the camera before the 25 % scroll
+Camera hop_from{}; // where the camera was going when a hop began
+std::optional<DesktopId> hop_a, hop_b, hop_c; // the row the normal-view hops walk
 std::string tmp_root;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -310,16 +312,20 @@ int run_step() {
 	case 4:
 		three->set_maximized(false);
 		cam0 = o->camera.current();
-		swipe(3, -600, 0, 30); // fingers left: canvas follows, camera moves right
+		// A swipe short of the hop threshold moves nothing: no free pan.
+		swipe(3, 20, 0, 4);
+		check(o->camera.current().cx == cam0.cx && !o->camera.panning(),
+			"a 3-finger swipe short of the hop threshold moves nothing");
+		swipe(3, 600, 0, 30); // fingers right, no desktop that way
 		return 1600;
 	case 5:
 		check(!o->overview.active() && o->camera.current().zoom == 1,
-			"still normal mode after pan");
-		check(o->camera.current().cx > cam0.cx + 550,
-			std::format("3-finger swipe panned + coasted (dx={:.0f})",
-				o->camera.current().cx - cam0.cx));
-		check(!o->camera.coasting(), "momentum settled");
-		shot("03-panned-free-area");
+			"still normal mode after the hop");
+		check(o->camera.current().cx == cam0.cx + o->width && o->camera.current().cy == cam0.cy
+			&& o->interactive(),
+			std::format("with no desktop that way, a 3-finger swipe right hopped one screen"
+				" right (dx={:.0f})", o->camera.current().cx - cam0.cx));
+		shot("03-hopped-free-area");
 		return 400;
 	case 6: {
 		o->pin_desktop();
@@ -674,18 +680,23 @@ int run_step() {
 		o->overview.exit();
 		return 700;
 	case 41:
-		swipe(3, 0, -900, 30); // pan down off the desktop into a free area
-		return 700;
+		// Fingers down twice, no desktop below: two screens down, clear of
+		// Desktop 1's frame at every scale the later steps give it (the
+		// view pinned there next grows as it scales down to 90 %).
+		hop_from = o->camera.destination();
+		swipe(3, 0, 300, 10);
+		swipe(3, 0, 300, 10);
+		return 900;
 	case 42: {
-		// A free landing spot stays wherever the pan stopped, at the zoom the
-		// pan had: a pan never changes the zoom.
-		if (o->camera.coasting() && retries++ < 100) {
-			return -100; // retry until the momentum settles
+		// A hop into a free area keeps the zoom the view had.
+		if (o->camera.panning() && retries++ < 100) {
+			return -100; // retry until the hops land
 		}
-		check(o->desktop_showing() == nullptr && o->camera.current().zoom == 1.25
-			&& o->interactive(),
-			std::format("the free landing spot keeps the pan's zoom, interactive ({:.2f})",
-				o->camera.current().zoom));
+		Camera cam = o->camera.current();
+		check(o->desktop_showing() == nullptr && cam.zoom == 1.25 && o->interactive()
+			&& cam.cx == hop_from.cx && cam.cy == hop_from.cy + 2 * o->height / 1.25,
+			std::format("two hops into the free area below keep the zoom, two screens down,"
+				" interactive ({:.2f}, dy {:.0f})", cam.zoom, cam.cy - hop_from.cy));
 		// Super + pinch on a free view: it is pinned as a desktop first, at
 		// the view's zoom.
 		std::size_t before = server->canvas.desktops.size();
@@ -977,18 +988,21 @@ int run_step() {
 		pinch_move(1.6);
 		pinch_up(false);
 		check(o->camera.current().zoom == 0.25, "the plain pinch left the zoom at 25 %");
-		// A 3-finger pan far off the desktop.
+		// A 3-finger hop off the 25 % desktop, left, where no desktop lies.
+		hop_from = o->camera.destination();
 		swipe(3, -900, 0, 30);
 		return 900;
 	}
 	case 67: {
-		if (o->camera.coasting() && retries++ < 100) {
-			return -100; // retry until the momentum settles
+		if (o->camera.panning() && retries++ < 100) {
+			return -100; // retry until the hop lands
 		}
-		check(o->desktop_showing() == nullptr && o->camera.current().zoom == 0.25
-			&& o->interactive(), std::format("a 3-finger pan off the 25 % desktop keeps"
-				" the zoom on the free view, interactive (zoom {:.2f})",
-				o->camera.current().zoom));
+		Camera cam = o->camera.current();
+		check(o->desktop_showing() == nullptr && cam.zoom == 0.25 && o->interactive()
+			&& cam.cx == hop_from.cx - o->width / 0.25 && cam.cy == hop_from.cy,
+			std::format("a hop off the 25 % desktop keeps the zoom on the free view one"
+				" screen left, interactive (zoom {:.2f}, dx {:.0f})", cam.zoom,
+				cam.cx - hop_from.cx));
 		shot("28-free-view-25");
 		return 300;
 	}
@@ -1017,7 +1031,73 @@ int run_step() {
 			&& server->hint.text == "Free area · 100 %",
 			std::format("Super+0 returns a free view to 100 % (zoom {:.2f}, hint {})",
 				o->camera.current().zoom, server->hint.text));
+		return 300;
+	case 72: {
+		// Hops in the normal view, on a row far from the rest: A, B at 80 %
+		// and C, a screen or so apart.
+		int w = o->width, h = o->height;
+		int x0 = 100000, y0 = 100000;
+		hop_a = server->canvas.desktops.create(wlr_box{x0, y0, w, h}).id();
+		hop_b = server->canvas.desktops.create(
+			wlr_box{x0 + 2 * w, y0, w * 5 / 4, h * 5 / 4}, 0.8).id();
+		hop_c = server->canvas.desktops.create(wlr_box{x0 + 4 * w, y0, w, h}).id();
+		o->camera.jump(camera_for_box(desk(hop_a)->frame(), 1));
+		return 300;
+	}
+	case 73:
+		check(o->desktop_showing() == desk(hop_a) && o->interactive(), "on desktop A of the row");
+		// Two quick swipes right: the second starts from where the first
+		// lands, so they walk two desktops.
+		swipe(3, 200, 0, 8);
+		swipe(3, 200, 0, 8);
+		return 900;
+	case 74: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera want = camera_for_box(desk(hop_c)->frame(), 1);
+		Camera cam = o->camera.current();
+		check(cam.cx == want.cx && cam.cy == want.cy && cam.zoom == 1 && o->interactive(),
+			std::format("two quick 3-finger swipes walked two desktops, A to B to C"
+				" (off by {:.0f},{:.0f})", cam.cx - want.cx, cam.cy - want.cy));
+		shot("29-hopped-to-c");
+		swipe(3, 300, 0, 10); // nothing right of C
+		return 900;
+	}
+	case 75: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera c = camera_for_box(desk(hop_c)->frame(), 1);
+		Camera cam = o->camera.current();
+		check(o->desktop_showing() == nullptr && cam.cx == c.cx + o->width && cam.cy == c.cy
+			&& cam.zoom == 1 && o->interactive(),
+			"with no desktop right of C, a swipe hopped one screen right onto a free view");
+		swipe(3, -300, 0, 10); // back the way it came
+		return 900;
+	}
+	case 76: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera c = camera_for_box(desk(hop_c)->frame(), 1);
+		check(o->camera.current().cx == c.cx && o->desktop_showing() == desk(hop_c),
+			"a swipe back hopped onto the desktop it left");
+		swipe(3, -1500, 0, 60); // a long swipe left: one hop all the same
+		return 900;
+	}
+	case 77: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera b = camera_for_box(desk(hop_b)->frame(), 0.8);
+		Camera cam = o->camera.current();
+		check(cam.cx == b.cx && cam.cy == b.cy && std::fabs(cam.zoom - 0.8) < 1e-9
+			&& o->interactive(),
+			std::format("a long swipe hops once, onto B at its 80 % (zoom {:.2f})", cam.zoom));
+		shot("30-hopped-to-b-80");
 		return 0;
+	}
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
