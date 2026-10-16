@@ -120,7 +120,7 @@ switches, text and fields, all coloured from `api.theme`.
 |---|---|
 | `canvas.bar` | The top bar surface, one per output, hosting every bar widget |
 | `canvas.launcher` | The logo widget, which opens the launcher |
-| `canvas.clock`, `canvas.weather`, `canvas.tray`, `canvas.network`, `canvas.bluetooth`, `canvas.audio`, `canvas.brightness`, `canvas.power` | A bar widget each, with its panel |
+| `canvas.clock`, `canvas.weather`, `canvas.tray`, `canvas.network`, `canvas.bluetooth`, `canvas.audio`, `canvas.brightness`, `canvas.power`, `canvas.agents` | A bar widget each, with its panel |
 | `canvas.theme` | The light/dark switch, the right-most bar widget |
 | `canvas.toolbar` | The overview toolbar surface, hosting every toolbar button |
 | `canvas.notes` | Sticky notes: a toolbar button with a colour menu, and the notes |
