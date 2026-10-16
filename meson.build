@@ -287,8 +287,10 @@ if foot_prog.found() and grim_prog.found()
 			suite: 'scenarios',
 			is_parallel: false,
 			# The bar scenario also walks every panel, the plugin reloads,
-			# the idle watch and the theme phase: it needs the wider budget.
-			timeout: scenario == 'bar' ? 240 : 180,
+			# the idle watch, the theme phase, the Wi-Fi phase and the
+			# agents phase (whose probe-reuse window alone waits out 20 s):
+			# it needs the wider budget.
+			timeout: scenario == 'bar' ? 420 : 180,
 			env: scenario_env,
 		)
 	endforeach

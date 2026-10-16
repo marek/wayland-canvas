@@ -347,17 +347,13 @@ std::optional<time_t> epoch_of_iso(const std::string &raw) {
 	}
 	long long offset = 0;
 	std::size_t zone = raw.find_first_not_of("0123456789.:", 10);
-	if (zone != std::string::npos) {
-		if (raw[zone] == 'Z' || raw[zone] == 'z') {
-			// UTC as written
-		} else {
-			int oh = 0, om = 0;
-			char sign = 0;
-			if (std::sscanf(raw.c_str() + zone, "%c%d:%d", &sign, &oh, &om) == 3
-					&& (sign == '+' || sign == '-')) {
-				offset = (oh * 3600 + om * 60) * (sign == '-' ? -1 : 1);
-			}
-		}
+	char zone_mark = zone != std::string::npos ? raw[zone] : '\0';
+	int oh = 0, om = 0;
+	char sign = 0;
+	if (zone_mark != '\0' && zone_mark != 'Z' && zone_mark != 'z'
+			&& std::sscanf(raw.c_str() + zone, "%c%d:%d", &sign, &oh, &om) == 3
+			&& (sign == '+' || sign == '-')) {
+		offset = (oh * 3600 + om * 60) * (sign == '-' ? -1 : 1);
 	}
 	return static_cast<time_t>(days_from_civil(y, m, d) * 86400 + hour * 3600
 		+ minute * 60 + second - offset);
@@ -881,12 +877,11 @@ void write_cache(const std::string &path,
 	g_object_unref(builder);
 	if (written) {
 		std::filesystem::rename(tmp, target, ec);
-		if (ec) {
-			std::filesystem::remove(tmp, ec);
+		if (!ec) {
+			return;
 		}
-	} else {
-		std::filesystem::remove(tmp, ec);
 	}
+	std::filesystem::remove(tmp, ec);
 }
 
 bool same_cache(const std::map<std::string, FileEntry> &a,
@@ -970,39 +965,35 @@ std::string model_display_name(std::string_view model_id) {
 	}
 	std::vector<std::string> words;
 	std::vector<std::string> version;
+	// Joins the numeric run so far into one version word: 5-5 → 5.5.
+	auto flush_version = [&words, &version]() {
+		if (version.empty()) {
+			return;
+		}
+		std::string joined;
+		for (const std::string &piece : version) {
+			joined += (joined.empty() ? "" : ".") + piece;
+		}
+		words.push_back(joined);
+		version.clear();
+	};
 	std::size_t start = 0;
 	while (start <= name.size()) {
 		std::size_t dash = name.find('-', start);
 		std::string part = name.substr(start,
 			dash == std::string::npos ? std::string::npos : dash - start);
-		if (!part.empty()) {
-			if (std::isdigit(static_cast<unsigned char>(part[0]))) {
-				version.push_back(part);
-			} else {
-				if (!version.empty()) {
-					// join the numeric run into one version: 5-5 → 5.5
-					std::string joined;
-					for (const std::string &piece : version) {
-						joined += (joined.empty() ? "" : ".") + piece;
-					}
-					words.push_back(joined);
-					version.clear();
-				}
-				words.push_back(word_case(part));
-			}
+		if (!part.empty() && std::isdigit(static_cast<unsigned char>(part[0]))) {
+			version.push_back(part);
+		} else if (!part.empty()) {
+			flush_version();
+			words.push_back(word_case(part));
 		}
 		if (dash == std::string::npos) {
 			break;
 		}
 		start = dash + 1;
 	}
-	if (!version.empty()) {
-		std::string joined;
-		for (const std::string &piece : version) {
-			joined += (joined.empty() ? "" : ".") + piece;
-		}
-		words.push_back(joined);
-	}
+	flush_version();
 	std::string out;
 	for (const std::string &word : words) {
 		out += (out.empty() ? "" : " ") + word;
@@ -1054,15 +1045,25 @@ std::string family_chip(std::string_view family) {
 	if (family == "gpt") {
 		return "GPT";
 	}
+	// The gateway families' chips stay short: the pill is narrow, and the
+	// hero right above the rows says the full name.
+	if (family == "anthropic") {
+		return "Claude GW";
+	}
 	return family_title(family);
 }
-
 std::string family_title(std::string_view family) {
 	if (family == "claude") {
 		return "Claude Code";
 	}
 	if (family == "gpt") {
 		return "GPT";
+	}
+	// An anthropic-* gateway still runs Claude models; the tab says so,
+	// and stays separate from the subscription tab whose figures
+	// Omarchy's own counter equals.
+	if (family == "anthropic") {
+		return "Claude (gateway)";
 	}
 	if (family == "other") {
 		return "Other";
@@ -1073,6 +1074,7 @@ std::string family_title(std::string_view family) {
 	}
 	return out;
 }
+
 
 std::string plan_label(std::string_view tier, std::string_view subscription) {
 	std::string lowered = lower_copy(tier);
@@ -1225,24 +1227,21 @@ Record collect(const Paths &paths,
 		FileEntry entry;
 		std::string signature = stat_signature(source.path);
 		long long size = stat_size(source.path);
-		if (auto hit = cached.find(source.path);
-				hit != cached.end() && hit->second.mtime == signature
-				&& hit->second.size == size) {
+		if (auto hit = cached.find(source.path); hit != cached.end()
+				&& hit->second.mtime == signature && hit->second.size == size) {
 			entry = hit->second; // unchanged since the last scan
+		} else if (source.path == paths.opencode_db) {
+			entry = scan_opencode_db(source.path);
+		} else if (source.codex) {
+			entry = scan_codex_file(source.path);
 		} else {
-			if (source.path == paths.opencode_db) {
-				entry = scan_opencode_db(source.path);
-			} else if (source.codex) {
-				entry = scan_codex_file(source.path);
-			} else {
-				// Claude transcripts and pi/omp sessions are both jsonl of
-				// assistant messages; they differ in where the provider
-				// lives, which decides the family.
-				bool transcript = source.path.rfind(paths.claude_dir + "/projects",
-					0) == 0;
-				entry = scan_jsonl(source.path, transcript
-					? transcript_message : agent_message);
-			}
+			// Claude transcripts and pi/omp sessions are both jsonl of
+			// assistant messages; they differ in where the provider
+			// lives, which decides the family.
+			bool transcript = source.path.rfind(paths.claude_dir + "/projects",
+				0) == 0;
+			entry = scan_jsonl(source.path, transcript
+				? transcript_message : agent_message);
 		}
 		for (const Counted &counted : entry.messages) {
 			if (!seen.insert(counted.key).second) {
@@ -1534,12 +1533,11 @@ void write_limits_cache(const std::string &path, const LimitsCache &cache) {
 	g_object_unref(builder);
 	if (written) {
 		std::filesystem::rename(tmp, target, ec);
-		if (ec) {
-			std::filesystem::remove(tmp, ec);
+		if (!ec) {
+			return;
 		}
-	} else {
-		std::filesystem::remove(tmp, ec);
 	}
+	std::filesystem::remove(tmp, ec);
 }
 
 std::vector<Limit> open_limits(const std::vector<Limit> &limits) {

@@ -47,13 +47,14 @@ BarButton {
 		}
 	}
 
-	function parse(raw) {
-		try {
-			providers = JSON.parse(raw).providers || []
-		} catch (e) {
-			// A failed run keeps the last good record.
-		}
+function parse(raw) {
+	try {
+		providers = JSON.parse(raw).providers || []
+	} catch (e) {
+		// A failed run keeps the last good record.
+		console.warn("[agents] parse failed: " + e)
 	}
+}
 
 	function anyLimitSpent() {
 		for (var i = 0; i < providers.length; i++) {

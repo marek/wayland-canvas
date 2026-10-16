@@ -108,9 +108,10 @@ session files are GPT), and otherwise the provider label does — exactly
 counter applies, so the two agree), an `openai*` label is GPT, and any
 other label roots its own family by its first segment: `fireworks-300k`
 is Fireworks, `acme-gateway` is Acme, and an `anthropic-*`
-gateway is an Anthropic tab beside the Claude tab, honestly separate from
-the subscription it is not. A message with no label of its own is placed
-by its model id (`claude-*`, `gpt*`/`codex-*`, `gemini-*`), and anything
+gateway is a Claude (gateway) tab beside the Claude Code tab — the same
+mark, named for what it shows, separate from the subscription figures
+Omarchy's own counter equals. A message with no label of its own is
+placed by its model id (`claude-*`, `gpt*`/`codex-*`, `gemini-*`), and anything
 unplaceable is Other. The same model behind two labels never merges two
 families, but one model id written two ways (`openai/gpt-5.5`,
 `fireworks:…/glm-5p3-fast`) is one row.

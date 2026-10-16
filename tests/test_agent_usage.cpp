@@ -533,8 +533,9 @@ void test_collection() {
 	check(gateway != nullptr && gateway->models.size() == 1
 			&& gateway->models[0].total() == 40,
 		"the custom Anthropic gateway's claude usage is its own tab");
-	check(gateway != nullptr && gateway->title == "Anthropic",
-		"the gateway family titles as Anthropic");
+	check(gateway != nullptr && gateway->title == "Claude (gateway)"
+		&& gateway->chip == "Claude GW",
+		"the gateway family is Claude (gateway), chipped Claude GW");
 	check(find_provider(record, "acme") != nullptr,
 		"the acme gateway family shows");
 	check(find_provider(record, "meta") != nullptr,
@@ -584,22 +585,22 @@ void test_cache_reuse() {
 	// them.
 	std::string target = fixture.sessions + "/a.jsonl";
 	struct stat st{};
-	if (stat(target.c_str(), &st) == 0) {
-		write_file(target, std::string(static_cast<std::size_t>(st.st_size),
-			'x'));
-		restore_mtime(target, st);
-		Record second = collect_fixture(fixture);
-		bool kept = false;
-		for (const ProviderRecord &provider : second.providers) {
-			if (provider.id == "claude") {
-				kept = day_tokens(provider, 0) == 1000;
-			}
-		}
-		check(kept, "an unchanged-stat file is not reparsed (the cache "
-			"answer stands)");
-	} else {
+	if (stat(target.c_str(), &st) != 0) {
 		check(false, "the cache-reuse fixture file went missing");
+		return;
 	}
+	write_file(target, std::string(static_cast<std::size_t>(st.st_size),
+		'x'));
+	restore_mtime(target, st);
+	Record second = collect_fixture(fixture);
+	bool kept = false;
+	for (const ProviderRecord &provider : second.providers) {
+		if (provider.id == "claude") {
+			kept = day_tokens(provider, 0) == 1000;
+		}
+	}
+	check(kept, "an unchanged-stat file is not reparsed (the cache "
+		"answer stands)");
 
 	// A genuinely changed file is reparsed and the cache follows.
 	write_file(fixture.sessions + "/a.jsonl",

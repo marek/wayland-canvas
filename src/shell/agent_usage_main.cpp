@@ -380,6 +380,9 @@ ProviderLimits codex_limits() {
 		&& write_all(child.in, R"({"method":"initialized","params":{}})"
 			"\n");
 	if (transport_ok) {
+		write_all(child.in,
+			R"({"id":2,"method":"account/read","params":{}})"
+			"\n");
 		account = rpc_line(child.out, 2, 4);
 		if (!account.empty()) {
 			write_all(child.in,

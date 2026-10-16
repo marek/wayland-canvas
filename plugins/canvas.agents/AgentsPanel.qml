@@ -7,7 +7,8 @@ import WaylandCanvas.Ui
 // Claude starburst, the GPT hexagon — with the plan (or a fault) as the
 // meta line; a fault also brings the sign-in card with the CLI command
 // that restores authoritative usage. The day and model figures are a
-// read-out; the only controls are the provider switch in the hero.
+// read-out; the only controls are the provider switch's equal chips under
+// the hero — any number of families fits the card.
 PanelCard {
 	id: root
 
@@ -58,46 +59,59 @@ PanelCard {
 		metaAttention: root.provider != null
 			&& root.provider.usageStatusText !== ""
 		iconComponent: root.provider == null ? null
-			: root.provider.id === "claude" ? claudeMark
+			: root.provider.id === "claude" || root.provider.id === "anthropic"
+			? claudeMark
 			: root.provider.id === "gpt" ? gptMark
 			: glyphMark
 
-		// The provider switch: a chip per family, the current one held in
-		// the accent's tint.
-		Row {
-			visible: root.providers.length > 1
-			spacing: UiTheme.panelSpacing
+	}
 
-			Repeater {
-				model: root.providers
+	// The provider switch: a full-width row of equal chips, so any number
+	// of families fits the card — the current one held in the accent's
+	// tint.
+	Row {
+		id: providerSwitch
+		visible: root.providers.length > 1
+		width: parent.width
+		spacing: UiTheme.panelSpacing
 
-				Rectangle {
-					id: chip
-					required property var modelData
-					required property int index
-					height: 24
-					width: chipText.width + 16
-					radius: 12
-					color: chip.index === root.current ? UiTheme.selected : UiTheme.fill
+		readonly property real chipWidth: root.providers.length > 0
+			? (width - spacing * (root.providers.length - 1))
+				/ root.providers.length
+			: 0
 
-					Text {
-						id: chipText
-						anchors.centerIn: parent
-						textFormat: Text.PlainText
-						renderType: Text.NativeRendering
-						text: chip.modelData.name
-						color: UiTheme.text
-						font {
-							family: UiTheme.fontFamily
-							pixelSize: UiTheme.fontSmall
-							bold: chip.index === root.current
-						}
+		Repeater {
+			model: root.providers
+
+			Rectangle {
+				id: chip
+				required property var modelData
+				required property int index
+				height: 24
+				width: providerSwitch.chipWidth
+				radius: 12
+				color: chip.index === root.current ? UiTheme.selected : UiTheme.fill
+
+				Text {
+					id: chipText
+					anchors.centerIn: parent
+					width: parent.width - 12
+					horizontalAlignment: Text.AlignHCenter
+					textFormat: Text.PlainText
+					renderType: Text.NativeRendering
+					elide: Text.ElideRight
+					text: chip.modelData.name
+					color: UiTheme.text
+					font {
+						family: UiTheme.fontFamily
+						pixelSize: UiTheme.fontSmall
+						bold: chip.index === root.current
 					}
+				}
 
-					MouseArea {
-						anchors.fill: parent
-						onClicked: root.current = chip.index
-					}
+				MouseArea {
+					anchors.fill: parent
+					onClicked: root.current = chip.index
 				}
 			}
 		}
