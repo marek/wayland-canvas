@@ -40,6 +40,10 @@ public:
 	// Foreign toplevel handle: the view entered or left `output`'s viewport.
 	void foreign_output_enter(Output &output);
 	void foreign_output_leave(Output &output);
+	// The ext-foreign-toplevel-list handle's identifier, or null before the
+	// window maps (or without the capture protocols). Window capture clients
+	// (grim -T, the portal's window sharing) name windows by it.
+	const char *ext_toplevel_identifier() const;
 
 	Server &server;
 	wlr_xdg_toplevel *const wlr;
@@ -100,6 +104,10 @@ private:
 	Listener set_title_, set_app_id_;
 	Listener foreign_activate_, foreign_maximize_, foreign_minimize_, foreign_fullscreen_,
 		foreign_close_;
+	// The ext-foreign-toplevel-list handle: created on map, closed on unmap,
+	// its title and app id kept current (view.cpp).
+	Handle<wlr_ext_foreign_toplevel_handle_v1,
+		wlr_ext_foreign_toplevel_handle_v1_destroy> ext_foreign_{};
 
 	friend class Server;
 };

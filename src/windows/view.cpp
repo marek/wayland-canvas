@@ -622,6 +622,18 @@ void View::create_foreign() {
 		handle->events.request_fullscreen, this);
 	foreign_close_.connect<&View::handle_foreign_close>(
 		handle->events.request_close, this);
+	// The ext-foreign-toplevel-list handle names the window for capture
+	// clients (image_capture.cpp reads it back through ->data).
+	if (server.image_capture.list != nullptr) {
+		wlr_ext_foreign_toplevel_handle_v1_state state{
+			.title = wlr->title, .app_id = wlr->app_id};
+		wlr_ext_foreign_toplevel_handle_v1 *ext =
+			wlr_ext_foreign_toplevel_handle_v1_create(server.image_capture.list, &state);
+		if (ext != nullptr) {
+			ext_foreign_.reset(ext);
+			ext->data = this;
+		}
+	}
 }
 
 void View::destroy_foreign() {
@@ -633,6 +645,7 @@ void View::destroy_foreign() {
 	foreign_minimize_.disconnect();
 	foreign_fullscreen_.disconnect();
 	foreign_close_.disconnect();
+	ext_foreign_.reset();
 	foreign_.reset();
 }
 
@@ -646,6 +659,10 @@ void View::foreign_output_leave(Output &output) {
 	if (foreign_) {
 		wlr_foreign_toplevel_handle_v1_output_leave(foreign_.get(), output.wlr);
 	}
+}
+
+const char *View::ext_toplevel_identifier() const {
+	return ext_foreign_ != nullptr ? ext_foreign_->identifier : nullptr;
 }
 
 // ---- toplevel events ----
@@ -812,12 +829,22 @@ void View::handle_set_title() {
 	if (foreign_ != nullptr && wlr->title != nullptr) {
 		wlr_foreign_toplevel_handle_v1_set_title(foreign_.get(), wlr->title);
 	}
+	if (ext_foreign_ != nullptr) {
+		wlr_ext_foreign_toplevel_handle_v1_state state{
+			.title = wlr->title, .app_id = wlr->app_id};
+		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
+	}
 	damage();
 }
 
 void View::handle_set_app_id() {
 	if (foreign_ != nullptr && wlr->app_id != nullptr) {
 		wlr_foreign_toplevel_handle_v1_set_app_id(foreign_.get(), wlr->app_id);
+	}
+	if (ext_foreign_ != nullptr) {
+		wlr_ext_foreign_toplevel_handle_v1_state state{
+			.title = wlr->title, .app_id = wlr->app_id};
+		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
 	damage();
 }

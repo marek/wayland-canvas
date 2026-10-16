@@ -21,6 +21,8 @@ without a policy is not added.
 | relative-pointer | relative pointer motion for clients that ask for it |
 | cursor-shape | standard cursor shapes |
 | screencopy, export-dmabuf | screenshots and capture (grim), and screen sharing through the portal ([below](#screen-sharing)); a copy asks for a frame through `needs_frame` ([../render/rendering.md](../render/rendering.md), [../bugs/screencopy-never-returned.md](../bugs/screencopy-never-returned.md)) |
+| ext-image-copy-capture-v1 | offscreen capture (grim, the portal's sharing): an output or one window ([../render/rendering.md](../render/rendering.md)); a window source re-renders the window alone at its told scale, and a frame request is always answered — with a fresh render, never damage-gated |
+| ext-foreign-toplevel-list-v1 | one handle per mapped window, its title and app id kept current; the identifier names a window for capture (grim -T) |
 | data-control, primary-selection | clipboard and primary selection |
 | viewporter, fractional-scale | client-side scaling to the output scale ([../render/hidpi.md](../render/hidpi.md)) |
 | presentation-time | per-frame presentation feedback ([../render/rendering.md](../render/rendering.md)) |

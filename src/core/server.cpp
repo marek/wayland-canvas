@@ -231,7 +231,8 @@ struct Server::Inhibitor {
 
 Server::Server()
 	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
-	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this) {
+	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this),
+	image_capture(*this) {
 }
 
 Server::~Server() {
@@ -239,6 +240,7 @@ Server::~Server() {
 		wl_display_destroy_clients(display);
 	}
 	ipc.finish();
+	image_capture.finish();
 	launcher.finish();
 	painter.finish();
 	hint.finish();
@@ -355,6 +357,7 @@ bool Server::init(const Options &options) {
 	init_layers();
 	decorations.init();
 	input.init();
+	image_capture.init();
 	return true;
 }
 

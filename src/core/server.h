@@ -9,6 +9,7 @@
 #include "input/gesture.h"
 #include "input/input.h"
 #include "platform/ipc.h"
+#include "platform/image_capture.h"
 #include "apps/launcher.h"
 #include "core/theme.h"
 #include "render/render.h"
@@ -107,6 +108,7 @@ public:
 	Canvas canvas;
 	Items items;
 	Ipc ipc;
+	ImageCapture image_capture;
 
 private:
 	// output.cpp

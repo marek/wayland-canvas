@@ -82,7 +82,12 @@ own the machine's Wayland display namespace and GPU.
   "under" must be pixel-identical to the one taken while nothing covered
   it (what overlaps a window leaves no trace), while the whole-output
   capture changes inside the overlap and nowhere outside the moved
-  window's old or new frame.
+  window's old or new frame. Then the capture protocols: plain `grim` now
+  travels ext-image-copy-capture (it prefers the ext managers when they are
+  offered) and its whole-output screenshot is compared pixel-exact against
+  the offscreen capture, and `grim -T <ext-foreign-toplevel identifier>`
+  captures "under" by name, again pixel-exact against the offscreen window
+  capture taken while "over" still covers most of it.
 
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and

@@ -137,6 +137,7 @@ core_lib = static_library(
 		'src/input/grab.cpp',
 		'src/input/input.cpp',
 		'src/platform/ipc.cpp',
+		'src/platform/image_capture.cpp',
 		'src/platform/layer.cpp',
 		'src/platform/output.cpp',
 		'src/render/capture.cpp',

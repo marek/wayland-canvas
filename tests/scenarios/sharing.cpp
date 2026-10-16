@@ -432,6 +432,66 @@ int run_step() {
 		}
 		return 300;
 	}
+	case 8: { // the protocols: grim now travels ext-image-copy-capture
+		shot("ref-ext-full");
+		return 400;
+	}
+	case 9: {
+		if (grim_running()) {
+			return -100;
+		}
+		// The whole output again, this time through the capture protocols.
+		Output *output = server->outputs.front().get();
+		CairoSurfacePtr cap = capture_output(*output, {0, 0, output->width, output->height});
+		cairo_surface_t *ref = load_png("ref-ext-full");
+		long bad = cap != nullptr ? pixels_differing(cap.get(), ref, {}) : -1;
+		long total = output->width * static_cast<long>(output->height);
+		check(bad >= 0 && bad * 1000 <= total,
+			std::format("grim's protocol screenshot matches the offscreen capture "
+				"({} of {} px differ)", bad, total));
+		cairo_surface_destroy(ref);
+		// And one window by its ext-foreign-toplevel identifier.
+		View *under = view_titled("under");
+		const char *identifier = under->ext_toplevel_identifier();
+		check(identifier != nullptr && *identifier != '\0',
+			"the window carries an ext-foreign-toplevel identifier");
+		if (identifier != nullptr) {
+			std::string path = std::format("{}/ref-ext-window.png", shot_dir);
+			std::string err = std::format("{}/ref-ext-window.err", shot_dir);
+		grim_pid = fork();
+		if (grim_pid == 0) {
+			FILE *log = std::fopen(err.c_str(), "w");
+			if (log != nullptr) {
+				dup2(fileno(log), STDERR_FILENO);
+			}
+			execlp("grim", "grim", "-T", identifier, path.c_str(),
+				static_cast<char *>(nullptr));
+			_exit(127);
+		}
+	}
+		return 400;
+	}
+	case 10: {
+		if (grim_running()) {
+			return -100;
+		}
+		// The window by identifier, against the offscreen window capture —
+		// still taken while "over" covers most of it.
+		Output *output = server->outputs.front().get();
+		View *under = view_titled("under");
+		CairoSurfacePtr cap = capture_view(*under, output->wlr->scale);
+		cairo_surface_t *ref = load_png("ref-ext-window");
+		long bad = cap != nullptr ? pixels_differing(cap.get(), ref, {}) : -1;
+		long total = cap != nullptr
+			? cairo_image_surface_get_width(cap.get())
+				* static_cast<long>(cairo_image_surface_get_height(cap.get()))
+			: 0;
+		check(bad == 0,
+			std::format("grim -T <identifier> captures the window alone "
+				"({} of {} px differ)", bad, total));
+		cairo_surface_destroy(ref);
+		return 300;
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		finished = true;
