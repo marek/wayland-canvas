@@ -122,7 +122,7 @@ void Desktops::move(DesktopId id, int x, int y) {
 	int dy = y - desktop->frame_.y;
 	if (desktop->tiling()) {
 		// The one case a frame carries its windows: a tiled desktop keeps
-		// its grid wherever the frame goes.
+		// its board wherever the frame goes.
 		for (View *view : server_.views) {
 			if (view->mapped && !view->minimized
 					&& server_.canvas.desktop_of(*view) == desktop) {

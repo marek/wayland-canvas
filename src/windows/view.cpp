@@ -406,7 +406,7 @@ void View::set_maximized(bool want) {
 		server.canvas.settle(*this);
 	} else {
 		// The restored size arrives with the client's next commit; settling on
-		// the stale maximized geometry would drop the window from the grid.
+		// the stale maximized geometry would lose its slice.
 		settle_pending = true;
 	}
 }
@@ -464,7 +464,7 @@ void View::set_fullscreen(bool want) {
 	if (want || !is_initialized(*this)) {
 		server.canvas.settle(*this);
 	} else {
-		// As with unmaximize: the grid return waits for the size commit.
+		// As with unmaximize: the board return waits for the size commit.
 		settle_pending = true;
 	}
 }
@@ -518,9 +518,8 @@ void View::set_frame(wlr_box frame) {
 }
 
 void View::set_tiled(bool want) {
-	if (!want) {
-		grid = std::nullopt; // untiled is out of every grid
-	}
+	// Only the xdg state and the flag: joining and leaving boards is
+	// Canvas::settle's business.
 	if (tiled == want) {
 		return;
 	}
@@ -678,7 +677,7 @@ void View::handle_map() {
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
 	place(*this);
-	// A window opened on a tiled desktop joins the grid.
+	// A window opened on a tiled desktop joins its board.
 	server.canvas.settle(*this);
 	create_foreign();
 	server.focus_view(this);
@@ -688,8 +687,6 @@ void View::handle_map() {
 
 void View::handle_unmap() {
 	server.input.forget(*this);
-	Desktop *home = server.canvas.desktop_of(*this);
-	bool in_grid = home != nullptr && home->tiling() && !maximized && !fullscreen;
 	mapped = false;
 	std::erase(server.views, this);
 	destroy_foreign();
@@ -697,14 +694,13 @@ void View::handle_unmap() {
 		server.focused_view = nullptr;
 		server.focus_view(server.top_visible_view(server.output_under_cursor()));
 	}
-	if (in_grid) {
-		server.canvas.reflow(home->id());
-	}
-	// Reset state the client renegotiates when it remaps.
+	// Reset state the client renegotiates when it remaps. The board needs no
+	// re-layout: an unmapped window holds no slice, so its own frees up.
 	maximized = false;
 	fullscreen = false;
 	tiled = false;
-	grid = std::nullopt;
+	board = std::nullopt;
+	slice = std::nullopt;
 	settle_pending = false;
 	saved = wlr_box{0, 0, 0, 0};
 	resize_edges = 0;

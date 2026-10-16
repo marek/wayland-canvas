@@ -68,6 +68,23 @@ void act_maximize(Server &server, Output *, KeyArg) {
 	}
 }
 
+// The bare-Super arrows: on a tiled desktop they step the focused window's
+// slice; on a floating one only Super+Up does anything, toggling maximize.
+void act_arrow(Server &server, Output *, KeyArg arg) {
+	Dir dir = std::get<Dir>(arg);
+	View *view = server.focused_view;
+	if (view == nullptr || !view->mapped || view->minimized) {
+		return;
+	}
+	if (view->board.has_value() && !view->maximized && !view->fullscreen) {
+		server.canvas.step(*view, dir.dx != 0 ? 0 : 1, dir.dx != 0 ? dir.dx : dir.dy);
+		return;
+	}
+	if (dir.dy < 0) {
+		act_maximize(server, nullptr, 0);
+	}
+}
+
 void act_fullscreen(Server &server, Output *, KeyArg) {
 	View *view = server.focused_view;
 	if (view != nullptr) {
@@ -225,8 +242,16 @@ constexpr std::array keys = {
 		.fn = act_minimize, .arg = 0},
 	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_SHIFT,
 		.keysym = XKB_KEY_m, .fn = act_restore_minimized, .arg = 0},
+	// On a tiled desktop the arrows step the focused window's slice; on a
+	// floating one Super+Up still toggles maximize.
+	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_Left,
+		.fn = act_arrow, .arg = Dir{-1, 0}},
+	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_Right,
+		.fn = act_arrow, .arg = Dir{1, 0}},
 	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_Up,
-		.fn = act_maximize, .arg = 0},
+		.fn = act_arrow, .arg = Dir{0, -1}},
+	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_Down,
+		.fn = act_arrow, .arg = Dir{0, 1}},
 	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_f,
 		.fn = act_fullscreen, .arg = 0},
 	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_Tab,

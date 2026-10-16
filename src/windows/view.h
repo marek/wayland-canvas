@@ -29,8 +29,8 @@ public:
 	void set_minimized(bool minimized);
 	void set_maximized(bool maximized);
 	void set_fullscreen(bool fullscreen);
-	void set_tiled(bool tiled); // the xdg tiled state only, no move or resize; off leaves the grid
-	// Grid placement: sized to the cell and told it is tiled.
+	void set_tiled(bool tiled); // the xdg tiled state only, no move or resize
+	// Slice placement: sized to the slice's box and told it is tiled.
 	void set_frame(wlr_box frame);
 	void move(int x, int y);
 	void activate();
@@ -48,13 +48,17 @@ public:
 	int x = 0, y = 0;
 	bool mapped = false, minimized = false, maximized = false, fullscreen = false,
 		tiled = false;
-	// The tiled desktop whose grid holds the window. A zoom moves a frame's
-	// edges past windows without moving them, so the grid, not the centre,
-	// says whose it is until it leaves the grid.
-	std::optional<DesktopId> grid;
+	// The tiled desktop whose board holds the window. A zoom moves a frame's
+	// edges past windows without moving them, so the board, not the centre,
+	// says whose it is until it leaves the board; a minimized window keeps
+	// its slice remembered while it is away, and a maximized or fullscreen
+	// one holds its slice reserved.
+	std::optional<DesktopId> board;
+	// The window's slice of that desktop's board, board fractions.
+	std::optional<Slice> slice;
 	wlr_box saved{}; // content box to restore after maximize/fullscreen
 	// Leaving maximize/fullscreen restores the size through a configure: the
-	// grid return waits for the commit that carries it.
+	// board return waits for the commit that carries it.
 	bool settle_pending = false;
 	uint32_t resize_edges = 0; // edges being dragged; the opposite ones stay put
 	// Configure that ended the resize: anchoring continues until the client acks it, since

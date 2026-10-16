@@ -370,10 +370,11 @@ void PointerGrab::release() {
 		[this](OverviewPress &s) { overview_click(s); },
 		[this](DesktopDrag &s) { drop_desktop_drag(s); },
 		[this](ItemDrag &s) { release_item_drag(s); },
-		// A user move or resize ends in the grid: back into the slot
-		// nearest the drop, or out of the tiling when dropped outside.
-		[this](Move &s) { server_.canvas.settle(*s.view); },
-		[this](Resize &s) { server_.canvas.settle(*s.view); },
+		// A user move ends on the board: swap slices with the window under
+		// the drop, take the largest free slice under it, or leave the
+		// board when dropped outside. A resize ends back on its slice.
+	[this](Move &s) { server_.canvas.drop(*s.view); },
+	[this](Resize &s) { server_.canvas.settle(*s.view); },
 		[](auto &) {},
 	}, state_);
 	cancel();

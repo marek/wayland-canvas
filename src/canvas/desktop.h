@@ -14,7 +14,7 @@ class Server;
 enum class DesktopId : int {};
 
 // A screen-sized rectangle on the canvas. Windows belong to the desktop their centre
-// lies in, or whose grid holds them; moving the frame never moves windows.
+// lies in, or whose board holds them; moving the frame never moves windows.
 class Desktop {
 public:
 	// `frame` fills the screen at `scale`: the base size is the frame times it.
@@ -26,7 +26,7 @@ public:
 	Rect rect() const;
 	Point centre() const; // exact: the frame resizes around it, so zooms never drift it
 	double scale() const; // the zoom its picture is shown at; its frame fills the screen at it
-	bool tiling() const; // the switch: while on, the desktop keeps its windows in a grid
+	bool tiling() const; // the switch: while on, the desktop keeps its windows tiled
 	bool contains(double cx, double cy) const;
 
 private:
@@ -57,7 +57,7 @@ public:
 	void raise(DesktopId id);
 	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows
 	void set_scale(DesktopId id, double scale); // resizes the frame around its centre; damages
-	// Flips the switch only; the grid that follows is Canvas::toggle_tiling's.
+	// Flips the switch only; the board that follows is Canvas::toggle_tiling's.
 	void set_tiling(DesktopId id, bool on);
 
 	// A removed desktop resolves to nullptr.

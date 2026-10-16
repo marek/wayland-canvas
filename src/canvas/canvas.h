@@ -19,19 +19,25 @@ public:
 	std::vector<View *> views_in(wlr_box box) const;
 	// The desktop the view's centre lies in.
 	Desktop *desktop_of(const View &view);
-	// The views in `area` as a grid in the output's usable part, once: a
-	// free spot has no tiling switch.
+	// The views in `area` as slices on a one-shot board, once: a free spot has
+	// no tiling switch. They keep no board membership.
 	void tile(wlr_box area, const Output &output);
-	// Flips a desktop's tiling switch: on re-flows its windows into the
-	// grid; off leaves them where the grid put them, told they are no
-	// longer tiled.
+	// Flips a desktop's tiling switch: on lays its standing windows onto the
+	// board by the new-window rule; off leaves them where the board left
+	// them, told they are no longer tiled.
 	void toggle_tiling(DesktopId id);
-	// Re-flows a tiled desktop's grid, for a change of its tiled set.
-	void reflow(DesktopId id);
-	// A view's grid membership may have changed (opened, closed, a state
-	// toggled, a move ended): it joins or leaves the grid, at the slot
-	// nearest where it stands, and the grids it left re-flow.
+	// Super+Left/Right/Up/Down: steps the focused view's slice and pushes the
+	// windows it covers. A step that leaves a covered window nowhere to go is
+	// not taken.
+	void step(View &view, int axis, int dir);
+	// A view's board membership may have changed (opened, closed, a state
+	// toggled, a move ended): it returns to its slice when it is still free,
+	// joins the board where it stands, or leaves the board behind.
 	void settle(View &view);
+	// A tiled view's drag ended: inside its desktop it swaps slices with the
+	// window under the drop or takes the largest free slice under it; outside
+	// the desktop it leaves the board.
+	void drop(View &view);
 	// The views in `from_area` move into `into`, keeping their offsets; `from` is removed.
 	void combine(DesktopId into, DesktopId from, wlr_box from_area);
 	// Settles a desktop's scale: the frame resizes around its centre, an
@@ -45,13 +51,24 @@ public:
 	Desktops desktops;
 
 private:
-	// The views in the desktop's grid: mapped, unminimized, in no state
-	// that holds a window out of the grid, and its members by frame centre.
-	std::vector<View *> grid_members(const Desktop &desktop);
-	bool grid_member(const View &view, const Desktop &desktop);
+	// The views the desktop's board holds: mapped, unminimized, and held by
+	// membership through zooms and states. Maximize and fullscreen keep their
+	// slice reserved while they last.
+	std::vector<View *> board_views(const Desktop &desktop);
+	// The slices those views hold, aligned with board_views().
+	std::vector<Slice> held_slices(const Desktop &desktop);
 	// The desktop's frame inset by the bars of the output that shows it,
 	// at the desktop's scale.
 	Rect tiling_area(const Desktop &desktop);
+	// Puts the view on its slice's box, told it is tiled. Maximized and
+	// fullscreen views only get the slice.
+	void place_on_slice(View &view, const Desktop &desktop, Slice slice);
+	// A new window on the desktop's board: the largest free slice, or half of
+	// the largest slice when none is free. The view joins the board.
+	void join(Desktop &desktop, View &view);
+	// Drops the view from its board: told it is no longer tiled, slice and
+	// membership dropped with it.
+	void leave_board(View &view);
 
 	Server &server_;
 };
