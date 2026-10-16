@@ -91,10 +91,12 @@ own the machine's Wayland display namespace and GPU.
   second concurrent pick; the `msg capture.pick` chooser bridge prints
   the chosen stdin line byte-exactly and stays silent on a cancel.
   Recordings are the compositor's own offscreen frames piped into a real
-  ffmpeg: whole screen (stopped by Alt+Print) and a region (stopped by
-  `capture.stop`), each left as a file ffprobe reads at the right size,
-  with `capture.recording` events and the state's `recording` following
-  start and stop, and `capture.stop` on nothing an error.
+  ffmpeg: whole screen (stopped by Alt+Print), a region and a window, the
+  window's rectangle frozen at pick time (both stopped by `capture.stop`),
+  each left as a file ffprobe reads at the right size — odd edges cropped
+  to the encoder's whole macroblocks — with `capture.recording` events and
+  the state's `recording` following start and stop, and `capture.stop` on
+  nothing an error.
 
 - **`sharing.cpp`** — the capture core, its protocols and the portal. The
   offscreen captures first: two foot windows mapped (they start overlapped

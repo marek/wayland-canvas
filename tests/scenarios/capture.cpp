@@ -1394,7 +1394,58 @@ int run_step() {
 		}
 		return 300;
 	}
-	case 64: { // the end: nothing recording, the event closed it
+	case 64: { // a window recording, the rect frozen at pick time
+		chord(KEY_5, SUPER_SHIFT);
+		click(toolbar_button_x(4, false), toolbar_modes_y()); // record a window
+		return 600;
+	}
+	case 65: {
+		if (!acted) {
+			if (!server->capture_ui.picking() && retries++ < 30) {
+				return -100;
+			}
+			View *view = cap_window();
+			wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
+			click(f.x + 60.0, f.y + 14.0);
+			acted = true;
+			retries = 0; // a fresh budget for the recorder's wait
+		}
+		if (!server->capture_ui.recording() && retries++ < 30) {
+			return -100;
+		}
+		check(server->capture_ui.recording(), "the window recording started");
+		return 2200; // some footage
+	}
+	case 66: {
+		run_client("capture.stop", "", "stop-window");
+		return 400;
+	}
+	case 67: {
+		if ((!client_done("stop-window") || server->capture_ui.recording())
+				&& retries++ < 30) {
+			return -100;
+		}
+		check(client_code("stop-window") == 0, "capture.stop closed the window recording");
+		std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
+		check(files.size() == 3, "three recordings, one per run");
+		if (files.size() == 3) {
+			run_sync(std::format(
+				"ffprobe -v error -select_streams v:0 "
+					"-show_entries stream=width,height -show_entries format=duration "
+					"-of csv=p=0 \"{}\" | tr '\\n' ' '",
+				files.front()), "ffprobe-window.txt");
+			std::string probe = read_file(shot_dir + "/ffprobe-window.txt");
+			View *view = cap_window();
+			wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
+			// the encoder crops odd edges to whole yuv420p macroblocks
+			check(view != nullptr && probe_matches(probe, f.width - f.width % 2,
+					f.height - f.height % 2, 0.5),
+				std::format("ffprobe reads the window recording as its frame ({})",
+					probe));
+		}
+		return 300;
+	}
+	case 68: { // the end: nothing recording, the event closed it
 		check(!server->capture_ui.recording(), "no recording is left running");
 		check(read_file(events_path).find("\"active\":false") != std::string::npos,
 			"the capture.recording event closed the recording");
