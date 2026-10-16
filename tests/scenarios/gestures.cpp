@@ -39,7 +39,7 @@ uint32_t t_ms = 10000;
 pid_t grim_pid = -1;
 std::optional<DesktopId> d1, d2, d3;
 Camera cam0{}, super_start{};
-Rect grid_one{}, grid_two{}; // the boxes the grid left, for the off check
+Rect board_one{}, board_two{}; // the boxes the board left, for the off check
 // The windows' frames before a zoom, for the checks that a zoom re-lays out
 // nothing; and the zoom rounds' progress and what they changed.
 std::vector<std::pair<View *, Rect>> kept;
@@ -206,17 +206,35 @@ bool inside(const Rect &r, const wlr_box &b) {
 		r.y + r.h <= b.y + b.height + 0.5;
 }
 
-// The view's frame sits in one of the grid's cells (clients snap to their own
-// units, so a side may sit a few px short of the cell).
-bool fits_cell(View *view, const std::vector<Rect> &cells) {
+// The board's slices, as fractions of its area.
+constexpr Slice LEFT{0, 0, 0.5, 1}, RIGHT{0.5, 0, 1, 1};
+constexpr Slice TL{0, 0, 0.5, 0.5}, BL{0, 0.5, 0.5, 1};
+constexpr Slice RT{0.5, 0, 1, 0.5}, RB{0.5, 0.5, 1, 1};
+
+// A slice's expected frame on a desktop's board: the slice laid into the
+// desktop's frame, rounded the way the compositor rounds it (the scenarios
+// run with no bar, so the frame is the whole tiling area).
+wlr_box slice_frame_of(const Desktop &desktop, Slice slice) {
+	const wlr_box &frame = desktop.frame();
+	Rect area{double(frame.x), double(frame.y), double(frame.width),
+		double(frame.height)};
+	Rect r = slice_box(area, slice, config::tile_gap);
+	return wlr_box{
+		static_cast<int>(std::round(r.x)),
+		static_cast<int>(std::round(r.y)),
+		static_cast<int>(std::round(r.x + r.w)) - static_cast<int>(std::round(r.x)),
+		static_cast<int>(std::round(r.y + r.h)) - static_cast<int>(std::round(r.y)),
+	};
+}
+
+// The view's frame lies on its slice (clients snap to their own units, so a
+// side may sit a few px short of the slice's box).
+bool on_slice(View *view, const wlr_box &expected) {
 	Rect f = view->frame_rect();
-	for (const Rect &cell : cells) {
-		if (std::fabs(f.x - cell.x) < 2 && std::fabs(f.y - cell.y) < 2
-				&& cell.w - f.w < 20 && cell.h - f.h < 24) {
-			return true;
-		}
-	}
-	return false;
+	Rect e{double(expected.x), double(expected.y), double(expected.width),
+		double(expected.height)};
+	return std::fabs(f.x - e.x) < 3 && std::fabs(f.y - e.y) < 3
+		&& e.w - f.w < 12 && e.h - f.h < 12;
 }
 
 // Remembers these windows' frames, to compare after a zoom.
@@ -377,25 +395,31 @@ int run_step() {
 		check(inside(a, desk(d1)->frame()) && inside(b, desk(d1)->frame()),
 			"tiled windows stay inside Desktop 1");
 		check(!a.intersects(b), "tiled windows do not overlap");
-		check(std::fabs(a.w - b.w) < 2 && std::fabs(a.y - b.y) < 2, "two windows tiled side by side");
+		// The first joiner took the whole board, the second halved it: two
+		// side-by-side halves, whoever of the two stood higher up.
+		View *left = a.x <= b.x ? one : two;
+		View *right = left == one ? two : one;
+		check(on_slice(left, slice_frame_of(*desk(d1), LEFT))
+				&& on_slice(right, slice_frame_of(*desk(d1), RIGHT)),
+			"the two windows took the board's halves");
 		check(desk(d1)->tiling(), "the spread switched tiling on for Desktop 1");
 		check(one->tiled && two->tiled, "tiled windows are told they are tiled");
 		shot("07-tiled");
-		grid_one = a;
-		grid_two = b;
+		board_one = a;
+		board_two = b;
 		pinch(3, 1.5, 10); // spread again: tiling off
 		return 400;
 	}
 	case 15:
 		check(!desk(d1)->tiling(), "a second spread switched tiling off");
-		check(one->frame_rect().x == grid_one.x && one->frame_rect().y == grid_one.y
-			&& two->frame_rect().x == grid_two.x && two->frame_rect().y == grid_two.y,
-			"switching tiling off kept the windows where the grid left them"
+		check(one->frame_rect().x == board_one.x && one->frame_rect().y == board_one.y
+			&& two->frame_rect().x == board_two.x && two->frame_rect().y == board_two.y,
+			"switching tiling off kept the windows where the board left them"
 			" (untiled, they may re-fit their own size)");
 		check(!one->tiled && !two->tiled,
 			"switching tiling off told the windows they are no longer tiled");
 		shot("07-untiled");
-		pinch(3, 1.5, 10); // and back on: the combine below joins the grid
+		pinch(3, 1.5, 10); // and back on: the combine below joins the board
 		return 400;
 	case 16: {
 		check(desk(d1)->tiling(), "the third spread switched tiling on again");
@@ -403,19 +427,20 @@ int run_step() {
 		check(server->canvas.desktops.size() == 1,
 			"pinch-in combined Desktop 2 into Desktop 1");
 		check(server->canvas.desktop_of(*three) == desk(d1) && three->tiled,
-			"the combined-in window joined Desktop 1's grid");
+			"the combined-in window joined Desktop 1's board");
 		d2 = std::nullopt;
 		return 500;
 	}
 	case 17: {
-		// The 3-window grid: every window in a cell of Desktop 1's frame.
-		const wlr_box &frame = desk(d1)->frame();
-		std::vector<Rect> cells = tile_layout(
-			Rect{double(frame.x), double(frame.y), double(frame.width), double(frame.height)},
-			3, config::tile_gap);
-		check(fits_cell(one, cells) && fits_cell(two, cells) && fits_cell(three, cells),
-			"combine into a tiled desktop put every window in a grid cell");
-		shot("08-combined-into-grid");
+		// The 3-window board: the left half's holder keeps its top half for
+		// the newcomer, which takes the bottom; the right half is untouched.
+		View *left = one->frame_rect().x <= two->frame_rect().x ? one : two;
+		View *right = left == one ? two : one;
+		check(on_slice(left, slice_frame_of(*desk(d1), TL))
+				&& on_slice(right, slice_frame_of(*desk(d1), RIGHT))
+				&& on_slice(three, slice_frame_of(*desk(d1), BL)),
+			"combine into a tiled desktop: the newcomer halved the left half");
+		shot("08-combined-into-board");
 		return 400;
 	}
 	case 18: {
@@ -521,7 +546,7 @@ int run_step() {
 			&& std::fabs(server->cursor->y - 300) < 0.5,
 			"the fake pointer placed the cursor");
 		super_start = o->camera.current();
-		keep({one, two, three}); // Desktop 1's grid, before any zoom
+		keep({one, two, three}); // Desktop 1's board, before any zoom
 		frame0 = desk(d1)->frame();
 		return 300;
 	case 30: {
@@ -565,7 +590,7 @@ int run_step() {
 		check(o->interactive(), "the resting zoom is interactive");
 		std::string changed = changed_boxes();
 		check(changed.empty(), std::format(
-			"settled at 80 %, the tiled grid kept every box{}", changed));
+			"settled at 80 %, the tiled board kept every box{}", changed));
 		check(told_output_scale(),
 			"the clients were not told the scale: still the output's");
 		check(server->hint.text == "Desktop 1 · 80 %",
@@ -625,14 +650,25 @@ int run_step() {
 		}
 		check(got && std::string_view(buf) == "ok\n",
 			std::format("typing on the 80 % desktop reached the client ({})", buf));
-		// The marker joined the grid, which re-flowed into the 80 % frame: a
-		// change of the tiled set, the one thing that lays a grid out.
+		// The marker joined the board by halving the largest held slice, the
+		// right half: its holder keeps the top, the marker takes the bottom.
+		// A join moves nobody else: the others kept their boxes.
 		View *marker = view_titled("marker");
-		bool in_frame = marker != nullptr;
-		for (View *v : {one, two, three, marker}) {
-			in_frame = in_frame && v != nullptr && inside(v->frame_rect(), desk(d1)->frame());
+		View *right = one->frame_rect().x <= two->frame_rect().x ? two : one;
+		bool others_kept = marker != nullptr;
+		for (const auto &[view, box] : kept) {
+			if (view != right) {
+				Rect now = view->frame_rect();
+				others_kept = others_kept && view->mapped && now.x == box.x
+					&& now.y == box.y && now.w == box.w && now.h == box.h;
+			}
 		}
-		check(in_frame, "the window opened on the 80 % desktop re-flowed the grid into its frame");
+		check(marker != nullptr && marker->board == d1 && marker->tiled
+				&& inside(marker->frame_rect(), desk(d1)->frame()),
+			"the window opened on the 80 % desktop joined the board in its frame");
+		check(on_slice(marker, slice_frame_of(*desk(d1), RB))
+				&& on_slice(right, slice_frame_of(*desk(d1), RT)) && others_kept,
+			"it halved the right half; every other window kept its box");
 		keep({one, two, three, marker});
 		// Near 100 % catches 100 % exactly: 100 is one of the steps.
 		key(KEY_LEFTMETA, true);
@@ -752,18 +788,18 @@ int run_step() {
 			&& std::fabs(o->camera.current().cy - want.cy) < 1
 			&& std::fabs(o->camera.current().zoom - want.zoom) < 1e-9,
 			"going to a desktop eases onto it at its scale");
-		// Desktop 1 has been tiled since the combine; the grid the marker
-		// re-flowed at 80 % has kept its boxes since.
+		// Desktop 1 has been tiled since the combine; the board the marker
+		// halved a slice of at 80 % has kept its boxes since.
 		check(desk(d1)->tiling(), "tiling is on for Desktop 1");
 		std::string changed = changed_boxes();
 		check(changed.empty(), std::format(
-			"the grid kept its boxes through the settles at 100 % and 125 %{}", changed));
+			"the board kept its boxes through the settles at 100 % and 125 %{}", changed));
 		shot("20-tiled-125");
 		return 400;
 	}
 	case 47: {
 		// Super + pinch on a tiled desktop: the settled scale leaves the
-		// grid alone.
+		// board alone.
 		key(KEY_LEFTMETA, true);
 		pinch_down(2);
 		pinch_move(0.64); // raw 1.25 x 0.64 = 0.8
@@ -776,7 +812,7 @@ int run_step() {
 	case 48: {
 		std::string changed = changed_boxes();
 		check(changed.empty(), std::format(
-			"settled at 80 %, the tiled grid kept every box{}", changed));
+			"settled at 80 %, the tiled board kept every box{}", changed));
 		shot("21-tiled-80");
 		// Tiling off and a maximized window: the zoom rounds below cover
 		// floating and maximized windows alike.
@@ -898,7 +934,7 @@ int run_step() {
 		return 400;
 	}
 	case 57:
-		// The grid through a zoom: laid out at 50 % (the maximized window
+		// The board through a zoom: laid out at 50 % (the maximized window
 		// stays out of it), then shown at 200 %, where the frame's edges
 		// pass the outer windows' centres.
 		super_pinch_to(1.0, 0.5);
@@ -911,9 +947,9 @@ int run_step() {
 		return 600;
 	case 59: {
 		View *marker = view_titled("marker");
-		check(desk(d1)->tiling() && one->grid == d1 && two->grid == d1
-			&& marker != nullptr && marker->grid == d1 && !three->grid.has_value(),
-			"Super+T tiled the 50 % desktop, the maximized window out of the grid");
+		check(desk(d1)->tiling() && one->board == d1 && two->board == d1
+			&& marker != nullptr && marker->board == d1 && !three->board.has_value(),
+			"Super+T tiled the 50 % desktop, the maximized window off the board");
 		keep({one, two, marker});
 		super_pinch_to(0.5, 2.0);
 		return 450;
@@ -921,14 +957,14 @@ int run_step() {
 	case 60: {
 		std::string changed = changed_boxes();
 		check(std::fabs(desk(d1)->scale() - 2.0) < 1e-9 && changed.empty(), std::format(
-			"from 50 % to 200 % the grid kept every box{}", changed));
-		// At 200 % the frame no longer covers every grid window's centre: the
-		// grid, not the centre, keeps them the desktop's.
+			"from 50 % to 200 % the board kept every box{}", changed));
+		// At 200 % the frame no longer covers every boarded window's centre:
+		// the board, not the centre, keeps them the desktop's.
 		int outside = 0;
 		for (const auto &[view, box] : kept) {
 			outside += !desk(d1)->contains(box.cx(), box.cy());
 		}
-		check(outside > 0, std::format("at 200 % {} grid window(s) lie past the frame's edge",
+		check(outside > 0, std::format("at 200 % {} boarded window(s) lie past the frame's edge",
 			outside));
 		spawn("foot -T late sh -c 'echo late; exec sleep 600'");
 		return 300;
@@ -938,20 +974,32 @@ int run_step() {
 		if ((late == nullptr || !late->mapped) && retries++ < 100) {
 			return -100; // retry until mapped
 		}
-		return 700; // the re-flow's configures land
+		return 700; // the join's configures land
 	}
 	case 62: {
-		// A window opened at 200 % re-flows the whole grid into the 200 %
-		// frame: none is left behind where the 50 % grid had it.
+		// A window opened at 200 % joins the board there: it halves the
+		// largest held slice, the right half, and moves nobody else.
 		View *late = view_titled("late");
 		View *marker = view_titled("marker");
-		bool all = late != nullptr && marker != nullptr;
-		for (View *v : {one, two, marker, late}) {
-			all = all && v != nullptr && v->tiled && v->grid == d1
-				&& inside(v->frame_rect(), desk(d1)->frame());
+		// The join already moved the halved slice's holder onto its kept
+		// half: after it, exactly one window holds the top-right quarter.
+		View *rholder = one->slice == RT ? one
+			: two->slice == RT ? two : marker;
+		bool others_kept = late != nullptr && rholder != nullptr;
+		for (const auto &[view, box] : kept) {
+			if (view != rholder) {
+				Rect now = view->frame_rect();
+				others_kept = others_kept && view->mapped && now.x == box.x
+					&& now.y == box.y && now.w == box.w && now.h == box.h;
+			}
 		}
-		check(all, "a window opened at 200 % re-flowed every grid window into the frame");
-		shot("26-tiled-200-reflow");
+		check(late != nullptr && late->tiled && late->board == d1
+				&& inside(late->frame_rect(), desk(d1)->frame()),
+			"a window opened at 200 % joined the board in its frame");
+		check(rholder != nullptr && rholder->slice == RT && late->slice == RB
+				&& others_kept,
+			"it halved the right half; every other window kept its box");
+		shot("26-tiled-200-join");
 		return 400;
 	}
 	case 63:

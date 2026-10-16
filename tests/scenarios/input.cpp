@@ -42,11 +42,8 @@ const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
 const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
 wlr_box saved{};
 int saved_x = 0;
-View *dragged = nullptr; // the window dragged onto the other's slot
 View *closed_view = nullptr; // compared by address only, after it is freed
 View *second = nullptr; // the window beside "a" on Desktop 1
-Rect box_a{}, box_second{}; // Desktop 1's grid boxes, captured for later checks
-Rect box_d{}; // the pinned desktop's window box, for the abandon check
 std::string shot_dir;
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -102,25 +99,36 @@ void shot(const char *name) {
 	}
 }
 
-// The expected grid cells of a desktop's frame for n windows.
-std::vector<Rect> grid_cells(const Desktop &desktop, std::size_t n) {
+// The board's slices, as fractions of its area.
+constexpr Slice WHOLE{0, 0, 1, 1};
+constexpr Slice LEFT{0, 0, 0.5, 1}, RIGHT{0.5, 0, 1, 1};
+constexpr Slice TOP{0, 0, 1, 0.5}, BOTTOM{0, 0.5, 1, 1};
+constexpr Slice TL{0, 0, 0.5, 0.5}, BL{0, 0.5, 0.5, 1};
+
+// A slice's expected frame on a desktop's board: the slice laid into the
+// desktop's frame, rounded the way the compositor rounds it (the scenarios
+// run with no bar, so the frame is the whole tiling area).
+wlr_box slice_frame_of(const Desktop &desktop, Slice slice) {
 	const wlr_box &frame = desktop.frame();
-	return tile_layout(
-		Rect{double(frame.x), double(frame.y), double(frame.width), double(frame.height)},
-		n, config::tile_gap);
+	Rect area{double(frame.x), double(frame.y), double(frame.width),
+		double(frame.height)};
+	Rect r = slice_box(area, slice, config::tile_gap);
+	return wlr_box{
+		static_cast<int>(std::round(r.x)),
+		static_cast<int>(std::round(r.y)),
+		static_cast<int>(std::round(r.x + r.w)) - static_cast<int>(std::round(r.x)),
+		static_cast<int>(std::round(r.y + r.h)) - static_cast<int>(std::round(r.y)),
+	};
 }
 
-// The view's frame sits in one of the cells (clients snap to their own
-// units, so a side may sit a few px short of the cell).
-bool fits_cell(View *view, const std::vector<Rect> &cells) {
+// The view's frame lies on its slice (clients snap to their own units, so a
+// side may sit a few px short of the slice's box).
+bool on_slice(View *view, const wlr_box &expected) {
 	Rect f = view->frame_rect();
-	for (const Rect &cell : cells) {
-		if (std::fabs(f.x - cell.x) < 2 && std::fabs(f.y - cell.y) < 2
-				&& cell.w - f.w < 20 && cell.h - f.h < 24) {
-			return true;
-		}
-	}
-	return false;
+	Rect e{double(expected.x), double(expected.y), double(expected.width),
+		double(expected.height)};
+	return std::fabs(f.x - e.x) < 3 && std::fabs(f.y - e.y) < 3
+		&& e.w - f.w < 12 && e.h - f.h < 12;
 }
 
 // Pointer at output-local logical (x, y) on the single 1280x720 output.
@@ -193,6 +201,8 @@ constexpr uint32_t SUPER[] = {KEY_LEFTMETA};
 constexpr uint32_t SUPER_SHIFT[] = {KEY_LEFTMETA, KEY_LEFTSHIFT};
 constexpr uint32_t SUPER_CTRL[] = {KEY_LEFTMETA, KEY_LEFTCTRL};
 constexpr uint32_t SUPER_ALT[] = {KEY_LEFTMETA, KEY_LEFTALT};
+constexpr uint32_t SUPER_CTRL_SHIFT[] = {KEY_LEFTMETA, KEY_LEFTCTRL,
+	KEY_LEFTSHIFT};
 
 int run_step() {
 	Output *o = out();
@@ -375,242 +385,371 @@ int run_step() {
 			}
 		}
 		check(d1 && second && d1->tiling(), "the tab's Tile switch switched tiling on");
-		check(a && second && !a->frame_rect().intersects(second->frame_rect()),
-			"the desktop's windows tiled into the grid");
+		View *left = a->frame_rect().x <= second->frame_rect().x ? a : second;
+		View *right = left == a ? second : a;
+		check(a && second && on_slice(left, slice_frame_of(*d1, LEFT))
+				&& on_slice(right, slice_frame_of(*d1, RIGHT)),
+			"the desktop's two windows took the board's halves");
 		check(a->tiled && second->tiled, "tiled windows are told they are tiled");
-		shot("tiled-on");
+		shot("tiled-halves");
 		return 300;
 	}
-	case 25: { // the Tile switch again: tiling off
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		box_a = a->frame_rect();
-		box_second = second->frame_rect();
-		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d1);
-		click(layout->tile_button.x + layout->tile_button.width / 2.0,
-			layout->tile_button.y + layout->tile_button.height / 2.0, BTN_LEFT);
-		return 400;
-	}
-	case 26: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		Rect fa = a->frame_rect(), fs = second->frame_rect();
-		check(d1 && !d1->tiling(), "the Tile switch switched tiling off");
-		check(fa.x == box_a.x && fa.y == box_a.y, std::format("window a stayed"
-			" where the grid left it ({:.0f},{:.0f}, was {:.0f},{:.0f}; untiled it"
-			" re-fits its own size)", fa.x, fa.y, box_a.x, box_a.y));
-		check(fs.x == box_second.x && fs.y == box_second.y, std::format("the other"
-			" window stayed where the grid left it ({:.0f},{:.0f}, was {:.0f},{:.0f})",
-			fs.x, fs.y, box_second.x, box_second.y));
-		check(!a->tiled && !second->tiled,
-			"switching off told the windows they are no longer tiled");
-		shot("tiled-off");
-		return 300;
-	}
-	case 27: { // `t` in the overview targets the desktop: tiling back on
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		o->overview.set_target(d1->frame(), d1->id(), false);
-		key(KEY_T, true);
-		key(KEY_T, false);
-		check(d1->tiling(), "`t` in the overview switched tiling back on");
-		return 300;
-	}
-	case 28: // leave the overview onto Desktop 1
+	case 25: { // leave the overview onto the empty Desktop 2
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		Point c = d2->centre();
+		o->overview.target_point(c.x, c.y);
 		o->overview.exit();
 		return 700;
-	case 29: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		check(!o->overview.active() && o->camera.current().zoom == 1,
-			"left the overview onto Desktop 1");
-		Camera want = camera_for_box(d1->frame());
-		check(std::fabs(o->camera.current().cx - want.cx) < 1
-			&& std::fabs(o->camera.current().cy - want.cy) < 1, "the camera rests on Desktop 1");
-		check(d1->tiling(), "tiling stayed on through the travel");
-		box_a = a->frame_rect();
-		box_second = second->frame_rect();
-		shot("tiled-two"); // the 2-window grid before the next window joins
+	}
+	case 26: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		if ((o->overview.active() || o->desktop_showing() != d2) && retries++ < 100) {
+			return -100;
+		}
+		check(!o->overview.active() && o->desktop_showing() == d2,
+			"left the overview onto Desktop 2");
+		// An empty desktop takes the switch too; its first window fills it.
+		chord(KEY_T, SUPER);
+		check(d2->tiling() && server->hint.text == "Tiling on for Desktop 2",
+			"Super+T switched tiling on for the empty desktop");
 		spawn("foot -T c sh -c 'echo c; exec sleep 600'");
 		return 400;
 	}
-	case 30:
+	case 27:
 		if (mapped() < 3 && retries++ < 100) {
 			return -100;
 		}
-		check(mapped() == 3, "a window opened while the tiled desktop was shown");
-		return 500; // the grid resize needs the client commits
-	case 31: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
+		return 500; // the client commits the slice size
+	case 28: { // Super+Left takes the whole board's window to the left half
+		Desktop *d2 = server->canvas.desktops.by_number(2);
 		View *c = titled("c");
-		std::vector<Rect> cells = grid_cells(*d1, 3);
-		check(c && server->canvas.desktop_of(*c) == d1 && fits_cell(c, cells),
-			"the new window joined the grid in a slot");
-		check(fits_cell(a, cells) && fits_cell(second, cells),
-			"the others re-flowed around it");
-		check(a->frame_rect() != box_a || second->frame_rect() != box_second,
-			"joining re-flowed the whole grid");
-		shot("tiled-new-window");
-		return 300;
+		check(c && c->board == d2->id() && c->tiled
+				&& on_slice(c, slice_frame_of(*d2, WHOLE)),
+			"the first window on the empty tiled desktop filled it");
+		shot("tiled-first-fills");
+		chord(KEY_LEFT, SUPER);
+		return 500;
 	}
-	case 32: // close one: the grid re-flows
-		titled("c")->close();
-		return 600;
-	case 33: {
-		if (mapped() < 2 && retries++ < 100) {
+	case 29:
+		check(on_slice(titled("c"), slice_frame_of(
+			*server->canvas.desktops.by_number(2), LEFT)),
+			"Super+Left took the window to the left half");
+		chord(KEY_DOWN, SUPER);
+		return 500;
+	case 30: // Left then Down reaches the bottom-left quarter
+		check(on_slice(titled("c"), slice_frame_of(
+			*server->canvas.desktops.by_number(2), BL)),
+			"Super+Left then Super+Down took the window to the bottom-left quarter");
+		shot("slice-bl");
+		chord(KEY_UP, SUPER); // the opposite key widens back to the left half
+		return 500;
+	case 31:
+		check(on_slice(titled("c"), slice_frame_of(
+			*server->canvas.desktops.by_number(2), LEFT)),
+			"Super+Up widened the bottom-left quarter back to the left half");
+		chord(KEY_RIGHT, SUPER); // and on to the whole board
+		return 500;
+	case 32:
+		check(on_slice(titled("c"), slice_frame_of(
+			*server->canvas.desktops.by_number(2), WHOLE)),
+			"Super+Right widened the left half back to the whole board");
+		chord(KEY_DOWN, SUPER); // the other order: Down first, then Left
+		return 500;
+	case 33:
+		check(on_slice(titled("c"), slice_frame_of(
+			*server->canvas.desktops.by_number(2), BOTTOM)),
+			"Super+Down took the whole board's window to the bottom half");
+		chord(KEY_LEFT, SUPER);
+		return 500;
+	case 34: // both orders land on the bottom-left quarter
+		check(on_slice(titled("c"), slice_frame_of(
+			*server->canvas.desktops.by_number(2), BL)),
+			"Super+Down then Super+Left also took the window to the bottom-left quarter");
+		// A second window takes the largest free slice: the top half wins the
+		// tie with the right one by reading order.
+		spawn("foot -T d sh -c 'echo d; exec sleep 600'");
+		return 400;
+	case 35: {
+		if (mapped() < 4 && retries++ < 100) {
 			return -100;
 		}
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		check(mapped() == 2 && titled("c") == nullptr, "the window closed");
-		check(fits_cell(a, grid_cells(*d1, 2)) && fits_cell(second, grid_cells(*d1, 2)),
-			"closing one re-flowed the grid");
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d");
+		check(d && on_slice(d, slice_frame_of(*d2, TOP))
+				&& on_slice(c, slice_frame_of(*d2, BL)),
+			"the new window took the largest free slice, the top half");
+		// Focus c through its title bar and grow it over d. The frame is in
+		// canvas coordinates; the pointer takes output-local ones.
+		wlr_box f = c->frame_box();
+		Point title = o->canvas_to_local(f.x + 80, f.y + 16);
+		click(title.x, title.y, BTN_LEFT);
 		return 300;
 	}
-	case 34: { // minimize via the title bar button: out of the grid
-		wlr_box f = a->frame_box();
-		click(f.x + f.width - config::button_width * 2.5, f.y + 16, BTN_LEFT);
+	case 36:
+		check(server->focused_view == titled("c"), "the clicked window is focused");
+		chord(KEY_UP, SUPER); // bottom-left quarter widens to the left half, over d
+		return 500;
+	case 37: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d");
+		check(on_slice(c, slice_frame_of(*d2, LEFT))
+				&& on_slice(d, slice_frame_of(*d2, RIGHT)),
+			"the grown slice pushed the covered window into the free space");
+		check(!c->frame_rect().intersects(d->frame_rect()), "tiled windows do not overlap");
+		shot("slice-push");
+		// A third window with no free space left: it halves a held slice.
+		spawn("foot -T e sh -c 'echo e; exec sleep 600'");
 		return 400;
 	}
-	case 35: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		check(a->minimized && !a->tiled, "minimize took the window out of the grid");
-		check(fits_cell(second, grid_cells(*d1, 1)),
-			"the remaining window re-flowed to fill the desktop");
+	case 38: {
+		if (mapped() < 5 && retries++ < 100) {
+			return -100;
+		}
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *e = titled("e");
+		check(e && on_slice(e, slice_frame_of(*d2, BL))
+				&& on_slice(c, slice_frame_of(*d2, TL))
+				&& on_slice(d, slice_frame_of(*d2, RIGHT)),
+			"with no free slice left, the new window halved the left half");
+		shot("slice-halved");
+		titled("e")->close(); // its slice frees up
+		return 600;
+	}
+	case 39: {
+		if (mapped() > 4 && retries++ < 100) {
+			return -100;
+		}
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d");
+		check(titled("e") == nullptr && on_slice(c, slice_frame_of(*d2, TL))
+				&& on_slice(d, slice_frame_of(*d2, RIGHT)),
+			"the closed window's slice stayed free, the others kept theirs");
+		spawn("foot -T f sh -c 'echo f; exec sleep 600'");
+		return 400;
+	}
+	case 40: {
+		if (mapped() < 5 && retries++ < 100) {
+			return -100;
+		}
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *f = titled("f");
+		check(f && on_slice(f, slice_frame_of(*d2, BL))
+				&& on_slice(c, slice_frame_of(*d2, TL))
+				&& on_slice(d, slice_frame_of(*d2, RIGHT)),
+			"the next window took the closed window's slice");
+		shot("slice-refilled");
+		// Drag c onto d's slice: they swap. Canvas coordinates in, the
+		// pointer takes output-local ones.
+		wlr_box fc = c->frame_box(), fd = d->frame_box();
+		Point from = o->canvas_to_local(fc.x + 80, fc.y + 16);
+		Point to = o->canvas_to_local(
+			fd.x + fd.width / 2.0 - fc.width / 2.0 + 80,
+			fd.y + fd.height / 2.0 - fc.height / 2.0 + 16);
+		drag(from.x, from.y, to.x, to.y);
+		return 500;
+	}
+	case 41: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *f = titled("f");
+		check(on_slice(c, slice_frame_of(*d2, RIGHT))
+				&& on_slice(d, slice_frame_of(*d2, TL))
+				&& on_slice(f, slice_frame_of(*d2, BL)),
+			"dragging a window onto the other's slice swapped them");
+		check(c->tiled && d->tiled && f->tiled, "both windows stayed tiled");
+		shot("slice-swap");
+		// Double-click c's title: maximize keeps the slice reserved.
+		wlr_box frame = c->frame_box();
+		Point title = o->canvas_to_local(frame.x + 80, frame.y + 16);
+		click(title.x, title.y, BTN_LEFT);
+		click(title.x, title.y, BTN_LEFT);
+		return 500;
+	}
+	case 42: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *f = titled("f");
+		check(c && c->maximized && !c->tiled && c->board == d2->id()
+				&& c->slice == RIGHT,
+			"maximize left the board but kept the window's slice");
+		check(on_slice(d, slice_frame_of(*d2, TL))
+				&& on_slice(f, slice_frame_of(*d2, BL)),
+			"maximize moved no other window: no re-layout happens anymore");
+		shot("slice-maximized");
+		wlr_box frame = c->frame_box();
+		Point restore = o->canvas_to_local(
+			frame.x + frame.width - config::button_width * 1.5, frame.y + 16);
+		click(restore.x, restore.y, BTN_LEFT);
+		return 500;
+	}
+	case 43: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *f = titled("f");
+		check(!c->maximized && c->tiled && c->board == d2->id()
+				&& on_slice(c, slice_frame_of(*d2, RIGHT))
+				&& on_slice(d, slice_frame_of(*d2, TL))
+				&& on_slice(f, slice_frame_of(*d2, BL)),
+			"leaving maximize put the window back on its reserved slice");
+		// Minimize: the slice frees up but is remembered.
+		wlr_box frame = c->frame_box();
+		Point mini = o->canvas_to_local(
+			frame.x + frame.width - config::button_width * 2.5, frame.y + 16);
+		click(mini.x, mini.y, BTN_LEFT);
+		return 400;
+	}
+	case 44: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *f = titled("f");
+		check(c && c->minimized && !c->tiled && c->board == d2->id()
+				&& c->slice == RIGHT,
+			"minimize freed the slice but kept it remembered");
+		check(on_slice(d, slice_frame_of(*d2, TL))
+				&& on_slice(f, slice_frame_of(*d2, BL)),
+			"minimize moved no other window either");
 		chord(KEY_M, SUPER_SHIFT); // restore it
 		return 500;
 	}
-	case 36: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		std::vector<Rect> cells = grid_cells(*d1, 2);
-		check(!a->minimized && fits_cell(a, cells) && fits_cell(second, cells),
-			"restoring it put it back in the grid");
-		return 300;
-	}
-	case 37: // maximize: out of the grid while in that state
-		chord(KEY_UP, SUPER);
-		return 500;
-	case 38: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		check(a->maximized && !a->tiled, "maximize took the window out of the grid");
-		check(fits_cell(second, grid_cells(*d1, 1)),
-			"the freed window re-flowed to fill the desktop");
-		shot("tiled-maximized-out");
-		return 300;
-	}
-	case 39: // leave maximize: back in the grid
-		chord(KEY_UP, SUPER);
-		return 500;
-	case 40: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		std::vector<Rect> cells = grid_cells(*d1, 2);
-		check(!a->maximized && a->tiled && fits_cell(a, cells) && fits_cell(second, cells),
-			"leaving maximize put the window back in the grid");
-		return 300;
-	}
-	case 41: // fullscreen: out of the grid while in that state
-		chord(KEY_F, SUPER);
-		return 500;
-	case 42: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		check(a->fullscreen && !a->tiled, "fullscreen took the window out of the grid");
-		check(fits_cell(second, grid_cells(*d1, 1)),
-			"the freed window re-flowed to fill the desktop");
-		return 300;
-	}
-	case 43: // leave fullscreen: back in the grid
-		chord(KEY_F, SUPER);
-		return 500;
-	case 44: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		std::vector<Rect> cells = grid_cells(*d1, 2);
-		check(!a->fullscreen && a->tiled, "leaving fullscreen tiled the window again");
-		check(fits_cell(a, cells) && fits_cell(second, cells),
-			std::format("leaving fullscreen put the window back in the grid"
-				" (a {:.0f},{:.0f} {:.0f}x{:.0f}; other {:.0f},{:.0f} {:.0f}x{:.0f})",
-				a->frame_rect().x, a->frame_rect().y, a->frame_rect().w, a->frame_rect().h,
-				second->frame_rect().x, second->frame_rect().y, second->frame_rect().w,
-				second->frame_rect().h));
-		return 300;
-	}
-	case 45: { // drag a window onto the other's slot: they reorder
-		View *left = a->frame_rect().x <= second->frame_rect().x ? a : second;
-		dragged = left;
-		View *right = left == a ? second : a;
-		wlr_box lf = left->frame_box(), rf = right->frame_box();
-		// Drop so the dragged window's centre lands inside the other's cell,
-		// right of its centre; the grab sits (80, 16) inside the frame.
-		double drop_x = rf.x + rf.width / 2.0 + 40 - lf.width / 2.0 + 80;
-		double drop_y = rf.y + rf.height / 2.0 - lf.height / 2.0 + 16;
-		drag(lf.x + 80, lf.y + 16, drop_x, drop_y);
-		return 500;
+	case 45: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *c = titled("c"), *d = titled("d"), *f = titled("f");
+		check(!c->minimized && c->tiled && on_slice(c, slice_frame_of(*d2, RIGHT))
+				&& on_slice(d, slice_frame_of(*d2, TL))
+				&& on_slice(f, slice_frame_of(*d2, BL)),
+			"the restored window took its own slice back, still free");
+		// Hop right off Desktop 2 onto a free view, carrying c along.
+		swipe(3, 900, 0);
+		return 1400;
 	}
 	case 46: {
-		Desktop *d1 = server->canvas.desktops.by_number(1);
-		View *other = dragged == a ? second : a;
-		std::vector<Rect> cells = grid_cells(*d1, 2);
-		Rect fd = dragged->frame_rect(), fo = other->frame_rect();
-		check(fd.x > fo.x, std::format("dragging a window onto the other's slot"
-			" reordered the grid (the dragged {} now at x={:.0f}, the other at x={:.0f})",
-			dragged == a ? "a" : "other", fd.x, fo.x));
-		check(dragged->tiled && fits_cell(dragged, cells) && fits_cell(other, cells),
-			"the dragged window went back into the grid");
-		shot("tiled-reordered");
-		return 300;
+		if (o->desktop_showing() != nullptr && retries++ < 100) {
+			return -100;
+		}
+		check(o->desktop_showing() == nullptr, "3-finger swipe hopped onto a free view");
+		chord(KEY_RIGHT, SUPER_CTRL_SHIFT); // move the focused window here
+		return 600;
 	}
-	case 47: // hop to a free view (nothing left of Desktop 1), then Super+T: pinned with tiling on
-		swipe(3, -900, 0);
-		return 1600;
+	case 47: {
+		View *c = titled("c");
+		check(c && !c->tiled && !c->board.has_value()
+				&& server->canvas.desktop_of(*c) == nullptr,
+			"moving out freed the window's slice and left the board");
+		chord(KEY_UP, SUPER); // a floating window still maximizes
+		return 500;
+	}
 	case 48: {
-		check(o->desktop_showing() == nullptr, "panned onto a free view");
+		View *c = titled("c");
+		Rect fr = c->frame_rect(), vp = o->viewport();
+		check(c->maximized && std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
+				&& std::fabs(fr.w - vp.w) < 1 && std::fabs(fr.h - vp.h) < 1,
+			"Super+Up still toggles maximize on a floating desktop");
+		shot("floating-maximized");
+		chord(KEY_UP, SUPER); // and back
+		return 500;
+	}
+	case 49: {
+		View *c = titled("c");
+		check(c && !c->maximized, "Super+Up restored the floating window");
+		// Pin this free view as a desktop with tiling on: c joins it.
 		chord(KEY_T, SUPER);
 		Desktop *d3 = server->canvas.desktops.by_number(3);
 		check(d3 && d3->tiling() && o->desktop_showing() == d3,
 			"Super+T pinned the free view as a desktop with tiling on");
 		check(server->hint.text == "Tiling on for Desktop 3",
 			"the hint names the new tiled desktop");
-		spawn("foot -T d sh -c 'echo d; exec sleep 600'");
 		return 400;
 	}
-	case 49: {
-		if (mapped() < 3 && retries++ < 100) {
+	case 50: {
+		Desktop *d3 = server->canvas.desktops.by_number(3);
+		View *c = titled("c");
+		check(c && c->board == d3->id() && on_slice(c, slice_frame_of(*d3, WHOLE)),
+			"the window standing there joined the new desktop's board");
+		// Back to Desktop 1 (via 2): its tiling survived, boxes unmoved.
+		chord(KEY_LEFT, SUPER_CTRL);
+		return 800;
+	}
+	case 51: {
+		if (o->desktop_showing() != server->canvas.desktops.by_number(2)
+				&& retries++ < 100) {
 			return -100;
 		}
-		Desktop *d3 = server->canvas.desktops.by_number(3);
-		View *dv = titled("d");
-		check(dv && server->canvas.desktop_of(*dv) == d3,
-			"the first window on the empty tiled desktop joined it");
-		check(fits_cell(dv, grid_cells(*d3, 1)),
-			"the first window filled the desktop's area");
-		box_d = dv->frame_rect();
-		shot("tiled-first-fills");
-		return 400;
+		chord(KEY_LEFT, SUPER_CTRL);
+		return 800;
 	}
-	case 50: // abandon the tiled desktop: its window stays, no longer tiled
-		chord(KEY_F4, SUPER_CTRL);
-		return 400;
-	case 51: {
-		View *dv = titled("d");
-		Rect fd = dv->frame_rect();
-		check(server->canvas.desktops.by_number(3) == nullptr,
-			"Super+Ctrl+F4 abandoned the tiled desktop");
-		check(dv && !dv->tiled && server->canvas.desktop_of(*dv) == nullptr,
-			"its window was told it is no longer tiled and belongs to no desktop");
-		check(fd.x == box_d.x && fd.y == box_d.y, std::format("its window stayed"
-			" where the grid left it ({:.0f},{:.0f}, was {:.0f},{:.0f})",
-			fd.x, fd.y, box_d.x, box_d.y));
-		shot("abandoned-tiled");
-		return 300;
+	case 52: {
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		if (o->desktop_showing() != d1 && retries++ < 100) {
+			return -100;
+		}
+		View *left = a->frame_rect().x <= second->frame_rect().x ? a : second;
+		View *right = left == a ? second : a;
+		check(d1 && o->desktop_showing() == d1 && d1->tiling(),
+			"back on Desktop 1, tiling still on");
+		check(on_slice(left, slice_frame_of(*d1, LEFT))
+				&& on_slice(right, slice_frame_of(*d1, RIGHT)),
+			"and its two windows kept their slices all along");
+		// `t` in the overview switches tiling off: boxes stay, boards drop.
+		chord(KEY_TAB, SUPER);
+		return 700;
 	}
-	case 52: { // combine the tiled Desktop 1 into the untiled Desktop 2
+	case 53: {
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		if (!o->overview.active() && retries++ < 100) {
+			return -100;
+		}
+		check(o->overview.active() && o->overview.target().desktop == d1->id(),
+			"the overview targets Desktop 1");
+		key(KEY_T, true);
+		key(KEY_T, false);
+		return 500;
+	}
+	case 54: {
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		View *left = a->frame_rect().x <= second->frame_rect().x ? a : second;
+		View *right = left == a ? second : a;
+		Rect fl = left->frame_rect(), fr = right->frame_rect();
+		check(d1 && !d1->tiling() && !a->tiled && !second->tiled
+				&& !a->board.has_value() && !second->board.has_value(),
+			"`t` in the overview switched tiling off, boards dropped");
+		check(on_slice(left, slice_frame_of(*d1, LEFT))
+				&& on_slice(right, slice_frame_of(*d1, RIGHT)),
+			"switching off left the windows where the board had them");
+		check(fl.x == left->frame_rect().x && fr.x == right->frame_rect().x,
+			"not a pixel moved when the board went away");
+		shot("tiled-off-kept");
+		// The tab's Tile switch brings it back: re-placed as they stood.
+		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d1);
+		click(layout->tile_button.x + layout->tile_button.width / 2.0,
+			layout->tile_button.y + layout->tile_button.height / 2.0, BTN_LEFT);
+		return 500;
+	}
+	case 55: {
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		View *left = a->frame_rect().x <= second->frame_rect().x ? a : second;
+		View *right = left == a ? second : a;
+		check(d1 && d1->tiling() && a->tiled && second->tiled
+				&& on_slice(left, slice_frame_of(*d1, LEFT))
+				&& on_slice(right, slice_frame_of(*d1, RIGHT)),
+			"the tab's Tile switch laid the standing windows back on the same slices");
+		// And off again, for the combine below.
+		key(KEY_T, true);
+		key(KEY_T, false);
+		return 500;
+	}
+	case 56: { // combine the tiled Desktop 2 into the untiled Desktop 1
 		Desktop *d1 = server->canvas.desktops.by_number(1);
 		Desktop *d2 = server->canvas.desktops.by_number(2);
-		Rect a0 = a->frame_rect(), s0 = second->frame_rect();
-		int dx = d2->frame().x - d1->frame().x;
-		int dy = d2->frame().y - d1->frame().y;
-		server->canvas.combine(d2->id(), d1->id(), d1->frame());
-		check(server->canvas.desktops.by_number(1) == nullptr,
+		View *d = titled("d"), *f = titled("f");
+		Rect d0 = d->frame_rect(), f0 = f->frame_rect();
+		check(d1 && d2 && !d1->tiling() && d2->tiling(),
+			"Desktop 1 untiled, Desktop 2 still tiled, before the combine");
+		int dx = d1->frame().x - d2->frame().x;
+		int dy = d1->frame().y - d2->frame().y;
+		server->canvas.combine(d1->id(), d2->id(), d2->frame());
+		check(server->canvas.desktops.by_number(2) == nullptr,
 			"the tiled desktop combined into the untiled one");
-		check(a->frame_rect().x == a0.x + dx && a->frame_rect().y == a0.y + dy
-			&& second->frame_rect().x == s0.x + dx && second->frame_rect().y == s0.y + dy,
+		check(d->frame_rect().x == d0.x + dx && d->frame_rect().y == d0.y + dy
+				&& f->frame_rect().x == f0.x + dx && f->frame_rect().y == f0.y + dy,
 			"its windows moved with the translation, keeping their layout");
-		check(!a->tiled && !second->tiled
-			&& server->canvas.desktop_of(*a) == d2,
+		check(!d->tiled && !f->tiled
+				&& server->canvas.desktop_of(*d) == d1,
 			"no longer tiled, they belong to the target desktop");
 		shot("combined-untiled");
 		return 0;
