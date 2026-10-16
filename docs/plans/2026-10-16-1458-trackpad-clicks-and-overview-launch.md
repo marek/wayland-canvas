@@ -18,14 +18,14 @@ handed to an instance already running, one started over D-Bus) is placed by the 
 ## Clicks
 
 - [ ] Two fingers pressed anywhere on the pad are a right click, three a middle click
-- [ ] In the overview a right click on a desktop (tab or interior) removes it, on the empty canvas makes one there
+- [x] In the overview a right click on a desktop (tab or interior) removes it, on the empty canvas makes one there
 
 ## Launches
 
-- [ ] A window launched from the overview opens in the target the overview had at the launch, whatever the overview does before it appears
+- [x] A window launched from the overview opens in the target the overview had at the launch, whatever the overview does before it appears
 
 ## Verification
 
-- [ ] Scenarios: a right click removing a desktop and making one; a launch from the overview whose window appears after the overview closed, opening in the launch's target
-- [ ] Intents, README and `-h` updated; warning-free build, every suite green
+- [x] Scenarios: a right click removing a desktop and making one; a launch from the overview whose window appears after the overview closed, opening in the launch's target
+- [x] Intents, README and `-h` updated; warning-free build, every suite green
 - [ ] On screen: two-finger clicks on the touchpad, in the overview and in apps, and a launch from the overview (the user)
