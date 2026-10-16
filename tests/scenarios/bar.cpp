@@ -1135,6 +1135,17 @@ void click(double x, double y, int button = BTN_LEFT) {
 	}
 }
 
+// The pointer at (x, y), without a click: parking it where no widget or
+// panel sits before a shot.
+void park(double x, double y) {
+	t += 8;
+	wlr_pointer_motion_absolute_event m = {
+		.pointer = &ptr, .time_msec = t, .x = x / double(screen_w),
+		.y = y / double(screen_h)};
+	wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
 // Two clicks close together in device time: the compositor's double-click.
 void double_click(double x, double y) {
 	click(x, y);
@@ -2483,6 +2494,7 @@ constexpr int UiThemePadding = 10; // UiTheme.panelPadding, mirrored here
 // alpha shifted out before the channels are compared.
 constexpr uint32_t accent_dark = 0x7aa2f7ff;   // UiTheme.accent, dark
 constexpr uint32_t attention_dark = 0xf7768eff; // UiTheme.attention, dark
+constexpr uint32_t attention_light = 0xf52a65ff; // UiTheme.attention, light
 constexpr uint32_t claude_mark = 0xd97757ff;   // the starburst's clay
 constexpr uint32_t muted_dark = 0x565f89ff;    // UiTheme.muted, dark
 constexpr uint32_t muted_light = 0x8489a3ff;   // UiTheme.muted, light
@@ -2715,6 +2727,82 @@ int colour_count(cairo_surface_t *s, const wlr_box &rect, uint32_t want) {
 		}
 	}
 	return count;
+}
+
+// ---- the recording-dot phase ----
+
+// This phase's one recording, and where its dot sat on the bar.
+std::string dot_recording;
+double dot_x = 0;
+bool dot_acted = false; // a step's chord or click has happened (retry-safe)
+
+// The capture toolbar's mode button `index` (0-5, the recordings from 3),
+// its click point: the geometry CaptureUi::toolbar_layout() builds, so the
+// real toolbar is clicked where it draws itself.
+std::pair<double, double> capture_mode_click(int index) {
+	int fixed = 2 * config::capture_toolbar_pad + 5 * config::capture_toolbar_gap
+		+ config::capture_toolbar_group_gap;
+	int avail = screen_w - 2 * config::capture_thumbnail_margin - fixed;
+	int bw = (avail - 5 * config::capture_toolbar_gap) / 6;
+	if (bw > config::capture_toolbar_button_w) {
+		bw = config::capture_toolbar_button_w;
+	}
+	if (bw < config::capture_toolbar_button_w / 2) {
+		bw = config::capture_toolbar_button_w / 2; // tiny outputs clip, not crush
+	}
+	int inner = 6 * bw + 5 * config::capture_toolbar_gap
+		+ config::capture_toolbar_group_gap;
+	int box_x = (screen_w - (inner + 2 * config::capture_toolbar_pad)) / 2;
+	int box_y = screen_h - config::capture_toolbar_margin
+		- (2 * config::capture_toolbar_pad + config::capture_toolbar_options_h
+			+ config::capture_toolbar_gap + config::capture_toolbar_button_h
+			+ config::capture_toolbar_gap + config::capture_toolbar_footer_h);
+	int x = box_x + config::capture_toolbar_pad
+		+ index * (bw + config::capture_toolbar_gap)
+		+ (index >= 3 ? config::capture_toolbar_group_gap : 0);
+	int y = box_y + config::capture_toolbar_pad
+		+ config::capture_toolbar_options_h + config::capture_toolbar_gap;
+	return {x + bw / 2.0, y + config::capture_toolbar_button_h / 2.0};
+}
+
+// The attention-coloured pixels inside the bar strip: how many, and their
+// bounding box (empty when none). The recording dot is the only thing that
+// wears the attention colour on this bar — a widget it displaces can slide
+// under where it sits, so runs are read by colour, not by what moved.
+std::pair<int, wlr_box> attention_span(cairo_surface_t *s, const wlr_box &bar,
+		uint32_t want) {
+	int count = 0;
+	wlr_box box{0, 0, 0, 0};
+	if (s == nullptr) {
+		return {count, box};
+	}
+	for (int y = bar.y; y < bar.y + bar.height; y++) {
+		for (int x = bar.x; x < bar.x + bar.width; x++) {
+			if (!pixel_is(s, x, y, want)) {
+				continue;
+			}
+			if (count == 0) {
+				box = {x, y, 1, 1};
+			} else {
+				if (x < box.x) {
+					box.width += box.x - x;
+					box.x = x;
+				}
+				if (y < box.y) {
+					box.height += box.y - y;
+					box.y = y;
+				}
+				if (x + 1 > box.x + box.width) {
+					box.width = x + 1 - box.x;
+				}
+				if (y + 1 > box.y + box.height) {
+					box.height = y + 1 - box.y;
+				}
+			}
+			count++;
+		}
+	}
+	return {count, box};
 }
 
 // The widths of the meter fills in the panel's card: one entry per meter
@@ -5705,6 +5793,139 @@ int run_step() {
 		check(editor_layer() == nullptr && toolbar_layer() == nullptr,
 			"no editor or toolbar outlived the agents phase");
 		check(overview_settled(false), "the overview stayed closed");
+		step = 208; // on to the recording dot: the bar plugin's own proof
+		return -100;
+	}
+
+	// ---- the recording-dot phase: 208-214 ----
+	// Alt+Print opens the capture toolbar on its recordings, a click records
+	// the screen through the real input path, and the plugin's dot is read
+	// off the bar itself, clicked with the fake pointer, and seen gone once
+	// the recording has stopped — its file left playable in the scratch
+	// Videos, never the machine's.
+	case 208: { // the quiet bar, the pointer parked clear of everything
+		park(640, 400);
+		dot_acted = false;
+		return shot_landed("norec-bar") ? 400 : -100;
+	}
+	case 209: { // Alt+Print: the toolbar, its recordings accented
+		if (!dot_acted) {
+			chord(KEY_SYSRQ, KEY_LEFTALT);
+			dot_acted = true;
+		}
+		if (!server->capture_ui.owns_keyboard() && retries++ < 30) {
+			return -100;
+		}
+		retries = 0;
+		check(server->capture_ui.owns_keyboard(),
+			"Alt+Print opened the capture toolbar");
+		auto [mx, my] = capture_mode_click(3);
+		click(mx, my); // record the screen
+		dot_acted = false; // the flag next guards the dot's click, not this one
+		return 600;
+	}
+	case 210: { // the recording runs, into the scratch Videos
+		if (!server->capture_ui.recording() && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		dot_recording = server->capture_ui.recording_path();
+		check(server->capture_ui.recording() && !dot_recording.empty()
+				&& dot_recording.rfind(scratch_home, 0) == 0
+				&& dot_recording.find("/Videos/") != std::string::npos,
+			std::format("the toolbar's click records the screen, into the "
+				"bar world's scratch Videos ({})", dot_recording));
+		return shot_landed("rec-bar") ? 500 : -100;
+	}
+	case 211: { // the dot: attention red, in the bar's right half
+		cairo_surface_t *after = load_png("rec-bar");
+		LayerSurface *bar = bar_layer();
+		// The palette this run ended in, read off the bar's own background
+		// at its right edge, picks the attention colour the dot must wear.
+		bool dark = after != nullptr && bar != nullptr
+			&& pixel_is(after, screen_w - 3, bar->geo.y + bar->geo.height / 2,
+				shell_bg_dark);
+		auto [red, dot] = bar != nullptr && after != nullptr
+			? attention_span(after, bar->geo,
+				dark ? attention_dark : attention_light)
+			: std::pair<int, wlr_box>{0, wlr_box{0, 0, 0, 0}};
+		check(red > 15,
+			std::format("the recording dot is on the bar, in the attention "
+				"colour ({} px)", red));
+		check(red > 15 && dot.x + dot.width / 2 > screen_w / 2,
+			"the dot sits in the bar's right section");
+		if (red > 0) {
+			dot_x = dot.x + dot.width / 2.0;
+		}
+		if (after != nullptr) {
+			cairo_surface_destroy(after);
+		}
+		return 400;
+	}
+	case 212: { // a click on the dot stops it, through the plugin
+		if (!dot_acted) { // once: a re-click could open an indicator's panel
+			click(dot_x, double(bar_h()) / 2.0);
+			dot_acted = true;
+		}
+		if (server->capture_ui.recording() && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(!server->capture_ui.recording(),
+			"a click on the dot stopped the recording");
+		run_msg("state", "", "dot-state");
+		return 400;
+	}
+	case 213: { // the state agrees, and the bar is quiet again
+		if (!msg_done("dot-state") && retries++ < 30) {
+			return -100;
+		}
+		retries = 0;
+		JsonParser *dot_state_parser = json_parser_new();
+		bool dot_state_read = json_parser_load_from_file(dot_state_parser,
+			(shot_dir + "/dot-state.out").c_str(), nullptr);
+		JsonObject *dot_state = dot_state_read
+			&& json_node_get_node_type(json_parser_get_root(dot_state_parser))
+				== JSON_NODE_OBJECT
+			? json_node_get_object(json_parser_get_root(dot_state_parser))
+			: nullptr;
+		check(msg_code("dot-state") == 0 && dot_state != nullptr
+				&& json_object_has_member(dot_state, "recording")
+				&& json_node_get_node_type(json_object_get_member(dot_state,
+					"recording")) == JSON_NODE_NULL,
+			"the state reports no recording any more");
+		g_object_unref(dot_state_parser);
+		return shot_landed("stopped-bar") ? 500 : -100;
+	}
+	case 214: { // the dot gone, the file playable
+		cairo_surface_t *after = load_png("stopped-bar");
+		LayerSurface *bar = bar_layer();
+		bool dark = after != nullptr && bar != nullptr
+			&& pixel_is(after, screen_w - 3, bar->geo.y + bar->geo.height / 2,
+				shell_bg_dark);
+		auto [red, dot] = bar != nullptr && after != nullptr
+			? attention_span(after, bar->geo,
+				dark ? attention_dark : attention_light)
+			: std::pair<int, wlr_box>{0, wlr_box{0, 0, 0, 0}};
+		check(red == 0,
+			std::format("the dot left the bar with the recording ({} red px)",
+				red));
+		if (after != nullptr) {
+			cairo_surface_destroy(after);
+		}
+		std::system(std::format(
+			"ffprobe -v error -select_streams v:0 "
+				"-show_entries stream=width,height -show_entries format=duration "
+				"-of csv=p=0 \"{}\" > {}/dot-probe.txt 2>&1",
+			dot_recording, shot_dir).c_str());
+		int w = 0, h = 0;
+		double dur = 0;
+		std::string probe = read_file(std::format("{}/dot-probe.txt", shot_dir));
+		bool played = std::sscanf(probe.c_str(), "%d,%d %lf", &w, &h, &dur) == 3
+			&& w == screen_w && h == screen_h && dur >= 0.5;
+		check(played,
+			std::format("ffprobe reads the recording as a playing {}x{} file ({})",
+				screen_w, screen_h, probe));
 		return 100; // done: the summary prints and the run ends
 	}
 	default:

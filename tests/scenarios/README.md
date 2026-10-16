@@ -298,6 +298,16 @@ own the machine's Wayland display namespace and GPU.
   the probe-reuse window, and both palettes — all on screenshots under
   `tmp/scenarios/bar/agents*.png`.
 
+  Last, the `canvas.recording` plugin: Alt+Print opens the capture toolbar
+  on its recordings and a click of its record-screen mode starts a real
+  recording into the bar world's scratch Videos (never the machine's —
+  the bar's own `HOME` is the scratch one). The plugin's dot is read off
+  the bar screenshot itself: attention-red pixels in the right section (a
+  widget the dot displaces can slide under where it sits, so the strip is
+  read by colour, not by what moved); a fake-pointer click on it stops
+  the recording (`state.recording` null again), the dot leaves the bar
+  with it, and ffprobe reads the file as a playing screen-sized video.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only
