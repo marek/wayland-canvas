@@ -1096,6 +1096,24 @@ int run_step() {
 			&& o->interactive(),
 			std::format("a long swipe hops once, onto B at its 80 % (zoom {:.2f})", cam.zoom));
 		shot("30-hopped-to-b-80");
+		// A sloppy 3-finger swipe the touchpad reports as a pinch: its
+		// travel hops all the same, here right onto C.
+		server->gestures.pinch_begin(t_ms, 3);
+		for (int i = 0; i < 10; i++) {
+			t_ms += 8;
+			server->gestures.pinch_update(t_ms, 30, 0, 1.02, 0);
+		}
+		t_ms += 8;
+		server->gestures.pinch_end(t_ms, false);
+		return 900;
+	}
+	case 78: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera c = camera_for_box(desk(hop_c)->frame(), 1);
+		check(o->camera.current().cx == c.cx && o->desktop_showing() == desk(hop_c),
+			"a 3-finger pinch with travel in the normal view hops like a swipe, onto C");
 		return 0;
 	}
 	default:

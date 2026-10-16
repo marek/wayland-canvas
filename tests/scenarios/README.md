@@ -36,7 +36,8 @@ own the machine's Wayland display namespace and GPU.
   100 %. Last, normal-view hops along a row of three desktops (the middle
   one at 80 %): two quick swipes walking two desktops, a swipe past the
   last one moving one screen and a swipe back returning onto it, and a long
-  swipe hopping only once, onto the 80 % desktop at its scale.
+  swipe hopping only once, onto the 80 % desktop at its scale, then a
+  3-finger pinch with travel hopping like a swipe.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
