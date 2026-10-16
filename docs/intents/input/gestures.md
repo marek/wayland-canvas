@@ -56,8 +56,8 @@ Rules that hold across the table:
   follows the scale live and settles on release; the windows are never
   told ([../canvas/desktops.md](../canvas/desktops.md)).
 - **Forwarding.** Only an interactive output
-  ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) — zoom
-  exactly 1, no transition in progress — forwards gestures to clients
+  ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) — resting
+  at its zoom, no transition in progress — forwards gestures to clients
   (2-finger gestures and unbound finger counts, via the
   pointer-gestures protocol, [../platform/protocols.md](../platform/protocols.md)).
   In the overview the compositor owns every gesture.

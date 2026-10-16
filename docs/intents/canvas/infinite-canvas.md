@@ -23,8 +23,13 @@ to a free area of the canvas is as easy as going to a desktop.
   125 % reads larger. The compositor scales the picture and the windows
   keep their size and layout, so zooming never rearranges anything; input
   reaches them through the same camera, so a scaled desktop is as usable
-  as one at 100 %. Any other zoom (the overview, a transition) is the
-  compositor's too, but not interactive ([overview.md](overview.md)).
+  as one at 100 %.
+- **Only a zoom action changes the zoom.** A Super pinch, Super+0, going
+  to a desktop (it brings its scale) and the overview do; a pan, a scroll
+  or a landing never does, so a free view keeps the zoom the camera
+  brought and stays as usable as the desktop it was panned off. The
+  overview and a transition on its way are the compositor's own, not
+  interactive ([overview.md](overview.md)).
 - **A resting camera sits on the pixel grid.** At rest the camera
   position is quantised to the output's pixel grid at its zoom, so a
   window never renders subpixel-blurry. Rendering and hit testing use the
@@ -38,8 +43,8 @@ to a free area of the canvas is as easy as going to a desktop.
 |---|---|
 | Canvas units | Logical pixels at zoom 1; the plane is unbounded in every direction |
 | Camera | One per output: the canvas point at the output's centre, plus a zoom |
-| Normal mode | The camera rests at the zoom of what it shows: the scale of the desktop it is on, else 1; clients get input |
-| Zoomed mode | Any other zoom; the compositor owns the pointer and keyboard ([overview.md](overview.md)) |
+| Normal mode | The camera rests at the zoom of what it shows: the scale of the desktop whose frame fills the screen, or on a free view the zoom it was brought there at (Super+0 returns a free view to 100 %); clients get input |
+| Zoomed mode | The overview, and any zoom transition while it runs; the compositor owns the pointer and keyboard ([overview.md](overview.md)) |
 | Interaction gate | An output forwards pointer and gesture events to clients only in normal mode, resting at that zoom, with no zoom transition in progress |
 | Scale of the output itself | [../render/hidpi.md](../render/hidpi.md) |
 
@@ -58,8 +63,9 @@ to a free area of the canvas is as easy as going to a desktop.
   (decay time constant and minimum coasting speed are compile-time
   constants in `src/core/config.h`).
 - A pan that lands close to a desktop (a compile-time fraction of the
-  screen) snaps onto it, its zoom easing to that desktop's scale; any
-  other landing spot stays wherever the pan stopped, at zoom 1.
+  screen as shown, the same distance on screen at every zoom) snaps onto
+  it, its zoom easing to that desktop's scale; any other landing spot
+  stays wherever the pan stopped, at the zoom it had.
 
 ### Free areas and orientation
 

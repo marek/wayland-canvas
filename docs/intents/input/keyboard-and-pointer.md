@@ -53,7 +53,7 @@ reach the client. A lone tap of Super opens the app launcher.
 | Super+Ctrl+F4 | Abandon the current desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+T | Switch tiling on or off for the current desktop; a free view is pinned as a desktop first ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+1..9 | Go to desktop N ([../canvas/desktops.md](../canvas/desktops.md)) |
-| Super+0 | Return the desktop shown to 100 % ([../canvas/desktops.md](../canvas/desktops.md)) |
+| Super+0 | Return the view to 100 %: the desktop shown ([../canvas/desktops.md](../canvas/desktops.md)), or a free view ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Shift+E, Ctrl+Alt+Backspace | Quit the compositor |
 | Ctrl+Alt+F1..F12 | Switch virtual terminal |
 | Overview keys | Arrows hop, Return go, Esc back, Delete/BackSpace abandon, `t` switch tiling, `m` combine, `n` new desktop, `0` the target desktop back to 100 %, `+`/`−` zoom ([../canvas/overview.md](../canvas/overview.md)) |
