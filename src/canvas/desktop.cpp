@@ -8,8 +8,10 @@
 #include "core/server.h"
 #include "windows/view.h"
 
-Desktop::Desktop(DesktopId id, int number, wlr_box frame)
-	: id_(id), number_(number), base_w_(frame.width), base_h_(frame.height),
+Desktop::Desktop(DesktopId id, int number, wlr_box frame, double scale)
+	: id_(id), number_(number), scale_(scale),
+		base_w_(static_cast<int>(std::lround(frame.width * scale))),
+		base_h_(static_cast<int>(std::lround(frame.height * scale))),
 		frame_(frame),
 		centre_{frame.x + frame.width / 2.0, frame.y + frame.height / 2.0} {
 }
@@ -71,14 +73,14 @@ Desktops::Desktops(Server &server)
 	: server_(server) {
 }
 
-Desktop &Desktops::create(wlr_box frame) {
+Desktop &Desktops::create(wlr_box frame, double scale) {
 	int number = 1;
 	while (by_number(number) != nullptr) {
 		number++;
 	}
 	DesktopId id = next_id_;
 	next_id_ = DesktopId{static_cast<int>(next_id_) + 1};
-	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame));
+	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame, scale));
 	server_.damage_all();
 	server_.ipc.emit_desktops();
 	return *stack_.front();

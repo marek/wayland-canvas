@@ -123,7 +123,7 @@ inline constexpr double scroll_pan_speed = 1.5; // 2-finger scroll over empty ca
 
 // Per-desktop scale (Super + 2-finger pinch): a desktop's frame is its
 // base size divided by its scale, and its windows are shown at it.
-inline constexpr double desktop_scale_min = 0.5;
+inline constexpr double desktop_scale_min = 0.25;
 inline constexpr double desktop_scale_max = 2.0;
 // Released pinches settle on this step of scale; 100 % is one of the steps,
 // so a near-100 pinch catches it exactly.
@@ -132,7 +132,7 @@ inline constexpr double desktop_scale_step = 0.05;
 // Overview (zoomed-out view).
 inline constexpr double overview_swipe_distance = 260.0; // 4-finger travel for a full zoom transition
 inline constexpr double overview_commit = 0.25; // progress past which a released zoom gesture completes
-inline constexpr double overview_max_zoom = 0.30;
+inline constexpr double overview_max_zoom = 0.30; // relative to a view at 100 %; further out below it
 inline constexpr double overview_min_zoom = 0.02;
 inline constexpr int overview_margin = 80; // logical px kept around the content
 inline constexpr double hop_threshold = 36.0; // 3-finger travel that triggers a jump to the next desktop

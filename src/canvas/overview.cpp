@@ -86,10 +86,10 @@ Camera Overview::camera_for(const Camera &home) const {
 	double ex = std::fmax(home.cx - content.x, content.x + content.w - home.cx);
 	double ey = std::fmax(home.cy - content.y, content.y + content.h - home.cy);
 	Rect sym = {home.cx - ex, home.cy - ey, 2 * ex, 2 * ey};
-	double zoom_c = fit_zoom(sym, vw, vh, config::overview_margin,
-		config::overview_max_zoom);
-	double zoom_f = fit_zoom(content, vw, vh, config::overview_margin,
-		config::overview_max_zoom);
+	// Always further out than the view it leaves, a zoomed-out one included.
+	double max_zoom = config::overview_max_zoom * std::fmin(home.zoom, 1.0);
+	double zoom_c = fit_zoom(sym, vw, vh, config::overview_margin, max_zoom);
+	double zoom_f = fit_zoom(content, vw, vh, config::overview_margin, max_zoom);
 	if (zoom_c >= 0.75 * zoom_f) {
 		return Camera{
 			.cx = home.cx,
@@ -141,9 +141,22 @@ void Overview::finish_enter(const Camera &far, double t) {
 	output_.damage();
 }
 
+namespace {
+
+// The zoom at which `box` fills the output's width: a free spot's own zoom.
+double zoom_filling(const Output &output, const wlr_box &box) {
+	return box.width > 0 ? static_cast<double>(output.width) / box.width : 1.0;
+}
+
+} // namespace
+
 Camera Overview::target_camera() const {
+	// A desktop at its scale; a free spot at the zoom that fills the screen
+	// with its outline: the view the overview came from, or a screen-sized
+	// spot at 1.
 	Desktop *desktop = output_.server.canvas.desktops.find(target_.desktop);
-	return camera_for_box(target_.box, desktop != nullptr ? desktop->scale() : 1.0);
+	return camera_for_box(target_.box,
+		desktop != nullptr ? desktop->scale() : zoom_filling(output_, target_.box));
 }
 
 void Overview::exit() {
@@ -290,7 +303,8 @@ void Overview::pin_target() {
 		server.hint.set("Already a desktop");
 		return;
 	}
-	Desktop &desktop = server.canvas.desktops.create(target_.box);
+	Desktop &desktop = server.canvas.desktops.create(target_.box,
+		zoom_filling(output_, target_.box));
 	target_.desktop = desktop.id();
 	server.hint.set(std::format("New Desktop {}", desktop.number()));
 }

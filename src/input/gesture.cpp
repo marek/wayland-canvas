@@ -87,6 +87,11 @@ bool Gestures::zooming(const Output &output) const {
 	}, state_);
 }
 
+bool Gestures::opening_overview(const Output &output) const {
+	const ZoomOut *z = std::get_if<ZoomOut>(&state_);
+	return z != nullptr && z->output == &output;
+}
+
 double Gestures::abandon_offset(DesktopId id) const {
 	if (const Abandon *abandon = std::get_if<Abandon>(&state_);
 			abandon != nullptr && abandon->desktop == id) {
@@ -283,7 +288,9 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 			Camera cam = o.camera.drawn();
 			double lx = cam.cx + pan.vx * config::inertia_tau_ms;
 			double ly = cam.cy + pan.vy * config::inertia_tau_ms;
-			double snap = config::snap_radius * std::fmin(o.width, o.height);
+			// A fraction of the screen as shown: the same distance on screen
+			// at every zoom.
+			double snap = config::snap_radius * std::fmin(o.width, o.height) / cam.zoom;
 			const Desktop *best = nullptr;
 			double best_dist = HUGE_VAL;
 			for (const Desktop &d : server_.canvas.desktops.all()) {
@@ -298,17 +305,9 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 			// A landing close to a desktop snaps onto it, its zoom easing
 			// to the desktop's scale.
 			o.camera.animate_to(camera_for_box(best->frame(), best->scale()));
-		} else {
-			if (!cancelled && std::hypot(pan.vx, pan.vy) > config::inertia_min_speed) {
-				o.camera.coast(pan.vx, pan.vy);
-			}
-			if (cam.zoom != 1) {
-				// Any other landing spot is a free view, at zoom 1: the
-				// camera eases its zoom there while the momentum runs.
-				Camera free = cam;
-				free.zoom = 1;
-				o.camera.animate_zoom(free, cam, 1, 0);
-			}
+		} else if (!cancelled && std::hypot(pan.vx, pan.vy) > config::inertia_min_speed) {
+			// Any other landing is a free view, at the zoom the pan had.
+			o.camera.coast(pan.vx, pan.vy);
 		}
 		o.damage();
 		},

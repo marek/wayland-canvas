@@ -52,6 +52,7 @@ public:
 	const State &state() const;
 	bool panning(const Output &output) const;
 	bool zooming(const Output &output) const; // a zoom gesture on that output
+	bool opening_overview(const Output &output) const; // the 4-finger zoom out, before it commits
 	double abandon_offset(DesktopId desktop) const; // 0 unless that desktop is being swiped away
 	const Pinch *pinch() const; // the pinch in progress, for the tile/combine preview
 	void output_gone(const Output &output); // its output was unplugged

@@ -17,7 +17,8 @@ enum class DesktopId : int {};
 // lies in, or whose grid holds them; moving the frame never moves windows.
 class Desktop {
 public:
-	Desktop(DesktopId id, int number, wlr_box frame);
+	// `frame` fills the screen at `scale`: the base size is the frame times it.
+	Desktop(DesktopId id, int number, wlr_box frame, double scale);
 
 	DesktopId id() const;
 	int number() const; // "Desktop 2": the smallest unused number at creation
@@ -49,8 +50,9 @@ class Desktops {
 public:
 	explicit Desktops(Server &server);
 
-	// The smallest unused number, placed topmost; damages.
-	Desktop &create(wlr_box frame);
+	// The smallest unused number, placed topmost, filling the screen with
+	// `frame` at `scale` (a view pinned at its zoom); damages.
+	Desktop &create(wlr_box frame, double scale = 1.0);
 	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
 	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows

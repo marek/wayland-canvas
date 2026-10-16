@@ -251,7 +251,9 @@ Desktop *Output::desktop_showing() const {
 
 double Output::resting_zoom() const {
 	// The camera rests at the zoom of what it shows: the scale of the
-	// desktop whose frame fills the screen, else 1 (a free view).
+	// desktop whose frame fills the screen; on a free view the zoom the
+	// camera is coming to rest at, since only a zoom action changes it and
+	// a pan, a scroll or a landing never does.
 	if (overview.active()) {
 		return overview.home().zoom;
 	}
@@ -265,7 +267,7 @@ double Output::resting_zoom() const {
 			return d.scale();
 		}
 	}
-	return 1;
+	return camera.destination().zoom;
 }
 
 void Output::pan(double dx, double dy) {
@@ -295,11 +297,12 @@ void Output::goto_direction(double dx, double dy) {
 		goto_desktop(*found);
 		return;
 	}
+	// No desktop that way: one screen that way as it is shown, at the zoom
+	// it has.
 	Compass q = nav_quantize_direction(dx, dy);
 	Camera to = camera.current();
-	to.cx += q.x * static_cast<double>(width);
-	to.cy += q.y * static_cast<double>(height);
-	to.zoom = 1;
+	to.cx += q.x * width / to.zoom;
+	to.cy += q.y * height / to.zoom;
 	camera.animate_to(to);
 }
 
@@ -315,7 +318,8 @@ void Output::pin_desktop() {
 		server.hint.set("Already a desktop");
 		return;
 	}
-	Desktop &created = server.canvas.desktops.create(rect_to_box(vp));
+	// Pinned at its zoom: the new desktop fills the screen at that scale.
+	Desktop &created = server.canvas.desktops.create(rect_to_box(vp), camera.current().zoom);
 	server.hint.set(std::format("New Desktop {}", created.number()));
 }
 

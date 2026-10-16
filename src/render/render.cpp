@@ -976,9 +976,11 @@ void Painter::render(Output &output) {
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
 		ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM);
 
-	// A camera resting on a scaled desktop is a normal view; only a zoom
-	// away from its resting zoom shows the free-canvas chrome.
-	bool zoomed = ctx.cam.zoom != ctx.output->resting_zoom();
+	// A camera resting at its zoom (a scaled desktop, a free view at any
+	// zoom) is a normal view; a zoom on its way to another zoom, or the
+	// 4-finger zoom out before it commits, shows the free-canvas chrome.
+	bool zoomed = ctx.cam.zoom != ctx.output->resting_zoom()
+		|| server_.gestures.opening_overview(output);
 	bool wallpaper = output.has_wallpaper();
 	if (zoomed && wallpaper) {
 		draw_logical_rect(ctx, 0, 0, output.width, output.height,

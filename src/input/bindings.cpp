@@ -182,8 +182,8 @@ void act_goto_desktop(Server &server, Output *output, KeyArg arg) {
 	}
 }
 
-// Super+0: the desktop shown back to 100 %, the camera easing with it. A
-// free view rests at 100 % already.
+// Super+0: the view back to 100 %, the camera easing with it: the desktop
+// shown, or a free view where it is.
 void act_reset_scale(Server &server, Output *output, KeyArg) {
 	if (output == nullptr) {
 		return;
@@ -191,7 +191,12 @@ void act_reset_scale(Server &server, Output *output, KeyArg) {
 	if (Desktop *desktop = output->desktop_showing()) {
 		server.canvas.settle_scale(desktop->id(), 1.0);
 		output->goto_desktop(*desktop);
+		return;
 	}
+	Camera to = output->camera.current();
+	to.zoom = 1;
+	output->camera.animate_to(to);
+	server.hint.set("Free area · 100 %");
 }
 
 void act_quit(Server &server, Output *, KeyArg) {

@@ -16,6 +16,9 @@ public:
 	CameraMotion &operator=(const CameraMotion &) = delete;
 
 	const Camera &current() const; // the exact camera
+	// Where the running animation ends, momentum aside; the current camera
+	// when none runs.
+	Camera destination() const;
 	// Quantized to the output's pixel grid: the camera drawn and hit-tested.
 	Camera drawn() const;
 	// Stops motion; marks the output dirty, refreshes visibility and pointer focus.

@@ -46,6 +46,7 @@ std::vector<std::pair<View *, Rect>> kept;
 int zoom_round = 0;
 std::string zoom_changes;
 wlr_box frame0{}; // Desktop 1's frame at 100 % before any zoom, for the drift check
+Camera scrolled_from{}; // the camera before the 25 % scroll
 std::string tmp_root;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -184,6 +185,18 @@ void pinch_up(bool cancelled) {
 	wlr_pointer_pinch_end_event ev = {
 		.pointer = &ptr, .time_msec = t_ms, .cancelled = cancelled};
 	wl_signal_emit_mutable(&ptr.events.pinch_end, &ev);
+}
+
+// A 2-finger scroll tick through the device path: vertical, from fingers.
+void scroll(double delta) {
+	t_ms += 8;
+	wlr_pointer_axis_event ev = {.pointer = &ptr, .time_msec = t_ms,
+		.source = WL_POINTER_AXIS_SOURCE_FINGER,
+		.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+		.delta = delta, .delta_discrete = 0};
+	wl_signal_emit_mutable(&ptr.events.axis, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 }
 
 bool inside(const Rect &r, const wlr_box &b) {
@@ -664,21 +677,27 @@ int run_step() {
 		swipe(3, 0, -900, 30); // pan down off the desktop into a free area
 		return 700;
 	case 42: {
-		// A free landing spot stays wherever the pan stopped, at zoom 1.
+		// A free landing spot stays wherever the pan stopped, at the zoom the
+		// pan had: a pan never changes the zoom.
 		if (o->camera.coasting() && retries++ < 100) {
 			return -100; // retry until the momentum settles
 		}
-		check(o->desktop_showing() == nullptr && o->camera.current().zoom == 1,
-			"the free landing spot rests at zoom 1");
-		// Super + pinch on a free view: it is pinned as a desktop first.
+		check(o->desktop_showing() == nullptr && o->camera.current().zoom == 1.25
+			&& o->interactive(),
+			std::format("the free landing spot keeps the pan's zoom, interactive ({:.2f})",
+				o->camera.current().zoom));
+		// Super + pinch on a free view: it is pinned as a desktop first, at
+		// the view's zoom.
 		std::size_t before = server->canvas.desktops.size();
 		key(KEY_LEFTMETA, true);
 		pinch_down(2);
 		check(server->canvas.desktops.size() == before + 1
 			&& std::holds_alternative<Gestures::DesktopScale>(
-				server->gestures.state()),
-			"a Super pinch on a free view pins it as a desktop first");
-		pinch_move(0.9);
+				server->gestures.state())
+			&& o->desktop_showing() != nullptr
+			&& std::fabs(o->desktop_showing()->scale() - 1.25) < 1e-9,
+			"a Super pinch on a free view pins it as a desktop first, at its zoom");
+		pinch_move(0.72); // raw 1.25 x 0.72 = 0.9
 		check(std::fabs(o->camera.current().zoom - 0.9) < 1e-9,
 			"the pinned desktop scales with the fingers");
 		shot("18-free-view-pinned");
@@ -922,8 +941,83 @@ int run_step() {
 		}
 		check(all, "a window opened at 200 % re-flowed every grid window into the frame");
 		shot("26-tiled-200-reflow");
-		return 0;
+		return 400;
 	}
+	case 63:
+		// Views at any zoom: back to 100 %, then down to the 25 % floor.
+		key(KEY_LEFTMETA, true);
+		key(KEY_0, true);
+		key(KEY_0, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	case 64:
+		super_pinch_to(1.0, 0.25);
+		return 500;
+	case 65: {
+		check(std::fabs(desk(d1)->scale() - 0.25) < 1e-9 && o->interactive(),
+			std::format("the scale reaches down to 25 % ({:.2f})", desk(d1)->scale()));
+		shot("27-desktop-25");
+		// A 2-finger scroll over the empty canvas right of the windows.
+		scrolled_from = o->camera.current();
+		for (int i = 0; i < 4; i++) {
+			scroll(40);
+		}
+		return 300;
+	}
+	case 66: {
+		Camera cam = o->camera.current();
+		check(cam.zoom == 0.25 && o->interactive() && std::fabs(cam.cy - scrolled_from.cy) > 100,
+			std::format("a 2-finger scroll pans the 25 % view at its zoom and leaves it"
+				" interactive (zoom {:.2f}, panned {:.0f})", cam.zoom, cam.cy - scrolled_from.cy));
+		// A 2-finger pinch without Super belongs to the client under the
+		// pointer at any zoom, and never zooms the view.
+		pinch_down(2);
+		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+			"a 2-finger pinch without Super is forwarded at 25 %");
+		pinch_move(1.6);
+		pinch_up(false);
+		check(o->camera.current().zoom == 0.25, "the plain pinch left the zoom at 25 %");
+		// A 3-finger pan far off the desktop.
+		swipe(3, -900, 0, 30);
+		return 900;
+	}
+	case 67: {
+		if (o->camera.coasting() && retries++ < 100) {
+			return -100; // retry until the momentum settles
+		}
+		check(o->desktop_showing() == nullptr && o->camera.current().zoom == 0.25
+			&& o->interactive(), std::format("a 3-finger pan off the 25 % desktop keeps"
+				" the zoom on the free view, interactive (zoom {:.2f})",
+				o->camera.current().zoom));
+		shot("28-free-view-25");
+		return 300;
+	}
+	case 68:
+		o->overview.enter();
+		return 700;
+	case 69:
+		check(o->overview.active() && o->camera.current().zoom < 0.25,
+			std::format("the overview opens further out than the 25 % view (zoom {:.3f})",
+				o->camera.current().zoom));
+		key(KEY_ENTER, true);
+		key(KEY_ENTER, false);
+		return 800;
+	case 70:
+		check(!o->overview.active() && std::fabs(o->camera.current().zoom - 0.25) < 1e-9
+			&& o->interactive(),
+			std::format("leaving the overview into the free view it came from keeps its zoom"
+				" ({:.2f})", o->camera.current().zoom));
+		key(KEY_LEFTMETA, true);
+		key(KEY_0, true);
+		key(KEY_0, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	case 71:
+		check(o->camera.current().zoom == 1 && o->interactive()
+			&& server->hint.text == "Free area · 100 %",
+			std::format("Super+0 returns a free view to 100 % (zoom {:.2f}, hint {})",
+				o->camera.current().zoom, server->hint.text));
+		return 0;
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);

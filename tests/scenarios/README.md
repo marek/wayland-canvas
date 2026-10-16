@@ -26,7 +26,12 @@ own the machine's Wayland display namespace and GPU.
   200 % that change no floating, maximized or tiled window, the frame back
   where it began at 100 %, Super+0 and `0` in the overview returning to
   100 %, and a grid laid out at 50 % that a window opened at 200 % re-flows
-  whole although the frame's edges have passed its windows' centres.
+  whole although the frame's edges have passed its windows' centres. Last,
+  views at any zoom: a desktop down at 25 %, where a 2-finger scroll, a
+  plain 2-finger pinch and a 3-finger pan off the desktop leave the zoom
+  alone and the view interactive, the overview opens further out and
+  returns to the free view at its zoom, and Super+0 brings a free view to
+  100 %.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

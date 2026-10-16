@@ -170,6 +170,24 @@ bool CameraMotion::zooming() const {
 	return anim_.kind == AnimKind::zoom;
 }
 
+Camera CameraMotion::destination() const {
+	switch (anim_.kind) {
+	case AnimKind::lerp:
+		return anim_.b;
+	case AnimKind::zoom:
+		if (anim_.p1 >= 1) {
+			return anim_.b;
+		}
+		if (anim_.p1 <= 0) {
+			return anim_.a;
+		}
+		return camera_zoom_path(anim_.a, anim_.b, anim_.p1);
+	case AnimKind::none:
+		break;
+	}
+	return cam_;
+}
+
 Camera camera_for_box(wlr_box box, double zoom) {
 	return Camera{
 		.cx = box.x + box.width / 2.0,
