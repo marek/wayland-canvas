@@ -41,7 +41,7 @@ packages name it as an optional dependency.
 - [x] The picker: drag a region with its size shown, click for the window under the pointer, Space to pick windows, Escape to cancel
 - [x] The capture toolbar: shots and recordings of the screen, a window or a region; options for where shots go, a timer and the pointer
 - [x] After a shot: saved under Screenshots, copied to the clipboard, a corner thumbnail that a click opens and a swipe dismisses
-- [ ] Recording the screen, a window or a region into the videos directory, with a red dot in the bar that stops it, as Alt+Print and the toolbar do
+- [x] Recording the screen, a window or a region into the videos directory, with a red dot in the bar that stops it, as Alt+Print and the toolbar do
 
 ## Verification
 
