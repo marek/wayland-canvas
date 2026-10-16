@@ -46,4 +46,4 @@ events, and gains canvas items (what a sticky note is on the canvas) and the the
 - [x] A scenario clicks the toolbar's Note button, finds the six colours in the manifest's order, and creates a note in the one chosen
 - [x] The switch flips the shell and the compositor, seen in screenshots of both modes
 - [x] Screenshots of the toolbar, the colour submenu, notes in the normal view and the overview, and both modes, inspected
-- [ ] Warning-free build, every suite green, the intents and README name the plugin layout
+- [x] Warning-free build, every suite green, the intents and README name the plugin layout
