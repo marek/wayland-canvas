@@ -18,7 +18,7 @@ and a narrower one here, the narrower one is given.
 | **Desktop** | A screen-sized dashed frame on the canvas, named "Desktop N" by id ([canvas/desktops.md](canvas/desktops.md)) |
 | **Frame** | A desktop's dashed rectangle. A *window frame* is a window's content plus its title bar and border — a different thing ([windows/title-bars.md](windows/title-bars.md)) |
 | **Tab** | A desktop's label in the overview, carrying its id and the Tile and Abandon buttons; dragging it moves the frame ([canvas/overview.md](canvas/overview.md)) |
-| **Hop** | The 3-finger-swipe move, the same in the normal view and the overview: to the closest desktop in the swipe's direction, or one screen that way when no desktop lies there; one hop per swipe ([canvas/infinite-canvas.md](canvas/infinite-canvas.md), [canvas/overview.md](canvas/overview.md)) |
+| **Hop** | The 3-finger-swipe move to the closest desktop in the swipe's direction; in the normal view it lands only on desktops, in the overview the target moves one screen to a free spot when no desktop lies there; one hop per swipe ([canvas/infinite-canvas.md](canvas/infinite-canvas.md), [canvas/overview.md](canvas/overview.md)) |
 | **Abandon** | Remove a desktop; its windows stay on the canvas ([canvas/desktops.md](canvas/desktops.md)) |
 | **Combine** | Move another desktop's windows into this one, keeping their relative layout, and remove that desktop ([canvas/desktops.md](canvas/desktops.md)) |
 | **Tile** | Lay the windows whose centre lies in a desktop or target spot onto a one-shot board of slices, inside the usable area, with gaps ([canvas/desktops.md](canvas/desktops.md)) |

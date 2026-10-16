@@ -11,15 +11,16 @@
 
 Multi-finger gestures are the compositor's vocabulary for moving over
 the canvas: a 3-finger swipe hops to the nearest desktop in its
-direction, the same in the normal view as in the zoomed-out one, and a
-4-finger swipe up opens the zoomed-out canvas. Only 2-finger gestures
-and finger counts the compositor does not bind are forwarded to clients.
+direction — in the normal view only ever onto a desktop, in the
+zoomed-out one onto a free spot too — and a 4-finger swipe up opens the
+zoomed-out canvas. Only 2-finger gestures and finger counts the
+compositor does not bind are forwarded to clients.
 
 ## Behavior
 
 | Mode | Fingers | Motion | Action |
 |---|---|---|---|
-| Normal | 3 | Swipe | Hop, as in the overview: ease onto the nearest desktop in the swipe's direction, at its scale; none that way, one screen that way ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
+| Normal | 3 | Swipe | Hop between desktops: ease onto the nearest desktop in the swipe's direction, at its scale; none that way, the view stays and a hint says so ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Normal | 4 | Swipe up | Zoom out into the overview, following the fingers ([../canvas/overview.md](../canvas/overview.md)) |
 | Normal | 3 or 4 | Pinch | Treated as a swipe of the same finger count |
 | Normal | 2 | Pinch with Super held | Scale the desktop shown, following the fingers: pinching in scales it down, spreading scales it up ([../canvas/desktops.md](../canvas/desktops.md)) |
@@ -66,12 +67,12 @@ Rules that hold across the table:
 
 ## Design considerations
 
-- **3-finger hop, 4-finger up** is the primary interface. A hop lands
-  on a desktop or exactly one screen away, never between places, so a
-  swipe cannot lose the user's place; it is the same gesture in both
-  modes, and the zoomed-out canvas is where desktops are arranged.
-  Panning freely stays with the pointer: a drag or a 2-finger scroll
-  over empty canvas.
+- **3-finger hop, 4-finger up** is the primary interface. In the normal
+  view a hop lands only on a desktop, never in empty canvas or between
+  places, so a swipe cannot lose the user's place; the zoomed-out canvas
+  is where desktops are arranged and free spots targeted. Panning freely
+  stays with the pointer and keys: a drag or a 2-finger scroll over empty
+  canvas, Super+Alt+arrows.
 - **Sloppy pinches are swipes.** At 3 and 4 fingers, touchpad gesture
   classification is unreliable; the finger count decides the intent,
   so a misclassified pinch still hops.

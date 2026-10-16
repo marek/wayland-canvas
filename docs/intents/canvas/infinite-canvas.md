@@ -64,13 +64,15 @@ a free area of the canvas is as easy as going to a desktop.
   direction — within a compile-time cone, straight-ahead neighbours
   beating nearer off-axis ones, as the overview's hop
   ([overview.md](overview.md)) — easing onto it at its scale. With none
-  that way it moves one screen that way as the view is shown, at the
-  zoom the view has.
+  that way the view stays where it is and a hint says so.
 - A hop starts from where the camera is going: a swipe made while a hop
   still eases walks on from that hop's landing, so quick swipes pass
   desktop by desktop.
-- A hop never leaves the camera between places: there is no momentum
-  and no landing short of a desktop or a whole screen.
+- A hop only ever lands on a desktop: no momentum, no landing in empty
+  canvas or between places, so a swipe cannot lose the user's place. A
+  free area is reached from the overview (its hop and its click target
+  free spots), by a drag or a 2-finger scroll over empty canvas, or with
+  Super+Alt+arrows.
 
 ### Free areas and orientation
 
