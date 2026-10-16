@@ -1,6 +1,6 @@
 #include <cmath>
 #include <numbers>
-#include <numeric>
+#include <optional>
 
 #include "core/geometry.h"
 
@@ -114,52 +114,199 @@ Compass nav_quantize_direction(double dx, double dy) {
 	return {dirs[sector][0], dirs[sector][1]};
 }
 
-std::vector<Rect> tile_layout(const Rect &area, std::size_t n, double gap) {
-	if (n == 0) {
-		return {};
+bool Slice::contains(double px, double py) const {
+	return x0 <= px && px < x1 && y0 <= py && py < y1;
+}
+
+bool Slice::intersects(const Slice &other) const {
+	return x0 < other.x1 && other.x0 < x1 && y0 < other.y1 && other.y0 < y1;
+}
+
+// The fractions are dyadic, so the half tests are exact.
+int Slice::span_x() const {
+	if (x0 <= 0 && x1 >= 1) {
+		return 1;
 	}
-	std::vector<Rect> out;
-	out.reserve(n);
-	std::size_t cols = static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(n))));
-	std::size_t rows = (n + cols - 1) / cols;
-	double cell_h = (area.h - gap * static_cast<double>(rows + 1)) / static_cast<double>(rows);
-	std::size_t i = 0;
-	for (std::size_t r = 0; r < rows; r++) {
-		std::size_t in_row = r == rows - 1 ? n - cols * (rows - 1) : cols;
-		double cell_w = (area.w - gap * static_cast<double>(in_row + 1)) / static_cast<double>(in_row);
-		for (std::size_t c = 0; c < in_row; c++, i++) {
-			out.push_back(Rect{
-				.x = area.x + gap + static_cast<double>(c) * (cell_w + gap),
-				.y = area.y + gap + static_cast<double>(r) * (cell_h + gap),
-				.w = cell_w,
-				.h = cell_h,
-			});
-		}
+	return x1 <= 0.5 ? 0 : 2;
+}
+
+int Slice::span_y() const {
+	if (y0 <= 0 && y1 >= 1) {
+		return 1;
+	}
+	return y1 <= 0.5 ? 0 : 2;
+}
+
+namespace {
+
+// The half of the board a span steps to: toward the first half (0) the far
+// half widens to the whole and the whole snaps to the near half; toward the
+// second half (2), the other way around; the near half never moves.
+double stepped_edge(int span, int dir, bool high) {
+	int to = span;
+	if (dir < 0) {
+		to = span == 2 ? 1 : 0;
+	} else if (dir > 0) {
+		to = span == 0 ? 1 : 2;
+	}
+	if (!high) {
+		return to == 0 ? 0 : (to == 1 ? 0 : 0.5);
+	}
+	return to == 0 ? 0.5 : (to == 1 ? 1 : 1);
+}
+
+} // namespace
+
+Slice step_slice(Slice slice, int axis, int dir) {
+	Slice out = slice;
+	if (axis == 0) {
+		out.x0 = stepped_edge(slice.span_x(), dir, false);
+		out.x1 = stepped_edge(slice.span_x(), dir, true);
+	} else {
+		out.y0 = stepped_edge(slice.span_y(), dir, false);
+		out.y1 = stepped_edge(slice.span_y(), dir, true);
 	}
 	return out;
 }
 
-std::vector<std::size_t> tile_order(std::span<const Rect> frames, double band) {
-	if (band <= 0) {
-		band = 1;
+bool reading_before(const Slice &a, const Slice &b) {
+	if (a.y0 != b.y0) {
+		return a.y0 < b.y0;
 	}
-	std::vector<std::size_t> order(frames.size());
-	std::iota(order.begin(), order.end(), std::size_t{0});
-	// Insertion sort: n is a handful of windows.
-	for (std::size_t i = 1; i < frames.size(); i++) {
-		std::size_t cur = order[i];
-		double cur_row = std::floor(frames[cur].cy() / band), cur_x = frames[cur].cx();
-		std::size_t j = i;
-		while (j > 0) {
-			std::size_t prev = order[j - 1];
-			double prev_row = std::floor(frames[prev].cy() / band);
-			if (prev_row < cur_row || (prev_row == cur_row && frames[prev].cx() <= cur_x)) {
-				break;
-			}
-			order[j] = prev;
-			j--;
+	if (a.x0 != b.x0) {
+		return a.x0 < b.x0;
+	}
+	// Same top-left corner: the slice that ends first is read first.
+	if (a.y1 != b.y1) {
+		return a.y1 < b.y1;
+	}
+	return a.x1 < b.x1;
+}
+
+std::pair<Slice, Slice> halve_slice(Slice slice) {
+	if (slice.x1 - slice.x0 >= slice.y1 - slice.y0) {
+		double mid = (slice.x0 + slice.x1) / 2;
+		return {{slice.x0, slice.y0, mid, slice.y1}, {mid, slice.y0, slice.x1, slice.y1}};
+	}
+	double mid = (slice.y0 + slice.y1) / 2;
+	return {{slice.x0, slice.y0, slice.x1, mid}, {slice.x0, mid, slice.x1, slice.y1}};
+}
+
+namespace {
+
+// Depth at which to stop looking for free slices: past it a slice is smaller
+// than any a window count under the board's cap can ever produce.
+constexpr int slice_max_depth = 12;
+
+// The whole board's four halves; any deeper slice only splits along its
+// longer side, because only steps make the cross-aligned halves.
+void child_slices(const Slice &s, Slice out[4], std::size_t &count) {
+	if (s.x0 <= 0 && s.x1 >= 1 && s.y0 <= 0 && s.y1 >= 1) {
+		out[count++] = {0, 0, 0.5, 1};
+		out[count++] = {0.5, 0, 1, 1};
+		out[count++] = {0, 0, 1, 0.5};
+		out[count++] = {0, 0.5, 1, 1};
+		return;
+	}
+	auto [low, high] = halve_slice(s);
+	out[count++] = low;
+	out[count++] = high;
+}
+
+} // namespace
+
+std::optional<Slice> largest_free_slice(std::span<const Slice> occupied,
+		std::optional<Point> under) {
+	// Every level of the slice tree halves every slice, so all candidates at
+	// one depth cover the same area: breadth-first finds the largest first,
+	// and reading order settles ties within a depth.
+	std::optional<std::pair<Slice, int>> best;
+	std::vector<std::pair<Slice, int>> queue{{Slice{0, 0, 1, 1}, 0}};
+	for (std::size_t i = 0; i < queue.size(); i++) {
+		Slice s = queue[i].first;
+		int depth = queue[i].second;
+		if (under.has_value()
+				&& !(s.x0 <= under->x && under->x < s.x1 && s.y0 <= under->y
+					&& under->y < s.y1)) {
+			continue;
 		}
-		order[j] = cur;
+		bool covered = false;
+		bool inside = false;
+		for (const Slice &occ : occupied) {
+			if (occ.intersects(s)) {
+				covered = true;
+			}
+			inside = inside || (s.x0 >= occ.x0 && s.x1 <= occ.x1 && s.y0 >= occ.y0
+				&& s.y1 <= occ.y1);
+		}
+		if (!covered) {
+			if (!best.has_value() || depth < best->second
+					|| (depth == best->second && reading_before(s, best->first))) {
+				best = {s, depth};
+			}
+			continue;
+		}
+		if (inside || depth >= slice_max_depth) {
+			continue; // no room inside this slice; stop splitting it
+		}
+		Slice children[4];
+		std::size_t count = 0;
+		child_slices(s, children, count);
+		for (std::size_t k = 0; k < count; k++) {
+			queue.emplace_back(children[k], depth + 1);
+		}
 	}
-	return order;
+	if (!best.has_value()) {
+		return std::nullopt;
+	}
+	return best->first;
+}
+
+std::optional<SlicePlacement> place_new(std::span<const Slice> occupied,
+		std::optional<std::size_t> exclude) {
+	if (std::optional<Slice> free = largest_free_slice(occupied)) {
+		return SlicePlacement{*free, no_slice};
+	}
+	// Nothing free: halve the largest slice other than the excluded one, ties
+	// in reading order.
+	auto area = [](const Slice &s) {
+		return (s.x1 - s.x0) * (s.y1 - s.y0);
+	};
+	std::optional<std::size_t> target;
+	for (std::size_t i = 0; i < occupied.size(); i++) {
+		if (exclude == i) {
+			continue;
+		}
+		if (!target.has_value() || area(occupied[i]) > area(occupied[*target])
+				|| (area(occupied[i]) == area(occupied[*target])
+					&& reading_before(occupied[i], occupied[*target]))) {
+			target = i;
+		}
+	}
+	// Every slice but the moved one is covered by it: the push has nowhere to
+	// go, so it halves the moved slice back instead of leaving a window homeless.
+	if (!target.has_value()) {
+		target = exclude;
+	}
+	if (!target.has_value()) {
+		return std::nullopt; // an empty board is all free; cannot happen
+	}
+	auto [kept, freed] = halve_slice(occupied[*target]);
+	return SlicePlacement{freed, *target};
+}
+
+Rect slice_box(const Rect &area, const Slice &slice, double gap) {
+	Rect out{
+		area.x + slice.x0 * area.w + gap / 2,
+		area.y + slice.y0 * area.h + gap / 2,
+		(slice.x1 - slice.x0) * area.w - gap,
+		(slice.y1 - slice.y0) * area.h - gap,
+	};
+	if (out.w < 1) {
+		out.w = 1;
+	}
+	if (out.h < 1) {
+		out.h = 1;
+	}
+	return out;
 }

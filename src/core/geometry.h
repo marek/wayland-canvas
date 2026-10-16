@@ -80,10 +80,55 @@ std::optional<std::size_t> nav_pick_direction(double ox, double oy, double dx, d
 // Snaps a direction to one of the 8 compass directions.
 Compass nav_quantize_direction(double dx, double dy);
 
-// Grid of n cells filling `area`, `gap` between and around cells. Row-major; the last
-// row's cells widen to fill the row.
-std::vector<Rect> tile_layout(const Rect &area, std::size_t n, double gap);
+// A slice of a board: the fractions of its area the slice spans, [x0,x1) x [y0,y1).
+// Every slice lies inside one half of the board on each axis or spans it whole,
+// because halving never carries a piece across the board's middle.
+struct Slice {
+	double x0 = 0, y0 = 0, x1 = 1, y1 = 1;
 
-// Order of frames for tile_layout: rows (frame centres banded by `band` canvas units)
-// top to bottom, left to right within a row. Returns indices into `frames`.
-std::vector<std::size_t> tile_order(std::span<const Rect> frames, double band);
+	bool operator==(const Slice &) const = default;
+	bool intersects(const Slice &other) const; // strict overlap; touching edges do not
+	bool contains(double px, double py) const;
+	// The half of the board the slice lies in on one axis: 0 first, 1 whole, 2 second.
+	// A slice made only by halving still lies in one half, so it counts as that half.
+	int span_x() const;
+	int span_y() const;
+};
+
+// Steps a slice toward `dir` (-1 first/left/up, +1 second/right/down) on one axis
+// (0 x, 1 y): the far half becomes the whole, the whole the near half, the near
+// half stays; the other axis keeps its span. The result is a half-aligned slice,
+// whatever halvings made the input.
+Slice step_slice(Slice slice, int axis, int dir);
+
+// Order to read slices in: rows top to bottom, left to right within a row.
+bool reading_before(const Slice &a, const Slice &b);
+
+// Splits a slice along its longer side; a landscape or square one splits left/right.
+// The first half is the left/top one a holder keeps when halved.
+std::pair<Slice, Slice> halve_slice(Slice slice);
+
+// The largest slice not overlapping any in `occupied`, containing the fraction
+// point `under` when given: the whole board, its four halves and, below them,
+// halves of those along their longer side, down to where the occupied slices
+// leave room. Ties go to the earlier-read slice. No room: nullopt.
+std::optional<Slice> largest_free_slice(std::span<const Slice> occupied,
+	std::optional<Point> under = std::nullopt);
+
+inline constexpr std::size_t no_slice = static_cast<std::size_t>(-1);
+
+// Where a new window goes: the largest free slice, or, with none free, half of
+// the largest slice other than `exclude` (the one a key moved; when nothing
+// else is held, that one, so a push that would cover the last window halves
+// the moved slice back instead). `halved` names the occupied entry that was
+// halved, no_slice when a free slice was taken.
+struct SlicePlacement {
+	Slice slice;
+	std::size_t halved = no_slice;
+};
+std::optional<SlicePlacement> place_new(std::span<const Slice> occupied,
+	std::optional<std::size_t> exclude = std::nullopt);
+
+// A slice's window box: the slice laid into `area`, inset by half the gap on
+// every side so neighbours sit a full gap apart.
+Rect slice_box(const Rect &area, const Slice &slice, double gap);

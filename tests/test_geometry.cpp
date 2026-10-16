@@ -106,123 +106,177 @@ void test_nav_quantize_direction() {
 	check(c.x == 0 && c.y == 0);
 }
 
-// ---- tile_layout ----
+// ---- slices ----
 
-void test_tile_layout() {
-	// 5 cells in a 100x60 area with gap 2: 3 columns, 2 rows.
-	const Rect area = {0, 0, 100, 60};
-	std::vector<Rect> cells = tile_layout(area, 5, 2);
-
-	double w0 = 92.0 / 3.0; // (100 - 2*(3+1)) / 3
-	double h = 27.0;        // (60 - 2*(2+1)) / 2
-	// Row 0: three equally sized cells.
-	check_near(cells[0].x, 2, 1e-9);
-	check_near(cells[0].y, 2, 1e-9);
-	check_near(cells[0].w, w0, 1e-9);
-	check_near(cells[0].h, h, 1e-9);
-	check_near(cells[1].x, 2 + (w0 + 2), 1e-9);
-	check_near(cells[1].y, 2, 1e-9);
-	check_near(cells[1].w, w0, 1e-9);
-	check_near(cells[1].h, h, 1e-9);
-	check_near(cells[2].x, 2 + 2 * (w0 + 2), 1e-9);
-	check_near(cells[2].y, 2, 1e-9);
-	check_near(cells[2].w, w0, 1e-9);
-	check_near(cells[2].h, h, 1e-9);
-	// Row 1: only two cells, widened to fill the row.
-	check_near(cells[3].x, 2, 1e-9);
-	check_near(cells[3].y, 2 + (h + 2), 1e-9);
-	check_near(cells[3].w, 47.0, 1e-9); // (100 - 2*(2+1)) / 2
-	check_near(cells[3].h, h, 1e-9);
-	check_near(cells[4].x, 2 + (47.0 + 2), 1e-9);
-	check_near(cells[4].y, cells[3].y, 1e-9);
-	check_near(cells[4].w, 47.0, 1e-9);
-	check_near(cells[4].h, h, 1e-9);
-	check(cells[3].w > cells[0].w + 1);
-
-	// Counts per row: rows share a y band, three then two.
-	check(cells[0].y == cells[1].y && cells[1].y == cells[2].y);
-	check(cells[3].y == cells[4].y);
-	check(cells[2].y != cells[3].y);
-
-	// No pair of cells overlaps...
-	for (int i = 0; i < 5; i++) {
-		for (int j = i + 1; j < 5; j++) {
-			check(!cells[i].intersects(cells[j]));
-		}
-	}
-	// ...and every cell sits inside the area with the gap respected.
-	for (int i = 0; i < 5; i++) {
-		check(cells[i].x >= 2);
-		check(cells[i].y >= 2);
-		check(cells[i].x + cells[i].w <= 98 + 1e-9);
-		check(cells[i].y + cells[i].h <= 58 + 1e-9);
-	}
-	// Horizontal neighbours are exactly one gap apart.
-	check_near(cells[1].x - cells[0].x - cells[0].w, 2, 1e-9);
-	check_near(cells[3].y - cells[0].y - cells[0].h, 2, 1e-9);
-
-	// A single cell fills the area minus the gap on every side.
-	std::vector<Rect> one = tile_layout(area, 1, 2);
-	check_near(one[0].x, 2, 1e-9);
-	check_near(one[0].y, 2, 1e-9);
-	check_near(one[0].w, 96, 1e-9);
-	check_near(one[0].h, 56, 1e-9);
-
-	// Perfect square count: 2x2, no widening anywhere.
-	std::vector<Rect> four = tile_layout(area, 4, 2);
-	for (int i = 0; i < 4; i++) {
-		check_near(four[i].w, 47.0, 1e-9);
-		check_near(four[i].h, 27.0, 1e-9);
-	}
-	check_near(four[0].x, 2, 1e-9);
-	check_near(four[1].x, 51, 1e-9);
-	check_near(four[2].x, 2, 1e-9);
-	check_near(four[3].x, 51, 1e-9);
-	check_near(four[0].y, 2, 1e-9);
-	check_near(four[2].y, 31, 1e-9);
+void test_step_slice() {
+	const Slice whole{0, 0, 1, 1};
+	const Slice left{0, 0, 0.5, 1};
+	const Slice right{0.5, 0, 1, 1};
+	const Slice top{0, 0, 1, 0.5};
+	const Slice bottom{0, 0.5, 1, 1};
+	const Slice bl{0, 0.5, 0.5, 1};
+	const Slice tr{0.5, 0, 1, 0.5};
+	// Super+Left: the second half becomes the whole, the whole the left half,
+	// the left half stays.
+	check(step_slice(right, 0, -1) == whole);
+	check(step_slice(whole, 0, -1) == left);
+	check(step_slice(left, 0, -1) == left);
+	// Super+Right, the other way around on x.
+	check(step_slice(left, 0, 1) == whole);
+	check(step_slice(whole, 0,1) == right);
+	check(step_slice(right, 0,1) == right);
+	// Super+Up and Super+Down alike on y.
+	check(step_slice(bottom, 1, -1) == whole);
+	check(step_slice(whole, 1, -1) == top);
+	check(step_slice(top, 1, -1) == top);
+	check(step_slice(top, 1,1) == whole);
+	check(step_slice(whole, 1,1) == bottom);
+	check(step_slice(bottom, 1,1) == bottom);
+	// The other axis keeps its span: a quarter stepped along its own half's
+	// axis does not move, stepped along the other one it widens to the half.
+	check(step_slice(bl, 0, -1) == bl); // already at the near half: nothing to do
+	check(step_slice(tr, 0, 1) == tr); // already at the far half: nothing to do
+	check(step_slice(bl, 1, -1) == left); // bottom-left quarter widens to the left half
+	check(step_slice(tr, 1,1) == right);
+	// A slice made only by halving counts as the half it lies in.
+	check(step_slice(Slice{0.25, 0, 0.5, 0.5}, 0,1) == top);
+	check(step_slice(Slice{0, 0.25, 0.5, 0.5}, 1, 1) == left);
+	check(step_slice(Slice{0, 0.5, 0.25, 1}, 0, 1) == bottom);
 }
 
-// ---- tile_order ----
+void test_slice_spans() {
+	check(Slice{0, 0, 1, 1}.span_x() == 1);
+	check(Slice{0, 0, 1, 1}.span_y() == 1);
+	check(Slice{0, 0, 0.5, 1}.span_x() == 0);
+	check(Slice{0.5, 0, 1, 1}.span_x() == 2);
+	check(Slice{0, 0, 1, 0.5}.span_y() == 0);
+	check(Slice{0, 0.5, 1, 1}.span_y() == 2);
+	// Halving-made slices still lie in one half on the halved axis.
+	check(Slice{0.25, 0, 0.5, 0.5}.span_x() == 0);
+	check(Slice{0, 0.25, 0.5, 0.5}.span_y() == 0);
+	// Containment takes the point on its low edges, not its high ones.
+	check(Slice{0, 0, 0.5, 1}.contains(0, 0));
+	check(Slice{0, 0, 0.5, 1}.contains(0.49, 0.99));
+	check(!Slice{0, 0, 0.5, 1}.contains(0.5, 0.5));
+	check(!Slice{0, 0, 0.5, 1}.contains(1, 1));
+	// Touching edges are not overlap.
+	check(!Slice{0, 0, 0.5, 1}.intersects(Slice{0.5, 0, 1, 1}));
+	check(!Slice{0, 0, 1, 0.5}.intersects(Slice{0, 0.5, 1, 1}));
+	check(Slice{0, 0, 0.5, 1}.intersects(Slice{0.25, 0.25, 0.75, 0.75}));
+}
 
-void test_tile_order() {
-	// Centres: (150,50) (10,50) (100,150) (20,260) (200,50); band 100 gives
-	// rows 0, 0, 1, 2, 0. Expected: row 0 by x (10, 150, 200), then rows
-	// 1 and 2 top to bottom.
-	const Rect frames[5] = {
-		{145, 45, 10, 10},
-		{5, 45, 10, 10},
-		{95, 145, 10, 10},
-		{15, 255, 10, 10},
-		{195, 45, 10, 10},
-	};
-	std::vector<std::size_t> order = tile_order(frames, 100);
-	check(order[0] == 1);
-	check(order[1] == 0);
-	check(order[2] == 4);
-	check(order[3] == 2);
-	check(order[4] == 3);
+void test_reading_order() {
+	// Rows top to bottom, left to right within a row.
+	check(reading_before(Slice{0, 0, 0.5, 0.5}, Slice{0.5, 0, 1, 0.5}));
+	check(reading_before(Slice{0.5, 0, 1, 0.5}, Slice{0, 0.5, 0.5, 1}));
+	check(reading_before(Slice{0, 0.5, 0.5, 1}, Slice{0.5, 0.5, 1, 1}));
+	// Same top-left corner: the slice that ends first is read first, so the
+	// top half comes before the left half.
+	check(reading_before(Slice{0, 0, 1, 0.5}, Slice{0, 0, 0.5, 1}));
+	check(reading_before(Slice{0.5, 0, 1, 1}, Slice{0, 0.5, 1, 1}));
+	check(!reading_before(Slice{0.5, 0, 1, 1}, Slice{0, 0, 1, 0.5}));
+}
 
-	// Same frames shuffled on input: banding still groups rows first.
-	const Rect shuffled[5] = {
-		{95, 145, 10, 10},  // row 1
-		{195, 45, 10, 10},  // row 0, x 200
-		{145, 45, 10, 10},  // row 0, x 150
-		{15, 255, 10, 10},  // row 2
-		{5, 45, 10, 10},    // row 0, x 10
-	};
-	order = tile_order(shuffled, 100);
-	check(order[0] == 4);
-	check(order[1] == 2);
-	check(order[2] == 1);
-	check(order[3] == 0);
-	check(order[4] == 3);
+void test_halve_slice() {
+	// A landscape or square slice splits left/right, a portrait one top/bottom.
+	auto [kept_l, freed_l] = halve_slice(Slice{0, 0, 1, 0.5});
+	check(kept_l == Slice{0, 0, 0.5, 0.5});
+	check(freed_l == Slice{0.5, 0, 1, 0.5});
+	auto [kept_s, freed_s] = halve_slice(Slice{0, 0, 0.5, 0.5});
+	check(kept_s == Slice{0, 0, 0.25, 0.5});
+	check(freed_s == Slice{0.25, 0, 0.5, 0.5});
+	auto [kept_t, freed_t] = halve_slice(Slice{0, 0, 0.5, 1});
+	check(kept_t == Slice{0, 0, 0.5, 0.5});
+	check(freed_t == Slice{0, 0.5, 0.5, 1});
+}
 
-	// Two frames in the same row keep left-to-right order; equal centres
-	// are stable (earlier index first).
-	const Rect pair[2] = {{30, 0, 10, 10}, {0, 5, 10, 10}};
-	order = tile_order(pair, 100);
-	check(order[0] == 1);
-	check(order[1] == 0);
+void test_largest_free_slice() {
+	// An empty board is all free: the whole board is the largest free slice.
+	check(largest_free_slice(std::vector<Slice>{}) == Slice{0, 0,1,1});
+
+	// One occupied quarter leaves three: both cross halves of equal area tie,
+	// and the earlier-read top half wins over the left half.
+	const Slice bl{0, 0.5, 0.5, 1};
+	check(largest_free_slice(std::vector<Slice>{bl}) == Slice{0, 0, 1, 0.5});
+
+	// A full board leaves no free slice at all.
+	const Slice left{0, 0,0.5,1}, right{0.5, 0, 1, 1};
+	check(!largest_free_slice(std::vector<Slice>{left, right}).has_value());
+
+	// Free space split into two diagonal quarters: equal areas, reading order
+	// picks the top-right one over the bottom-left one.
+	check(largest_free_slice(std::vector<Slice>{Slice{0, 0, 0.5, 0.5}, Slice{0.5, 0.5, 1, 1}})
+		== Slice{0.5, 0, 1, 0.5});
+
+	// Halving debris: a free eighth beside an occupied one; the eighths pair up
+	// into the half they lie in only when both are free, so the free quarter on
+	// the other side is the largest.
+	check(largest_free_slice(std::vector<Slice>{Slice{0, 0, 0.25, 0.5}})
+		== Slice{0.5, 0, 1, 1});
+
+	// The `under` point narrows the search to the slices containing it.
+	check(largest_free_slice(std::vector<Slice>{bl}, Point{.x = 0.75, .y = 0.25})
+		== Slice{0, 0, 1, 0.5});
+	check(largest_free_slice(std::vector<Slice>{bl}, Point{.x = 0.75, .y = 0.75})
+		== Slice{0.5, 0, 1, 1});
+	check(!largest_free_slice(std::vector<Slice>{bl}, Point{.x = 0.25, .y = 0.75}).has_value());
+}
+
+void test_place_new() {
+	const Slice left_half{0, 0, 0.5,1}, right_half{0.5, 0, 1,1};
+	std::optional<SlicePlacement> p = place_new(std::vector<Slice>{});
+	check(p.has_value() && p->slice == Slice{0, 0, 1, 1} && p->halved == no_slice);
+
+	// One window holding the whole board: the newcomer halves it, the holder
+	// keeping the left half.
+	p = place_new(std::vector<Slice>{Slice{0, 0, 1, 1}});
+	check(p.has_value() && p->slice == Slice{0.5, 0, 1, 1} && p->halved == 0);
+
+	// Halves held by two windows: the newcomer halves the earlier-read left
+	// half, top/bottom because it is portrait.
+	p = place_new(std::vector<Slice>{left_half, right_half});
+	check(p.has_value() && p->slice == Slice{0, 0.5, 0.5, 1} && p->halved == 0);
+
+	// Free space is taken before anything is halved: the two diagonal
+	// quarters leave the top-left one free.
+	p = place_new(std::vector<Slice>{Slice{0,0.5,0.5,1}, Slice{0.5, 0, 1, 0.5}});
+	check(p.has_value() && p->slice == Slice{0, 0, 0.5, 0.5} && p->halved == no_slice);
+
+	// Pushing without free space halves the largest slice other than the
+	// moved one; the moved one is excluded by index.
+	p = place_new(std::vector<Slice>{left_half, right_half}, 1);
+	check(p.has_value() && p->halved == 0
+		&& p->slice == Slice{0, 0.5, 0.5, 1});
+
+	// Nothing to halve but the moved slice itself: the push halves it back.
+	p = place_new(std::vector<Slice>{Slice{0,0, 1, 1}}, 0);
+	check(p.has_value() && p->halved == 0 && p->slice == Slice{0.5, 0, 1, 1});
+
+	// A crowded board, nothing free: the largest slice is halved, the
+	// earliest-read of the equal largest, along its longer side.
+	const Slice tl_left{0, 0, 0.25, 0.5}, tl_eighth{0.25, 0, 0.5, 0.5},
+		tr{0.5, 0, 1, 0.5}, bl{0, 0.5, 0.5, 1}, br{0.5, 0.5, 1, 1};
+	p = place_new(std::vector<Slice>{tl_left, tl_eighth, tr, bl, br});
+	check(p.has_value() && p->halved == 2 && p->slice == Slice{0.75, 0, 1, 0.5});
+}
+
+void test_slice_box() {
+	const Rect area{10, 20, 100, 60};
+	Rect whole = slice_box(area, Slice{0, 0, 1, 1}, 2);
+	check_near(whole.x, 11, 1e-9);
+	check_near(whole.y, 21, 1e-9);
+	check_near(whole.w, 98, 1e-9);
+	check_near(whole.h, 58, 1e-9);
+	Rect half = slice_box(area, Slice{0, 0, 0.5, 1}, 2);
+	check_near(half.x, 11, 1e-9);
+	check_near(half.y, 21, 1e-9);
+	check_near(half.w, 48, 1e-9);
+	check_near(half.h, 58, 1e-9);
+	Rect quarter = slice_box(area, Slice{0.5, 0.5, 1, 1}, 2);
+	check_near(quarter.x, 61, 1e-9);
+	check_near(quarter.y, 51, 1e-9);
+	check_near(quarter.w, 48, 1e-9);
+	check_near(quarter.h, 28, 1e-9);
 }
 
 // ---- camera_zoom_path ----
@@ -357,8 +411,13 @@ void test_canvas_units_covered() {
 int main() {
 	test_nav_pick_direction();
 	test_nav_quantize_direction();
-	test_tile_layout();
-	test_tile_order();
+	test_step_slice();
+	test_slice_spans();
+	test_reading_order();
+	test_halve_slice();
+	test_largest_free_slice();
+	test_place_new();
+	test_slice_box();
 	test_camera_zoom_path();
 	test_camera_viewport();
 	test_fit_zoom();
