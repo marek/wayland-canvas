@@ -25,10 +25,10 @@ windows tiled, and every window opened on it joins the tiling.
   ([infinite-canvas.md](infinite-canvas.md)).
 - **Membership by frame centre** is a single rule that needs no
   bookkeeping when frames or windows move: a window belongs to the
-  desktop its frame centre lies in, or to none. A tiled desktop's grid is
+  desktop its frame centre lies in, or to none. A tiled desktop's board is
   the one exception: it holds the windows it tiled until one leaves it,
   because a zoom moves the frame's edges past windows that stay put, and a
-  grid that dropped them there would lose them
+  board that dropped them there would lose them
   ([../bugs/zoom-collapsed-the-grid.md](../bugs/zoom-collapsed-the-grid.md)).
 - **Combine keeps relative layout**, translating by the offset between
   the two desktops, so a working arrangement survives the merge.
@@ -40,7 +40,7 @@ windows tiled, and every window opened on it joins the tiling.
   A free view has neither: asking a free view for a scale or for tiling
   pins it as a desktop first.
 - **A scale scales the picture, never the layout.** Zooming is done many
-  times in a row; if each zoom resized windows or re-flowed a grid, every
+  times in a row; if each zoom resized windows or re-placed a board, every
   zoom would rearrange what the user arranged. So the windows keep their
   size, place and layout, their clients are not told, and the compositor
   scales what they drew: soft above 100 %, which is why the way back to
@@ -52,7 +52,7 @@ windows tiled, and every window opened on it joins the tiling.
 |---|---|
 | Definition | A rectangle on the canvas that fills the screen at the desktop's scale: the output's logical size, when the desktop is made, divided by the scale |
 | Appearance | A dashed outline |
-| Membership | A window belongs to the desktop its frame centre lies in, or to the tiled desktop whose grid holds it |
+| Membership | A window belongs to the desktop its frame centre lies in, or to the tiled desktop whose board holds it |
 | Overlapping frames | The topmost frame containing the centre owns the window |
 | First desktop | Desktop 1 exists from the start, at the first output's initial view |
 | Ids | Smallest unused number |
@@ -88,7 +88,7 @@ other desktop.
 | Frame | Resizes around its centre, which no zoom moves, so the desktop keeps filling the screen and is back where it began at 100 %; its windows stay where they are on the canvas, at their size |
 | Settling | Released, the scale settles on the nearest 5 % step, catching at 100 % |
 | Windows | Shown at the scale and fully usable, and never told it: their size, layout and rendering stay as they are, and the compositor scales what they drew ([../render/hidpi.md](../render/hidpi.md)) |
-| Tiled and maximized windows | A scale change never re-lays them out: a tiled grid keeps its boxes and a maximized window its size, both scaled with the picture. The next re-flow, or the next maximize, fills the frame at the scale it has then |
+| Tiled and maximized windows | A scale change never re-lays them out: a tiled board keeps its boxes and a maximized window its size, both scaled with the picture. The next join, or the next maximize, fills the frame at the scale it has then |
 | Reset | Super+0 returns the desktop shown to 100 %, `0` in the overview the target desktop ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md), [overview.md](overview.md)); the camera eases with it, and a hint names it like a settled pinch |
 | Shown | The overview's tab names a scale other than 100 % |
 
@@ -101,14 +101,15 @@ desktop's tab, `t` in the overview, Super+T in the normal view, or a
 
 | Subject | Rule |
 |---|---|
-| On | The desktop's windows are grid-tiled inside the area not covered by bars, with gaps (a compile-time constant in `src/core/config.h`), in reading order of where they stood |
-| Kept | While on, the grid re-flows when a window opens on the desktop, closes, is minimized or restored, or is moved in or out of it; a change of the desktop's scale never re-flows it ([Scale](#scale)) |
-| Held | The grid holds the windows it tiled, wherever a zoom puts the frame's edges, until one leaves it: moved out, minimized, maximized, made fullscreen, closed, or tiling switched off. The next re-flow takes every window it holds |
+| On | The desktop's windows join its board of slices inside the area not covered by bars, each sized to its slice's box with gaps (a compile-time constant in `src/core/config.h`), in reading order of where they stood: the first takes the whole board, the next halves it, further ones halve the largest held slice, the halved holder keeping the left or top half |
+| Kept | While on, a join never moves the windows already on the board: a new window takes the largest free slice, or halves the largest held one; a close leaves its slice free for the next taker; a change of the desktop's scale never re-places anything ([Scale](#scale)) |
+| Stepping | Super+arrows move the focused window's slice Windows-snap style: the far half becomes the whole, the whole the near half, the near half stays; the other axis keeps its span. A growth covers neighbours: each is pushed into the largest free slice, or a held slice halves for it; a push with nowhere to go leaves the whole step untaken |
+| Held | The board holds the windows it tiled, wherever a zoom puts the frame's edges, until one leaves it: moved out, closed, or tiling switched off. Maximize and fullscreen keep the window's slice reserved while they last; minimize remembers it while the window is away, its space free for takers |
 | New windows | A window opened while the desktop is shown joins the tiling |
-| Moving a tiled window | Dropped inside the desktop, it takes the grid slot nearest the drop; dropped outside, it leaves the tiling |
-| Maximize, fullscreen | Take the window out of the grid while in that state; leaving the state puts it back |
+| Moving a tiled window | Dropped onto another window's slice they swap slices; dropped on free board space it takes the largest free slice under the drop; dropped outside the desktop, it leaves the board |
+| Maximize, fullscreen | Take the window out of the layout while in that state, its slice reserved; leaving the state returns it to that slice. A window already in that state when tiling switches on gets no slice |
 | Frame | A tiled desktop keeps its windows tiled inside its frame wherever the frame goes: the one case where a frame carries windows |
-| Off | Windows stay where the grid left them and are told they are no longer tiled |
+| Off | Windows stay where the board left them and are told they are no longer tiled; boards and remembered slices are dropped with it |
 
 The per-window tiling contract is
 [../windows/window-management.md](../windows/window-management.md)'s.
@@ -124,7 +125,7 @@ The per-window tiling contract is
   is ignored.
 - **Switching tiling on for an empty desktop**: the switch is on; the
   first window opened there fills the area.
-- **Combining into a tiled desktop**: the incoming windows join its grid;
+- **Combining into a tiled desktop**: the incoming windows join its board by the new-window rule;
   combining a tiled desktop into an untiled one leaves the windows where
   the translation puts them, no longer tiled.
 - **Abandoning a tiled desktop**: its windows stay where they are, no
@@ -134,7 +135,7 @@ The per-window tiling contract is
   windows are drawn one to one ([../render/hidpi.md](../render/hidpi.md)).
 - **Zooming in past a window's centre**: the frame shrinks around its
   centre, and a window whose centre it leaves belongs to no desktop until
-  the frame covers it again, unless the desktop's grid holds it; nothing
+  the frame covers it again, unless the desktop's board holds it; nothing
   about the window changes.
 - **Windows overlapping after a combine or a frame move**: allowed;
   stacking and focus rules apply

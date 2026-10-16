@@ -21,7 +21,9 @@ and a narrower one here, the narrower one is given.
 | **Hop** | The 3-finger-swipe move, the same in the normal view and the overview: to the closest desktop in the swipe's direction, or one screen that way when no desktop lies there; one hop per swipe ([canvas/infinite-canvas.md](canvas/infinite-canvas.md), [canvas/overview.md](canvas/overview.md)) |
 | **Abandon** | Remove a desktop; its windows stay on the canvas ([canvas/desktops.md](canvas/desktops.md)) |
 | **Combine** | Move another desktop's windows into this one, keeping their relative layout, and remove that desktop ([canvas/desktops.md](canvas/desktops.md)) |
-| **Tile** | Grid-tile the windows whose centre lies in a desktop or target spot, inside the usable area, with gaps ([canvas/desktops.md](canvas/desktops.md)) |
+| **Tile** | Lay the windows whose centre lies in a desktop or target spot onto a one-shot board of slices, inside the usable area, with gaps ([canvas/desktops.md](canvas/desktops.md)) |
+| **Board** | A tiled desktop's slices, filled by its windows; membership holds through zooms and states ([canvas/desktops.md](canvas/desktops.md)) |
+| **Slice** | A fraction of a board: the whole, one of its halves, or a quarter; Super+arrows step a window's slice Windows-snap style ([canvas/desktops.md](canvas/desktops.md)) |
 | **Shelf** | The strip along the bottom of the overview holding minimized windows; clicking one restores it and goes there ([canvas/overview.md](canvas/overview.md)) |
 | **Hint** | A transient message the overview shows briefly, such as "Tiled 2 windows" |
 | **SSD** | Server-side decorations: the compositor draws the title bar and border ([windows/title-bars.md](windows/title-bars.md)) |

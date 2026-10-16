@@ -43,7 +43,7 @@ reach the client. A lone tap of Super opens the app launcher.
 | Super+Return | Terminal: `$TERMINAL`, else `foot` |
 | Super+Q, Alt+F4 | Close the window ([../windows/window-management.md](../windows/window-management.md)) |
 | Super+M / Super+Shift+M | Minimize / restore the last minimized window |
-| Super+Up | Maximize toggle |
+| Super+arrows | On a tiled desktop, step the focused window's slice: the far half becomes the whole, the whole the near half, the near half stays (both orders reach the quarters); covered windows are pushed into the largest free slice, or the halving splits one. On a floating desktop only Super+Up does anything: maximize toggle |
 | Super+F | Fullscreen toggle |
 | Super+Tab, Super+W | Overview toggle ([../canvas/overview.md](../canvas/overview.md)) |
 | Super+Ctrl+Arrows | Hop, as a 3-finger swipe does: the desktop in that direction, else one screen that way ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |

@@ -17,18 +17,20 @@ own the machine's Wayland display namespace and GPU.
   threshold moving nothing), pinning that free area as a desktop, moving a
   window between desktops, 4-finger overview open/exit, 3-finger hops
   (including onto a free spot), 3-finger spread tiling (on: the windows
-  grid and are told they are tiled; off: they keep the grid's positions and
+  take the board's halves; off: they keep the board's positions and
   are told they are not; back on: a pinch-in combine then joins the
-  incoming window into the grid),
+  incoming window by halving the left half),
   overview desktop create/abandon, minimize/restore via the shelf, landing on
   empty canvas, and the keyboard desktop-direction jump. Then a desktop's
   scale: the Super + 2-finger pinch following the fingers and settling on 5 %
   steps, clicks and typing through the camera at 80 %, settles that never
-  re-flow a grid or tell a client a scale, twelve settles between 50 % and
-  200 % that change no floating, maximized or tiled window, the frame back
-  where it began at 100 %, Super+0 and `0` in the overview returning to
-  100 %, and a grid laid out at 50 % that a window opened at 200 % re-flows
-  whole although the frame's edges have passed its windows' centres. Then,
+  re-place a boarded window or tell a client a scale, twelve settles
+  between 50 % and 200 % that change no floating, maximized or tiled
+  window, the frame back where it began at 100 %, Super+0 and `0` in
+  the overview returning to 100 %, a board laid out at 50 % whose
+  membership holds at 200 % although the frame's edges have passed its
+  windows' centres, and a window opened at 200 % joining the board
+  there by halving the right half, every other window keeping its box. Then,
   views at any zoom: a desktop down at 25 %, where a 2-finger scroll, a
   plain 2-finger pinch and a 3-finger hop off the desktop leave the zoom
   alone and the view interactive, the overview opens further out and
@@ -47,11 +49,17 @@ own the machine's Wayland display namespace and GPU.
   right, a 4-finger overview), right-click desktop creation, tab-drag
   combining, frame-vs-window drag, and clicking empty canvas to land on a
   free area — then the per-desktop tiling switch end to end: the tab's Tile
-  button and `t` toggling it, windows opened while it is on joining the grid
-  and closing or minimizing re-flowing it, maximize and fullscreen taking a
-  window out and restore putting it back, a drag onto another slot reordering
-  the grid, Super+T pinning a free view with tiling on, and abandoning or
-  combining a tiled desktop keeping positions and telling the windows.
+  button and `t` toggling it, the two standing windows taking the board's
+  halves, Super+arrows stepping a window's slice through the halves and
+  quarters by both key orders, a covered window pushed into the free space,
+  a join with no free slice left halving a held one, a close freeing its
+  slice for the next taker, a drag onto another slice swapping them,
+  maximize and minimize keeping the slice reserved or remembered with no
+  re-layout, restore retaking it, a hop away and Super+Ctrl+Shift+arrow
+  moving the window out to a floating view, Super+Up maximizing there,
+  Super+T pinning that view as a desktop the standing window joins, travel
+  back to the first desktop with every slice kept, and combining a tiled
+  desktop into an untiled one keeping positions and telling the windows.
 - **`launcher.cpp`** — the app launcher: logo-key tap opens, panel renders,
   search filters, Enter and result-click launch foot and close the launcher,
   logo-as-modifier does not open it, Escape and outside-click close it,

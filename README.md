@@ -153,7 +153,7 @@ compositor binary (build tree or install prefix) or at
 | Overview | 4-finger swipe down | Zoom into the target |
 | Overview | 4-finger swipe up | Zoom out further |
 | Overview | 4-finger swipe left/right | Swipe the desktop under the pointer (or the target) away: **abandon** it; windows stay |
-| Overview | 3-finger pinch out | **Tile** the windows of the desktop under the pointer (or the target) |
+| Overview | 3-finger pinch out | **Tile** the windows of the desktop under the pointer (or the target) onto a one-shot board of slices |
 | Overview | 3-finger pinch in | **Combine**: the nearest other desktop's windows move into this one (relative layout kept) |
 | Overview | 2-finger pinch / scroll | Zoom / pan the overview |
 | Overview | Super + 2-finger pinch | Zoom the desktop under the pointer (or the target); `0` returns the target to 100 % |
@@ -182,7 +182,7 @@ compositor binary (build tree or install prefix) or at
 | Super+Return | Terminal |
 | Super+Q, Alt+F4 | Close window |
 | Super+M / Super+Shift+M | Minimize / restore last minimized |
-| Super+Up / Super+F | Maximize-restore / fullscreen |
+| Super+arrows / Super+F | Step the focused window's slice on a tiled desktop (Super+Up maximizes on a floating one) / fullscreen |
 | Super+Tab, Super+W | Toggle overview |
 | Super+Ctrl+Arrows | Go to the desktop in that direction (or one screen that way) |
 | Super+Ctrl+Shift+Arrows | Move the focused window to that desktop and follow |
