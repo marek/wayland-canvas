@@ -10,10 +10,11 @@
 
 A desktop is a rectangle the user positions over the windows however they
 want; moving a desktop frame never moves a window. Each desktop has its
-own scale, set with Super and a two-finger pinch, and windows on it are
-shown and used at that scale. Each desktop can be switched to tiling: while
-it is on, the desktop keeps its windows tiled, and every window opened on
-it joins the tiling.
+own scale, set with Super and a two-finger pinch and returned to 100 % with
+Super+0: the scale enlarges or shrinks the desktop's picture, and the
+windows on it keep their size and layout and stay usable at it. Each
+desktop can be switched to tiling: while it is on, the desktop keeps its
+windows tiled, and every window opened on it joins the tiling.
 
 ## Design considerations
 
@@ -34,6 +35,12 @@ it joins the tiling.
   window, so going to a desktop brings its scale and its layout with it.
   A free view has neither: asking a free view for a scale or for tiling
   pins it as a desktop first.
+- **A scale scales the picture, never the layout.** Zooming is done many
+  times in a row; if each zoom resized windows or re-flowed a grid, every
+  zoom would rearrange what the user arranged. So the windows keep their
+  size, place and layout, their clients are not told, and the compositor
+  scales what they drew: soft above 100 %, which is why the way back to
+  100 % is one key.
 
 ## Behavior
 
@@ -74,9 +81,11 @@ other desktop.
 |---|---|
 | Range | 50 % to 200 %; a new desktop starts at 100 % |
 | Change | Super + 2-finger pinch on the desktop shown ([../input/gestures.md](../input/gestures.md)): pinching in scales down, spreading scales up, following the fingers |
-| Frame | Resizes around its centre as the scale changes, so the desktop keeps filling the screen; its windows stay where they are on the canvas |
+| Frame | Resizes around its centre as the scale changes, so the desktop keeps filling the screen; its windows stay where they are on the canvas, at their size |
 | Settling | Released, the scale settles on the nearest 5 % step, catching at 100 % |
-| Windows | Shown at the scale and fully usable; told the scale on release, so they render for it ([../render/hidpi.md](../render/hidpi.md)) |
+| Windows | Shown at the scale and fully usable, and never told it: their size, layout and rendering stay as they are, and the compositor scales what they drew ([../render/hidpi.md](../render/hidpi.md)) |
+| Tiled and maximized windows | A scale change never re-lays them out: a tiled grid keeps its boxes and a maximized window its size, both scaled with the picture. The next re-flow, or the next maximize, fills the frame at the scale it has then |
+| Reset | Super+0 returns the desktop shown to 100 %, `0` in the overview the target desktop ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md), [overview.md](overview.md)); the camera eases with it, and a hint names it like a settled pinch |
 | Shown | The overview's tab names a scale other than 100 % |
 
 ### Tiling
@@ -89,7 +98,7 @@ desktop's tab, `t` in the overview, Super+T in the normal view, or a
 | Subject | Rule |
 |---|---|
 | On | The desktop's windows are grid-tiled inside the area not covered by bars, with gaps (a compile-time constant in `src/core/config.h`), in reading order of where they stood |
-| Kept | While on, the grid re-flows when a window opens on the desktop, closes, is minimized or restored, or is moved in or out of it, and when the scale or the frame changes |
+| Kept | While on, the grid re-flows when a window opens on the desktop, closes, is minimized or restored, or is moved in or out of it; a change of the desktop's scale never re-flows it ([Scale](#scale)) |
 | New windows | A window opened while the desktop is shown joins the tiling |
 | Moving a tiled window | Dropped inside the desktop, it takes the grid slot nearest the drop; dropped outside, it leaves the tiling |
 | Maximize, fullscreen | Take the window out of the grid while in that state; leaving the state puts it back |
@@ -115,9 +124,12 @@ The per-window tiling contract is
   the translation puts them, no longer tiled.
 - **Abandoning a tiled desktop**: its windows stay where they are, no
   longer tiled.
-- **Windows that refuse the scale** (clients without fractional scaling):
-  they are scaled by the compositor and may look soft
-  ([../render/hidpi.md](../render/hidpi.md)).
+- **A window on a desktop above 100 %** looks soft: the compositor
+  enlarges what it drew. Super+0 returns the desktop to 100 %, where
+  windows are drawn one to one ([../render/hidpi.md](../render/hidpi.md)).
+- **Zooming in past a window's centre**: the frame shrinks around its
+  centre, and a window whose centre it leaves belongs to no desktop until
+  the frame covers it again; nothing about the window changes.
 - **Windows overlapping after a combine or a frame move**: allowed;
   stacking and focus rules apply
   ([../windows/window-management.md](../windows/window-management.md)).

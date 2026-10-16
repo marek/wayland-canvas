@@ -53,8 +53,8 @@ Rules that hold across the table:
   begins, the pinch scales a desktop and never reaches a client; letting
   Super go mid-pinch changes nothing, and the pinch never counts as a Super
   tap. On a free view the view is pinned as a desktop first. The view
-  follows the scale live; the windows are told the settled scale on
-  release ([../canvas/desktops.md](../canvas/desktops.md)).
+  follows the scale live and settles on release; the windows are never
+  told ([../canvas/desktops.md](../canvas/desktops.md)).
 - **Forwarding.** Only an interactive output
   ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) — zoom
   exactly 1, no transition in progress — forwards gestures to clients

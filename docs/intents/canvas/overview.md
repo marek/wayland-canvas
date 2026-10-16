@@ -74,7 +74,7 @@ or free area, is one gesture away.
 | Drag empty canvas | Pan the overview camera |
 | Two-finger tap (right click) on empty canvas or a desktop interior | New desktop at that spot ([desktops.md](desktops.md)) |
 | Tab buttons | The Tile switch, Abandon ([desktops.md](desktops.md)) |
-| Keys | Esc back; Return go; arrows hop; Delete/BackSpace abandon the target desktop; `t` switch tiling on the target; `m` combine; `n` new desktop; `+`/`−` zoom. Super+Tab / Super+W toggle |
+| Keys | Esc back; Return go; arrows hop; Delete/BackSpace abandon the target desktop; `t` switch tiling on the target; `m` combine; `n` new desktop; `0` returns the target desktop to 100 % ([desktops.md](desktops.md)); `+`/`−` zoom. Super+Tab / Super+W toggle |
 | Shell surfaces | The bar, the toolbar, panels and the note editor take the pointer over them as in the normal view; one that holds the keyboard ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) takes the keys, and the overview's own keys act only while none does |
 
 A press becomes a drag only past a small travel; under it, the release

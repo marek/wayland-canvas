@@ -18,14 +18,13 @@ to a free area of the canvas is as easy as going to a desktop.
 - **One plane, not a grid of desktops.** A desktop is a marked
   rectangle ([desktops.md](desktops.md)), not a container; that is
   what makes free areas, combining and abandoning cheap.
-- **Each desktop has its own scale, and windows stay usable at it.** A
-  desktop shown at 80 % holds more windows and one at 125 % reads larger,
-  the way display scaling does, but per desktop. Clients are told the
-  scale they are shown at (the output's scale times their desktop's) and
-  render for it, and input reaches them through the same camera, so a
-  scaled desktop is as usable as one at 100 %. Any other zoom (the
-  overview, a transition) is the compositor's own view
-  ([overview.md](overview.md)).
+- **Each desktop has its own scale, a zoom that stays with it.** A
+  desktop shown at 80 % fits more of the canvas on the screen and one at
+  125 % reads larger. The compositor scales the picture and the windows
+  keep their size and layout, so zooming never rearranges anything; input
+  reaches them through the same camera, so a scaled desktop is as usable
+  as one at 100 %. Any other zoom (the overview, a transition) is the
+  compositor's too, but not interactive ([overview.md](overview.md)).
 - **A resting camera sits on the pixel grid.** At rest the camera
   position is quantised to the output's pixel grid at its zoom, so a
   window never renders subpixel-blurry. Rendering and hit testing use the
