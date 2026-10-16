@@ -244,6 +244,13 @@ void button(uint32_t code, bool pressed) {
 	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 }
 
+// A plain click at output-local (x, y).
+void click(double x, double y) {
+	move_to(x, y);
+	button(BTN_LEFT, true);
+	button(BTN_LEFT, false);
+}
+
 // A title-bar drag of `view` by logical (dx, dy), ten moves like a hand per
 // grab. The pointer cannot leave the output, so a move longer than the edge
 // allowance is several grabs, re-aimed at the title bar each time.
@@ -348,8 +355,9 @@ def request(method, fmt, args, options):
 
 
 def screencast(source_type, kind):
-    # The chooser stand-in answers for the compositor's picker; it reads its
-    # mode from CHOOSER_MODE_FILE, so set it before the selection.
+    # The chooser xdpw runs is the compositor's own capture.pick picker; the
+    # mode file tells the scenario which offered source to click, so write
+    # it before the request that makes xdpw ask.
     with open(MODE_FILE, 'w') as mode:
         mode.write(kind)
     results = request('CreateSession', '(a{sv})', [],
@@ -659,23 +667,15 @@ int run_step() {
 			"[preferred]\ndefault=gtk\n"
 			"org.freedesktop.impl.portal.ScreenCast=wlr\n"
 			"org.freedesktop.impl.portal.Screenshot=wlr\n");
-		// The chooser xdpw runs is the compositor's own picker; until its
-		// capture.pick lands here, a stand-in answers for it: it echoes back
-		// the first monitor (or window) line xdpw offers.
-		std::string chooser = std::format("{}/chooser.sh", portal_dir);
-		write_file(chooser,
-			"#!/bin/sh\n"
-			"mode=$(cat \"$CHOOSER_MODE_FILE\" 2>/dev/null || echo monitor)\n"
-			"prefix=Monitor:\n"
-			"[ \"$mode\" = window ] && prefix='Window:'\n"
-			"match=\n"
-			"while IFS= read -r line; do\n"
-			"  case \"$line\" in \"$prefix\"*) [ -z \"$match\" ] && match=$line;; esac\n"
-			"done\n"
-			"[ -n \"$match\" ] && printf '%s\\n' \"$match\"\n");
-		std::system(std::format("chmod +x {}", chooser).c_str());
+		// The chooser xdpw runs is the compositor's own picker, through the
+		// msg client: xdpw offers its monitor and window lines on stdin,
+		// `capture.pick` opens the picker, and the scenario (case 12) clicks
+		// the source the client asked for by the mode file it wrote first.
+		const char *canvas_bin = std::getenv("WAYLAND_CANVAS_BIN");
 		write_file(std::format("{}/config/xdg-desktop-portal-wlr/config", portal_dir),
-			std::format("[screencast]\nchooser_type = dmenu\nchooser_cmd = {}\n", chooser));
+			std::format("[screencast]\nchooser_type = dmenu\n"
+				"chooser_cmd = {} msg capture.pick\n",
+				canvas_bin != nullptr && *canvas_bin ? canvas_bin : "wayland-canvas"));
 		write_file(std::format("{}/client.py", portal_dir), PORTAL_CLIENT);
 		// The compositor's socket as an absolute path, for the session's
 		// portal and backend to find this compositor and nothing else.
@@ -739,6 +739,35 @@ int run_step() {
 	case 12: {
 		if (portal_skip || portal_pid <= 0) {
 			return 300;
+		}
+		// While the portal session runs, its chooser is the compositor's own
+		// picker: answer each one by clicking the source the client asked
+		// for (the mode file it wrote before its request).
+		if (server->capture_ui.picking()) {
+			std::string mode = read_file(std::format("{}/chooser-mode", portal_dir));
+			View *wanted = mode.find("window") != std::string::npos
+				? view_titled("under") : nullptr;
+			if (wanted != nullptr) {
+				wlr_box f = view_on_screen(*wanted);
+				click(f.x + 60.0, f.y + 14.0); // the window's title bar
+			} else {
+				// A click no window covers answers with the output itself.
+				const double spots[][2] = {{40, 40}, {80, 650}, {640, 700}};
+				for (auto &spot : spots) {
+					bool covered = false;
+					for (View *v : server->views) {
+						if (v->mapped && !v->minimized) {
+							wlr_box f = view_on_screen(*v);
+							covered = covered || (spot[0] >= f.x && spot[0] < f.x + f.width
+								&& spot[1] >= f.y && spot[1] < f.y + f.height);
+						}
+					}
+					if (!covered) {
+						click(spot[0], spot[1]);
+						break;
+					}
+				}
+			}
 		}
 		int status = 0;
 		if (waitpid(portal_pid, &status, WNOHANG) == 0) {
