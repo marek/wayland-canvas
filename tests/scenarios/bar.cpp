@@ -2109,6 +2109,8 @@ constexpr int UiThemePadding = 10; // UiTheme.panelPadding, mirrored here
 constexpr uint32_t accent_dark = 0x7aa2f7ff;   // UiTheme.accent, dark
 constexpr uint32_t attention_dark = 0xf7768eff; // UiTheme.attention, dark
 constexpr uint32_t claude_mark = 0xd97757ff;   // the starburst's clay
+constexpr uint32_t muted_dark = 0x565f89ff;    // UiTheme.muted, dark
+constexpr uint32_t muted_light = 0x8489a3ff;   // UiTheme.muted, light
 constexpr uint32_t panel_light = 0xf4f5f8ff;   // UiTheme.panel, light
 
 
@@ -4383,6 +4385,29 @@ int run_step() {
 		}
 		check(rows >= 11, std::format("the panel's rows are all there "
 			"({} rows: two limits, seven days, two models)", rows));
+		// The day bars: each fill scaled to the busiest day of the
+		// seven, the second-busiest at three quarters of it. The scan
+		// keeps to the bar's own column — meter_fills pads the box it
+		// takes, so the column is named through the padding — so the
+		// weekday and value texts stay out of the count.
+		int track = agents_box.width - 2 * UiThemePadding - 116;
+		wlr_box dayBars{agents_box.x + UiThemePadding + 50, agents_box.y,
+			track + 2 * UiThemePadding, 0};
+		std::vector<int> dayFills = meter_fills(s, dayBars, muted_dark);
+		int busiestDay = 0, secondDay = 0;
+		for (int fill : dayFills) {
+			if (fill > busiestDay) {
+				secondDay = busiestDay;
+				busiestDay = fill;
+			} else if (fill > secondDay) {
+				secondDay = fill;
+			}
+		}
+		check(dayFills.size() >= 2 && busiestDay >= track * 0.95
+				&& secondDay >= track * 0.68 && secondDay <= track * 0.82,
+			std::format("the day bars scale to the busiest day of the "
+				"week ({} and {} of a {} px track)", busiestDay, secondDay,
+				track));
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
@@ -4641,6 +4666,12 @@ int run_step() {
 			"the panel card is the light surface");
 		check(colour_count(s, mark, claude_mark) > 20,
 			"the Claude mark keeps its colour in the light");
+		// The day bars carry the light palette's own muted fill.
+		int track = agents_box.width - 2 * UiThemePadding - 116;
+		wlr_box dayBars{agents_box.x + UiThemePadding + 50, agents_box.y,
+			track + 2 * UiThemePadding, 0};
+		check(!meter_fills(s, dayBars, muted_light).empty(),
+			"the day bars keep drawing in the light palette");
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}

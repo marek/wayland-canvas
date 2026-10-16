@@ -234,11 +234,16 @@ PanelCard {
 		Repeater {
 			model: root.provider ? root.provider.days : []
 
-			// One day: the weekday on the left, the tokens on the right;
-			// today's row is the one drawn bold.
+			// One day: the weekday on the left, a bar scaled to the
+			// busiest day of the seven, the tokens on the right; today's
+			// row is the one drawn bold, its fill the brighter text
+			// colour where the rest carry the muted one.
 			Item {
 				id: day
 				required property var modelData
+				readonly property real busiest: root.provider
+					&& root.provider.days ? Math.max(
+					0, ...root.provider.days.map(one => one.tokens)) : 0
 				width: parent.width
 				height: 22
 
@@ -251,6 +256,25 @@ PanelCard {
 						bold: day.modelData.today
 					}
 					renderType: Text.NativeRendering
+				}
+
+				Rectangle {
+					x: 60
+					width: parent.width - 116
+					height: 5
+					radius: 2
+					anchors.verticalCenter: parent.verticalCenter
+					color: UiTheme.track
+
+					Rectangle {
+						width: day.busiest > 0
+							? day.modelData.tokens / day.busiest * parent.width
+							: 0
+						height: parent.height
+						radius: 2
+						color: day.modelData.today
+							? UiTheme.text : UiTheme.muted
+					}
 				}
 
 				Text {

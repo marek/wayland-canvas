@@ -91,7 +91,7 @@ anything else being clicked.
 | Power | battery level, state and time left; the power profile where the system offers one (balanced always, power saver with it, performance where the platform has it); suspend, restart, power off, log out |
 | Weather | the forecast for the coming days, from the same reading the widget shows |
 | Clock | a month calendar with today marked; ‹ and › step the month |
-| Agents | one tab per AI provider family: the limits windows (meter, share, the moment one resets) for Claude and GPT, and the tokens by day (today bold) and by model for every family. A sign-in fault brings the card with the CLI command that restores authoritative usage |
+| Agents | one tab per AI provider family: the limits windows (meter, share, the moment one resets) for Claude and GPT, and the tokens by day (a bar scaled to the busiest day of the seven, today bold and bright) and by model for every family. A sign-in fault brings the card with the CLI command that restores authoritative usage |
 
 Out of scope: workspace numbers (asked without), a keyboard-layout
 switcher (there is no compositor-side layout-switch surface to drive),
