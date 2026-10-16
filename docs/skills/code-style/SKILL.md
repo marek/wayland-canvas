@@ -120,3 +120,7 @@ The short form:
 - Two features that need the same behaviour share the implementation;
   the gesture path, the key path and the pointer path drive the same
   canvas actions.
+- **Short-circuit returns.** Handle the exceptional case first and
+  return — a guard clause — so the main path stays flat and unindented:
+  it is easier to read than nested or large if/else branches. This holds
+  for every language here: C++, QML and its JavaScript, Python, shell.
