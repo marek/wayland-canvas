@@ -44,6 +44,7 @@ wlr_box saved{};
 int saved_x = 0;
 View *closed_view = nullptr; // compared by address only, after it is freed
 View *second = nullptr; // the window beside "a" on Desktop 1
+std::optional<DesktopId> right_made; // the desktop a right click made in the overview
 std::string shot_dir;
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -756,6 +757,64 @@ int run_step() {
 				&& server->canvas.desktop_of(*d) == d1,
 			"no longer tiled, they belong to the target desktop");
 		shot("combined-untiled");
+		return 400;
+	}
+	case 57: { // the overview's right clicks: on the empty canvas, a new desktop
+		check(o->overview.active(), "the overview is still open for the right clicks");
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		Point c{d1->frame().x + d1->frame().width / 2.0,
+			d1->frame().y + d1->frame().height * 1.9};
+		check(server->canvas.desktops.at(c.x, c.y) == nullptr
+				&& !server->view_at(c.x, c.y, o->camera.drawn().zoom).has_value(),
+			"the spot below Desktop 1 is empty canvas");
+		std::size_t before = server->canvas.desktops.size();
+		Point p = o->canvas_to_local(c.x, c.y);
+		click(p.x, p.y, BTN_RIGHT);
+		Desktop *made = server->canvas.desktops.at(c.x, c.y);
+		check(made != nullptr && server->canvas.desktops.size() == before + 1,
+			"a right click on the empty canvas made a desktop there");
+		right_made = made != nullptr ? std::optional(made->id()) : std::nullopt;
+		return 400;
+	}
+	case 58: { // inside a desktop, clear of windows: that desktop goes
+		Desktop *made = server->canvas.desktops.find(right_made);
+		std::size_t before = server->canvas.desktops.size();
+		if (made != nullptr) {
+			Point p = o->canvas_to_local(made->centre().x, made->centre().y);
+			click(p.x, p.y, BTN_RIGHT);
+		}
+		check(made != nullptr && server->canvas.desktops.find(right_made) == nullptr
+				&& server->canvas.desktops.size() == before - 1,
+			"a right click inside a desktop, clear of windows, removed it");
+		return 400;
+	}
+	case 59: { // on a window: nothing, the window's desktop stays
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		View *d = titled("d");
+		std::size_t before = server->canvas.desktops.size();
+		Point p = o->canvas_to_local(d->frame_rect().cx(), d->frame_rect().cy());
+		click(p.x, p.y, BTN_RIGHT);
+		check(server->canvas.desktops.by_number(1) == d1
+				&& server->canvas.desktops.size() == before,
+			"a right click on a window inside Desktop 1 left the desktop alone");
+		return 400;
+	}
+	case 60: { // on a desktop's tab: that desktop goes, its windows stay
+		Desktop *d1 = server->canvas.desktops.by_number(1);
+		DesktopId id = d1->id();
+		View *d = titled("d"), *f = titled("f");
+		Rect d0 = d->frame_rect(), f0 = f->frame_rect();
+		std::optional<TabLayout> tab = server->painter.overview_tab_layout(*o, *d1);
+		if (tab.has_value()) {
+			click(tab->tab.x + 30, tab->tab.y + tab->tab.height / 2.0, BTN_RIGHT);
+		}
+		check(tab.has_value() && server->canvas.desktops.find(id) == nullptr,
+			"a right click on Desktop 1's tab removed it");
+		check(d->frame_rect().x == d0.x && d->frame_rect().y == d0.y
+				&& f->frame_rect().x == f0.x && f->frame_rect().y == f0.y
+				&& server->canvas.desktop_of(*d) == nullptr,
+			"its windows stayed where they were, on no desktop");
+		shot("right-click-removed");
 		return 0;
 	}
 	default:

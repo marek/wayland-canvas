@@ -523,6 +523,14 @@ void Launcher::close() {
 	}
 }
 
+void Launcher::launch_selected() {
+	pid_t pid = launch(apps_.items()[results_[selected_]]);
+	if (output_->overview.active()) {
+		server_.launches.add(pid, *output_);
+	}
+	close();
+}
+
 bool Launcher::is_open() const {
 	return open_;
 }
@@ -557,8 +565,7 @@ void Launcher::key(xkb_keysym_t sym, uint32_t utf32, uint32_t mods) {
 	}
 	if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) {
 		if (selected_ < results_.size()) {
-			launch(apps_.items()[results_[selected_]]);
-			close();
+			launch_selected();
 		}
 		return;
 	}
@@ -672,8 +679,7 @@ bool Launcher::pointer_button(Output &output, double ox, double oy, uint32_t but
 	int row = inside ? row_at(pl.box, pl.rows, ox, oy) : -1;
 	if (row >= 0 && row == pressed_row_) {
 		selected_ = static_cast<std::size_t>(row);
-		launch(apps_.items()[results_[selected_]]);
-		close();
+		launch_selected();
 		return true;
 	}
 	pressed_row_ = -1;

@@ -90,7 +90,9 @@ every installed app (XDG `.desktop` entries from `~/.local/share/applications`
 and `/usr/share/applications`, with icons from your icon theme). Type to filter,
 ↑/↓ or the mouse to pick, Enter or click to launch, Esc or a click outside to
 close. New windows open in the middle of the screen you're looking at (or of
-the overview's target).
+the overview's target). An app launched from the overview opens in the
+overview's target even if you leave the overview before its window appears;
+the window then waits there without taking the keyboard, and a hint says where.
 
 To add your own entry, use the standard XDG desktop-entry file that every Linux
 launcher reads: save e.g. `~/.local/share/applications/my-tool.desktop`
@@ -191,7 +193,8 @@ compositor binary (build tree or install prefix) or at
 | Overview | click desktop / window / empty canvas | Go there (empty canvas = free area) |
 | Overview | drag a frame (tab or empty interior) | Reposition the desktop over the windows |
 | Overview | drop a frame onto another | Combine them |
-| Overview | right-click (two-finger tap) | New desktop at that spot |
+| Overview | right-click (two-finger tap or press) on empty canvas | New desktop at that spot |
+| Overview | right-click a desktop's tab or its empty interior | Remove that desktop (its windows stay) |
 | Overview | tab buttons ⊞ / ✕ | Tile / abandon |
 | Overview | minimized shelf (bottom) | Restore that window |
 

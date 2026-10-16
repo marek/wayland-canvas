@@ -40,7 +40,15 @@ own the machine's Wayland display namespace and GPU.
   last one staying on it with a hint, a long swipe hopping only once, onto
   the 80 % desktop at its scale, a 3-finger pinch with travel hopping like
   a swipe, and from a free view below the row a swipe toward nothing
-  staying and one toward the row landing on it.
+  staying and one toward the row landing on it. Then launches from the
+  overview: an app opening in the overview's target, a free spot; one that
+  takes a second to appear, with the overview closed by Escape before it
+  does, still opening in the spot it was launched for, unfocused, with a
+  hint saying where (traced through the launched shell to its child); a
+  window asking to start maximized, far from the canvas origin, filling the
+  screen being looked at; and a late launch starting maximized filling the
+  free spot it was launched for. The late launches are scratch desktop
+  entries in a scratch `$XDG_DATA_HOME`.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
@@ -61,6 +69,9 @@ own the machine's Wayland display namespace and GPU.
   Super+T pinning that view as a desktop the standing window joins, travel
   back to the first desktop with every slice kept, and combining a tiled
   desktop into an untiled one keeping positions and telling the windows.
+  Last, the overview's right clicks: on the empty canvas a new desktop, inside
+  a desktop clear of windows and on its tab removing it (its windows staying
+  put, on no desktop), on a window nothing.
 - **`launcher.cpp`** — the app launcher: logo-key tap opens, panel renders,
   search filters, Enter and result-click launch foot and close the launcher,
   logo-as-modifier does not open it, Escape and outside-click close it,

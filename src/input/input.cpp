@@ -201,6 +201,34 @@ PressTarget overview_press_target(Server &server, Output &output, double ox,
 	return PressOnEmpty{};
 }
 
+// The desktop a press landed on: its tab (the body or a button) or its
+// interior clear of windows.
+std::optional<DesktopId> pressed_desktop(const PressTarget &target) {
+	if (const auto *on = std::get_if<PressOnDesktop>(&target)) {
+		return on->desktop;
+	}
+	if (const auto *on = std::get_if<PressOnTile>(&target)) {
+		return on->desktop;
+	}
+	if (const auto *on = std::get_if<PressOnAbandon>(&target)) {
+		return on->desktop;
+	}
+	return std::nullopt;
+}
+
+// A right click removes the desktop it lands on (its windows stay on the
+// canvas) and makes one on the empty canvas; on a window, an item or the
+// shelf it does nothing.
+void overview_right_click(Output &output, const PressTarget &target, Point p) {
+	if (std::optional<DesktopId> desktop = pressed_desktop(target)) {
+		output.overview.abandon(desktop);
+		return;
+	}
+	if (std::holds_alternative<PressOnEmpty>(target)) {
+		output.overview.new_desktop(p.x, p.y);
+	}
+}
+
 } // namespace
 
 // ---- keyboard devices ----
@@ -277,6 +305,11 @@ void Input::new_pointer(wlr_input_device *device) {
 	if (libinput_device_config_tap_get_finger_count(dev) > 0) {
 		libinput_device_config_tap_set_enabled(dev, config::tap_to_click
 			? LIBINPUT_CONFIG_TAP_ENABLED : LIBINPUT_CONFIG_TAP_DISABLED);
+	}
+	libinput_config_click_method click = config::clickfinger
+		? LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER : LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS;
+	if ((libinput_device_config_click_get_methods(dev) & click) != 0) {
+		libinput_device_config_click_set_method(dev, click);
 	}
 	if (libinput_device_config_scroll_has_natural_scroll(dev)) {
 		libinput_device_config_scroll_set_natural_scroll_enabled(dev,
@@ -503,20 +536,15 @@ void Input::overview_press(Output &output, uint32_t time, uint32_t button) {
 	double oy = server_.cursor->y - output.ly;
 	Point p = output.local_to_canvas(ox, oy);
 
-	if (button == BTN_RIGHT) {
-		// Right click on the empty canvas or a desktop's interior (not
-		// over a window) creates a desktop there.
-		if (!server_.view_at(p.x, p.y, cam.zoom).has_value()) {
-			output.overview.new_desktop(p.x, p.y);
-		}
+	if (button != BTN_LEFT && button != BTN_RIGHT) {
 		return;
 	}
-	if (button != BTN_LEFT) {
-		return;
-	}
-
 	PressTarget target =
 		overview_press_target(server_, output, ox, oy, p.x, p.y, cam.zoom);
+	if (button == BTN_RIGHT) {
+		overview_right_click(output, target, p);
+		return;
+	}
 	if (const auto *on_item = std::get_if<PressOnItem>(&target)) {
 		// A press on an item drags it (or activates it) like in the
 		// normal view.

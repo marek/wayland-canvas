@@ -5,6 +5,7 @@
 #include <optional>
 #include "canvas/desktop.h"
 #include "windows/decoration.h"
+#include "windows/launches.h"
 #include "core/geometry.h"
 #include "core/util.h"
 
@@ -68,6 +69,10 @@ public:
 	uint32_t output_mask = 0; // outputs the view is visible on
 	double told_scale = 0; // the scale its surfaces were last told: their outputs'
 	uint64_t minimize_seq = 0;
+	// The spot of the launch from the overview the window's process descends
+	// from: the window opens there. Traced at each initial commit while the
+	// launch is recent (config::launch_trace_ms), dropped once it has mapped.
+	std::optional<LaunchSpot> launched_for;
 
 	Decoration deco;
 

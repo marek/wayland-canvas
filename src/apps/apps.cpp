@@ -265,12 +265,12 @@ std::vector<std::size_t> Apps::search(std::string_view query) const {
 
 // ---- launching ----
 
-void launch(const App &app) {
+pid_t launch(const App &app) {
 	if (app.exec.empty()) {
-		return;
+		return -1;
 	}
 	std::string cmd = app.terminal
 		? std::format("{} -e {}", config::terminal_cmd, app.exec)
 		: std::format("exec {}", app.exec);
-	spawn(cmd.c_str());
+	return spawn(cmd.c_str());
 }

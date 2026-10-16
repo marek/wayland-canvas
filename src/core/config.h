@@ -148,13 +148,20 @@ inline constexpr uint32_t double_click_ms = 400;
 // Input devices.
 inline constexpr int repeat_rate = 25;
 inline constexpr int repeat_delay = 600;
-inline constexpr bool tap_to_click = true;
+inline constexpr bool tap_to_click = true; // one finger left, two right, three middle
+// Pressing the pad: two fingers are a right click and three a middle click,
+// wherever they press (off: the pad's bottom-right corner is the right button).
+inline constexpr bool clickfinger = true;
 inline constexpr bool natural_scroll = true;
 inline constexpr bool disable_while_typing = true;
 inline constexpr int cursor_size = 24;
 
 // Commands run through /bin/sh -c.
 inline constexpr const char *terminal_cmd = "exec ${TERMINAL:-foot}";
+// A window opens in the overview target it was launched for while its
+// launch is this recent: a cold start of a large app fits, and it matches
+// how long wlroots keeps an xdg-activation token.
+inline constexpr double launch_trace_ms = 30000.0;
 
 // App launcher: tap the logo key (or Super+Space).
 inline constexpr int launcher_width = 600;

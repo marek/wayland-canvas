@@ -142,6 +142,7 @@ core_lib = static_library(
 		'src/render/draw.cpp',
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
+		'src/windows/launches.cpp',
 		'src/windows/view.cpp',
 	),
 	protocol_headers,

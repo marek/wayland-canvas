@@ -1,4 +1,6 @@
 #include <cmath>
+#include <format>
+#include <string>
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -94,6 +96,70 @@ wlr_box fullscreen_area(View &view) {
 
 // ---- placement ----
 
+// The screen-sized canvas box a new window opens centred in, the zoom its
+// view rests at, and the output whose bars inset it.
+struct Opening {
+	Output *output;
+	wlr_box box;
+	double zoom;
+};
+
+// The spot a launch from the overview was made for, else the open
+// overview's target, else the viewport of the output under the cursor.
+Opening opening_of(const View &view, Output &under_cursor) {
+	if (!view.launched_for.has_value()) {
+		Overview &overview = under_cursor.overview;
+		if (overview.active()) {
+			return {&under_cursor, overview.target().box, overview.target_camera().zoom};
+		}
+		return {&under_cursor, box_of_viewport(under_cursor.viewport()),
+			under_cursor.camera.drawn().zoom};
+	}
+	const LaunchSpot &spot = *view.launched_for;
+	Output *output = &under_cursor;
+	for (const std::unique_ptr<Output> &candidate : view.server.outputs) {
+		if (spot.output == candidate->wlr->name) {
+			output = candidate.get();
+			break;
+		}
+	}
+	// The desktop may have moved or zoomed since the launch: its frame now.
+	const Desktop *desktop = view.server.canvas.desktops.find(spot.target.desktop);
+	if (desktop != nullptr) {
+		return {output, desktop->frame(), desktop->scale()};
+	}
+	return {output, spot.target.box, spot.zoom};
+}
+
+// Whether an output shows the window: an open overview shows the canvas, a
+// normal view the windows whose frame centre its viewport holds.
+bool shown_anywhere(const View &view) {
+	Rect frame = view.frame_rect();
+	for (const std::unique_ptr<Output> &output : view.server.outputs) {
+		if (output->overview.active() || output->viewport().contains(frame.cx(), frame.cy())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// The client process behind the view.
+pid_t client_pid(const View &view) {
+	pid_t pid = 0;
+	wl_client_get_credentials(wl_resource_get_client(view.wlr->resource), &pid, nullptr,
+		nullptr);
+	return pid;
+}
+
+// For the hint about a window that opened unseen: where it is.
+std::string opened_where(View &view) {
+	const Desktop *desktop = view.server.canvas.desktop_of(view);
+	if (desktop == nullptr) {
+		return "Opened in a free area";
+	}
+	return std::format("Opened in Desktop {}", desktop->number());
+}
+
 void place(View &view) {
 	Output *output = view.server.output_under_cursor();
 	if (output == nullptr) {
@@ -120,14 +186,10 @@ void place(View &view) {
 		return;
 	}
 
-	// Inside the screen minus bars (exclusive zones), or the overview target
-	// at the zoom leaving into it rests at.
-	bool overview = output->overview.active();
-	wlr_box screen = overview ? output->overview.target().box
-		: box_of_viewport(output->viewport());
-	double zoom = overview ? output->overview.target_camera().zoom
-		: output->camera.drawn().zoom;
-	Rect area = rect_of_box(output->usable_canvas_box(screen, zoom));
+	// Inside the screen minus bars (exclusive zones), at the zoom the view
+	// rests at there.
+	Opening opening = opening_of(view, *output);
+	Rect area = rect_of_box(opening.output->usable_canvas_box(opening.box, opening.zoom));
 	double px = area.x + (area.w - fw) / 2.0;
 	double py = area.y + (area.h - fh) / 2.0;
 	if (fw > area.w) {
@@ -680,7 +742,15 @@ void View::handle_map() {
 	// A window opened on a tiled desktop joins its board.
 	server.canvas.settle(*this);
 	create_foreign();
-	server.focus_view(this);
+	if (launched_for.has_value() && !shown_anywhere(*this)) {
+		// Launched for a spot no output shows any more (the overview closed
+		// or moved on before it appeared): it opens there without taking the
+		// keyboard from the window in front of the user, and a hint says where.
+		server.hint.set(opened_where(*this));
+	} else {
+		server.focus_view(this);
+	}
+	launched_for.reset();
 	server.visibility_dirty = true;
 	damage();
 }
@@ -718,6 +788,11 @@ void View::handle_commit() {
 			| WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN
 			| WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MINIMIZE);
 		deco.handle_initial_commit();
+		launched_for = server.launches.spot_for(client_pid(*this));
+		// Until it maps, the frame waits where the window will open: a request
+		// to start maximized or fullscreen, sent before this commit or after
+		// it (foot asks after), fills the area around that spot.
+		place(*this);
 		if (wlr->requested.fullscreen) {
 			set_fullscreen(true);
 		} else if (wlr->requested.maximized) {

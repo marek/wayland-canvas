@@ -72,6 +72,10 @@ private:
 	bool query_pop_char();
 	bool query_pop_word();
 	void query_changed();
+	// Runs the selected entry and closes. Launched from the overview, its
+	// windows open in the overview's target, whatever the overview does
+	// before they appear.
+	void launch_selected();
 	void scroll_to_selection(int rows);
 	void move_selection(int rows, int delta);
 	int row_at(const wlr_box &box, int rows, double ox, double oy) const;

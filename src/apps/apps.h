@@ -4,6 +4,7 @@
 #include <span>
 #include <string_view>
 #include <vector>
+#include <sys/types.h>
 #include "apps/desktop_entry.h"
 
 // Installed applications.
@@ -25,4 +26,5 @@ private:
 };
 
 // Runs the app via spawn(); Terminal=true apps run inside $TERMINAL -e.
-void launch(const App &app);
+// Returns the launched shell's pid, or -1 (no Exec, or the spawn failed).
+pid_t launch(const App &app);

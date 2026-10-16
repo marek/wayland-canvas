@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <sys/types.h>
 #include "input/bindings.h"
 #include "canvas/canvas.h"
 #include "canvas/items.h"
@@ -13,6 +14,7 @@
 #include "core/theme.h"
 #include "render/render.h"
 #include "core/util.h"
+#include "windows/launches.h"
 #include "windows/view.h"
 
 class LayerSurface;
@@ -26,7 +28,8 @@ struct Options {
 
 double now_ms();
 // Runs `cmd` through /bin/sh -c, double-forked so it never becomes a zombie.
-void spawn(const char *cmd);
+// Returns the shell's pid (the command's own when the shell execs it), or -1.
+pid_t spawn(const char *cmd);
 
 // The compositor: wlroots globals, every object on the canvas, and the subsystems.
 class Server {
@@ -101,6 +104,7 @@ public:
 	Gestures gestures;
 	Hint hint;
 	Launcher launcher;
+	Launches launches;
 	Painter painter;
 	Theme theme;
 	Decorations decorations;

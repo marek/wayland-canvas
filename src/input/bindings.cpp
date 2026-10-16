@@ -34,8 +34,12 @@ struct Keybind {
 	KeyArg arg = 0;
 };
 
-void act_spawn(Server &, Output *, KeyArg arg) {
-	spawn(std::get<const char *>(arg));
+// Started from the overview, the command's windows open in its target.
+void act_spawn(Server &server, Output *output, KeyArg arg) {
+	pid_t pid = spawn(std::get<const char *>(arg));
+	if (output != nullptr && output->overview.active()) {
+		server.launches.add(pid, *output);
+	}
 }
 
 void act_launcher(Server &server, Output *output, KeyArg) {

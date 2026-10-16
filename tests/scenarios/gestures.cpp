@@ -2,6 +2,7 @@
 // backend, real foot clients, synthetic touchpad gestures through the Gesture
 // entry points, screenshots. Writes only under $CANVAS_TMP (meson passes the
 // repo's tmp/).
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cmath>
@@ -10,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <initializer_list>
 #include <linux/input-event-codes.h>
 #include <optional>
 #include <print>
@@ -50,6 +52,7 @@ Camera scrolled_from{}; // the camera before the 25 % scroll
 Camera hop_from{}; // where the camera was going when a hop began
 std::optional<DesktopId> hop_a, hop_b, hop_c; // the row the normal-view hops walk
 std::vector<View *> launched_before; // the views before the overview launch
+wlr_box launch_box{}; // the overview target a late launch was made for
 std::string tmp_root;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -146,6 +149,29 @@ void key(uint32_t code, bool pressed) {
 		.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
 			: WL_KEYBOARD_KEY_STATE_RELEASED};
 	wlr_keyboard_notify_key(&kbd, &ev);
+}
+
+// Presses and releases each key in turn: typing into the launcher.
+void tap_keys(std::initializer_list<uint32_t> codes) {
+	for (uint32_t code : codes) {
+		key(code, true);
+		key(code, false);
+	}
+}
+
+// Remembers the mapped windows, so launched_view() finds the next one.
+void remember_views() {
+	launched_before.assign(server->views.begin(), server->views.end());
+}
+
+// The mapped window that was not there at remember_views(), or null.
+View *launched_view() {
+	for (View *v : server->views) {
+		if (v->mapped && std::ranges::find(launched_before, v) == launched_before.end()) {
+			return v;
+		}
+	}
+	return nullptr;
 }
 
 // Pointer at output-local logical (x, y) on the single 1280x720 output.
@@ -1206,29 +1232,17 @@ int run_step() {
 		// Launch an app from the overview: a Super tap opens the launcher.
 		key(KEY_LEFTMETA, true);
 		key(KEY_LEFTMETA, false);
-		for (uint32_t code : {KEY_F, KEY_O, KEY_O, KEY_T}) {
-			key(code, true);
-			key(code, false);
-		}
+		tap_keys({KEY_F, KEY_O, KEY_O, KEY_T});
 		return 300;
 	}
 	case 83:
 		check(server->launcher.is_open(), "a Super tap opened the launcher over the overview");
-		launched_before.clear();
-		for (View *v : server->views) {
-			launched_before.push_back(v);
-		}
+		remember_views();
 		key(KEY_ENTER, true);
 		key(KEY_ENTER, false);
 		return 300;
 	case 84: {
-		View *launched = nullptr;
-		for (View *v : server->views) {
-			if (v->mapped && std::find(launched_before.begin(), launched_before.end(), v)
-					== launched_before.end()) {
-				launched = v;
-			}
-		}
+		View *launched = launched_view();
 		if (launched == nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -1241,6 +1255,86 @@ int run_step() {
 				" spot, not on B (centre {:.0f},{:.0f}; target {},{} {}x{})", fr.cx(), fr.cy(),
 				target.x, target.y, target.width, target.height));
 		shot("31-launched-into-target");
+		return 300;
+	}
+	case 85: // an app that takes a second to appear, launched from the overview
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		tap_keys({KEY_T, KEY_A, KEY_R, KEY_D, KEY_Y});
+		return 300;
+	case 86:
+		check(server->launcher.is_open(), "the launcher opened over the overview again");
+		remember_views();
+		launch_box = o->overview.target().box;
+		tap_keys({KEY_ENTER, KEY_ESC}); // launch, then Escape back to B at once
+		return 300;
+	case 87:
+		check(!o->overview.active() && launched_view() == nullptr,
+			"Escape closed the overview before the launched window appeared");
+		return 100;
+	case 88: {
+		View *tardy = launched_view();
+		if (tardy == nullptr && retries++ < 100) {
+			return -100;
+		}
+		Rect fr = tardy != nullptr ? tardy->frame_rect() : Rect{};
+		check(tardy != nullptr && wlr_box_contains_point(&launch_box, fr.cx(), fr.cy())
+				&& o->desktop_showing() == desk(hop_b),
+			std::format("the late window opened in the free spot it was launched for, not on B"
+				" where the overview closed to (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
+		check(tardy != nullptr && server->focused_view != tardy
+				&& server->hint.text == "Opened in a free area",
+			std::format("unseen, it left the keyboard alone, and a hint said where (hint {})",
+				server->hint.text));
+		return 300;
+	}
+	case 89: // on B, far from the canvas origin: a window asking to start maximized
+		remember_views();
+		spawn("exec foot --maximized -T maxhere");
+		return 300;
+	case 90: {
+		View *maxhere = launched_view();
+		if (maxhere == nullptr && retries++ < 100) {
+			return -100;
+		}
+		Rect fr = maxhere != nullptr ? maxhere->frame_rect() : Rect{};
+		check(maxhere != nullptr && maxhere->maximized
+				&& o->viewport().contains(fr.cx(), fr.cy()) && server->focused_view == maxhere,
+			std::format("a window starting maximized filled the screen being looked at, and"
+				" took the keyboard (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
+		shot("32-started-maximized-here");
+		o->overview.enter();
+		return 700;
+	}
+	case 91:
+		check(o->overview.active() && o->overview.target().desktop == hop_b,
+			"the overview opened over B again");
+		swipe(3, 0, 80, 8); // the target down to the free spot below B again
+		return 500;
+	case 92:
+		check(!o->overview.target().desktop.has_value(),
+			"the overview's target moved to the free spot below B again");
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		tap_keys({KEY_B, KEY_E, KEY_L, KEY_A, KEY_T, KEY_E, KEY_D});
+		return 300;
+	case 93:
+		check(server->launcher.is_open(), "the launcher opened over the overview a third time");
+		remember_views();
+		launch_box = o->overview.target().box;
+		tap_keys({KEY_ENTER, KEY_ESC});
+		return 300;
+	case 94: {
+		View *belated = launched_view();
+		if (belated == nullptr && retries++ < 100) {
+			return -100;
+		}
+		Rect fr = belated != nullptr ? belated->frame_rect() : Rect{};
+		check(belated != nullptr && belated->maximized && !o->overview.active()
+				&& wlr_box_contains_point(&launch_box, fr.cx(), fr.cy())
+				&& o->desktop_showing() == desk(hop_b),
+			std::format("a late window starting maximized filled the free spot it was launched"
+				" for, not B (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
 		return 0;
 	}
 	default:
@@ -1273,6 +1367,30 @@ int handle_timer() {
 	return 0;
 }
 
+void write_entry(const std::string &path, const char *name, const char *exec) {
+	FILE *f = std::fopen(path.c_str(), "w");
+	if (f == nullptr) {
+		std::fprintf(stderr, "fopen %s: %s\n", path.c_str(), std::strerror(errno));
+		std::exit(2);
+	}
+	std::fprintf(f, "[Desktop Entry]\nType=Application\nName=%s\nExec=%s\n", name, exec);
+	std::fclose(f);
+}
+
+// The launcher entries of the late launches, in $XDG_DATA_HOME/applications:
+// each window appears a second after its launch, once the overview it was
+// launched from has closed.
+void install_late_entries(const std::string &xdg_dir) {
+	std::string apps = xdg_dir + "/applications";
+	mkdir_p(apps);
+	// foot as the shell's child (`; true` keeps sh from exec'ing it), so the
+	// trace walks up from the client to the launch.
+	write_entry(apps + "/tardy-terminal.desktop", "Tardy Terminal",
+		"sh -c \"sleep 1; foot -T tardy; true\"");
+	write_entry(apps + "/belated-maximized.desktop", "Belated Maximized",
+		"sh -c \"sleep 1; exec foot --maximized -T belated\"");
+}
+
 } // namespace
 
 int main() {
@@ -1282,6 +1400,10 @@ int main() {
 	shot_dir = std::format("{}/scenarios/gestures", root);
 	tmp_root = root;
 	mkdir_p(shot_dir);
+	std::string xdg_dir = std::format("{}/scenarios/gestures/xdg", root);
+	install_late_entries(xdg_dir);
+	// Before the server starts: the launcher scans $XDG_DATA_HOME/applications first.
+	setenv("XDG_DATA_HOME", xdg_dir.c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();
