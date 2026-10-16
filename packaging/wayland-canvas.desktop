@@ -3,4 +3,4 @@ Name=wayland-canvas
 Comment=Infinite-canvas Wayland compositor with virtual desktops
 Exec=wayland-canvas
 Type=Application
-DesktopNames=wayland-canvas
+DesktopNames=wayland-canvas;wlroots

@@ -15,6 +15,7 @@
 #include "core/config.h"
 #include "platform/layer.h"
 #include "platform/output.h"
+#include "platform/session_bus.h"
 #include "core/server.h"
 #include "windows/view.h"
 
@@ -109,6 +110,31 @@ void update_idle_inhibit(Server &server, int delta) {
 // signal stays ignored across exec.
 void (*inherited_sigpipe)(int) = SIG_DFL;
 bool sigpipe_recorded = false;
+
+// Puts this compositor's WAYLAND_DISPLAY and desktop name into the
+// activation environment of the services the session bus starts — the
+// screen-sharing portal and its wlroots backend first among them — when
+// the bus is this run's to take (docs/intents/platform/protocols.md).
+void hand_over_session_bus(bool login) {
+	const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	switch (session_bus::owner(address ? address : "", runtime ? runtime : "", login)) {
+	case session_bus::Owner::none:
+	case session_bus::Owner::host:
+		return;
+	case session_bus::Owner::own:
+		spawn("dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP");
+		return;
+	case session_bus::Owner::login:
+		// Portals an earlier session left running still serve that
+		// session's display: restart the ones that run.
+		spawn("dbus-update-activation-environment --systemd WAYLAND_DISPLAY"
+			" XDG_CURRENT_DESKTOP && systemctl --user try-restart"
+			" xdg-desktop-portal.service xdg-desktop-portal-wlr.service"
+			" xdg-desktop-portal-gtk.service");
+		return;
+	}
+}
 
 } // namespace
 
@@ -352,6 +378,10 @@ bool Server::start() {
 	unsetenv("NIRI_SOCKET");
 	// Before any client is spawned, so they inherit the socket path.
 	ipc.init();
+	// Every client is in a wayland-canvas session; "wlroots" lets the portal
+	// pick its wlroots backend where our portals config is not installed.
+	setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", true);
+	hand_over_session_bus(session != nullptr);
 	wlr_log(WLR_INFO, "Running wayland-canvas on WAYLAND_DISPLAY=%s", socket);
 	if (options.start_bar) {
 		start_bar();

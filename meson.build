@@ -94,6 +94,12 @@ theme_prefs_lib = static_library(
 	dependencies: [glib, gio],
 )
 
+session_bus_lib = static_library(
+	'canvas-session-bus',
+	'src/platform/session_bus.cpp',
+	include_directories: src_inc,
+)
+
 # The AI usage collector the agents panel's widget runs: pure logic over
 # the tools' own records, unit-tested on its own, and a thin helper
 # executable installed beside the compositor for the widget to run by
@@ -140,7 +146,7 @@ core_lib = static_library(
 	),
 	protocol_headers,
 	include_directories: src_inc,
-	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib],
+	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
 		glib, json_glib, libinput, libdrm],
 )
@@ -168,10 +174,15 @@ install_subdir(
 )
 
 # What the distribution packages carry beyond the binary: the session file
-# the display managers list, and the default-session tool.
+# the display managers list, the default-session tool, and the portals
+# config that sends screen sharing to the wlroots backend.
 install_data(
 	'packaging/wayland-canvas.desktop',
 	install_dir: get_option('datadir') / 'wayland-sessions',
+)
+install_data(
+	'packaging/wayland-canvas-portals.conf',
+	install_dir: get_option('datadir') / 'xdg-desktop-portal',
 )
 install_data(
 	'packaging/wayland-canvas-session',
@@ -234,6 +245,17 @@ test(
 		include_directories: src_inc,
 		link_with: agent_usage_lib,
 		dependencies: [glib, json_glib, sqlite3],
+	),
+	suite: 'unit',
+)
+
+test(
+	'session-bus',
+	executable(
+		'test-session-bus',
+		'tests/test_session_bus.cpp',
+		include_directories: src_inc,
+		link_with: session_bus_lib,
 	),
 	suite: 'unit',
 )

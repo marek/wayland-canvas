@@ -68,8 +68,9 @@ own the machine's Wayland display namespace and GPU.
   `$XDG_DATA_HOME/applications` before `Server::init`: found by typing its
   name, launched with Enter, and verified by the marker file its spec-quoted
   `Exec` writes plus the foot window it opens. The marker holds the launched
-  command's ignored signals: SIGPIPE must be as the scenario process itself
-  was started (the compositor's own ignore never reaches what it launches).
+  command's ignored signals and its `XDG_CURRENT_DESKTOP`: SIGPIPE must be as
+  the scenario process itself was started (the compositor's own ignore never
+  reaches what it launches), and the desktop name `wayland-canvas:wlroots`.
 
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and

@@ -71,20 +71,27 @@ int mapped() {
 	return n;
 }
 
-// The SigIgn mask the custom entry's command wrote into the marker file,
-// once the line is there in full.
-std::optional<unsigned long long> marker_sigign() {
+// What the custom entry's command wrote into the marker file — its SigIgn
+// mask and its XDG_CURRENT_DESKTOP — once both lines are there in full.
+struct Marker {
+	unsigned long long sigign;
+	std::string desktop;
+};
+std::optional<Marker> read_marker() {
 	FILE *f = std::fopen(marker_path.c_str(), "r");
 	if (f == nullptr) {
 		return std::nullopt;
 	}
-	char line[128] = {};
-	bool read = std::fgets(line, sizeof line, f) != nullptr;
+	char first[128] = {}, second[128] = {};
+	bool read = std::fgets(first, sizeof first, f) != nullptr
+		&& std::fgets(second, sizeof second, f) != nullptr;
 	std::fclose(f);
-	if (!read || std::strncmp(line, "SigIgn:", 7) != 0 || std::strchr(line, '\n') == nullptr) {
+	if (!read || std::strncmp(first, "SigIgn:", 7) != 0 || std::strchr(second, '\n') == nullptr) {
 		return std::nullopt;
 	}
-	return std::strtoull(line + 7, nullptr, 16);
+	std::string desktop = second;
+	desktop.pop_back();
+	return Marker{std::strtoull(first + 7, nullptr, 16), desktop};
 }
 
 void shot(const char *name) {
@@ -226,15 +233,20 @@ int run_step() {
 		check(!server->launcher.is_open(), "Enter launched the custom entry and closed the launcher");
 		return 400;
 	case 12: {
-		std::optional<unsigned long long> ign = marker_sigign();
-		if (!ign && retries++ < 100) return -100;
-		check(ign.has_value(), "the custom entry's Exec wrote the marker file");
+		std::optional<Marker> marker = read_marker();
+		if (!marker && retries++ < 100) return -100;
+		check(marker.has_value(), "the custom entry's Exec wrote the marker file");
 		// The compositor ignores SIGPIPE for itself; what it starts must not
 		// inherit that ignore.
-		bool ignored = ign && (*ign & (1ull << (SIGPIPE - 1))) != 0;
-		check(ign && ignored == harness_ignores_sigpipe, std::format(
+		unsigned long long ign = marker ? marker->sigign : 0;
+		bool ignored = (ign & (1ull << (SIGPIPE - 1))) != 0;
+		check(marker && ignored == harness_ignores_sigpipe, std::format(
 			"the launched command got SIGPIPE as the compositor found it ({}, SigIgn {:x})",
-			harness_ignores_sigpipe ? "ignored" : "default", ign.value_or(0)));
+			harness_ignores_sigpipe ? "ignored" : "default", ign));
+		// Apps and the portal they talk to know which desktop they are in.
+		check(marker && marker->desktop == "wayland-canvas:wlroots", std::format(
+			"the launched command sees XDG_CURRENT_DESKTOP=wayland-canvas:wlroots ({})",
+			marker ? marker->desktop : "-"));
 		return 300;
 	}
 	case 13:
@@ -288,8 +300,9 @@ void install_custom_entry() {
 	std::fprintf(f, "[Desktop Entry]\n");
 	std::fprintf(f, "Type=Application\n");
 	std::fprintf(f, "Name=Zydeco Marker\n");
-	std::fprintf(f, "Exec=sh -c \"grep SigIgn /proc/self/status > %s; exec foot -T scenariocustom\"\n",
-		marker_path.c_str());
+	std::fprintf(f, "Exec=sh -c \"grep SigIgn /proc/self/status > %s;"
+		" printenv XDG_CURRENT_DESKTOP >> %s; exec foot -T scenariocustom\"\n",
+		marker_path.c_str(), marker_path.c_str());
 	std::fclose(f);
 }
 

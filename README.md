@@ -62,6 +62,25 @@ If `wlroots-0.20` isn't installed system-wide, meson fetches 0.20.2 into
 
 The terminal is `$TERMINAL` (falls back to `foot`).
 
+### Screen sharing (Chrome, video calls)
+
+Apps share a screen through xdg-desktop-portal and PipeWire; install the wlroots
+backend once:
+
+```sh
+sudo pacman -S xdg-desktop-portal-wlr   # Debian: apt install xdg-desktop-portal-wlr
+```
+
+wayland-canvas names itself `wayland-canvas:wlroots` (`XDG_CURRENT_DESKTOP`) and
+hands its display to the portal at start. Sharing works from a wayland-canvas
+login. The portal is one per session bus, so while another compositor runs on the
+same bus (nesting it, or a login on another VT) the portal shares *that* one; to
+share a nested run's own screen, give it a bus of its own:
+
+```sh
+dbus-run-session -- ./build/wayland-canvas
+```
+
 ## Opening apps
 
 Tap the Windows (logo) key, or press Super+Space: a Start-style launcher lists
@@ -206,7 +225,8 @@ xdg-shell, xdg-decoration and KDE server-decoration (server-side by default;
 clients that negotiate neither keep their own decorations), layer-shell (bars,
 launchers, wallpapers, notifications), foreign-toplevel management (taskbars can
 restore minimized windows), xdg-activation, pointer-gestures, relative-pointer,
-cursor-shape, screencopy/export-dmabuf (grim), data-control, primary selection,
+cursor-shape, screencopy/export-dmabuf (grim, and screen sharing through
+xdg-desktop-portal-wlr), data-control, primary selection,
 viewporter, fractional-scale, presentation-time, single-pixel-buffer, idle-notify,
 idle-inhibit, virtual-keyboard.
 

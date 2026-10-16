@@ -26,7 +26,8 @@ depends=(
 	'systemd-libs'
 	'wayland'
 )
-optdepends=('quickshell: the top bar (started automatically when qs is on PATH)')
+optdepends=('quickshell: the top bar (started automatically when qs is on PATH)'
+	'xdg-desktop-portal-wlr: screen sharing and screenshots for apps (Chrome, video calls)')
 makedepends=(
 	'clang'
 	'git'
