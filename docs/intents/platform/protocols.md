@@ -39,6 +39,7 @@ backend (xdg-desktop-portal-wlr) captures the outputs through screencopy.
 | Desktop name | every client sees `XDG_CURRENT_DESKTOP=wayland-canvas:wlroots`; the session file names the same two ([../workspace/packaging.md](../workspace/packaging.md)) |
 | Backends | `wayland-canvas-portals.conf`, installed beside the portal's own configs, sends ScreenCast and Screenshot to the wlroots backend and the rest to the GTK one; where it is not installed (a run from the build tree) the portal finds the wlroots backend by the `wlroots` desktop name |
 | Activation environment | the services the session bus starts (the portal and its backends) learn this compositor's `WAYLAND_DISPLAY` and desktop name at start, when the bus is this run's: a login session hands them over through systemd and restarts the portals an earlier session left running; a run on a bus of its own (`dbus-run-session`) hands them over on that bus; a run on the user's systemd bus that is not a login (nested, headless) leaves them to the host |
+| Hand-back | on exit a login puts back the two values it replaced in the user's systemd environment (unsetting the ones that were unset) and restarts the portals, so they serve the session they were taken from — another compositor running on another VT shares its screens again. Unless another session has taken them since: then they are left to it. A crash hands nothing back |
 
 The portal is one service per bus: while another session owns the user's
 bus — a host compositor of a nested run, or a login on another VT — it shares
