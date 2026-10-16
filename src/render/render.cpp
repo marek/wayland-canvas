@@ -106,6 +106,37 @@ void draw_ui_texture(const RenderCtx &ctx, wlr_texture *texture,
 	wlr_render_pass_add_texture(ctx.pass, &opts);
 }
 
+// One hollow rectangle of the capture overlay: four thin fills. The
+// horizontal edges carry the corners.
+void draw_capture_outline(const RenderCtx &ctx, const CaptureOutline &outline) {
+	wlr_render_color color = color_rgba(outline.rgba);
+	double t = outline.thickness;
+	const wlr_box &b = outline.box;
+	draw_logical_rect(ctx, b.x, b.y, b.width, t, color);
+	draw_logical_rect(ctx, b.x, b.y + b.height - t, b.width, t, color);
+	draw_logical_rect(ctx, b.x, b.y + t, t, b.height - 2 * t, color);
+	draw_logical_rect(ctx, b.x + b.width - t, b.y + t, t, b.height - 2 * t, color);
+}
+
+// The capture UI's own overlay: the picker, the toolbar, the thumbnail.
+void draw_capture_overlay(const RenderCtx &ctx) {
+	const CaptureOverlay &capture =
+		ctx.output->server.capture_ui.overlay(*ctx.output, ctx.scale);
+	for (const CaptureFill &fill : capture.fills) {
+		draw_logical_rect(ctx, fill.box.x, fill.box.y, fill.box.width,
+			fill.box.height, color_rgba(fill.rgba));
+	}
+	for (const CaptureOutline &outline : capture.outlines) {
+		draw_capture_outline(ctx, outline);
+	}
+	for (const CaptureImage &image : capture.images) {
+		if (image.texture != nullptr) {
+			draw_ui_texture(ctx, image.texture, image.box.x, image.box.y,
+				image.box.width, image.box.height, 1.0);
+		}
+	}
+}
+
 // Dashed rectangle outline (dash 10, gap 6). The horizontal edges carry the
 // corners; the vertical edges run between them so corners aren't drawn
 // twice. draw_logical_rect() keeps only the on-screen dashes.
@@ -1018,8 +1049,10 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 			draw_ui_texture(ctx, panel->texture, panel->box.x, panel->box.y,
 				panel->box.width, panel->box.height, 1.0);
 		}
-		draw_drag_icon(ctx);
+	draw_capture_overlay(ctx);
+	draw_drag_icon(ctx);
 	}
+
 }
 
 void Painter::render(Output &output) {

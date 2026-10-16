@@ -11,6 +11,7 @@
 #include "platform/ipc.h"
 #include "platform/image_capture.h"
 #include "apps/launcher.h"
+#include "apps/capture_ui.h"
 #include "core/theme.h"
 #include "render/render.h"
 #include "core/util.h"
@@ -109,6 +110,7 @@ public:
 	Items items;
 	Ipc ipc;
 	ImageCapture image_capture;
+	CaptureUi capture_ui;
 
 private:
 	// output.cpp

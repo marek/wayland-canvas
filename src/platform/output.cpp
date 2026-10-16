@@ -424,6 +424,7 @@ void Output::handle_destroy() {
 		view->output_mask &= ~bit;
 	}
 	server.launcher.output_destroyed(*this);
+	server.capture_ui.output_destroyed(*this);
 
 	// The layer surfaces die with the output; destroying each wlroots object
 	// runs its own destroy handler, which takes it out of these vectors.

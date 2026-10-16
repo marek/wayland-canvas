@@ -232,7 +232,8 @@ struct Server::Inhibitor {
 Server::Server()
 	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this),
-	image_capture(*this) {
+	image_capture(*this),
+	capture_ui(*this) {
 }
 
 Server::~Server() {
@@ -240,6 +241,7 @@ Server::~Server() {
 		wl_display_destroy_clients(display);
 	}
 	ipc.finish();
+	capture_ui.finish();
 	image_capture.finish();
 	launcher.finish();
 	painter.finish();
@@ -425,6 +427,7 @@ void Server::set_theme(ThemeMode mode) {
 	painter.theme_changed();
 	hint.theme_changed();
 	launcher.theme_changed();
+	capture_ui.theme_changed();
 	for (std::unique_ptr<View> &view : toplevels) {
 		view->deco.theme_changed();
 	}

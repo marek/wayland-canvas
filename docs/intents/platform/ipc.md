@@ -41,7 +41,7 @@ display socket exists and before any client is spawned.
 | Message | Shape |
 |---|---|
 | Request | `{"id": 7, "method": "overview.toggle", "params": {"output": "DP-1"}}`: `id` a number or string, echoed back; `params` optional |
-| Response | `{"id": 7, "result": …}` or `{"id": 7, "error": "…"}` |
+| Response | `{"id": 7, "result": …}` or `{"id": 7, "error": "…"}` — `capture.pick`'s only when the user has picked |
 | Event | `{"event": "overview", "params": {…}}`, only on a connection that subscribed |
 
 A client may send several requests on one connection or reconnect per
@@ -61,6 +61,8 @@ request; responses come in request order.
 | `item.remove` | `id` | `true`; an error for an unknown id |
 | `item.activate` | `id` | `true`; the compositor reports the item exactly as a double-click does — the `item.activated` event with its output and output-local box — so a plugin can open an editor over an item it just placed. An error for an unknown id, or when the item is on no output's screen |
 | `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
+| `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
+| `capture.stop` | — | `true`; an error (`not recording`) with nothing running |
 
 `item.set` creates the item or updates the one with that id. Without `x`
 and `y`, a new item is centred on what the output under the cursor shows
@@ -72,7 +74,16 @@ update keeps its place. Ids are the plugin's own strings, named
 event (the action itself belongs to a plugin), so a script or a
 keybinding can run a shell action without speaking to the shell directly —
 `wayland-canvas msg action.run '{"name":"canvas.notes/create",
-"args":{"color":"#ffd866"}}'`.
+"args":{"color":"#ffd8f66"}}'`.
+
+`capture.pick` is the one method whose answer waits for the user: the
+compositor opens its own picker
+([../apps/capture.md](../apps/capture.md)) and the response goes out
+when the pick completes; a cancel answers `cancelled`, and a second
+pick while one runs answers `a capture pick is already running`. The
+chooser of xdg-desktop-portal-wlr is this method through the msg
+client (below).
+
 
 ### State
 
@@ -81,6 +92,7 @@ keybinding can run a shell action without speaking to the shell directly —
 | `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `overview` (true while the output shows the overview) |
 | `desktops` | `id`, `number`, `x`, `y`, `width`, `height` (canvas px) |
 | `items` | as last set, with the place the user dragged it to |
+| `recording` | `null`, or `{"path": …}` while a recording runs |
 
 ### Events
 
@@ -93,6 +105,7 @@ keybinding can run a shell action without speaking to the shell directly —
 | `item.moved` | `id`, `x`, `y` | The user dropped a dragged item |
 | `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item, or a client ran `item.activate` |
 | `action` | `name`, `args` | A client ran `action.run`; the host runs the named plugin action |
+| `capture.recording` | `active`, `path` | A recording started (the file it writes) or stopped |
 
 ### Canvas items
 
@@ -110,7 +123,11 @@ membership).
 `$WAYLAND_CANVAS_SOCKET`, sends one request, prints the result and exits
 0, or prints the error to stderr and exits 1 (also on a transport failure).
 `wayland-canvas msg subscribe` prints each event as one line until
-interrupted.
+interrupted. `wayland-canvas msg capture.pick`, with the chooser list
+on stdin (`Monitor: <name> <description>` / `Window: <title>
+(<identifier>)`, as xdg-desktop-portal-wlr prints it), runs the
+picker and prints the chosen list line back byte-exactly; silence
+means the user cancelled. That command is the portal's `chooser_cmd`.
 
 ## Error states, corner cases
 

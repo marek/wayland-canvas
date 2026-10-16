@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cmath>
 #include "platform/layer.h"
 #include "platform/output.h"
@@ -669,6 +670,8 @@ const char *View::ext_toplevel_identifier() const {
 
 View::View(Server &server, wlr_xdg_toplevel *wlr)
 	: server(server), wlr(wlr), deco(*this) {
+	static std::atomic<uint64_t> next_session_id = 1;
+	session_id = next_session_id++;
 	wlr->base->data = this;
 	map_.connect<&View::handle_map>(wlr->base->surface->events.map, this);
 	unmap_.connect<&View::handle_unmap>(wlr->base->surface->events.unmap, this);

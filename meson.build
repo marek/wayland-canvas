@@ -126,6 +126,7 @@ core_lib = static_library(
 		'src/apps/apps.cpp',
 		'src/apps/icons.cpp',
 		'src/apps/launcher.cpp',
+		'src/apps/capture_ui.cpp',
 		'src/canvas/camera.cpp',
 		'src/canvas/canvas.cpp',
 		'src/canvas/items.cpp',
@@ -279,7 +280,7 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env = environment()
 	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
-	scenarios = ['gestures', 'input', 'launcher', 'ipc']
+	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture']
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.
 	scenarios += ['sharing']

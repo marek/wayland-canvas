@@ -72,6 +72,9 @@ public:
 	uint32_t output_mask = 0; // outputs the view is visible on
 	double told_scale = 0; // the scale its surfaces were last told: their outputs'
 	uint64_t minimize_seq = 0;
+	// Stable id for the IPC world (capture picks and sharing), assigned in
+	// the constructor.
+	uint64_t session_id = 0;
 
 	Decoration deco;
 

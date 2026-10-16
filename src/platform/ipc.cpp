@@ -6,7 +6,7 @@
 #include <cstring>
 #include <expected>
 #include <format>
-#include <limits>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -364,6 +364,10 @@ Ipc::Client::Client(Ipc &ipc, int fd) : ipc(ipc), fd(fd) {
 }
 
 Ipc::Client::~Client() {
+	if (ipc.pick_client_ == this) {
+		ipc.pick_client_ = nullptr; // its pick can never be answered now
+		ipc.pick_id_.clear();
+	}
 	source.reset(); // off the loop before the fd it watched is closed
 	if (fd >= 0) { // a dropped client's fd is already closed
 		close(fd);
@@ -533,10 +537,79 @@ void Ipc::handle_line(Client &client, std::string_view line) {
 		queue(client, response(request.id_json, quote(request.error), true));
 		return;
 	}
+	if (request.method == "capture.pick") {
+		capture_pick(client, request.id_json, request.params);
+		return;
+	}
 	std::expected<std::string, std::string> result =
 		dispatch_method(client, request.method, request.params);
 	queue(client, response(request.id_json,
 		result.has_value() ? *result : quote(result.error()), !result.has_value()));
+}
+
+void Ipc::capture_pick(Client &client, std::string_view id_json,
+		JsonObject *params) {
+	auto bail = [&](std::string_view error) {
+		queue(client, response(id_json, quote(error), true));
+	};
+	constexpr std::string_view usage =
+		R"(params: what must be "region", "window", "output" or "any")";
+	if (params == nullptr || !json_object_has_member(params, "what")) {
+		bail(usage);
+		return;
+	}
+	JsonNode *node = json_object_get_member(params, "what");
+	const char *what = json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_STRING
+		? json_node_get_string(node) : nullptr;
+	constexpr std::array kinds = {
+		std::pair{std::string_view{"region"}, CaptureUi::PickWhat::region},
+		std::pair{std::string_view{"window"}, CaptureUi::PickWhat::window},
+		std::pair{std::string_view{"output"}, CaptureUi::PickWhat::output},
+		std::pair{std::string_view{"any"}, CaptureUi::PickWhat::any},
+	};
+	CaptureUi::PickWhat kind = CaptureUi::PickWhat::any;
+	bool known = false;
+	for (const auto &[name, value] : kinds) {
+		if (name == what) {
+			kind = value;
+			known = true;
+			break;
+		}
+	}
+	if (what == nullptr || !known) {
+		bail(usage);
+		return;
+	}
+	std::expected<Output *, std::string> output = resolve_output(params);
+	if (!output.has_value()) {
+		bail(output.error());
+		return;
+	}
+	if (*output == nullptr) {
+		bail("no output to pick on");
+		return;
+	}
+	if (pick_client_ != nullptr
+			|| !server_.capture_ui.start_pick(*output, kind,
+				CaptureUi::PickUse::ipc, CaptureUi::Options{})) {
+		bail("a capture pick is already running");
+		return;
+	}
+	pick_client_ = &client;
+	pick_id_ = id_json;
+	// No response yet: answer_pick() sends it once the user has picked.
+}
+
+void Ipc::answer_pick(bool ok, std::string_view payload) {
+	if (pick_client_ == nullptr) {
+		return;
+	}
+	Client &client = *pick_client_;
+	std::string id = pick_id_;
+	pick_client_ = nullptr;
+	pick_id_.clear();
+	queue(client, response(id, ok ? payload : quote(payload), !ok));
 }
 
 std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
@@ -553,6 +626,7 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"item.remove"}, &Ipc::m_item_remove},
 		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
+		std::pair{std::string_view{"capture.stop"}, &Ipc::m_capture_stop},
 	};
 	for (const auto &[method, run] : table) {
 		if (method == name) {
@@ -570,6 +644,16 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 		json_builder_set_member_name(builder, "theme");
 		std::string mode = std::string{theme_name(server_.theme.mode())};
 		json_builder_add_string_value(builder, mode.c_str());
+		json_builder_set_member_name(builder, "recording");
+		if (server_.capture_ui.recording()) {
+			json_builder_begin_object(builder);
+			json_builder_set_member_name(builder, "path");
+			std::string path = server_.capture_ui.recording_path();
+			json_builder_add_string_value(builder, path.c_str());
+			json_builder_end_object(builder);
+		} else {
+			json_builder_add_null_value(builder);
+		}
 	});
 }
 
@@ -855,6 +939,15 @@ std::expected<std::string, std::string> Ipc::m_action_run(Client &,
 	return std::string{"true"};
 }
 
+std::expected<std::string, std::string> Ipc::m_capture_stop(Client &,
+		JsonObject *) {
+	if (!server_.capture_ui.recording()) {
+		return std::unexpected(std::string{"not recording"});
+	}
+	server_.capture_ui.stop_recording();
+	return std::string{"true"};
+}
+
 // --------------------------------------------------------------- writing
 
 void Ipc::queue(Client &client, std::string_view line) {
@@ -960,6 +1053,16 @@ void Ipc::emit_theme() {
 	push_event("theme", object_text([&](JsonBuilder *builder) {
 		json_builder_set_member_name(builder, "mode");
 		json_builder_add_string_value(builder, mode.c_str());
+	}));
+}
+
+void Ipc::emit_recording(bool active, const std::string &path) {
+	std::string copy = path; // NUL-terminated for the C API
+	push_event("capture.recording", object_text([&](JsonBuilder *builder) {
+		json_builder_set_member_name(builder, "active");
+		json_builder_add_boolean_value(builder, active);
+		json_builder_set_member_name(builder, "path");
+		json_builder_add_string_value(builder, copy.c_str());
 	}));
 }
 
@@ -1088,8 +1191,127 @@ int Ipc::handle_client(int, uint32_t mask, void *data) {
 
 // ---------------------------------------------------------- the msg client
 
+namespace {
+
+// One line of xdg-desktop-portal-wlr's chooser list: `Monitor: <name>
+// <description>` or `Window: <title> (<identifier>)`.
+struct ChooserEntry {
+	std::string line; // echoed byte-exactly when it is the choice
+	std::string monitor; // the monitor's name token; empty for a window
+	std::string identifier; // the window's parenthesized identifier; else empty
+};
+
+std::vector<ChooserEntry> read_chooser_list() {
+	std::vector<ChooserEntry> entries;
+	for (std::string line; std::getline(std::cin, line);) {
+		if (line.ends_with('\r')) {
+			line.pop_back();
+		}
+		if (line.starts_with("Monitor: ")) {
+			std::string rest = line.substr(9);
+			entries.push_back({.line = line, .monitor = rest.substr(0, rest.find(' '))});
+		} else if (line.starts_with("Window: ") && line.ends_with(')')
+				&& line.rfind('(') != std::string::npos) {
+			std::size_t open = line.rfind('(');
+			entries.push_back({.line = line,
+				.identifier = line.substr(open + 1, line.size() - open - 2)});
+		}
+	}
+	return entries;
+}
+
+// The object's string `member`, or empty when absent or not a string.
+std::string string_member(JsonObject *object, const char *member) {
+	if (object == nullptr || !json_object_has_member(object, member)) {
+		return {};
+	}
+	JsonNode *node = json_object_get_member(object, member);
+	const char *text = json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_STRING
+		? json_node_get_string(node) : nullptr;
+	return text != nullptr ? std::string{text} : std::string{};
+}
+
+// `wayland-canvas msg capture.pick` as xdg-desktop-portal-wlr's chooser:
+// reads the monitor and window list from stdin, runs the compositor's own
+// picker, and prints the chosen line back byte-exactly. Silence means the
+// user cancelled; only a transport failure is an error exit.
+int capture_pick_bridge() {
+	if (isatty(0)) {
+		std::fputs("usage: wayland-canvas msg capture.pick < chooser list\n"
+			"       (xdg-desktop-portal-wlr's chooser: the monitors and\n"
+			"        windows arrive on stdin, the choice goes to stdout)\n", stderr);
+		return 2;
+	}
+	std::vector<ChooserEntry> entries = read_chooser_list();
+	bool windows = false, monitors = false;
+	for (const ChooserEntry &entry : entries) {
+		windows = windows || !entry.identifier.empty();
+		monitors = monitors || !entry.monitor.empty();
+	}
+	if (!windows && !monitors) {
+		return 0; // nothing to choose between: no answer is a cancel
+	}
+	const char *what = windows && monitors ? "any" : windows ? "window" : "output";
+	int fd = connect_to_socket();
+	if (fd < 0) {
+		return 1;
+	}
+	std::string request = std::format(
+		R"({{"id":1,"method":"capture.pick","params":{{"what":"{}"}}}})", what);
+	request += '\n';
+	if (!write_request(fd, request)) {
+		std::fputs("wayland-canvas: could not send the request\n", stderr);
+		close(fd);
+		return 1;
+	}
+	std::optional<std::string> first = read_line(fd);
+	if (!first.has_value()) {
+		std::fputs("wayland-canvas: the compositor did not answer\n", stderr);
+		close(fd);
+		return 1;
+	}
+	JsonParserPtr parser(json_parser_new());
+	std::string buffer(*first);
+	GErrorHolder gerr;
+	JsonNode *root = nullptr;
+	if (json_parser_load_from_data(parser.get(), buffer.c_str(),
+			static_cast<gssize>(buffer.size()), &gerr.error)) {
+		root = json_parser_get_root(parser.get());
+	}
+	JsonObject *answer = root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
+		? json_node_get_object(root) : nullptr;
+	if (answer == nullptr || json_object_has_member(answer, "error")
+			|| !json_object_has_member(answer, "result")) {
+		close(fd); // an error answer is the user cancelling: silence, exit 0
+		return 0;
+	}
+	JsonNode *result_node = json_object_get_member(answer, "result");
+	JsonObject *result = result_node != nullptr
+			&& json_node_get_node_type(result_node) == JSON_NODE_OBJECT
+		? json_node_get_object(result_node) : nullptr;
+	std::string want_monitor = string_member(result, "output");
+	std::string want_identifier = string_member(result, "identifier");
+	for (const ChooserEntry &entry : entries) {
+		bool chosen = (!want_identifier.empty() && entry.identifier == want_identifier)
+			|| (!want_monitor.empty() && entry.monitor == want_monitor);
+		if (chosen) {
+			std::printf("%s\n", entry.line.c_str());
+			close(fd);
+			return 0;
+		}
+	}
+	close(fd); // a result matching no line is as good as no answer
+	return 0;
+}
+
+} // namespace
+
 int msg_command(int argc, char *argv[]) {
 	// argv[0] is "msg"; argv[1] the method, argv[2] optional params.
+	if (argc == 2 && strcmp(argv[1], "capture.pick") == 0) {
+		return capture_pick_bridge();
+	}
 	if (argc < 2 || *argv[1] == '\0' || argc > 3
 			|| (argc == 3 && strcmp(argv[1], "subscribe") == 0)) {
 		msg_usage();
