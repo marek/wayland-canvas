@@ -17,7 +17,7 @@ restored before the session file disappears.
 
 | Subject | Rule |
 |---|---|
-| Contents | the `wayland-canvas` binary, `wayland-canvas-session` in `bin`, `wayland-canvas.desktop` in `share/wayland-sessions`, the top bar's Quickshell config in `share/wayland-canvas/shell`, the licence (`/usr/share/licenses` on Arch, `/usr/share/doc/wayland-canvas/copyright` on Debian) |
+| Contents | the `wayland-canvas` binary, `wayland-canvas-session` in `bin`, `wayland-canvas.desktop` in `share/wayland-sessions`, `wayland-canvas-portals.conf` in `share/xdg-desktop-portal`, the top bar's Quickshell config in `share/wayland-canvas/shell`, the licence (`/usr/share/licenses` on Arch, `/usr/share/doc/wayland-canvas/copyright` on Debian) |
 | Build targets | `ninja -C build package-arch`, `ninja -C build package-deb`; artifacts under `build/packages/` |
 | Arch build | `makepkg` over a tarball of the local source tree (the wlroots subproject included, `.git` stripped), built by the same meson native file as a normal build, installed with `--skip-subprojects=wlroots` because wlroots is linked in statically |
 | Debian build | inside a rootless Debian root filesystem downloaded from the official image registry, cached under `tmp/dl/`, entered with user namespaces (`unshare --map-root-user --map-auto`); build dependencies installed there by apt; `Depends` computed by `dpkg-shlibdeps` from the built binary |
@@ -25,10 +25,11 @@ restored before the session file disappears.
 | Prompts | never from the packages themselves: pacman forbids prompts in install scripts, and the Debian maintainer scripts stay non-interactive. `tools/install.sh` is the one flow that asks, for both formats |
 | Removal hooks | Arch `pre_remove` and Debian `prerm` run `wayland-canvas-session restore`; Debian `postrm purge` removes `/var/lib/wayland-canvas` |
 | Top bar runtime | optional: quickshell is `optdepends` on Arch and `Recommends` on Debian (in sid) — the compositor starts the bar when `qs` is on PATH (`-B` turns it off), and the package is complete without it ([../shell/bar.md](../shell/bar.md)) |
+| Screen sharing runtime | optional: xdg-desktop-portal-wlr is `optdepends` on Arch and `Recommends` on Debian — apps share screens through it ([../platform/protocols.md](../platform/protocols.md#screen-sharing)), and the package is complete without it |
 
 ## The session file
 
-`wayland-canvas.desktop` (`Exec=wayland-canvas`, `DesktopNames=wayland-canvas`)
+`wayland-canvas.desktop` (`Exec=wayland-canvas`, `DesktopNames=wayland-canvas;wlroots`)
 is installed to `share/wayland-sessions`, which SDDM, GDM and LightDM list for
 their Wayland sessions. greetd does not read session files; it starts whatever
 command its config names (below).
