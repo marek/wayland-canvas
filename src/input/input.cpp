@@ -62,6 +62,17 @@ bool is_logo_key(std::span<const xkb_keysym_t> syms) {
 	return false;
 }
 
+// The key's unshifted symbols: Super+Shift+3 is '#' on a US layout, so the
+// digit chords are matched through their level-0 symbol as well.
+int base_syms(wlr_keyboard *wlr, uint32_t keycode, const xkb_keysym_t **syms) {
+	xkb_layout_index_t layout = xkb_state_key_get_layout(wlr->xkb_state, keycode);
+	if (layout == XKB_LAYOUT_INVALID) {
+		*syms = nullptr;
+		return 0;
+	}
+	return xkb_keymap_key_get_syms_by_level(wlr->keymap, keycode, layout, 0, syms);
+}
+
 // ---- pointer hit testing ----
 
 struct PointerHit {
@@ -361,7 +372,26 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 		// A logo key pressed on its own may become a tap (see release).
 		super_tap_ = logo && wlr->num_keycodes == 1;
 		Output *output = server.output_under_cursor();
-		if (server.launcher.is_open()) {
+		if (server.capture_ui.owns_keyboard()) {
+			// The picker, the toolbar or a countdown owns the keyboard:
+			// every key is consumed, and a lone Super tap means nothing.
+			super_tap_ = false;
+			for (xkb_keysym_t sym : sym_list) {
+				server.capture_ui.key(sym, mods);
+			}
+			const xkb_keysym_t *base = nullptr;
+			int nbase = base_syms(wlr, keycode, &base);
+			for (int i = 0; i < nbase; i++) {
+				bool repeat = false; // Space is its own base symbol
+				for (xkb_keysym_t sym : sym_list) {
+					repeat = repeat || sym == base[i];
+				}
+				if (!repeat) {
+					server.capture_ui.key(base[i], mods);
+				}
+			}
+			handled = true; // nothing the capture UI sees reaches a client
+		} else if (server.launcher.is_open()) {
 			// The launcher owns the keyboard while open.
 			if (nsyms > 0 && !logo) {
 				if (xkb_keysym_to_lower(syms[0]) == XKB_KEY_space &&
@@ -380,22 +410,38 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			LayerSurface *holder = server.focused_layer;
 			bool shell_types = holder != nullptr && holder->mapped
 				&& (mods & WLR_MODIFIER_LOGO) == 0;
-			if (!shell_types) {
-				for (xkb_keysym_t sym : sym_list) {
-					if (server.bindings.handle_overview(sym, mods, *output)) {
-						break;
-					}
-				}
-				handled = true; // the overview owns every other key
-			}
-		} else {
+		if (!shell_types) {
+			bool matched = false;
 			for (xkb_keysym_t sym : sym_list) {
-				if (server.bindings.handle(sym, mods, output)) {
-					handled = true;
+				if (server.bindings.handle_overview(sym, mods, *output)) {
+					matched = true;
 					break;
 				}
 			}
+			if (!matched) {
+				const xkb_keysym_t *base = nullptr;
+				int nbase = base_syms(wlr, keycode, &base);
+				for (int i = 0; i < nbase && !matched; i++) {
+					matched = server.bindings.handle_overview(base[i], mods, *output);
+				}
+			}
+			handled = true; // the overview owns every other key
 		}
+	} else {
+		for (xkb_keysym_t sym : sym_list) {
+			if (server.bindings.handle(sym, mods, output)) {
+				handled = true;
+				break;
+			}
+		}
+		if (!handled) {
+			const xkb_keysym_t *base = nullptr;
+			int nbase = base_syms(wlr, keycode, &base);
+			for (int i = 0; i < nbase && !handled; i++) {
+				handled = server.bindings.handle(base[i], mods, output);
+			}
+		}
+	}
 		if (handled && event->keycode < 256) {
 			key_consumed_[event->keycode] = true;
 		}
@@ -448,6 +494,7 @@ void Input::forget(const View &view) {
 		last_title_view = nullptr;
 	}
 	grab.forget(view);
+	server_.capture_ui.forget(view);
 }
 
 // ---- pointer motion ----
@@ -463,6 +510,13 @@ void Input::process_cursor_motion(uint32_t time) {
 	if (output == nullptr) {
 		wlr_seat_pointer_notify_clear_focus(server.seat);
 		set_cursor_image("default");
+		return;
+	}
+	if (server.capture_ui.pointer_motion(*output, server.cursor->x - output->lx,
+			server.cursor->y - output->ly)) {
+		wlr_seat_pointer_notify_clear_focus(server.seat);
+		set_view_hover(server, nullptr, DecoPart::none);
+		set_cursor_image(server.capture_ui.cursor_image());
 		return;
 	}
 	if (server.launcher.pointer_motion(*output, server.cursor->x - output->lx,
@@ -583,6 +637,10 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	if (output == nullptr) {
 		return;
 	}
+	if (server.capture_ui.pointer_button(*output, server.cursor->x - output->lx,
+			server.cursor->y - output->ly, button, true)) {
+		return;
+	}
 	if (server.launcher.pointer_button(*output, server.cursor->x - output->lx,
 			server.cursor->y - output->ly, button, true)) {
 		return;
@@ -685,9 +743,14 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 			Output *output =
 				server_.output_at(server_.cursor->x, server_.cursor->y);
 			if (output != nullptr) {
+				if (server_.capture_ui.pointer_button(*output,
+						server_.cursor->x - output->lx,
+						server_.cursor->y - output->ly, button, false)) {
+					return;
+				}
 				server_.launcher.pointer_button(*output,
-					server_.cursor->x - output->lx, server_.cursor->y - output->ly,
-					button, false);
+					server_.cursor->x - output->lx,
+					server_.cursor->y - output->ly, button, false);
 			}
 		}
 		return;
@@ -731,6 +794,9 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	Output *output = server.output_at(server.cursor->x, server.cursor->y);
 	if (output == nullptr) {
 		return;
+	}
+	if (server.capture_ui.owns_keyboard()) {
+		return; // the picker and the toolbar swallow scrolling
 	}
 	if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL &&
 			server.launcher.pointer_axis(*output, server.cursor->x - output->lx,
@@ -784,6 +850,9 @@ void Input::handle_cursor_frame() {
 void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	notify_activity(server_);
 	super_tap_ = false;
+	if (server_.capture_ui.owns_keyboard()) {
+		return; // the capture UI owns the pointer
+	}
 	server_.gestures.swipe_begin(event->time_msec, event->fingers);
 }
 
@@ -800,6 +869,9 @@ void Input::handle_swipe_end(wlr_pointer_swipe_end_event *event) {
 void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 	notify_activity(server_);
 	super_tap_ = false;
+	if (server_.capture_ui.owns_keyboard()) {
+		return; // the capture UI owns the pointer
+	}
 	server_.gestures.pinch_begin(event->time_msec, event->fingers);
 }
 

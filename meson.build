@@ -126,6 +126,7 @@ core_lib = static_library(
 		'src/apps/apps.cpp',
 		'src/apps/icons.cpp',
 		'src/apps/launcher.cpp',
+		'src/apps/capture_ui.cpp',
 		'src/canvas/camera.cpp',
 		'src/canvas/canvas.cpp',
 		'src/canvas/items.cpp',
@@ -137,8 +138,10 @@ core_lib = static_library(
 		'src/input/grab.cpp',
 		'src/input/input.cpp',
 		'src/platform/ipc.cpp',
+		'src/platform/image_capture.cpp',
 		'src/platform/layer.cpp',
 		'src/platform/output.cpp',
+		'src/render/capture.cpp',
 		'src/render/draw.cpp',
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
@@ -184,6 +187,11 @@ install_data(
 install_data(
 	'packaging/wayland-canvas-portals.conf',
 	install_dir: get_option('datadir') / 'xdg-desktop-portal',
+)
+install_data(
+	'packaging/xdg-desktop-portal-wlr.conf',
+	rename: 'config',
+	install_dir: get_option('sysconfdir') / 'xdg' / 'xdg-desktop-portal-wlr' / 'wayland-canvas',
 )
 install_data(
 	'packaging/wayland-canvas-session',
@@ -273,7 +281,10 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env = environment()
 	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
-	scenarios = ['gestures', 'input', 'launcher', 'ipc']
+	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture']
+	# The sharing scenario adds the capture core, the capture protocols and
+	# the portal; it skips its portal phase itself when the tooling is missing.
+	scenarios += ['sharing']
 	# The bar scenario drives the real bar client against stand-in services,
 	# so it also needs qs, a dbus-daemon to build its private buses from,
 	# and the dbusmock stand-in environment (provisioned under tmp/ by the

@@ -33,7 +33,7 @@ their values.
 | [canvas/](canvas/) | The plane, the desktops, the overview |
 | [input/](input/) | Touchpad gestures, keyboard and pointer |
 | [windows/](windows/) | Title bars and window management |
-| [apps/](apps/) | Applications: the launcher and the desktop entries it finds them by |
+| [apps/](apps/) | Applications: the launcher, the desktop entries it finds them by, and the capture UI |
 | [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, sticky notes, light and dark |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
 | [platform/](platform/) | wlroots, protocols, outputs, the C++ standard, the control IPC |
@@ -56,6 +56,7 @@ their values.
 | [windows/title-bars.md](windows/title-bars.md) | Server-side title bars ("menu bars"): the Windows 11 look, buttons, states, negotiation policy, resize zones |
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |
 | [apps/launcher.md](apps/launcher.md) | Opening, layout, search ranking, keys, pointer, launching, Terminal=true |
+| [apps/capture.md](apps/capture.md) | Shots and recordings: the key chords, the region/window/output picker, the toolbar, the thumbnail, the recorder |
 | [apps/desktop-entries.md](apps/desktop-entries.md) | The standard XDG entry as the way to add items, precedence, overrides, TryExec, Exec quoting, icon theme lookup order |
 | [shell/bar.md](shell/bar.md) | The top bar: look, sections, widgets, click actions, panels, autostart |
 | [shell/plugins.md](shell/plugins.md) | What a plugin is, where plugins are found, the config, the common trigger, the API, the UI kit, the built-in plugins |

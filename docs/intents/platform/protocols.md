@@ -21,6 +21,8 @@ without a policy is not added.
 | relative-pointer | relative pointer motion for clients that ask for it |
 | cursor-shape | standard cursor shapes |
 | screencopy, export-dmabuf | screenshots and capture (grim), and screen sharing through the portal ([below](#screen-sharing)); a copy asks for a frame through `needs_frame` ([../render/rendering.md](../render/rendering.md), [../bugs/screencopy-never-returned.md](../bugs/screencopy-never-returned.md)) |
+| ext-image-copy-capture-v1 | offscreen capture (grim, the portal's sharing): an output or one window ([../render/rendering.md](../render/rendering.md)); a window source re-renders the window alone at its told scale, and a frame request is always answered — with a fresh render, never damage-gated |
+| ext-foreign-toplevel-list-v1 | one handle per mapped window, its title and app id kept current; the identifier names a window for capture (grim -T) |
 | data-control, primary-selection | clipboard and primary selection |
 | viewporter, fractional-scale | client-side scaling to the output scale ([../render/hidpi.md](../render/hidpi.md)) |
 | presentation-time | per-frame presentation feedback ([../render/rendering.md](../render/rendering.md)) |
@@ -32,7 +34,9 @@ without a policy is not added.
 
 Apps share a screen — a Chrome presentation, a video call — through
 xdg-desktop-portal's ScreenCast over PipeWire, and the portal's wlroots
-backend (xdg-desktop-portal-wlr) captures the outputs through screencopy.
+backend (xdg-desktop-portal-wlr) captures through the ext-image-copy-capture
+protocols: monitors from the outputs' committed frames, windows from the
+compositor's own window sources ([above](#requirement)).
 
 | Subject | Rule |
 |---|---|
@@ -40,6 +44,8 @@ backend (xdg-desktop-portal-wlr) captures the outputs through screencopy.
 | Backends | `wayland-canvas-portals.conf`, installed beside the portal's own configs, sends ScreenCast and Screenshot to the wlroots backend and the rest to the GTK one; where it is not installed (a run from the build tree) the portal finds the wlroots backend by the `wlroots` desktop name |
 | Activation environment | the services the session bus starts (the portal and its backends) learn this compositor's `WAYLAND_DISPLAY` and desktop name at start, when the bus is this run's: a login session hands them over through systemd and restarts the portals an earlier session left running; a run on a bus of its own (`dbus-run-session`) hands them over on that bus; a run on the user's systemd bus that is not a login (nested, headless) leaves them to the host |
 | Hand-back | on exit a login puts back the two values it replaced in the user's systemd environment (unsetting the ones that were unset) and restarts the portals, so they serve the session they were taken from — another compositor running on another VT shares its screens again. Unless another session has taken them since: then they are left to it. A crash hands nothing back |
+| Sharing chooser | the xdpw config shipped in the per-desktop directory (`sysconfdir/xdg/xdg-desktop-portal-wlr/wayland-canvas/config`) runs the compositor's own picker as the chooser: `chooser_type = dmenu`, `chooser_cmd = wayland-canvas msg capture.pick`; per-desktop, so another compositor's xdpw on the same bus never reads it |
+| Proof | the sharing scenario drives a private `dbus-run-session` portal — scratch XDG dirs, its own PipeWire, never the user's bus or portal — and its ScreenCast client must receive a PipeWire stream for a monitor and for a window; a machine without the portal pieces skips the phase |
 
 The portal is one service per bus: while another session owns the user's
 bus — a host compositor of a nested run, or a login on another VT — it shares

@@ -83,6 +83,56 @@ own the machine's Wayland display namespace and GPU.
   the scenario process itself was started (the compositor's own ignore never
   reaches what it launches), and the desktop name `wayland-canvas:wlroots`.
 
+- **`capture.cpp`** — the shots-and-recordings UI, end to end, with the
+  XDG pictures and videos dirs pointing into `tmp/scenarios/capture/`
+  and an `xdg-open` stub on PATH (nothing touches the real user dirs or
+  opens a real viewer). Every saved shot is compared pixel for pixel
+  against grim — the whole screen (Super+Shift+3, Shift+Print, and the
+  toolbar's screen mode), a dragged region (Super+Shift+4, the
+  toolbar's region mode), a clicked window and a Space-mode window
+  (exactly its frame, alone, at the output's scale). Ctrl on a shot
+  chord and the toolbar's destination option are read back with
+  wl-paste and matched against the same grim reference. The thumbnail:
+  pixels appear bottom-right, a swipe dismisses them, a click reaches
+  the xdg-open stub with the saved file's path. The picker keys (Space,
+  Esc, Print) behave; the timer's shot lands only after its countdown.
+  `capture.pick` answers a dragged region by its numbers, a window by
+  its session id and ext-foreign-toplevel identifier, an output and the
+  portal's `any` both ways, cancels as `cancelled`, and refuses a
+  second concurrent pick; the `msg capture.pick` chooser bridge prints
+  the chosen stdin line byte-exactly and stays silent on a cancel.
+  Recordings are the compositor's own offscreen frames piped into a real
+  ffmpeg: whole screen (stopped by Alt+Print), a region and a window, the
+  window's rectangle frozen at pick time (both stopped by `capture.stop`),
+  each left as a file ffprobe reads at the right size — odd edges cropped
+  to the encoder's whole macroblocks — with `capture.recording` events and
+  the state's `recording` following start and stop, and `capture.stop` on
+  nothing an error.
+
+- **`sharing.cpp`** — the capture core, its protocols and the portal. The
+  offscreen captures first: two foot windows mapped (they start overlapped
+  at the centre), pulled apart with a title-bar drag, then the offscreen
+  whole-output capture and a region capture compared pixel for pixel
+  against grim's screenshot and `grim -g` crop of the same areas, and a
+  window capture checked to be exactly the frame at the output's scale.
+  "Over" is then dropped back over most of "under": the window shot of
+  "under" must be pixel-identical to the one taken while nothing covered
+  it (what overlaps a window leaves no trace), while the whole-output
+  capture changes inside the overlap and nowhere outside the moved
+  window's old or new frame. Then the capture protocols: plain `grim` now
+  travels ext-image-copy-capture (it prefers the ext managers when they are
+  offered) and its whole-output screenshot is compared pixel-exact against
+  the offscreen capture, and `grim -T <ext-foreign-toplevel identifier>`
+  captures "under" by name, again pixel-exact against the offscreen window
+  capture taken while "over" still covers most of it. Last, the portal:
+  a private `dbus-run-session` with scratch XDG dirs and its own PipeWire
+  (never the machine's bus, portal or config — a machine without the
+  portal pieces skips the phase) runs a Python+Gio ScreenCast client that
+  must receive a PipeWire stream for a monitor and for a window; xdpw's
+  chooser is the compositor's own `wayland-canvas msg capture.pick`
+  bridge, and the scenario answers its picker by clicking the source the
+  client asked for.
+
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and
   session buses on sockets under `tmp/scenarios/bar/bus/` (a bar process must

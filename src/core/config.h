@@ -32,6 +32,7 @@ struct Palette {
 	uint32_t combine, abandon;
 	uint32_t dim; // over wallpapers while zoomed out
 	uint32_t panel, panel_text; // overview labels, hints, shelf
+	uint32_t picker_cross; // the picker's crosshair lines
 	uint32_t launcher, launcher_border, launcher_search, launcher_selected,
 		launcher_hover, launcher_text, launcher_dim_text, launcher_backdrop;
 };
@@ -59,6 +60,7 @@ inline constexpr Palette palette_dark{
 	.dim = 0x000000a0,
 	.panel = 0x101216e0,
 	.panel_text = 0xe8eaedff,
+	.picker_cross = 0xffffffcc,
 	.launcher = 0x1f1f1ff5,
 	.launcher_border = 0x3a3a3aff,
 	.launcher_search = 0x2b2b2bff,
@@ -94,6 +96,7 @@ inline constexpr Palette palette_light{
 	.dim = 0x000000a0, // dims wallpapers in the overview in both modes
 	.panel = 0xf4f5f8f0,
 	.panel_text = 0x1f2430ff,
+	.picker_cross = 0x1f2430cc,
 	.launcher = 0xf4f5f8f5,
 	.launcher_border = 0xd1d4dcff,
 	.launcher_search = 0xe6e8ecff,
@@ -188,4 +191,28 @@ inline constexpr const char *bar_shell_install_dir = "../share/wayland-canvas/sh
 inline constexpr const char *ipc_socket_prefix = "wayland-canvas";
 inline constexpr std::size_t ipc_max_line = 64 * 1024;
 inline constexpr std::size_t ipc_max_queued = 1024 * 1024;
+
+// Shots, recordings and the capture UI. The recorder is an optional
+// dependency: without it on PATH, recordings fail with a hint and shots
+// keep working.
+inline constexpr int capture_thumbnail_max_w = 240; // logical px
+inline constexpr int capture_thumbnail_max_h = 140;
+inline constexpr int capture_thumbnail_margin = 12; // from the output's corner
+inline constexpr int capture_thumbnail_ms = 5000; // shown before it fades
+inline constexpr int capture_toolbar_button_w = 84; // logical px
+inline constexpr int capture_toolbar_button_h = 56;
+inline constexpr int capture_toolbar_gap = 8; // between buttons and rows
+inline constexpr int capture_toolbar_group_gap = 20; // shots | recordings
+inline constexpr int capture_toolbar_pad = 12; // panel padding
+inline constexpr int capture_toolbar_options_h = 36; // the options row
+inline constexpr int capture_toolbar_footer_h = 24; // the "Esc closes" line
+inline constexpr int capture_toolbar_margin = 24; // from the output's bottom
+inline constexpr double capture_pick_outline = 2.0; // the selection's outline
+inline constexpr int capture_pick_label_gap = 8; // the size label from it
+inline constexpr int capture_countdown_ms = 1000; // one tick of the countdown
+inline constexpr int capture_timer_steps[] = {0, 5, 10}; // none, 5 s, 10 s
+inline constexpr const char *capture_recorder = "ffmpeg"; // encodes the frames
+inline constexpr int capture_recorder_fps = 60; // frames piped per second
+inline constexpr int capture_recorder_poll_ms = 200; // the reaper's poll
+inline constexpr int capture_recorder_stop_ms = 2000; // teardown wait
 } // namespace config

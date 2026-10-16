@@ -231,6 +231,65 @@ void act_vt(Server &server, Output *, KeyArg arg) {
 	}
 }
 
+// The capture chords, macOS-style: a shot of the screen, the picker for a
+// region or a window, the toolbar, and the recorder's stop. Ctrl on any
+// of them copies to the clipboard instead of saving.
+void act_shot_screen(Server &server, Output *output, KeyArg arg) {
+	if (output != nullptr) {
+		server.capture_ui.shoot_screen(*output,
+			{.clipboard = std::get<int>(arg) != 0});
+	}
+}
+
+void act_shot_pick(Server &server, Output *output, KeyArg arg) {
+	server.capture_ui.pick_for_shot(output, {.clipboard = std::get<int>(arg) != 0});
+}
+
+void act_capture_toolbar(Server &server, Output *output, KeyArg arg) {
+	server.capture_ui.open_toolbar(output, false,
+		{.clipboard = std::get<int>(arg) != 0});
+}
+
+void act_record_stop(Server &server, Output *output, KeyArg arg) {
+	server.capture_ui.stop_recording_or_toolbar(output,
+		{.clipboard = std::get<int>(arg) != 0});
+}
+
+// The capture chords, kept apart from `keys` so the capture UI and the
+// overview can try them on their own: tried before every other binding.
+// Super+Shift+3 is '#' on a US layout, so the digits are matched through
+// their unshifted level too (input.cpp), and Shift+Print is Sys_Req on
+// most layouts, so both keysyms are bound.
+constexpr std::array capture_keys = {
+	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_3, .fn = act_shot_screen, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_CTRL | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_3, .fn = act_shot_screen, .arg = 1},
+	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_4, .fn = act_shot_pick, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_CTRL | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_4, .fn = act_shot_pick, .arg = 1},
+	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_5, .fn = act_capture_toolbar, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_CTRL | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_5, .fn = act_capture_toolbar, .arg = 1},
+	Keybind{.mods = 0, .keysym = XKB_KEY_Print, .fn = act_shot_pick, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_CTRL, .keysym = XKB_KEY_Print,
+		.fn = act_shot_pick, .arg = 1},
+	Keybind{.mods = WLR_MODIFIER_SHIFT, .keysym = XKB_KEY_Print,
+		.fn = act_shot_screen, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_SHIFT, .keysym = XKB_KEY_Sys_Req,
+		.fn = act_shot_screen, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_CTRL | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_Print, .fn = act_shot_screen, .arg = 1},
+	Keybind{.mods = WLR_MODIFIER_CTRL | WLR_MODIFIER_SHIFT,
+		.keysym = XKB_KEY_Sys_Req, .fn = act_shot_screen, .arg = 1},
+	Keybind{.mods = WLR_MODIFIER_ALT, .keysym = XKB_KEY_Print,
+		.fn = act_record_stop, .arg = 0},
+	Keybind{.mods = WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT,
+		.keysym = XKB_KEY_Print, .fn = act_record_stop, .arg = 1},
+};
+
 // dwl-style binding table. Keysyms are matched case-insensitively so
 // Shift+letter bindings still hit.
 constexpr std::array keys = {
@@ -367,7 +426,21 @@ Bindings::Bindings(Server &server)
 
 bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 	sym = xkb_keysym_to_lower(sym);
+	if (handle_capture(sym, mods, output)) {
+		return true;
+	}
 	for (const Keybind &key : keys) {
+		if (key.keysym == sym && key.mods == mods) {
+			key.fn(server_, output, key.arg);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool Bindings::handle_capture(xkb_keysym_t sym, uint32_t mods, Output *output) {
+	sym = xkb_keysym_to_lower(sym);
+	for (const Keybind &key : capture_keys) {
 		if (key.keysym == sym && key.mods == mods) {
 			key.fn(server_, output, key.arg);
 			return true;
@@ -378,6 +451,9 @@ bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 
 bool Bindings::handle_overview(xkb_keysym_t sym, uint32_t mods, Output &output) {
 	sym = xkb_keysym_to_lower(sym);
+	if (handle_capture(sym, mods, &output)) {
+		return true;
+	}
 	switch (sym) {
 	case XKB_KEY_Escape:
 		output.overview.cancel();

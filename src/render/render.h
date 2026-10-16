@@ -8,6 +8,7 @@
 #include <inplace_vector>
 #pragma clang diagnostic pop
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,6 +51,36 @@ struct HelpSlot {
 	TexturePtr texture;
 	int w = 0, h = 0;
 	float scale = 0;
+};
+
+// Everything one render target's frame is drawn with: an output's on-screen
+// frame, or an offscreen capture of a rectangle of that output (see
+// Painter::render_area).
+struct RenderCtx {
+	Output *output;
+	wlr_render_pass *pass;
+	Camera cam; // output->camera(): quantized, same as hit testing
+	Rect viewport; // visible canvas rectangle
+	double left, top; // canvas coords shown at output-local (0, 0)
+	float scale;
+	// What title bars are drawn for: the output's scale times the zoom the
+	// camera rests at, so they stay sharp on a scaled desktop.
+	double deco_scale;
+	wl_output_transform transform; // maps target-local logical to buffer pixels
+	wl_output_transform out_transform; // what textures are counter-rotated by
+	int tw, th; // buffer resolution, in transform order
+	// The render target: an output-local logical rectangle — the whole output
+	// for an on-screen frame, the captured area for an offscreen one.
+	double origin_x = 0, origin_y = 0;
+	int vw = 0, vh = 0;
+	// Whether the compositor's own UI is drawn: true for an on-screen frame;
+	// false for an offscreen capture, which shows the desktop, not the
+	// picker or toolbar that asked for it.
+	bool show_ui = true;
+	bool overview;
+	std::vector<DrawnSurface> *drawn; // Painter's reused per-frame buffer
+	std::span<HelpSlot> help_cache; // Painter's help-line texture cache
+	unsigned *help_clock;
 };
 
 // A desktop tab's label texture and its size, drawn at `scale`.
@@ -99,6 +130,12 @@ public:
 	Painter &operator=(const Painter &) = delete;
 
 	void render(Output &output);
+	// Draws `local_area` (output-local logical) of what the output shows now
+	// into an offscreen ARGB8888 `target` of exactly the area at the output's
+	// scale, untransformed — the same pixels an on-screen frame of that area
+	// holds. False (logged) when the pass cannot begin or the area is empty.
+	// Surfaces drawn get no enter or frame feedback: the output still owns that.
+	bool render_area(Output &output, wlr_box local_area, wlr_buffer *target);
 	void theme_changed(); // drops the help-line and tab-label textures
 	void finish(); // releases cached textures before the renderer goes
 
@@ -120,6 +157,11 @@ public:
 
 private:
 	static constexpr std::size_t help_slots = 4;
+
+	// The context one render target's frame is drawn with.
+	RenderCtx make_ctx(Output &output, wlr_render_pass *pass);
+	// Everything from the canvas clear to the drag icon, into ctx's target.
+	void draw_scene(const RenderCtx &ctx);
 
 	// One slot of the desktop-label cache: one texture per fill the label
 	// sits on — the panel of an ordinary tab, the accent of the target.
