@@ -31,29 +31,29 @@ the other shell shows.
 
 ## Shared
 
-- [ ] UI kit: a panel hero, a section header and a separator, in both modes
+- [x] UI kit: a panel hero, a section header and a separator, in both modes
 
 ## Network panel
 
-- [ ] Head: the connection's name and state, the Wi-Fi switch; share-as-QR and speed test where the system has the tools
-- [ ] Live figures: ping, packet loss, receive and send rates, downloaded and uploaded, IP address and gateway (copyable)
-- [ ] Band: the band in use and an Automatic switch; off, a choice of 2.4, 5 and 6 GHz for the connection
-- [ ] DNS provider: DHCP, Cloudflare, Google, Custom (servers typed in), applied to the active connection
-- [ ] Known networks first (the connected one on top, lock, forget), then the networks the scan finds while the panel is open
-- [ ] Joining: a password for secured networks without credentials, identity and passphrase for enterprise ones
+- [x] Head: the connection's name and state, the Wi-Fi switch; share-as-QR and speed test where the system has the tools
+- [x] Live figures: ping, packet loss, receive and send rates, downloaded and uploaded, IP address and gateway (copyable)
+- [x] Band: the band in use and an Automatic switch; off, a choice of 2.4, 5 and 6 GHz for the connection
+- [x] DNS provider: DHCP, Cloudflare, Google, Custom (servers typed in), applied to the active connection
+- [x] Known networks first (the connected one on top, lock, forget), then the networks the scan finds while the panel is open
+- [x] Joining: a password for secured networks without credentials, identity and passphrase for enterprise ones
 
 ## AI panel
 
-- [ ] Usage collector: tokens by day for the last 7 days and by model, per family, from Claude Code transcripts, Codex sessions and pi/omp and opencode sessions, one rule naming a record's family
-- [ ] Claude limits from the OAuth usage endpoint with the CLI's credentials: 5-hour session and 7-day week, percentage, meter, reset time; the plan's name
-- [ ] GPT limits and plan from the Codex CLI's app-server, the same way
-- [ ] Bar icon in the right section before Bluetooth; hidden on a machine without AI usage
-- [ ] Panel: a switch between the families with usage; hero with the mark, the family and the plan or state; a sign-in card without credentials; tokens by day with today in bold; tokens by model with bars
+- [x] Usage collector: tokens by day for the last 7 days and by model, per family, from Claude Code transcripts, Codex sessions and pi/omp and opencode sessions, one rule naming a record's family
+- [x] Claude limits from the OAuth usage endpoint with the CLI's credentials: 5-hour session and 7-day week, percentage, meter, reset time; the plan's name
+- [x] GPT limits and plan from the Codex CLI's app-server, the same way
+- [x] Bar icon in the right section before Bluetooth; hidden on a machine without AI usage
+- [x] Panel: a switch between the families with usage; hero with the mark, the family and the plan or state; a sign-in card without credentials; tokens by day with today in bold; tokens by model with bars
 
 ## Verification
 
-- [ ] The bar scenario drives both panels in its private world: band, DNS, joining and forgetting reach the NetworkManager stand-in; the AI panel reads fixture sessions of two families, one signed in and one not, through stand-ins for Anthropic's endpoint and the Codex app-server; nothing reaches the machine's network settings, its credentials, Anthropic or OpenAI
-- [ ] Screenshots of both panels in both modes, inspected against the reference screenshots
-- [ ] Read-only on this machine: the Claude figures equal the other shell's record, every family with usage has a tab, the network panel shows the live connection
-- [ ] The bar intent states both panels; warning-free build, every suite green
+- [x] The bar scenario drives both panels in its private world: band, DNS, joining and forgetting reach the NetworkManager stand-in; the AI panel reads fixture sessions of two families, one signed in and one not, through stand-ins for Anthropic's endpoint and the Codex app-server; nothing reaches the machine's network settings, its credentials, Anthropic or OpenAI
+- [x] Screenshots of both panels in both modes, inspected against the reference screenshots
+- [x] Read-only on this machine: the Claude figures equal the other shell's record, every family with usage has a tab, the network panel shows the live connection
+- [x] The bar intent states both panels; warning-free build, every suite green
 - [ ] On screen: both panels, nested and on a TTY (the user)
