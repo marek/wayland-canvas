@@ -3,14 +3,17 @@
 dbusmock's networkmanager template already covers what Quickshell 0.3.1's
 Networking service reads (manager, devices, access points, settings,
 active connections); this wrapper adds the methods it lacks (GetAllDevices
-on the manager, Disconnect on the device) and loads
-the scenario's fixed Wi-Fi world on one connected device:
+on the manager, Disconnect on the device) and loads the scenario's fixed
+Wi-Fi world on one connected device:
 
-    CafeGuest    secured, unknown, strongest — the typing check's network
+    CafeGuest    secured, unknown, strongest — the password join's network
+    CorpNet      enterprise (802.1X), unknown — the identity join's network
     HomeNet      secured, known, connected
-    LibraryFree  open, unknown
+    LibraryFree  open, unknown — the click-join's network
+    OldCafe      secured, known, not connected — the forget action's network
 
-The panel sorts by signal strength, so CafeGuest is the first row.
+The panel sorts connected first, then known, then signal, so the rows read
+HomeNet, OldCafe, CafeGuest, CorpNet, LibraryFree.
 """
 
 # noqa: F401,F403 — the star import is the point: AddTemplate wires every
@@ -26,8 +29,11 @@ import dbusmock.templates.networkmanager as nm
 CCMP = nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_PAIR_CCMP
 SECURED = nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_KEY_MGMT_PSK | CCMP
 # the template maps an AP's flags to connection settings through a
-# one-entry table; teach it the flag combination above (PSK + pair CCMP)
+# one-entry table; teach it the flag combinations above (PSK + pair CCMP,
+# and 802.1X + pair CCMP for the enterprise network)
 nm.NM80211ApSecurityFlags.NAME_MAP[SECURED] = {"key-mgmt": "wpa-psk", "auth-alg": "open"}
+ENTERPRISE = nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_KEY_MGMT_802_1X | CCMP
+nm.NM80211ApSecurityFlags.NAME_MAP[ENTERPRISE] = {"key-mgmt": "wpa-eap"}
 OPEN = nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_NONE
 
 
@@ -58,22 +64,25 @@ def load(mock, parameters):
     )
 
     # A successful activation would move the device's connection from
-    # HomeNet to CafeGuest and reshuffle the panel's rows; the scenario
-    # needs the recorded call, not the state change, so the activation
-    # answers with paths but leaves the connected network alone.
+    # HomeNet to the joined network and reshuffle the panel's rows; the
+    # scenario needs the recorded call, not the state change, so the
+    # activation answers with paths but leaves the connected network alone.
     dbusmock.get_object(nm.MANAGER_OBJ).add_and_activate_connection = (
         lambda self_, settings, dev, ap: (
-            dbus.ObjectPath("/org/freedesktop/NetworkManager/ActiveConnection/cafe"),
-            dbus.ObjectPath("/org/freedesktop/NetworkManager/ActiveConnection/cafe"),
+            dbus.ObjectPath("/org/freedesktop/NetworkManager/ActiveConnection/joined"),
+            dbus.ObjectPath("/org/freedesktop/NetworkManager/ActiveConnection/joined"),
         )
     )
     # HomeNet's flags stay plain PSK: AddWiFiConnection maps them through a
-    # one-entry table. CafeGuest — the typing flow's target — carries the
-    # pair cipher too, or Quickshell refuses it a PSK.
+    # one-entry table. The joined networks — the password flow's targets —
+    # carry the pair cipher too, or Quickshell refuses them a PSK.
     home_ap = mock.AddAccessPoint(device, "home", "HomeNet", "44:55:66:77:88:99", 2, 2437, 54000, 70, nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_KEY_MGMT_PSK)
     mock.AddAccessPoint(device, "cafe", "CafeGuest", "66:77:88:99:aa:bb", 2, 2437, 54000, 90, SECURED)
+    mock.AddAccessPoint(device, "corp", "CorpNet", "77:88:99:aa:bb:cc", 2, 5240, 54000, 80, ENTERPRISE)
     mock.AddAccessPoint(device, "library", "LibraryFree", "22:33:44:55:66:77", 2, 2462, 54000, 50, OPEN)
+    mock.AddAccessPoint(device, "oldcafe", "OldCafe", "33:44:55:66:77:88", 2, 2462, 54000, 40, SECURED)
     home_conn = mock.AddWiFiConnection(device, "home", "HomeNet", "wpa-psk")
+    mock.AddWiFiConnection(device, "oldcafe", "OldCafe", "wpa-psk")
     mock.AddActiveConnection(
         [device],
         home_conn,

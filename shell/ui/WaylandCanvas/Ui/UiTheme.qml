@@ -44,6 +44,8 @@ QtObject {
 
 	readonly property string fontFamily: "monospace"
 	readonly property int fontBody: 12
+	readonly property int fontSmall: 11 // section headers, a hero's meta line
+	readonly property int fontTitle: 15 // a hero's title
 	readonly property int fontIcon: 13
 	readonly property int barHeight: 26
 	readonly property int iconSlot: 27
@@ -57,4 +59,6 @@ QtObject {
 	readonly property int rowHeight: 32
 	readonly property int sectionHeight: 18
 	readonly property int detailHeight: 14
+	readonly property int heroHeight: 44
+	readonly property int heroIcon: 32
 }

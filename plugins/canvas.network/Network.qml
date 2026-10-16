@@ -3,8 +3,8 @@ import QtQuick
 import WaylandCanvas.Ui
 
 // Network: connection type and Wi-Fi strength. A left click opens the panel
-// (the manifest names it): the Wi-Fi switch, the visible networks, and the
-// connect and disconnect flow.
+// (the manifest names it): the connection in use with its live figures, the
+// band, the DNS provider, and the networks to join.
 BarButton {
 	id: root
 
@@ -13,8 +13,11 @@ BarButton {
 		? device
 		: null
 	readonly property int strength: connectedStrength()
+	// The network the connection in use is on, null when none is; the
+	// panel's head and figures describe this one.
+	readonly property var connectedNetwork: connectedNet()
 
-	// The visible networks, strongest first — the panel's list.
+	// The visible networks, strongest first — the bar glyph's strength read.
 	readonly property var networks: {
 		var list = wifi != null && wifi.networks ? wifi.networks.values.slice() : []
 		list.sort(function(a, b) {
@@ -52,17 +55,21 @@ BarButton {
 		return Math.round(network.signalStrength * 100)
 	}
 
-	function connectedStrength() {
+	function connectedNet() {
 		if (wifi == null || wifi.networks == null) {
-			return 0
+			return null
 		}
 		var networks = wifi.networks.values
 		for (var i = 0; i < networks.length; i++) {
 			if (networks[i].connected) {
-				return percent(networks[i])
+				return networks[i]
 			}
 		}
-		return 0
+		return null
+	}
+
+	function connectedStrength() {
+		return connectedNet() != null ? percent(connectedNet()) : 0
 	}
 
 	// The glyph for a signal in percent.

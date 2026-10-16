@@ -58,17 +58,26 @@ own the machine's Wayland display namespace and GPU.
   session buses on sockets under `tmp/scenarios/bar/bus/` (a bar process must
   never touch the machine's buses) and launches
   `tests/scenarios/bar-standins.py` on them, which provides deterministic
-  stand-ins — NetworkManager with one Wi-Fi device and three networks
-  (`HomeNet` connected, `CafeGuest` secured-unknown, `LibraryFree` open),
+  stand-ins — NetworkManager with one Wi-Fi device and five networks
+  (`HomeNet` connected and known, `OldCafe` known and forgotten later,
+  `CafeGuest` secured-unknown, `CorpNet` enterprise (802.1X), `LibraryFree`
+  open),
   BlueZ with a powered adapter plus one paired and one unpaired device,
   UPower with a discharging 55 % battery, power-profiles-daemon, and a
   status-notifier tray item with a five-item menu. The weather fetch stays
   in the private world too: a curl stand-in sits first on the PATH the bar
   inherits, answers wttr.in at once from a canned response captured once
   (`tests/scenarios/bar-standins/wttr-j1.json`, three forecast days) and
-  passes anything else to the real curl, logging every invocation under
-  the run's scratch (`curl-standin.log`) so a run can show it never
-  reached the network. The scenario proves the
+  passes anything else to the real curl. The network panel's CLI tools get
+  the same treatment: `nmcli`, `ping`, `qrencode` and `speedtest` shims
+  sit first on that PATH, answering the panel's reads from a fixture
+  world (the connected `HomeNet` at `192.168.8.42`, gateway `192.168.8.1`,
+  PSK `correcthorse`, the tool's JSON) and recording the panel's writes
+  in a state file so its reads follow them; `wl-copy` passes through to
+  the real one under the scenario's display. Every invocation of either
+  stand-in is logged under the run's scratch (`curl-standin.log`,
+  `tool-standin.log`) so a run can show it never
+  reached the network or the machine's own NetworkManager. The scenario proves the
   bar's own process runs with exactly those bus addresses (read from
   `/proc/<pid>/environ`). Then, with the real bar client (qs) started by the
   compositor on those buses: every indicator is clicked with the fake pointer

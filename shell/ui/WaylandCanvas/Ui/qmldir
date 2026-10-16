@@ -3,7 +3,10 @@ singleton UiTheme UiTheme.qml
 BarButton BarButton.qml
 PanelCard PanelCard.qml
 PanelField PanelField.qml
+PanelHero PanelHero.qml
 PanelRow PanelRow.qml
+PanelSectionHeader PanelSectionHeader.qml
+PanelSeparator PanelSeparator.qml
 PanelSlider PanelSlider.qml
 PanelSwitch PanelSwitch.qml
 PanelText PanelText.qml
