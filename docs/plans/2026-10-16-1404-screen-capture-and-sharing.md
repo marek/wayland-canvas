@@ -32,7 +32,7 @@ packages name it as an optional dependency.
 
 - [ ] Offscreen capture of an output region and of a single window (alone, at the output scale), shared by every path below
 - [ ] ext-image-copy-capture-v1 with output and toplevel sources, and ext-foreign-toplevel-list-v1, proven with a real client
-- [ ] The session: `XDG_CURRENT_DESKTOP=wayland-canvas` for every client, the activation environment updated at start, `wayland-canvas-portals.conf` shipped (wlr for ScreenCast and Screenshot, gtk for the rest), xdg-desktop-portal-wlr an optional dependency of both packages
+- [x] The session: `XDG_CURRENT_DESKTOP=wayland-canvas:wlroots` for every client, the activation environment handed over at start (a login through systemd, never the host's bus), `wayland-canvas-portals.conf` shipped (wlr for ScreenCast and Screenshot, gtk for the rest), xdg-desktop-portal-wlr an optional dependency of both packages
 
 ## Shots and recordings
 
