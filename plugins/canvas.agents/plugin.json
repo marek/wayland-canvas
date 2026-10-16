@@ -1,0 +1,27 @@
+{
+	"id": "canvas.agents",
+	"name": "Agents",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The AI usage indicator: tokens and limits from the agents' own records, with the provider panel",
+	"settings": {
+		"refreshIntervalSec": 900
+	},
+	"contributes": {
+		"barWidgets": [
+			{
+				"id": "agents",
+				"entry": "Agents.qml",
+				"section": "right",
+				"order": 0.5,
+				"panel": "agents"
+			}
+		],
+		"panels": [
+			{
+				"id": "agents",
+				"entry": "AgentsPanel.qml"
+			}
+		]
+	}
+}
