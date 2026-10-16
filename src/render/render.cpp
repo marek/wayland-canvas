@@ -21,6 +21,9 @@ struct RenderCtx {
 	Rect viewport; // visible canvas rectangle
 	double left, top; // canvas coords shown at output-local (0, 0)
 	float scale;
+	// What title bars are drawn for: the output's scale times the zoom the
+	// camera rests at, so they stay sharp on a scaled desktop.
+	double deco_scale;
 	wl_output_transform transform; // inverse of output->wlr->transform
 	int tw, th; // transformed (buffer) resolution
 	bool overview;
@@ -299,13 +302,7 @@ void draw_view(const RenderCtx &ctx, View &view) {
 		// full frame width from the frame's top edge; the border runs
 		// below it and around the content.
 		if (tb > 0) {
-			// Decorations are drawn at the scale the client is told: the
-			// output's scale times the desktop's.
-			double desktop_scale = 1;
-			if (const Desktop *desktop = server.canvas.desktop_of(view)) {
-				desktop_scale = desktop->scale();
-			}
-			view.deco.update(ctx.output->wlr->scale * desktop_scale);
+			view.deco.update(ctx.deco_scale);
 			if (view.deco.texture() != nullptr) {
 				draw_ui_texture(ctx, view.deco.texture(),
 					canvas_x(ctx, frame.x), canvas_y(ctx, frame.y),
@@ -954,6 +951,7 @@ void Painter::render(Output &output) {
 	ctx.left = ctx.cam.cx - output.width / (2.0 * ctx.cam.zoom);
 	ctx.top = ctx.cam.cy - output.height / (2.0 * ctx.cam.zoom);
 	ctx.scale = wlr_output->scale;
+	ctx.deco_scale = wlr_output->scale * output.resting_zoom();
 	ctx.transform = wlr_output_transform_invert(wlr_output->transform);
 	wlr_output_transformed_resolution(wlr_output, &ctx.tw, &ctx.th);
 	ctx.overview = output.overview.active();

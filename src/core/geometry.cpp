@@ -67,6 +67,10 @@ double fit_zoom(const Rect &content, double vw, double vh, double margin, double
 	return zoom;
 }
 
+int canvas_units_covered(int px, double zoom) {
+	return static_cast<int>(std::ceil(px / zoom - 1e-9));
+}
+
 std::optional<std::size_t> nav_pick_direction(double ox, double oy, double dx, double dy,
 	std::span<const Rect> candidates, std::optional<std::size_t> exclude,
 	double max_angle_deg) {

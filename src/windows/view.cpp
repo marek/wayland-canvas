@@ -22,11 +22,13 @@ wlr_box box_of_viewport(const Rect &r) {
 
 // ---- maximize/fullscreen areas ----
 
-wlr_box inset_usable(const Output *output, wlr_box area) {
+// `area` shown at `zoom`, less the output's bars; the whole area when the
+// bars would leave nothing.
+wlr_box inset_usable(const Output *output, wlr_box area, double zoom) {
 	if (output == nullptr) {
 		return area;
 	}
-	wlr_box inset = output->usable_canvas_box(area);
+	wlr_box inset = output->usable_canvas_box(area, zoom);
 	if (inset.width < 1 || inset.height < 1) {
 		return area;
 	}
@@ -48,11 +50,13 @@ wlr_box maximize_area(View &view) {
 		}
 	}
 	if (picked != nullptr) {
-		return inset_usable(picked, box_of_viewport(picked->viewport()));
+		return inset_usable(picked, box_of_viewport(picked->viewport()),
+			picked->camera.drawn().zoom);
 	}
 	Desktop *desktop = view.server.canvas.desktop_of(view);
 	if (desktop != nullptr) {
-		return inset_usable(view.server.output_under_cursor(), desktop->frame());
+		return inset_usable(view.server.output_under_cursor(), desktop->frame(),
+			desktop->scale());
 	}
 	Output *any = view.server.output_under_cursor();
 	int w = any != nullptr ? any->width : 1280;
@@ -62,7 +66,7 @@ wlr_box maximize_area(View &view) {
 		static_cast<int>(std::round(frame.cy())) - h / 2,
 		w, h,
 	};
-	return inset_usable(any, area);
+	return inset_usable(any, area, 1.0); // off every desktop the camera rests at 1
 }
 
 // Fullscreen covers the whole output viewport, no decorations, no inset.
@@ -116,10 +120,14 @@ void place(View &view) {
 		return;
 	}
 
-	// Inside the screen minus bars (exclusive zones), or the overview target.
-	wlr_box screen = output->overview.active() ? output->overview.target().box
+	// Inside the screen minus bars (exclusive zones), or the overview target
+	// at the zoom leaving into it rests at.
+	bool overview = output->overview.active();
+	wlr_box screen = overview ? output->overview.target().box
 		: box_of_viewport(output->viewport());
-	Rect area = rect_of_box(output->usable_canvas_box(screen));
+	double zoom = overview ? output->overview.target_camera().zoom
+		: output->camera.drawn().zoom;
+	Rect area = rect_of_box(output->usable_canvas_box(screen, zoom));
 	double px = area.x + (area.w - fw) / 2.0;
 	double py = area.y + (area.h - fh) / 2.0;
 	if (fw > area.w) {
@@ -510,6 +518,9 @@ void View::set_frame(wlr_box frame) {
 }
 
 void View::set_tiled(bool want) {
+	if (!want) {
+		grid = std::nullopt; // untiled is out of every grid
+	}
 	if (tiled == want) {
 		return;
 	}
@@ -693,6 +704,7 @@ void View::handle_unmap() {
 	maximized = false;
 	fullscreen = false;
 	tiled = false;
+	grid = std::nullopt;
 	settle_pending = false;
 	saved = wlr_box{0, 0, 0, 0};
 	resize_edges = 0;

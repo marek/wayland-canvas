@@ -19,7 +19,14 @@ own the machine's Wayland display namespace and GPU.
   tiled; off: they keep the grid's positions and are told they are not; back
   on: a pinch-in combine then joins the incoming window into the grid),
   overview desktop create/abandon, minimize/restore via the shelf, landing on
-  empty canvas, and the keyboard desktop-direction jump.
+  empty canvas, and the keyboard desktop-direction jump. Then a desktop's
+  scale: the Super + 2-finger pinch following the fingers and settling on 5 %
+  steps, clicks and typing through the camera at 80 %, settles that never
+  re-flow a grid or tell a client a scale, twelve settles between 50 % and
+  200 % that change no floating, maximized or tiled window, the frame back
+  where it began at 100 %, Super+0 and `0` in the overview returning to
+  100 %, and a grid laid out at 50 % that a window opened at 200 % re-flows
+  whole although the frame's edges have passed its windows' centres.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

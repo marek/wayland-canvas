@@ -65,6 +65,11 @@ Camera camera_zoom_path(const Camera &near, const Camera &far, double t);
 // with `margin` logical pixels free on every side.
 double fit_zoom(const Rect &content, double vw, double vh, double margin, double max_zoom);
 
+// How many canvas units `px` output pixels cover of an area shown at `zoom`,
+// rounded up so the area clears them (an exact quotient stays exact): the
+// part of a scaled desktop under a bar.
+int canvas_units_covered(int px, double zoom);
+
 // The candidate closest to (ox, oy) in direction (dx, dy): its centre must lie within
 // max_angle_deg of the direction, and distance off-axis is penalised so the most "straight
 // ahead" neighbour wins over a slightly nearer diagonal one. `exclude` is skipped.

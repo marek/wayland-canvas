@@ -132,7 +132,10 @@ compositor binary (build tree or install prefix) or at
 
 - **Canvas**: every output has its own camera onto one shared plane.
 - **Desktop**: a screen-sized rectangle on the canvas. A window belongs to the
-  desktop its centre is in. Moving a desktop frame never moves windows.
+  desktop its centre is in. Moving a desktop frame never moves windows. Each
+  desktop has its own zoom, 50 % to 200 %: it scales the picture only, so
+  windows keep their size and layout (and look soft above 100 %); Super+0
+  brings it back to 100 %.
 - **Free area**: any spot that isn't a desktop; you can pan or jump there too.
 - **Overview**: a zoomed-out, live view of the canvas where desktops are arranged.
   It has a *target* (accent outline): a desktop, or a free screen-sized spot.
@@ -143,6 +146,7 @@ compositor binary (build tree or install prefix) or at
 |---|---|---|
 | Normal | 3-finger swipe | Pan the canvas anywhere (content follows fingers), with momentum; landing near a desktop snaps onto it |
 | Normal | 4-finger swipe up | Zoom out into the overview (follows your fingers; release early to cancel) |
+| Normal | Super + 2-finger pinch | **Zoom** the desktop shown, following your fingers; it settles on 5 % steps. Windows keep their size; Super+0 returns to 100 % |
 | Overview | 3-finger swipe | Jump to the closest desktop in that direction; none that way → move one screen that way (free spot) |
 | Overview | 4-finger swipe down | Zoom into the target |
 | Overview | 4-finger swipe up | Zoom out further |
@@ -150,6 +154,7 @@ compositor binary (build tree or install prefix) or at
 | Overview | 3-finger pinch out | **Tile** the windows of the desktop under the pointer (or the target) |
 | Overview | 3-finger pinch in | **Combine**: the nearest other desktop's windows move into this one (relative layout kept) |
 | Overview | 2-finger pinch / scroll | Zoom / pan the overview |
+| Overview | Super + 2-finger pinch | Zoom the desktop under the pointer (or the target); `0` returns the target to 100 % |
 
 ## Mouse
 
@@ -183,9 +188,10 @@ compositor binary (build tree or install prefix) or at
 | Super+Ctrl+D / Super+Ctrl+F4 | Make the current view a desktop / abandon the current desktop |
 | Super+T | Tile the current desktop (or view) |
 | Super+1…9 | Go to desktop N |
+| Super+0 | Return the desktop shown to 100 % |
 | Super+Shift+E, Ctrl+Alt+Backspace | Quit |
 | Ctrl+Alt+F1…F12 | Switch VT |
-| Overview: arrows, Return, Escape, Delete, T, M, N, +/- | Jump, enter, back, abandon, tile, combine, new desktop, zoom |
+| Overview: arrows, Return, Escape, Delete, T, M, N, 0, +/- | Jump, enter, back, abandon, tile, combine, new desktop, target back to 100 %, zoom |
 
 ## Configuration
 

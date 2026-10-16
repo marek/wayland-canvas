@@ -14,7 +14,7 @@ class Server;
 enum class DesktopId : int {};
 
 // A screen-sized rectangle on the canvas. Windows belong to the desktop their centre
-// lies in; moving the frame never moves windows.
+// lies in, or whose grid holds them; moving the frame never moves windows.
 class Desktop {
 public:
 	Desktop(DesktopId id, int number, wlr_box frame);
@@ -23,22 +23,24 @@ public:
 	int number() const; // "Desktop 2": the smallest unused number at creation
 	const wlr_box &frame() const; // canvas coordinates
 	Rect rect() const;
-	Point centre() const;
-	double scale() const; // the desktop's display scale; its frame fills the screen at it
+	Point centre() const; // exact: the frame resizes around it, so zooms never drift it
+	double scale() const; // the zoom its picture is shown at; its frame fills the screen at it
 	bool tiling() const; // the switch: while on, the desktop keeps its windows in a grid
 	bool contains(double cx, double cy) const;
 
 private:
 	friend class Desktops; // the frame changes only through Desktops
 	// Sets the scale and resizes the frame around its centre: base size /
-	// scale. Windows never move. Callers tell the desktop's windows only
-	// when the change settles.
+	// scale. Windows never move, and nothing is told to their clients.
 	void set_scale(double scale);
 	DesktopId id_;
 	int number_;
 	double scale_ = 1.0;
 	int base_w_ = 0, base_h_ = 0; // the output's logical size when the desktop was made
 	wlr_box frame_;
+	// Kept apart from the frame's whole pixels: re-centring a rounded frame
+	// on every zoom would walk it across the canvas.
+	Point centre_;
 	bool tiling_ = false; // off on a new desktop
 };
 

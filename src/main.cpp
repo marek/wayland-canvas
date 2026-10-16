@@ -27,6 +27,8 @@ constexpr char usage_text[] =
 	"  3-finger swipe       pan the canvas anywhere; momentum on release,\n"
 	"                       snapping onto a nearby desktop\n"
 	"  4-finger swipe up    zoom out into the overview of all desktops\n"
+	"  Super + 2-finger pinch  scale the desktop shown (the picture only:\n"
+	"                       windows keep their size); Super+0 back to 100 %\n"
 	"  In the overview:\n"
 	"    3-finger swipe     hop to the nearest desktop in that direction\n"
 	"    3-finger pinch out tile that desktop's windows into a grid\n"
@@ -48,7 +50,7 @@ constexpr char usage_text[] =
 	"  action.run         {\"name\": \"<plugin action>\", \"args\": {...}}\n"
 	"  quit               end the session\n"
 	"\n"
-	"See the keyboard bindings in src/core/config.h and src/input/input.cpp.\n";
+	"See the keyboard bindings in src/input/bindings.cpp.\n";
 
 } // namespace
 

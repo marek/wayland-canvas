@@ -341,6 +341,17 @@ void test_basics() {
 	check_near(e1.zoom, 0.25, 1e-9);
 }
 
+// A 26 px bar over a desktop shown at its scale: the canvas it covers.
+void test_canvas_units_covered() {
+	check(canvas_units_covered(26, 1.0) == 26);
+	check(canvas_units_covered(26, 0.5) == 52);  // at 50 % the bar covers twice the canvas
+	check(canvas_units_covered(26, 2.0) == 13);
+	check(canvas_units_covered(26, 0.8) == 33);  // 32.5 rounds up: the area clears the bar
+	check(canvas_units_covered(26, 1.25) == 21); // 20.8 rounds up
+	check(canvas_units_covered(26, 1.3) == 20);  // 20.000...04 is exact, not 21
+	check(canvas_units_covered(0, 0.5) == 0);    // no bar, no inset
+}
+
 } // namespace
 
 int main() {
@@ -351,6 +362,7 @@ int main() {
 	test_camera_zoom_path();
 	test_camera_viewport();
 	test_fit_zoom();
+	test_canvas_units_covered();
 	test_basics();
 
 	if (failures == 0) {

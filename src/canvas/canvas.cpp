@@ -94,6 +94,11 @@ std::vector<View *> Canvas::views_in(wlr_box box) const {
 }
 
 Desktop *Canvas::desktop_of(const View &view) {
+	// A window a tiled desktop's grid holds is that desktop's wherever a zoom
+	// has moved the frame's edges; any other is the desktop its centre is in.
+	if (Desktop *holder = desktops.find(view.grid)) {
+		return holder;
+	}
 	Point centre = box_centre(view.frame_box());
 	return desktops.at(centre.x, centre.y);
 }
@@ -102,8 +107,7 @@ bool Canvas::grid_member(const View &view, const Desktop &desktop) {
 	if (!view.mapped || view.minimized || view.maximized || view.fullscreen) {
 		return false;
 	}
-	Point centre = box_centre(view.frame_box());
-	return desktops.at(centre.x, centre.y) == &desktop;
+	return desktop_of(view) == &desktop;
 }
 
 std::vector<View *> Canvas::grid_members(const Desktop &desktop) {
@@ -131,7 +135,7 @@ Rect Canvas::tiling_area(const Desktop &desktop) {
 	if (picked == nullptr) {
 		return desktop.rect();
 	}
-	return box_to_rect(picked->usable_canvas_box(desktop.frame()));
+	return box_to_rect(picked->usable_canvas_box(desktop.frame(), desktop.scale()));
 }
 
 void Canvas::tile(wlr_box area, const Output &output) {
@@ -140,7 +144,7 @@ void Canvas::tile(wlr_box area, const Output &output) {
 		server_.hint.set("No windows to tile here");
 		return;
 	}
-	flow_grid(in_area, box_to_rect(output.usable_canvas_box(area)));
+	flow_grid(in_area, box_to_rect(output.usable_canvas_box(area, 1.0))); // a free spot rests at 1
 	server_.hint.set(std::format("Tiled {} window{}",
 		in_area.size(), in_area.size() == 1 ? "" : "s"));
 }
@@ -176,9 +180,15 @@ void Canvas::reflow(DesktopId id) {
 		return;
 	}
 	flow_grid(members, tiling_area(*desktop));
+	for (View *view : members) {
+		view->grid = id; // held until it leaves the grid, whatever a zoom does
+	}
 }
 
 void Canvas::settle(View &view) {
+	// Opened, moved, minimized, maximized or restored: where its centre now
+	// stands decides its grid again.
+	view.grid = std::nullopt;
 	bool gridded = false;
 	for (const Desktop &desktop : desktops.all()) {
 		if (desktop.tiling() && grid_member(view, desktop)) {
@@ -237,12 +247,19 @@ wlr_box Canvas::spot_at(double cx, double cy, const Output &output) {
 	return centred_box(output, cx, cy);
 }
 
-void Canvas::scale_settled(const Desktop &desktop) {
-	// A settled scale is a completed action: name it, tell the desktop's
-	// windows the scale they are shown at on the next visibility pass, and
-	// re-flow a tiled grid into the resized frame.
-	server_.hint.set(std::format("Desktop {} · {} %", desktop.number(),
-		static_cast<int>(std::round(desktop.scale() * 100))));
-	reflow(desktop.id());
-	server_.visibility_dirty = true;
+void Canvas::settle_scale(DesktopId id, double scale) {
+	Desktop *desktop = desktops.find(id);
+	if (desktop == nullptr) {
+		return;
+	}
+	desktops.set_scale(id, scale);
+	for (const std::unique_ptr<Output> &output : server_.outputs) {
+		if (output->overview.active() && output->overview.target().desktop == id) {
+			output->overview.set_target(desktop->frame(), id, false);
+		}
+	}
+	// A settled scale is a completed action, named. It re-lays out nothing:
+	// the windows keep their size and layout, a tiled grid its boxes.
+	server_.hint.set(std::format("Desktop {} · {} %", desktop->number(),
+		static_cast<int>(std::round(scale * 100))));
 }

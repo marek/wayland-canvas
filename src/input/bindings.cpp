@@ -182,6 +182,18 @@ void act_goto_desktop(Server &server, Output *output, KeyArg arg) {
 	}
 }
 
+// Super+0: the desktop shown back to 100 %, the camera easing with it. A
+// free view rests at 100 % already.
+void act_reset_scale(Server &server, Output *output, KeyArg) {
+	if (output == nullptr) {
+		return;
+	}
+	if (Desktop *desktop = output->desktop_showing()) {
+		server.canvas.settle_scale(desktop->id(), 1.0);
+		output->goto_desktop(*desktop);
+	}
+}
+
 void act_quit(Server &server, Output *, KeyArg) {
 	wl_display_terminate(server.display);
 }
@@ -264,6 +276,8 @@ constexpr std::array keys = {
 		.fn = act_goto_desktop, .arg = 8},
 	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_9,
 		.fn = act_goto_desktop, .arg = 9},
+	Keybind{.mods = WLR_MODIFIER_LOGO, .keysym = XKB_KEY_0,
+		.fn = act_reset_scale, .arg = 0},
 	Keybind{.mods = WLR_MODIFIER_LOGO | WLR_MODIFIER_SHIFT,
 		.keysym = XKB_KEY_e, .fn = act_quit, .arg = 0},
 	Keybind{.mods = WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT,
@@ -365,6 +379,12 @@ bool Bindings::handle_overview(xkb_keysym_t sym, uint32_t mods, Output &output) 
 		return true;
 	case XKB_KEY_n:
 		overview_new_desktop_at(server_, output);
+		return true;
+	case XKB_KEY_0:
+		if (Desktop *desktop =
+				server_.canvas.desktops.find(output.overview.target().desktop)) {
+			server_.canvas.settle_scale(desktop->id(), 1.0);
+		}
 		return true;
 	case XKB_KEY_plus:
 	case XKB_KEY_equal:

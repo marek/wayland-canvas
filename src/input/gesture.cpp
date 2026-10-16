@@ -578,15 +578,11 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 						* config::desktop_scale_step,
 					config::desktop_scale_min, config::desktop_scale_max);
 			}
-			server_.canvas.desktops.set_scale(z->desktop, settled);
+			server_.canvas.settle_scale(z->desktop, settled);
 			if (!z->overview) {
 				// The camera comes to rest on the desktop, at its scale.
-				Camera next = camera_for_box(desktop->frame(), settled);
-				o.camera.animate_to(next);
+				o.camera.animate_to(camera_for_box(desktop->frame(), settled));
 			}
-			// The desktop's windows are told the settled scale — and only
-			// now, on release.
-			server_.canvas.scale_settled(*desktop);
 		}
 		o.damage();
 		state_ = Idle{};

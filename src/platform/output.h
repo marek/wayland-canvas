@@ -26,7 +26,9 @@ public:
 	Rect viewport() const;
 	Point local_to_canvas(double ox, double oy) const;
 	Point canvas_to_local(double cx, double cy) const;
-	wlr_box usable_canvas_box(wlr_box area) const;
+	// `area` on the canvas, shown at `zoom`, less what this output's bars
+	// (exclusive zones) cover of it.
+	wlr_box usable_canvas_box(wlr_box area, double zoom) const;
 	bool tick(double now); // advances camera motion and the frame fade; true while still moving
 	bool is_panning() const;
 	bool interactive() const; // false while the compositor owns the pointer (overview, animation)

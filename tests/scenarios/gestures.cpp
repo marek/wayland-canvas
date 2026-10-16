@@ -2,6 +2,7 @@
 // backend, real foot clients, synthetic touchpad gestures through the Gesture
 // entry points, screenshots. Writes only under $CANVAS_TMP (meson passes the
 // repo's tmp/).
+#include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -15,6 +16,8 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -37,6 +40,12 @@ pid_t grim_pid = -1;
 std::optional<DesktopId> d1, d2, d3;
 Camera cam0{}, super_start{};
 Rect grid_one{}, grid_two{}; // the boxes the grid left, for the off check
+// The windows' frames before a zoom, for the checks that a zoom re-lays out
+// nothing; and the zoom rounds' progress and what they changed.
+std::vector<std::pair<View *, Rect>> kept;
+int zoom_round = 0;
+std::string zoom_changes;
+wlr_box frame0{}; // Desktop 1's frame at 100 % before any zoom, for the drift check
 std::string tmp_root;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -193,6 +202,50 @@ bool fits_cell(View *view, const std::vector<Rect> &cells) {
 		}
 	}
 	return false;
+}
+
+// Remembers these windows' frames, to compare after a zoom.
+void keep(std::initializer_list<View *> views) {
+	kept.clear();
+	for (View *view : views) {
+		kept.emplace_back(view, view->frame_rect());
+	}
+}
+
+// The kept windows whose frame moved, resized or unmapped since keep(),
+// named with their sizes; empty when nothing changed.
+std::string changed_boxes() {
+	std::string out;
+	for (const auto &[view, box] : kept) {
+		Rect now = view->frame_rect();
+		if (!view->mapped || now.x != box.x || now.y != box.y || now.w != box.w
+				|| now.h != box.h) {
+			out += std::format(" ({} {:.0f}x{:.0f} at {:.0f},{:.0f} -> {:.0f}x{:.0f} at {:.0f},{:.0f}{})",
+				view->wlr->title != nullptr ? view->wlr->title : "?", box.w, box.h,
+				box.x, box.y, now.w, now.h, now.x, now.y, view->mapped ? "" : ", unmapped");
+		}
+	}
+	return out;
+}
+
+// Whether every kept window was told only the output's scale.
+bool told_output_scale() {
+	for (const auto &[view, box] : kept) {
+		if (std::fabs(view->told_scale - out()->wlr->scale) > 1e-9) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Super + 2-finger pinch through the device path, from the shown desktop's
+// scale `from` to settle at `to`.
+void super_pinch_to(double from, double to) {
+	key(KEY_LEFTMETA, true);
+	pinch_down(2);
+	pinch_move(to / from);
+	pinch_up(false);
+	key(KEY_LEFTMETA, false);
 }
 
 int run_step() {
@@ -449,6 +502,8 @@ int run_step() {
 			&& std::fabs(server->cursor->y - 300) < 0.5,
 			"the fake pointer placed the cursor");
 		super_start = o->camera.current();
+		keep({one, two, three}); // Desktop 1's grid, before any zoom
+		frame0 = desk(d1)->frame();
 		return 300;
 	case 30: {
 		// Super + 2-finger pinch from the normal view: the shown desktop
@@ -489,11 +544,11 @@ int run_step() {
 			&& std::fabs(o->camera.current().cy - want.cy) < 1,
 			"the camera came to rest on the desktop at its scale");
 		check(o->interactive(), "the resting zoom is interactive");
-		check(one && two && three
-			&& std::fabs(one->told_scale - 0.8) < 1e-9
-			&& std::fabs(two->told_scale - 0.8) < 1e-9
-			&& std::fabs(three->told_scale - 0.8) < 1e-9,
-			"the desktop's windows were told the settled scale (0.8)");
+		std::string changed = changed_boxes();
+		check(changed.empty(), std::format(
+			"settled at 80 %, the tiled grid kept every box{}", changed));
+		check(told_output_scale(),
+			"the clients were not told the scale: still the output's");
 		check(server->hint.text == "Desktop 1 · 80 %",
 			"the settle is named like a completed action");
 		shot("14-desktop-80");
@@ -551,6 +606,15 @@ int run_step() {
 		}
 		check(got && std::string_view(buf) == "ok\n",
 			std::format("typing on the 80 % desktop reached the client ({})", buf));
+		// The marker joined the grid, which re-flowed into the 80 % frame: a
+		// change of the tiled set, the one thing that lays a grid out.
+		View *marker = view_titled("marker");
+		bool in_frame = marker != nullptr;
+		for (View *v : {one, two, three, marker}) {
+			in_frame = in_frame && v != nullptr && inside(v->frame_rect(), desk(d1)->frame());
+		}
+		check(in_frame, "the window opened on the 80 % desktop re-flowed the grid into its frame");
+		keep({one, two, three, marker});
 		// Near 100 % catches 100 % exactly: 100 is one of the steps.
 		key(KEY_LEFTMETA, true);
 		pinch_down(2);
@@ -562,9 +626,11 @@ int run_step() {
 		return 400;
 	}
 	case 37: {
-		check(o->camera.current().zoom == 1 && o->interactive()
-			&& std::fabs(one->told_scale - 1.0) < 1e-9,
-			"back at 100 %: zoom 1, interactive, clients told 1.0");
+		check(o->camera.current().zoom == 1 && o->interactive(),
+			"back at 100 %: zoom 1, interactive");
+		std::string changed = changed_boxes();
+		check(changed.empty() && told_output_scale(), std::format(
+			"back at 100 %, every window kept its box and the output's scale{}", changed));
 		// Spread past 100 % for the 125 % frame.
 		key(KEY_LEFTMETA, true);
 		pinch_down(2);
@@ -577,9 +643,11 @@ int run_step() {
 	}
 	case 38: {
 		check(std::fabs(o->camera.current().zoom - 1.25) < 1e-9 && o->interactive()
-			&& std::fabs(one->told_scale - 1.25) < 1e-9
 			&& desk(d1)->frame().width == std::lround(o->width / 1.25),
-			"the desktop rests at 125 %, its windows told 1.25");
+			"the desktop rests at 125 %, its frame the base size over 1.25");
+		std::string changed = changed_boxes();
+		check(changed.empty() && told_output_scale(), std::format(
+			"at 125 %, every window kept its box and the output's scale{}", changed));
 		shot("16-desktop-125");
 		return 400;
 	}
@@ -654,20 +722,18 @@ int run_step() {
 			&& std::fabs(o->camera.current().cy - want.cy) < 1
 			&& std::fabs(o->camera.current().zoom - want.zoom) < 1e-9,
 			"going to a desktop eases onto it at its scale");
-	// Desktop 1 has been tiled since the combine; its grid flowed into
-	// the 125 % frame when that scale settled.
-	check(desk(d1)->tiling(), "tiling is on for Desktop 1");
-		grid_one = one->frame_rect();
-		grid_two = two->frame_rect();
-		check(inside(grid_one, desk(d1)->frame()) && inside(grid_two, desk(d1)->frame())
-			&& !grid_one.intersects(grid_two),
-			"the grid filled the 125 % frame");
+		// Desktop 1 has been tiled since the combine; the grid the marker
+		// re-flowed at 80 % has kept its boxes since.
+		check(desk(d1)->tiling(), "tiling is on for Desktop 1");
+		std::string changed = changed_boxes();
+		check(changed.empty(), std::format(
+			"the grid kept its boxes through the settles at 100 % and 125 %{}", changed));
 		shot("20-tiled-125");
 		return 400;
 	}
 	case 47: {
-		// Super + pinch on a tiled desktop: the grid re-flows into the
-		// frame the settled scale leaves.
+		// Super + pinch on a tiled desktop: the settled scale leaves the
+		// grid alone.
 		key(KEY_LEFTMETA, true);
 		pinch_down(2);
 		pinch_move(0.64); // raw 1.25 x 0.64 = 0.8
@@ -678,14 +744,184 @@ int run_step() {
 		return 400;
 	}
 	case 48: {
-		Rect a = one->frame_rect(), b = two->frame_rect();
-		check(inside(a, desk(d1)->frame()) && inside(b, desk(d1)->frame())
-			&& !a.intersects(b),
-			"the grid re-flowed into the 80 % frame");
-		check(a.w > grid_one.w + 100 && b.w > grid_two.w + 100,
-			std::format("the 80 % grid boxes are the larger frame's ({:.0f} vs {:.0f})",
-				a.w, grid_one.w));
+		std::string changed = changed_boxes();
+		check(changed.empty(), std::format(
+			"settled at 80 %, the tiled grid kept every box{}", changed));
 		shot("21-tiled-80");
+		// Tiling off and a maximized window: the zoom rounds below cover
+		// floating and maximized windows alike.
+		key(KEY_LEFTMETA, true);
+		key(KEY_T, true);
+		key(KEY_T, false);
+		key(KEY_LEFTMETA, false);
+		return 600; // untiled, foot may re-fit its own size
+	}
+	case 49:
+		check(!desk(d1)->tiling(), "Super+T switched tiling off");
+		three->set_maximized(true);
+		return 500;
+	case 50: {
+		Rect fr = three->frame_rect();
+		Rect vp = o->viewport();
+		check(three->maximized && std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
+			&& std::fabs(fr.w - vp.w) < 1 && std::fabs(fr.h - vp.h) < 1,
+			std::format("maximized at 80 %, the window fills the screen ({:.0f}x{:.0f})",
+				fr.w, fr.h));
+		keep({one, two, three, view_titled("marker")});
+		zoom_round = 0;
+		zoom_changes.clear();
+		return 300;
+	}
+	case 51: {
+		// Twelve settles, six zooms in and out between 50 % and 200 %, on
+		// uneven steps too: no zoom changes a window, however many there
+		// are. Odd rounds look at the settle before them, 450 ms on, once
+		// anything it set off would have landed.
+		static constexpr std::array targets{2.0, 0.5, 1.35, 0.7, 1.15, 0.5,
+			2.0, 0.85, 1.5, 0.6, 1.25, 0.6};
+		std::size_t round = static_cast<std::size_t>(zoom_round / 2);
+		if (zoom_round % 2 == 1) {
+			std::string changed = changed_boxes();
+			bool told = told_output_scale();
+			if (std::fabs(desk(d1)->scale() - targets[round]) > 1e-9 || !changed.empty()
+					|| !told) {
+				zoom_changes += std::format(" [round {} at {:.2f}:{}{}]", round + 1,
+					desk(d1)->scale(), changed, told ? "" : " clients told a scale");
+			}
+			if (round == 0) {
+				shot("22-desktop-200");
+			} else if (round == 1) {
+				shot("23-desktop-50");
+			}
+			zoom_round++;
+			return -100;
+		}
+		if (round == targets.size()) {
+			check(zoom_changes.empty(), std::format(
+				"twelve settles between 50 % and 200 % changed no window{}", zoom_changes));
+			return 300;
+		}
+		super_pinch_to(desk(d1)->scale(), targets[round]);
+		zoom_round++;
+		return -450;
+	}
+	case 52: {
+		// Super+0: back to 100 % from 60 %.
+		check(std::fabs(desk(d1)->scale() - 0.6) < 1e-9, "the zoom rounds ended at 60 %");
+		key(KEY_LEFTMETA, true);
+		key(KEY_0, true);
+		key(KEY_0, false);
+		key(KEY_LEFTMETA, false);
+		check(desk(d1)->scale() == 1.0 && server->hint.text == "Desktop 1 · 100 %",
+			"Super+0 returned the desktop shown to 100 %, named in a hint");
+		check(!server->launcher.is_open(), "Super+0 opens no launcher");
+		return 700;
+	}
+	case 53: {
+		Camera want = camera_for_box(desk(d1)->frame(), 1.0);
+		check(o->camera.current().zoom == 1 && o->interactive()
+			&& std::fabs(o->camera.current().cx - want.cx) < 1
+			&& std::fabs(o->camera.current().cy - want.cy) < 1,
+			"the camera eased with it and rests on the desktop at 100 %");
+		std::string changed = changed_boxes();
+		check(changed.empty() && told_output_scale() && three->maximized, std::format(
+			"the reset changed no window either, the maximized one included{}", changed));
+		const wlr_box &f = desk(d1)->frame();
+		check(f.x == frame0.x && f.y == frame0.y && f.width == frame0.width
+			&& f.height == frame0.height,
+			std::format("after every zoom, back at 100 % the frame is where it began"
+				" ({},{} vs {},{})", f.x, f.y, frame0.x, frame0.y));
+		shot("24-reset-super-0");
+		super_pinch_to(1.0, 1.25);
+		return 500;
+	}
+	case 54:
+		check(std::fabs(desk(d1)->scale() - 1.25) < 1e-9, "spread to 125 % again");
+		o->overview.enter();
+		return 600;
+	case 55: {
+		// `0` in the overview: the target desktop back to 100 %.
+		check(o->overview.active() && o->overview.target().desktop == d1,
+			"the overview targets the 125 % desktop");
+		key(KEY_0, true);
+		key(KEY_0, false);
+		const wlr_box &f = desk(d1)->frame();
+		const wlr_box &t = o->overview.target().box;
+		check(desk(d1)->scale() == 1.0 && f.width == o->width && f.height == o->height,
+			"0 in the overview returned the target desktop to 100 %, its frame the base size");
+		check(t.x == f.x && t.y == f.y && t.width == f.width && t.height == f.height,
+			"the overview's target follows the resized frame");
+		check(server->hint.text == "Desktop 1 · 100 %", "the overview's reset is named in a hint");
+		shot("25-overview-reset");
+		o->overview.exit();
+		return 700;
+	}
+	case 56: {
+		Camera want = camera_for_box(desk(d1)->frame(), 1.0);
+		check(!o->overview.active() && o->camera.current().zoom == 1 && o->interactive()
+			&& std::fabs(o->camera.current().cx - want.cx) < 1
+			&& std::fabs(o->camera.current().cy - want.cy) < 1,
+			"leaving the overview rests on the desktop at 100 %");
+		std::string changed = changed_boxes();
+		check(changed.empty() && told_output_scale(), std::format(
+			"no window changed through the overview's reset{}", changed));
+		return 400;
+	}
+	case 57:
+		// The grid through a zoom: laid out at 50 % (the maximized window
+		// stays out of it), then shown at 200 %, where the frame's edges
+		// pass the outer windows' centres.
+		super_pinch_to(1.0, 0.5);
+		return 450;
+	case 58:
+		key(KEY_LEFTMETA, true);
+		key(KEY_T, true);
+		key(KEY_T, false);
+		key(KEY_LEFTMETA, false);
+		return 600;
+	case 59: {
+		View *marker = view_titled("marker");
+		check(desk(d1)->tiling() && one->grid == d1 && two->grid == d1
+			&& marker != nullptr && marker->grid == d1 && !three->grid.has_value(),
+			"Super+T tiled the 50 % desktop, the maximized window out of the grid");
+		keep({one, two, marker});
+		super_pinch_to(0.5, 2.0);
+		return 450;
+	}
+	case 60: {
+		std::string changed = changed_boxes();
+		check(std::fabs(desk(d1)->scale() - 2.0) < 1e-9 && changed.empty(), std::format(
+			"from 50 % to 200 % the grid kept every box{}", changed));
+		// At 200 % the frame no longer covers every grid window's centre: the
+		// grid, not the centre, keeps them the desktop's.
+		int outside = 0;
+		for (const auto &[view, box] : kept) {
+			outside += !desk(d1)->contains(box.cx(), box.cy());
+		}
+		check(outside > 0, std::format("at 200 % {} grid window(s) lie past the frame's edge",
+			outside));
+		spawn("foot -T late sh -c 'echo late; exec sleep 600'");
+		return 300;
+	}
+	case 61: {
+		View *late = view_titled("late");
+		if ((late == nullptr || !late->mapped) && retries++ < 100) {
+			return -100; // retry until mapped
+		}
+		return 700; // the re-flow's configures land
+	}
+	case 62: {
+		// A window opened at 200 % re-flows the whole grid into the 200 %
+		// frame: none is left behind where the 50 % grid had it.
+		View *late = view_titled("late");
+		View *marker = view_titled("marker");
+		bool all = late != nullptr && marker != nullptr;
+		for (View *v : {one, two, marker, late}) {
+			all = all && v != nullptr && v->tiled && v->grid == d1
+				&& inside(v->frame_rect(), desk(d1)->frame());
+		}
+		check(all, "a window opened at 200 % re-flowed every grid window into the frame");
+		shot("26-tiled-200-reflow");
 		return 0;
 	}
 	default:

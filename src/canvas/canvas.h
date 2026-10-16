@@ -26,8 +26,7 @@ public:
 	// grid; off leaves them where the grid put them, told they are no
 	// longer tiled.
 	void toggle_tiling(DesktopId id);
-	// Re-flows a tiled desktop's grid: the entry point for a settled scale
-	// or frame change.
+	// Re-flows a tiled desktop's grid, for a change of its tiled set.
 	void reflow(DesktopId id);
 	// A view's grid membership may have changed (opened, closed, a state
 	// toggled, a move ended): it joins or leaves the grid, at the slot
@@ -35,10 +34,11 @@ public:
 	void settle(View &view);
 	// The views in `from_area` move into `into`, keeping their offsets; `from` is removed.
 	void combine(DesktopId into, DesktopId from, wlr_box from_area);
-	// The desktop's scale settled at a new value: its windows are told the
-	// scale they are shown at, and a tiled grid re-flows into the resized
-	// frame.
-	void scale_settled(const Desktop &desktop);
+	// Settles a desktop's scale: the frame resizes around its centre, an
+	// overview targeting it follows the frame, and a hint names the scale.
+	// Nothing else follows: no window is resized or re-flowed, and no
+	// client is told.
+	void settle_scale(DesktopId id, double scale);
 	// The desktop frame at the point, or an output-sized box centred on it.
 	wlr_box spot_at(double cx, double cy, const Output &output);
 
@@ -49,7 +49,8 @@ private:
 	// that holds a window out of the grid, and its members by frame centre.
 	std::vector<View *> grid_members(const Desktop &desktop);
 	bool grid_member(const View &view, const Desktop &desktop);
-	// The desktop's frame inset by the bars of the output that shows it.
+	// The desktop's frame inset by the bars of the output that shows it,
+	// at the desktop's scale.
 	Rect tiling_area(const Desktop &desktop);
 
 	Server &server_;

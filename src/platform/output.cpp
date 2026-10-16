@@ -46,16 +46,14 @@ void update_output_geometry(Output &output) {
 void view_update_outputs(View &view, uint32_t mask) {
 	uint32_t old = view.output_mask;
 	view.output_mask = mask;
-	// The scale the view is shown at: the output's scale times the scale
-	// of the desktop it belongs to (1 off every desktop).
-	double desktop_scale = 1;
-	if (Desktop *desktop = view.server.canvas.desktop_of(view)) {
-		desktop_scale = desktop->scale();
-	}
-	double scale = desktop_scale;
+	// The scale the view's clients render for: the largest scale of the
+	// outputs it is on. A desktop's scale is the compositor's scaling of the
+	// picture and never reaches them, so a zoom never re-renders or resizes
+	// a window.
+	double scale = 0;
 	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if ((mask & output->bit) && output->wlr->scale * desktop_scale > scale) {
-			scale = output->wlr->scale * desktop_scale;
+		if ((mask & output->bit) && output->wlr->scale > scale) {
+			scale = output->wlr->scale;
 		}
 	}
 	// Like wlr_scene: a view scrolled off every output keeps its last
@@ -75,8 +73,7 @@ void view_update_outputs(View &view, uint32_t mask) {
 		});
 		view.told_scale = scale;
 	} else if (mask != 0 && scale != view.told_scale) {
-		// Same outputs, a new scale: the desktop's scale settled, or the
-		// window moved onto a desktop of another scale.
+		// Same outputs, a new scale: one of them changed its scale.
 		view.for_each_surface([&](wlr_surface *surface, int, int) {
 			wlr_fractional_scale_v1_notify_scale(surface, scale);
 			wlr_surface_set_preferred_buffer_scale(surface,
@@ -173,10 +170,12 @@ Point Output::canvas_to_local(double cx, double cy) const {
 	};
 }
 
-wlr_box Output::usable_canvas_box(wlr_box area) const {
-	int left = usable.x, top = usable.y;
-	int right = width - (usable.x + usable.width);
-	int bottom = height - (usable.y + usable.height);
+wlr_box Output::usable_canvas_box(wlr_box area, double zoom) const {
+	// The bars' output pixels in canvas units at that zoom.
+	int left = canvas_units_covered(usable.x, zoom);
+	int top = canvas_units_covered(usable.y, zoom);
+	int right = canvas_units_covered(width - (usable.x + usable.width), zoom);
+	int bottom = canvas_units_covered(height - (usable.y + usable.height), zoom);
 	area.x += left;
 	area.y += top;
 	area.width -= left + right;
