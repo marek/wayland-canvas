@@ -310,8 +310,9 @@ if foot_prog.found() and grim_prog.found()
 			is_parallel: false,
 			# The bar scenario also walks every panel, the plugin reloads,
 			# the idle watch, the theme phase, the Wi-Fi phase and the
-			# agents phase (whose probe-reuse window alone waits out 20 s):
-			# it needs the wider budget.
+			# agents phase: its 200-odd steps (step 90's reload check alone
+			# waits out up to 105 s of retries by design, the agents phase's
+			# probe-reuse window 20 s) need the wider budget.
 			timeout: scenario == 'bar' ? 420 : 180,
 			env: scenario_env,
 		)
