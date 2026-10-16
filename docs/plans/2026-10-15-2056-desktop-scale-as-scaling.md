@@ -31,9 +31,9 @@ bar and disappears after a few zooms in and out is root-caused and covered by a 
 
 ## Views at any zoom
 
-- [ ] A 2-finger scroll or a 3-finger pan never changes the zoom in the normal view: a free view keeps the zoom it was panned at and stays interactive; the snap onto a desktop is a fraction of the screen as shown
-- [ ] Super+0 returns a free view to 100 %; pinning a free view makes a desktop at its zoom; leaving the overview into a free spot fills the screen with it
-- [ ] The scale reaches down to 25 %, and the overview always opens further out than the view it leaves
+- [x] A 2-finger scroll or a 3-finger pan never changes the zoom in the normal view: a free view keeps the zoom it was panned at and stays interactive; the snap onto a desktop is a fraction of the screen as shown
+- [x] Super+0 returns a free view to 100 %; pinning a free view makes a desktop at its zoom; leaving the overview into a free spot fills the screen with it
+- [x] The scale reaches down to 25 %, and the overview always opens further out than the view it leaves
 
 ## Verification
 
@@ -41,5 +41,5 @@ bar and disappears after a few zooms in and out is root-caused and covered by a 
 - [x] The scenario resets with Super+0 and with `0` in the overview
 - [x] Screenshots at 50 %, 125 %, 200 % and after the reset, inspected
 - [x] README and `-h` name Super+0; warning-free build, every suite green
-- [ ] The gestures scenario at 25 %: a 2-finger scroll, a plain 2-finger pinch and a 3-finger pan off the desktop leave the zoom alone and the view interactive; the overview round trip keeps the free view's zoom; Super+0 brings it to 100 %
-- [ ] On screen: Super + 2-finger pinch on the touchpad, nested and on a TTY, zooming in and out with Super+0 to come back (the user)
+- [x] The gestures scenario at 25 %: a 2-finger scroll, a plain 2-finger pinch and a 3-finger pan off the desktop leave the zoom alone and the view interactive; the overview round trip keeps the free view's zoom; Super+0 brings it to 100 %
+- [ ] On screen: Super + 2-finger pinch on the touchpad, nested and on a TTY, zooming in and out (down to 25 %), panning a zoomed desktop with 2 and 3 fingers, and Super+0 to come back (the user)
