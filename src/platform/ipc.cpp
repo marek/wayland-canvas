@@ -310,6 +310,99 @@ void add_items_array(JsonBuilder *builder, Server &server) {
 	json_builder_end_array(builder);
 }
 
+// -------------------------------------------------------- settings as JSON
+
+// A swipe preset's name, as canvas.conf and the settings window write it.
+std::string_view swipe_name(settings::SwipePreset preset) {
+	switch (preset) {
+	case settings::SwipePreset::three_finger_hops:
+		return "three-finger-hops";
+	case settings::SwipePreset::four_finger_hops:
+		return "four-finger-hops";
+	case settings::SwipePreset::off:
+		return "off";
+	}
+	return "off";
+}
+
+std::optional<settings::SwipePreset> swipe_preset(std::string_view name) {
+	if (name == "three-finger-hops") {
+		return settings::SwipePreset::three_finger_hops;
+	}
+	if (name == "four-finger-hops") {
+		return settings::SwipePreset::four_finger_hops;
+	}
+	if (name == "off") {
+		return settings::SwipePreset::off;
+	}
+	return std::nullopt;
+}
+
+// The settings as settings.get returns them (docs/intents/platform/ipc.md):
+// the file, its ignored lines, every action with its keys and defaults in
+// the registry's order, the commands, the gestures.
+void add_settings(JsonBuilder *builder, Server &server) {
+	auto add_string = [builder](const char *name, std::string_view text) {
+		json_builder_set_member_name(builder, name);
+		// json-glib copies the string, so a temporary ending now is fine.
+		json_builder_add_string_value(builder, std::string(text).c_str());
+	};
+	auto add_chords = [builder](const std::vector<settings::Chord> &chords) {
+		json_builder_begin_array(builder);
+		for (settings::Chord chord : chords) {
+			json_builder_add_string_value(builder,
+				settings::chord_text(chord).c_str());
+		}
+		json_builder_end_array(builder);
+	};
+	add_string("path", server.conf_path);
+	json_builder_set_member_name(builder, "errors");
+	json_builder_begin_array(builder);
+	for (const settings::Error &error : server.conf_errors) {
+		json_builder_begin_object(builder);
+		json_builder_set_member_name(builder, "line");
+		json_builder_add_int_value(builder, error.line);
+		add_string("text", error.text);
+		json_builder_end_object(builder);
+	}
+	json_builder_end_array(builder);
+	json_builder_set_member_name(builder, "shortcuts");
+	json_builder_begin_array(builder);
+	const std::vector<settings::ActionDef> &registry = settings::registry();
+	for (std::size_t i = 0; i < registry.size(); i++) {
+		const settings::ActionDef &def = registry[i];
+		json_builder_begin_object(builder);
+		add_string("scope",
+			def.scope == settings::Scope::overview ? "overview" : "global");
+		add_string("action", def.name);
+		add_string("label", def.label);
+		add_string("group", def.group);
+		json_builder_set_member_name(builder, "keys");
+		add_chords(server.conf.keys[i]);
+		json_builder_set_member_name(builder, "defaults");
+		add_chords(def.defaults);
+		json_builder_end_object(builder);
+	}
+	json_builder_end_array(builder);
+	json_builder_set_member_name(builder, "commands");
+	json_builder_begin_array(builder);
+	for (const settings::Command &command : server.conf.commands) {
+		json_builder_begin_object(builder);
+		json_builder_set_member_name(builder, "keys");
+		json_builder_add_string_value(builder,
+			settings::chord_text(command.chord).c_str());
+		add_string("command", command.command);
+		json_builder_end_object(builder);
+	}
+	json_builder_end_array(builder);
+	json_builder_set_member_name(builder, "gestures");
+	json_builder_begin_object(builder);
+	add_string("swipes", swipe_name(server.conf.swipes));
+	json_builder_set_member_name(builder, "pinchScale");
+	json_builder_add_boolean_value(builder, server.conf.pinch_scale);
+	json_builder_end_object(builder);
+}
+
 // ------------------------------------------------------------ the client
 
 // Connects to $WAYLAND_CANVAS_SOCKET, else to the socket of the compositor
@@ -392,6 +485,12 @@ Ipc::Client::~Client() {
 		ipc.pick_client_ = nullptr; // its pick can never be answered now
 		ipc.pick_id_.clear();
 	}
+	if (ipc.capture_client_ == this) {
+		ipc.capture_client_ = nullptr; // its capture can never be answered
+		ipc.capture_id_.clear();
+		// The capture itself ends: no keys are swallowed for a dead client.
+		ipc.server_.input.cancel_shortcut_capture();
+	}
 	source.reset(); // off the loop before the fd it watched is closed
 	if (fd >= 0) { // a dropped client's fd is already closed
 		close(fd);
@@ -454,6 +553,9 @@ bool Ipc::init() {
 }
 
 void Ipc::finish() {
+	// A shortcut capture under way would call back into this dying Ipc;
+	// its client — still alive here — is answered null.
+	server_.input.cancel_shortcut_capture();
 	clients_.clear();
 	listen_source_.reset();
 	if (listen_fd_ >= 0) {
@@ -566,6 +668,10 @@ void Ipc::handle_line(Client &client, std::string_view line) {
 		capture_pick(client, request.id_json, request.params);
 		return;
 	}
+	if (request.method == "shortcut.capture") {
+		shortcut_capture(client, request.id_json, request.params);
+		return;
+	}
 	std::expected<std::string, std::string> result =
 		dispatch_method(client, request.method, request.params);
 	queue(client, response(request.id_json,
@@ -637,6 +743,55 @@ void Ipc::answer_pick(bool ok, std::string_view payload) {
 	queue(client, response(id, ok ? payload : quote(payload), !ok));
 }
 
+void Ipc::shortcut_capture(Client &client, std::string_view id_json,
+		JsonObject *params) {
+	auto bail = [&](std::string_view error) {
+		queue(client, response(id_json, quote(error), true));
+	};
+	// The scope is only named for what settings.set will decide; the
+	// capture reports the chord as pressed.
+	std::expected<std::optional<std::string>, std::string> scope =
+		opt_string(params, "scope");
+	if (!scope.has_value()) {
+		bail(scope.error());
+		return;
+	}
+	if (scope->has_value() && *(*scope) != "global" && *(*scope) != "overview") {
+		bail("params: scope must be \"global\" or \"overview\"");
+		return;
+	}
+	// A capture under way is cancelled: its client is answered now.
+	server_.input.cancel_shortcut_capture();
+	capture_client_ = &client;
+	capture_id_ = id_json;
+	// No response yet: answer_capture() sends it once the chord is pressed
+	// or the capture is cancelled.
+	server_.input.begin_shortcut_capture(
+		[this](std::optional<settings::Chord> chord) {
+			answer_capture(chord);
+		});
+}
+
+void Ipc::answer_capture(std::optional<settings::Chord> chord) {
+	if (capture_client_ == nullptr) {
+		return;
+	}
+	Client &client = *capture_client_;
+	std::string id = capture_id_;
+	capture_client_ = nullptr;
+	capture_id_.clear();
+	std::string payload = object_text([&](JsonBuilder *builder) {
+		json_builder_set_member_name(builder, "keys");
+		if (chord.has_value()) {
+			json_builder_add_string_value(builder,
+				settings::chord_text(*chord).c_str());
+		} else {
+			json_builder_add_null_value(builder);
+		}
+	});
+	queue(client, response(id, payload, false));
+}
+
 std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::string_view name, JsonObject *params) {
 	// The protocol's method table.
@@ -652,6 +807,9 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
 		std::pair{std::string_view{"capture.stop"}, &Ipc::m_capture_stop},
+		std::pair{std::string_view{"settings.get"}, &Ipc::m_settings_get},
+		std::pair{std::string_view{"settings.set"}, &Ipc::m_settings_set},
+		std::pair{std::string_view{"shortcut.cancel"}, &Ipc::m_shortcut_cancel},
 	};
 	for (const auto &[method, run] : table) {
 		if (method == name) {
@@ -973,6 +1131,204 @@ std::expected<std::string, std::string> Ipc::m_capture_stop(Client &,
 	return std::string{"true"};
 }
 
+std::expected<std::string, std::string> Ipc::m_settings_get(Client &,
+		JsonObject *) {
+	return object_text([&](JsonBuilder *builder) {
+		add_settings(builder, server_);
+	});
+}
+
+std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
+		JsonObject *params) {
+	constexpr std::string_view usage =
+		R"(params: exactly one of action with keys, commands, swipes or pinchScale)";
+	if (params == nullptr) {
+		return std::unexpected(std::string{usage});
+	}
+	bool has_action = json_object_has_member(params, "action");
+	bool has_commands = json_object_has_member(params, "commands");
+	bool has_swipes = json_object_has_member(params, "swipes");
+	bool has_pinch = json_object_has_member(params, "pinchScale");
+	if (has_action + has_commands + has_swipes + has_pinch != 1) {
+		return std::unexpected(std::string{usage});
+	}
+	settings::File file{server_.conf_text};
+	std::expected<settings::Edit, std::string> edit =
+		std::unexpected(std::string{usage});
+	if (has_action) {
+		// scope + action + keys: `keys` null (or absent) writes the
+		// action's defaults into its line, `[]` leaves it keyless.
+		std::expected<std::optional<std::string>, std::string> scope =
+			opt_string(params, "scope");
+		if (!scope.has_value()) {
+			return std::unexpected(scope.error());
+		}
+		settings::Scope scope_value = settings::Scope::global;
+		if (scope->has_value()) {
+			if (*(*scope) == "overview") {
+				scope_value = settings::Scope::overview;
+			} else if (*(*scope) != "global") {
+				return std::unexpected(std::string{
+					"params: scope must be \"global\" or \"overview\""});
+			}
+		}
+		std::expected<std::optional<std::string>, std::string> action =
+			opt_string(params, "action");
+		if (!action.has_value()) {
+			return std::unexpected(action.error());
+		}
+		if (!action->has_value() || (*action)->empty()) {
+			return std::unexpected(std::string{
+				"params: action must be a non-empty string"});
+		}
+		std::optional<std::vector<settings::Chord>> keys;
+		if (json_object_has_member(params, "keys")) {
+			JsonNode *node = json_object_get_member(params, "keys");
+			if (json_node_get_node_type(node) == JSON_NODE_NULL) {
+				keys = std::nullopt; // the reset: the defaults
+			} else if (json_node_get_node_type(node) == JSON_NODE_ARRAY) {
+				JsonArray *array = json_node_get_array(node);
+				std::vector<settings::Chord> chords;
+				for (unsigned i = 0; i < json_array_get_length(array); i++) {
+					JsonNode *element = json_array_get_element(array, i);
+					if (json_node_get_node_type(element) != JSON_NODE_VALUE
+							|| json_node_get_value_type(element) != G_TYPE_STRING) {
+						return std::unexpected(std::string{
+							"params: keys must be chord strings"});
+					}
+					std::string text = json_node_get_string(element);
+					std::expected<settings::Chord, std::string> chord =
+						settings::parse_chord(text, scope_value);
+					if (!chord.has_value()) {
+						return std::unexpected(std::format("bad chord '{}': {}",
+							text, chord.error()));
+					}
+					chords.push_back(*chord);
+				}
+				keys = std::optional{std::move(chords)};
+			} else {
+				return std::unexpected(std::string{
+					"params: keys must be an array of chords or null"});
+			}
+		}
+		edit = file.set_action(scope_value, *(*action), keys);
+	} else if (has_commands) {
+		// The [commands] entries, replaced wholesale.
+		JsonNode *node = json_object_get_member(params, "commands");
+		if (json_node_get_node_type(node) != JSON_NODE_ARRAY) {
+			return std::unexpected(std::string{
+				"params: commands must be an array of {keys, command}"});
+		}
+		JsonArray *array = json_node_get_array(node);
+		std::vector<settings::Command> commands;
+		for (unsigned i = 0; i < json_array_get_length(array); i++) {
+			JsonNode *element = json_array_get_element(array, i);
+			if (json_node_get_node_type(element) != JSON_NODE_OBJECT) {
+				return std::unexpected(std::string{
+					"params: commands must be an array of {keys, command}"});
+			}
+			JsonObject *entry = json_node_get_object(element);
+			const char *keys_text = nullptr;
+			const char *command_text = nullptr;
+			for (const char *name : {"keys", "command"}) {
+				if (!json_object_has_member(entry, name)) {
+					continue;
+				}
+				JsonNode *member = json_object_get_member(entry, name);
+				if (json_node_get_node_type(member) != JSON_NODE_VALUE
+						|| json_node_get_value_type(member) != G_TYPE_STRING) {
+					return std::unexpected(std::format(
+						"params: commands' {} must be a string", name));
+				}
+				if (name == std::string_view{"keys"}) {
+					keys_text = json_node_get_string(member);
+				} else {
+					command_text = json_node_get_string(member);
+				}
+			}
+			if (keys_text == nullptr || command_text == nullptr) {
+				return std::unexpected(std::string{
+					"params: every command needs keys and command"});
+			}
+			std::expected<settings::Chord, std::string> chord =
+				settings::parse_chord(keys_text, settings::Scope::global);
+			if (!chord.has_value()) {
+				return std::unexpected(std::format("bad chord '{}': {}",
+					keys_text, chord.error()));
+			}
+			commands.push_back({*chord, command_text});
+		}
+		edit = file.set_commands(commands);
+	} else if (has_swipes) {
+		std::expected<std::optional<std::string>, std::string> swipes =
+			opt_string(params, "swipes");
+		if (!swipes.has_value()) {
+			return std::unexpected(swipes.error());
+		}
+		if (!swipes->has_value()) {
+			return std::unexpected(std::string{
+				"params: swipes must be \"three-finger-hops\","
+				" \"four-finger-hops\" or \"off\""});
+		}
+		std::optional<settings::SwipePreset> preset = swipe_preset(*(*swipes));
+		if (!preset.has_value()) {
+			return std::unexpected(std::format(
+				"params: swipes must be \"three-finger-hops\","
+				" \"four-finger-hops\" or \"off\", not '{}'", *(*swipes)));
+		}
+		edit = file.set_swipes(*preset);
+	} else {
+		JsonNode *node = json_object_get_member(params, "pinchScale");
+		if (json_node_get_node_type(node) != JSON_NODE_VALUE
+				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
+			return std::unexpected(std::string{
+				"params: pinchScale must be true or false"});
+		}
+		edit = file.set_pinch_scale(json_node_get_boolean(node));
+	}
+	if (!edit.has_value()) {
+		return std::unexpected(edit.error());
+	}
+	if (!server_.write_conf(edit->text)) {
+		return std::unexpected(std::format("{} is unwritable",
+			server_.conf_path));
+	}
+	// The settings now, with where a taken chord came from.
+	return object_text([&](JsonBuilder *builder) {
+		add_settings(builder, server_);
+		json_builder_set_member_name(builder, "moved");
+		json_builder_begin_array(builder);
+		for (const settings::Moved &moved : edit->moved) {
+			json_builder_begin_object(builder);
+			json_builder_set_member_name(builder, "scope");
+			json_builder_add_string_value(builder,
+				moved.scope == settings::Scope::overview ? "overview" : "global");
+			json_builder_set_member_name(builder, "action");
+			json_builder_add_string_value(builder, moved.action.c_str());
+			if (!moved.command.empty()) {
+				json_builder_set_member_name(builder, "command");
+				json_builder_add_string_value(builder, moved.command.c_str());
+			}
+			json_builder_set_member_name(builder, "keys");
+			json_builder_begin_array(builder);
+			for (settings::Chord chord : moved.keys) {
+				json_builder_add_string_value(builder,
+					settings::chord_text(chord).c_str());
+			}
+			json_builder_end_array(builder);
+			json_builder_end_object(builder);
+		}
+		json_builder_end_array(builder);
+	});
+}
+
+std::expected<std::string, std::string> Ipc::m_shortcut_cancel(Client &,
+		JsonObject *) {
+	// A capture under way is cancelled: its client is answered null now.
+	server_.input.cancel_shortcut_capture();
+	return std::string{"true"};
+}
+
 // --------------------------------------------------------------- writing
 
 void Ipc::queue(Client &client, std::string_view line) {
@@ -1078,6 +1434,12 @@ void Ipc::emit_theme() {
 	push_event("theme", object_text([&](JsonBuilder *builder) {
 		json_builder_set_member_name(builder, "mode");
 		json_builder_add_string_value(builder, mode.c_str());
+	}));
+}
+
+void Ipc::emit_settings() {
+	push_event("settings", object_text([&](JsonBuilder *builder) {
+		add_settings(builder, server_);
 	}));
 }
 

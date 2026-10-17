@@ -17,8 +17,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/poll.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -46,6 +49,9 @@ View *closed_view = nullptr; // compared by address only, after it is freed
 View *second = nullptr; // the window beside "a" on Desktop 1
 std::optional<DesktopId> right_made; // the desktop a right click made in the overview
 std::string shot_dir;
+
+std::string canvas_conf; // this run's scratch canvas.conf
+pid_t raw_pid = -1;      // a forked raw socket client, reaped by a later step
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -180,6 +186,166 @@ void chord(uint32_t k, std::span<const uint32_t> mods) {
 	key(k, false);
 	for (uint32_t m : std::views::reverse(mods)) {
 		key(m, false);
+	}
+}
+
+// --------------------------------------------------- canvas.conf helpers
+
+// A whole file's text, or nullopt when it is missing.
+std::optional<std::string> read_file(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "rb");
+	if (f == nullptr) {
+		return std::nullopt;
+	}
+	std::string text;
+	char chunk[4096];
+	std::size_t n = 0;
+	while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
+		text.append(chunk, n);
+	}
+	std::fclose(f);
+	return text;
+}
+
+bool file_exists(const std::string &path) {
+	struct stat st{};
+	return stat(path.c_str(), &st) == 0;
+}
+
+// Saves `text` over canvas.conf the way an editor does: written beside,
+// renamed over, so the inotify reload sees one whole file.
+bool save_conf(const std::string &text) {
+	std::string tmp = canvas_conf + ".hand";
+	FILE *f = std::fopen(tmp.c_str(), "wb");
+	if (f == nullptr) {
+		return false;
+	}
+	bool ok = text.empty()
+		|| std::fwrite(text.data(), 1, text.size(), f) == text.size();
+	std::fclose(f);
+	return ok && rename(tmp.c_str(), canvas_conf.c_str()) == 0;
+}
+
+// True when the running session's resolved keys for `action` (global
+// scope) hold `chord`: the observable of a reload that applied.
+bool holds_chord(std::string_view action, const settings::Chord &chord) {
+	const std::vector<settings::ActionDef> &registry = settings::registry();
+	for (std::size_t i = 0; i < registry.size(); i++) {
+		if (registry[i].scope != settings::Scope::global
+				|| registry[i].name != action) {
+			continue;
+		}
+		for (settings::Chord held : server->conf.keys[i]) {
+			if (held == chord) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// ------------------------------------------------------ raw ipc clients
+
+// Connects to the control socket from a child process (the compositor
+// runs in this one, so nothing here may block the parent). -1 on failure.
+int child_connect() {
+	const char *path = std::getenv("WAYLAND_CANVAS_SOCKET");
+	if (path == nullptr || *path == '\0') {
+		return -1;
+	}
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		return -1;
+	}
+	sockaddr_un addr{};
+	addr.sun_family = AF_UNIX;
+	if (strlen(path) >= sizeof(addr.sun_path)) {
+		close(fd);
+		return -1;
+	}
+	strcpy(addr.sun_path, path);
+	if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+bool child_write_all(int fd, std::string_view bytes) {
+	std::size_t done = 0;
+	while (done < bytes.size()) {
+		ssize_t n = write(fd, bytes.data() + done, bytes.size() - done);
+		if (n > 0) {
+			done += static_cast<std::size_t>(n);
+		} else if (n < 0 && errno == EINTR) {
+			continue;
+		} else {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Forks a child that sends `to_send` as raw lines and captures everything
+// the compositor sends back, until `quiet_polls` quiet 400 ms polls, EOF
+// or 10 s pass; whatever arrived is written under <shot_dir>/<out>. A
+// shortcut capture's answer can wait for keys the parent presses only
+// after the child is forked, so it gets the long quiet count.
+pid_t fork_ipc_client(const std::string &to_send, const char *out,
+		int quiet_polls) {
+	pid_t pid = fork();
+	if (pid != 0) {
+		return pid;
+	}
+	int fd = child_connect();
+	FILE *f = std::fopen((shot_dir + "/" + out).c_str(), "w");
+	if (fd < 0 || f == nullptr) {
+		if (f != nullptr) {
+			std::fclose(f);
+		}
+		_exit(125);
+	}
+	if (!child_write_all(fd, to_send)) {
+		std::fclose(f);
+		close(fd);
+		_exit(124);
+	}
+	char buf[1024];
+	int idle = 0;
+	bool eof = false;
+	for (int elapsed = 0; !eof && idle < quiet_polls && elapsed < 10000;
+			elapsed += 400) {
+		pollfd pfd{.fd = fd, .events = POLLIN, .revents = 0};
+		if (poll(&pfd, 1, 400) == 0) {
+			idle++;
+			continue;
+		}
+		idle = 0;
+		if ((pfd.revents & (POLLERR | POLLNVAL)) != 0) {
+			break;
+		}
+		ssize_t n = read(fd, buf, sizeof buf);
+		if (n <= 0) {
+			eof = true;
+			break;
+		}
+		std::fwrite(buf, 1, static_cast<std::size_t>(n), f);
+		std::fflush(f); // the parent reads the file while this child lives
+	}
+	if (eof) {
+		std::fputs("\nEOF\n", f);
+	}
+	std::fflush(f);
+	std::fclose(f);
+	close(fd);
+	_exit(0);
+}
+
+// Reaps the forked client of an earlier step, if it has exited.
+void reap_client() {
+	if (raw_pid > 0) {
+		waitpid(raw_pid, nullptr, WNOHANG);
+		raw_pid = -1;
 	}
 }
 
@@ -815,7 +981,266 @@ int run_step() {
 				&& server->canvas.desktop_of(*d) == nullptr,
 			"its windows stayed where they were, on no desktop");
 		shot("right-click-removed");
-		return 0;
+		return 400;
+	}
+	case 61: { // canvas.conf: written with every default, chords from it
+		key(KEY_ESC, true);
+		key(KEY_ESC, false);
+		check(!o->overview.active(), "Escape left the overview");
+		std::optional<std::string> text = read_file(canvas_conf);
+		check(text.has_value() && *text == settings::template_text(),
+			"the first run wrote canvas.conf with every default");
+		key(KEY_LEFTMETA, true);
+		key(KEY_SPACE, true);
+		key(KEY_SPACE, false);
+		key(KEY_LEFTMETA, false);
+		check(server->launcher.is_open(), "Super+Space opened the launcher");
+		key(KEY_LEFTMETA, true);
+		key(KEY_SPACE, true);
+		key(KEY_SPACE, false);
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(), "its own chord closed it");
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(),
+			"a lone Super tap runs nothing by default");
+		return 300;
+	}
+	case 62: { // a hand edit saves over the file; the session applies it
+		std::optional<std::string> text = read_file(canvas_conf);
+		std::string from = "launcher = Super+Space";
+		std::size_t at = text.has_value() ? text->find(from) : std::string::npos;
+		if (at != std::string::npos) {
+			text->replace(at, from.size(), "launcher = Super+K");
+			save_conf(*text);
+		}
+		return 300;
+	}
+	case 63: { // Super+K now opens it, without any restart
+		bool applied = holds_chord("launcher",
+			{settings::mod_logo, XKB_KEY_k});
+		if (!applied && retries++ < 100) {
+			return -100;
+		}
+		check(applied, "saving canvas.conf applied to the running session");
+		key(KEY_LEFTMETA, true);
+		key(KEY_K, true);
+		key(KEY_K, false);
+		key(KEY_LEFTMETA, false);
+		check(server->launcher.is_open(), "Super+K, from the file, opened the launcher");
+		key(KEY_LEFTMETA, true);
+		key(KEY_K, true);
+		key(KEY_K, false);
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(), "and closed it again");
+		key(KEY_LEFTMETA, true);
+		key(KEY_SPACE, true);
+		key(KEY_SPACE, false);
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(),
+			"Super+Space, replaced in the file, opens nothing");
+		return 300;
+	}
+	case 64: { // a hand-written file with comments, for the edits below
+		save_conf("# my wayland-canvas\n[shortcuts]\n# the launcher\n"
+			"launcher = Super+K\n\n[commands]\n# Super+B runs a command\n");
+		return 300;
+	}
+	case 65: {
+		bool applied = holds_chord("launcher",
+			{settings::mod_logo, XKB_KEY_k});
+		if (!applied && retries++ < 100) {
+			return -100;
+		}
+		// settings.set takes Super+K from the launcher for the terminal.
+		raw_pid = fork_ipc_client(
+			"{\"id\":1,\"method\":\"settings.set\",\"params\":"
+			"{\"action\":\"terminal\",\"keys\":[\"Super+K\"]}}\n",
+			"set-terminal.out", 3);
+		return 400;
+	}
+	case 66: { // one line rewritten, every other byte of the user's file kept
+		reap_client();
+		std::string out = read_file(shot_dir + "/set-terminal.out")
+			.value_or("");
+		check(out.find("\"moved\":[{\"scope\":\"global\","
+				"\"action\":\"launcher\",\"keys\":[\"Super+K\"]}") != std::string::npos,
+			"settings.set reported the chord taken from the launcher");
+		std::string text = read_file(canvas_conf).value_or("");
+		check(text.find("# my wayland-canvas\n[shortcuts]\n# the launcher\n"
+				"terminal = Super+K\n") == 0,
+			"only the launcher's line was rewritten, comments kept");
+		check(text.find("\n[commands]\n# Super+B runs a command\n")
+				!= std::string::npos,
+			"the [commands] section and its comment stayed");
+		check(holds_chord("terminal", {settings::mod_logo, XKB_KEY_k}),
+			"the edit applied at once");
+		return 300;
+	}
+	case 67: { // a [commands] chord runs its command
+		raw_pid = fork_ipc_client(
+			std::format("{{\"id\":2,\"method\":\"settings.set\",\"params\":"
+				"{{\"commands\":[{{\"keys\":\"Super+B\","
+				"\"command\":\"touch {}/command-marker\"}}]}}}}\n", shot_dir),
+			"set-commands.out", 3);
+		return 400;
+	}
+	case 68: {
+		reap_client();
+		std::string out = read_file(shot_dir + "/set-commands.out")
+			.value_or("");
+		check(out.find("\"commands\":[{\"keys\":\"Super+B\"") != std::string::npos,
+			"settings.set wrote the [commands] entry");
+		key(KEY_LEFTMETA, true);
+		key(KEY_B, true);
+		key(KEY_B, false);
+		key(KEY_LEFTMETA, false);
+		return 300;
+	}
+	case 69: {
+		if (!file_exists(shot_dir + "/command-marker") && retries++ < 100) {
+			return -100;
+		}
+		check(file_exists(shot_dir + "/command-marker"),
+			"a [commands] chord ran its command");
+		return 300;
+	}
+	case 70: { // a bad line: ignored with its number, hinted on every screen
+		if (std::optional<std::string> text = read_file(canvas_conf)) {
+			std::string in = "[shortcuts]\n";
+			std::size_t at = text->find(in);
+			if (at != std::string::npos) {
+				text->insert(at + in.size(), "lancher = Super+P\n");
+			}
+			save_conf(*text);
+		}
+		return 300;
+	}
+	case 71: {
+		if (server->conf_errors.empty() && retries++ < 100) {
+			return -100;
+		}
+		check(!server->conf_errors.empty()
+				&& server->conf_errors.front().text == "unknown action 'lancher'",
+			"the ignored line is listed with its reason");
+		check(server->hint.text.starts_with("canvas.conf line ")
+				&& server->hint.text.find("unknown action 'lancher'")
+					!= std::string::npos,
+			std::format("the first error shows as a hint ({})",
+				server->hint.text));
+		return 300;
+	}
+	case 72: { // the gesture choices from the file reach the gesture engine
+		if (std::optional<std::string> text = read_file(canvas_conf)) {
+			save_conf(*text + "\n[gestures]\nswipes = four-finger-hops\n");
+		}
+		return 300;
+	}
+	case 73: {
+		if (server->gestures.options().swipes != SwipePreset::four_finger_hops
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(server->gestures.options().swipes == SwipePreset::four_finger_hops,
+			"the file's swipe preset reached the gesture engine");
+		return 300;
+	}
+	case 74: { // a subscriber sees the settings change as an event
+		raw_pid = fork_ipc_client(
+			"{\"id\":1,\"method\":\"subscribe\"}\n"
+			"{\"id\":2,\"method\":\"settings.set\",\"params\":"
+			"{\"pinchScale\":false}}\n",
+			"settings-event.out", 4);
+		return 600;
+	}
+	case 75: {
+		reap_client();
+		std::string out = read_file(shot_dir + "/settings-event.out")
+			.value_or("");
+		check(out.find("\"event\":\"settings\"") != std::string::npos
+				&& out.find("\"pinchScale\":false") != std::string::npos,
+			"a subscriber received the settings event");
+		return 300;
+	}
+	case 76: { // a recorded chord: every key belongs to the capture
+		// The terminal spawned by an early step reads into this marker:
+		// a fresh one makes "ran nothing" observable.
+		unlink((shot_dir + "/terminal-marker").c_str());
+		raw_pid = fork_ipc_client(
+			"{\"id\":7,\"method\":\"shortcut.capture\"}\n",
+			"capture-chord.out", 24);
+		return 400;
+	}
+	case 77: { // Super+K (the terminal's chord now) recorded: run by nothing
+		key(KEY_LEFTMETA, true);
+		key(KEY_K, true);
+		key(KEY_K, false);
+		key(KEY_LEFTMETA, false);
+		return 400;
+	}
+	case 78: {
+		std::string out = read_file(shot_dir + "/capture-chord.out")
+			.value_or("");
+		if (out.empty() && retries++ < 100) {
+			return -100;
+		}
+		check(out.find("\"keys\":\"Super+K\"") != std::string::npos,
+			"the capture reported the chord pressed");
+		check(!file_exists(shot_dir + "/terminal-marker"),
+			"the recorded chord ran nothing");
+		reap_client();
+		// The same chord, unrecorded, is the terminal again.
+		key(KEY_LEFTMETA, true);
+		key(KEY_K, true);
+		key(KEY_K, false);
+		key(KEY_LEFTMETA, false);
+		return 300;
+	}
+	case 79: {
+		if (!file_exists(shot_dir + "/terminal-marker") && retries++ < 100) {
+			return -100;
+		}
+		check(file_exists(shot_dir + "/terminal-marker"),
+			"the same chord, unrecorded, ran the terminal");
+		// A plain key reaches the terminal's client: foot reads into the
+		// marker. Pressed until it lands, while the new terminal takes the
+		// focus.
+		key(KEY_X, true);
+		key(KEY_X, false);
+		// The Super tap, given to the launcher through the socket.
+		raw_pid = fork_ipc_client(
+			"{\"id\":8,\"method\":\"settings.set\",\"params\":"
+			"{\"action\":\"launcher\",\"keys\":[\"Super+Space\",\"Super\"]}}\n",
+			"set-tap.out", 3);
+		return 400;
+	}
+	case 80: {
+		std::string typed = read_file(shot_dir + "/terminal-marker")
+			.value_or("");
+		if (typed.find('x') == std::string::npos && retries++ < 100) {
+			// The terminal may still be taking the focus, and its line
+			// discipline holds the key until Enter: press x, then Enter.
+			key(KEY_X, true);
+			key(KEY_X, false);
+			key(KEY_ENTER, true);
+			key(KEY_ENTER, false);
+			return -100;
+		}
+		check(typed.find('x') != std::string::npos,
+			"a plain key reached the terminal's client");
+		bool tap_given = holds_chord("launcher", {settings::mod_logo, 0});
+		if (!tap_given && retries++ < 100) {
+			return -100;
+		}
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		check(server->launcher.is_open(),
+			"the Super tap, given to the launcher, opened it");
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(), "and closed it again");
+		shot("tap-launcher");
+		return 300;
 	}
 	default:
 		finished = true;
@@ -856,9 +1281,27 @@ int main() {
 	std::string root = env && *env ? env : "tmp"; // meson passes the repo's tmp/ via env
 	shot_dir = std::format("{}/scenarios/input", root);
 	mkdir_p(shot_dir);
+	// The terminal action runs this run's script: foot reading stdin into
+	// the marker, so a chord that spawns it — and keys that reach it — are
+	// observable.
+	std::string terminal_sh = std::format("{}/terminal.sh", shot_dir);
+	if (FILE *f = std::fopen(terminal_sh.c_str(), "w"); f != nullptr) {
+		std::fprintf(f, "#!/bin/sh\nexec foot sh -c 'cat > %s/terminal-marker'\n",
+			shot_dir.c_str());
+		std::fclose(f);
+		chmod(terminal_sh.c_str(), 0755);
+	}
+	setenv("TERMINAL", terminal_sh.c_str(), 1);
+	// Before the server starts: canvas.conf lives in this run's scratch,
+	// never in the user's real ~/.config — and every run sees it written
+	// fresh, as the first run does.
+	canvas_conf = std::format("{}/scenarios/input/xdg-config"
+		"/wayland-canvas/canvas.conf", root);
+	unlink(canvas_conf.c_str());
+	setenv("XDG_CONFIG_HOME",
+		std::format("{}/scenarios/input/xdg-config", root).c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
-	setenv("TERMINAL", "foot", 1);
 	server.emplace();
 	Options options;
 	options.start_bar = false; // the suites never spawn the bar

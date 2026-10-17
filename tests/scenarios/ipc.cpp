@@ -1518,6 +1518,9 @@ int main() {
 	std::string root = env && *env ? env : "tmp";
 	shot_dir = std::format("{}/scenarios/ipc", root);
 	mkdir_p(shot_dir);
+	// Before the server starts: canvas.conf lives in this run's scratch,
+	// never in the user's real ~/.config.
+	setenv("XDG_CONFIG_HOME", std::format("{}/scenarios/ipc/xdg-config", root).c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();

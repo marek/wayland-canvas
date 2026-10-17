@@ -2,11 +2,14 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 #include "input/grab.h"
+#include "core/settings.h"
 #include "core/util.h"
 
 class Output;
@@ -58,6 +61,15 @@ public:
 	// A view was unmapped or destroyed: drop what referred to it.
 	void forget(const View &view);
 
+	// A shortcut capture, for the settings window: from begin to end every
+	// key, modifiers included, belongs to it — nothing runs and no surface
+	// sees a key. `done` receives the chord pressed, or nullopt when it was
+	// cancelled (Escape alone, or a second capture).
+	void begin_shortcut_capture(
+		std::function<void(std::optional<settings::Chord>)> done);
+	// Ends the capture under way, if any; it answers nullopt.
+	void cancel_shortcut_capture();
+
 	// Title double-click state: the last click and its view.
 	uint32_t last_title_click = 0;
 	View *last_title_view = nullptr;
@@ -81,9 +93,21 @@ private:
 	std::array<bool, 256> key_consumed_{};
 	// Set of buttons whose press was forwarded to a client.
 	uint32_t pressed_buttons_ = 0;
-	// Logo key pressed alone and nothing else happened yet: releasing it opens
-	// the launcher. Any other key, button, scroll or gesture cancels the tap.
+	// Logo key pressed alone and nothing else happened yet: releasing it
+	// runs the action that holds the Super tap. Any other key, button,
+	// scroll or gesture cancels the tap.
 	bool super_tap_ = false;
+
+	// A capture under way (shortcut.capture): every key belongs to it
+	// until the chord is pressed or it is cancelled.
+	struct ShortcutCapture {
+		std::function<void(std::optional<settings::Chord>)> done;
+		uint32_t mods = 0; // modifiers held inside the capture
+		bool ending = false; // answered; the keys held at the end drain
+		std::vector<uint32_t> draining; // their keycodes
+	};
+	std::optional<ShortcutCapture> shortcut_capture_;
+
 
 	// Backend input devices.
 	void handle_new_input(wlr_input_device *device);
@@ -93,6 +117,14 @@ private:
 
 	// Key events.
 	void process_key(Keyboard &keyboard, wlr_keyboard_key_event *event);
+	// Answers the capture — the chord pressed, or nothing on a cancel —
+	// after which the keys held at the end drain before it is gone.
+	void end_shortcut_capture(std::optional<settings::Chord> chord);
+	// Every key of a shortcut capture: modifiers are tracked, the first
+	// non-modifier key ends it as the chord, a lone Super release is the
+	// tap, and a bare Escape cancels.
+	void capture_key(Keyboard &keyboard, wlr_keyboard_key_event *event,
+		std::span<const xkb_keysym_t> syms);
 
 	// Pointer motion and buttons.
 	void process_cursor_motion(uint32_t time);

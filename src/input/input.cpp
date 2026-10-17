@@ -2,6 +2,7 @@
 // recognition lives in gesture.cpp, pointer grabs in grab.cpp, key
 // bindings in bindings.cpp.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -14,6 +15,7 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+
 namespace {
 
 constexpr uint32_t binding_mods = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
@@ -60,6 +62,27 @@ bool is_logo_key(std::span<const xkb_keysym_t> syms) {
 		}
 	}
 	return false;
+}
+
+// The binding modifier a key changes, when it is one. The settings' own
+// bits match the wlr_keyboard ones (core/settings.h).
+std::optional<uint32_t> modifier_bit(xkb_keysym_t sym) {
+	switch (sym) {
+	case XKB_KEY_Super_L:
+	case XKB_KEY_Super_R:
+		return settings::mod_logo;
+	case XKB_KEY_Control_L:
+	case XKB_KEY_Control_R:
+		return settings::mod_ctrl;
+	case XKB_KEY_Alt_L:
+	case XKB_KEY_Alt_R:
+		return settings::mod_alt;
+	case XKB_KEY_Shift_L:
+	case XKB_KEY_Shift_R:
+		return settings::mod_shift;
+	default:
+		return std::nullopt;
+	}
 }
 
 // The key's unshifted symbols: Super+Shift+3 is '#' on a US layout, so the
@@ -367,8 +390,42 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	bool logo = is_logo_key(sym_list);
 
 	bool handled = false;
-	bool toggle_launcher = false;
-	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+	bool tap = false;
+	if (shortcut_capture_.has_value()) {
+		if (!shortcut_capture_->ending) {
+			// From begin to end every key belongs to the capture: nothing
+			// runs, no surface sees one.
+			capture_key(keyboard, event, sym_list);
+			if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED
+					&& event->keycode < 256) {
+				key_consumed_[event->keycode] = true;
+			}
+			handled = true;
+		} else if (!shortcut_capture_->draining.empty()
+				&& event->state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+			// The answer is out; the keys held at the end drain.
+			std::vector<uint32_t> &draining = shortcut_capture_->draining;
+			bool held = false;
+			for (uint32_t key : draining) {
+				held = held || key == event->keycode;
+			}
+			if (held) {
+				draining.erase(std::remove(draining.begin(), draining.end(),
+					event->keycode), draining.end());
+				if (draining.empty()) {
+					shortcut_capture_.reset();
+				}
+				handled = true;
+			} else {
+				shortcut_capture_.reset();
+			}
+		} else {
+			// Nothing left to drain: the capture is over, and this event
+			// is handled as ever.
+			shortcut_capture_.reset();
+		}
+	}
+	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		// A logo key pressed on its own may become a tap (see release).
 		super_tap_ = logo && wlr->num_keycodes == 1;
 		Output *output = server.output_under_cursor();
@@ -392,10 +449,21 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			}
 			handled = true; // nothing the capture UI sees reaches a client
 		} else if (server.launcher.is_open()) {
-			// The launcher owns the keyboard while open.
+			// The launcher owns the keyboard while open; its own chords —
+			// and only those — close it.
 			if (nsyms > 0 && !logo) {
-				if (xkb_keysym_to_lower(syms[0]) == XKB_KEY_space &&
-						(mods & WLR_MODIFIER_LOGO)) {
+				bool closing = false;
+				for (xkb_keysym_t sym : sym_list) {
+					closing = closing || server.bindings.launcher_chord(sym, mods);
+				}
+				if (!closing) {
+					const xkb_keysym_t *base = nullptr;
+					int nbase = base_syms(wlr, keycode, &base);
+					for (int i = 0; i < nbase && !closing; i++) {
+						closing = server.bindings.launcher_chord(base[i], mods);
+					}
+				}
+				if (closing) {
 					server.launcher.close();
 				} else {
 					server.launcher.key(syms[0],
@@ -410,44 +478,45 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			LayerSurface *holder = server.focused_layer;
 			bool shell_types = holder != nullptr && holder->mapped
 				&& (mods & WLR_MODIFIER_LOGO) == 0;
-		if (!shell_types) {
-			bool matched = false;
+			if (!shell_types) {
+				bool matched = false;
+				for (xkb_keysym_t sym : sym_list) {
+					if (server.bindings.handle_overview(sym, mods, *output)) {
+						matched = true;
+						break;
+					}
+				}
+				if (!matched) {
+					const xkb_keysym_t *base = nullptr;
+					int nbase = base_syms(wlr, keycode, &base);
+					for (int i = 0; i < nbase && !matched; i++) {
+						matched = server.bindings.handle_overview(base[i], mods, *output);
+					}
+				}
+				handled = true; // the overview owns every other key
+			}
+		} else {
 			for (xkb_keysym_t sym : sym_list) {
-				if (server.bindings.handle_overview(sym, mods, *output)) {
-					matched = true;
+				if (server.bindings.handle(sym, mods, output)) {
+					handled = true;
 					break;
 				}
 			}
-			if (!matched) {
+			if (!handled) {
 				const xkb_keysym_t *base = nullptr;
 				int nbase = base_syms(wlr, keycode, &base);
-				for (int i = 0; i < nbase && !matched; i++) {
-					matched = server.bindings.handle_overview(base[i], mods, *output);
+				for (int i = 0; i < nbase && !handled; i++) {
+					handled = server.bindings.handle(base[i], mods, output);
 				}
 			}
-			handled = true; // the overview owns every other key
 		}
-	} else {
-		for (xkb_keysym_t sym : sym_list) {
-			if (server.bindings.handle(sym, mods, output)) {
-				handled = true;
-				break;
-			}
-		}
-		if (!handled) {
-			const xkb_keysym_t *base = nullptr;
-			int nbase = base_syms(wlr, keycode, &base);
-			for (int i = 0; i < nbase && !handled; i++) {
-				handled = server.bindings.handle(base[i], mods, output);
-			}
-		}
-	}
 		if (handled && event->keycode < 256) {
 			key_consumed_[event->keycode] = true;
 		}
-	} else {
-		// Logo pressed and released with nothing in between, like Windows.
-		toggle_launcher = super_tap_ && logo;
+	} else if (!handled) {
+		// Logo pressed and released with nothing in between: the tap runs
+		// whichever action holds `Super`.
+		tap = super_tap_ && logo;
 		super_tap_ = false;
 		if (event->keycode < 256 && key_consumed_[event->keycode]) {
 			// Release of a press the client never saw.
@@ -461,9 +530,90 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 		wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode,
 			event->state);
 	}
-	if (toggle_launcher) {
-		server.launcher.toggle(server.output_under_cursor());
+	if (tap) {
+		server.bindings.handle_tap(server.output_under_cursor());
 	}
+}
+
+// ---- shortcut capture ----
+
+void Input::begin_shortcut_capture(
+		std::function<void(std::optional<settings::Chord>)> done) {
+	// One capture at a time: a second cancels the first (it answers
+	// nullopt).
+	cancel_shortcut_capture();
+	shortcut_capture_ = ShortcutCapture{.done = std::move(done)};
+	// What is held when the capture begins counts into the chord.
+	if (wlr_keyboard *wlr = wlr_seat_get_keyboard(server_.seat); wlr != nullptr) {
+		shortcut_capture_->mods = wlr_keyboard_get_modifiers(wlr) & binding_mods;
+	}
+	// The capture swallows everything, tap tracking included.
+	super_tap_ = false;
+}
+
+void Input::cancel_shortcut_capture() {
+	if (!shortcut_capture_.has_value()) {
+		return;
+	}
+	std::function<void(std::optional<settings::Chord>)> done =
+		std::move(shortcut_capture_->done);
+	shortcut_capture_.reset();
+	if (done != nullptr) {
+		done(std::nullopt);
+	}
+}
+
+// Answers the capture — `chord`, or nothing on a cancel. The keys held at
+// the end drain (swallowed) before the capture is gone, so nothing of the
+// chord runs after it.
+void Input::end_shortcut_capture(std::optional<settings::Chord> chord) {
+	std::function<void(std::optional<settings::Chord>)> done =
+		std::move(shortcut_capture_->done);
+	shortcut_capture_->ending = true;
+	if (wlr_keyboard *wlr = wlr_seat_get_keyboard(server_.seat); wlr != nullptr) {
+		for (std::size_t i = 0; i < wlr->num_keycodes; i++) {
+			shortcut_capture_->draining.push_back(wlr->keycodes[i]);
+		}
+	}
+	if (done != nullptr) {
+		done(chord);
+	}
+}
+
+void Input::capture_key(Keyboard &keyboard, wlr_keyboard_key_event *event,
+		std::span<const xkb_keysym_t> syms) {
+	ShortcutCapture &capture = *shortcut_capture_;
+	bool pressed = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
+	bool all_modifiers = !syms.empty();
+	bool logo = false;
+	for (xkb_keysym_t sym : syms) {
+		std::optional<uint32_t> bit = modifier_bit(sym);
+		all_modifiers = all_modifiers && bit.has_value();
+		logo = logo || (bit == settings::mod_logo);
+		if (bit.has_value()) {
+			capture.mods = pressed ? (capture.mods | *bit) : (capture.mods & ~*bit);
+		}
+	}
+	// A modifier never ends the capture by itself — except a Super
+	// pressed and released alone: the tap.
+	if (all_modifiers) {
+		if (!pressed && logo && capture.mods == 0) {
+			end_shortcut_capture(settings::Chord{settings::mod_logo, 0});
+		}
+		return;
+	}
+	// A release between presses is swallowed; the capture goes on.
+	if (!pressed) {
+		return;
+	}
+	// The first non-modifier key ends it as the chord held now. A bare
+	// Escape cancels.
+	if (xkb_keysym_to_lower(syms[0]) == XKB_KEY_Escape && capture.mods == 0) {
+		end_shortcut_capture(std::nullopt);
+		return;
+	}
+	end_shortcut_capture(
+		settings::Chord{capture.mods, xkb_keysym_to_lower(syms[0])});
 }
 
 // ---- cursor image and position ----
