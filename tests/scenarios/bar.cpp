@@ -3722,8 +3722,9 @@ int apps_open() {
 		if (!view->mapped) {
 			continue;
 		}
-		std::string key = view->wlr->app_id != nullptr && *view->wlr->app_id != '\0'
-			? std::string{view->wlr->app_id}
+		const char *app_id = view->shell_app_id();
+		std::string key = app_id != nullptr && *app_id != '\0'
+			? std::string{app_id}
 			: std::format("window:{}", view->session_id);
 		if (std::ranges::find(seen, key) == seen.end()) {
 			seen.push_back(key);

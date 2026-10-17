@@ -306,11 +306,11 @@ void add_windows_array(JsonBuilder *builder, Server &server) {
 		json_builder_set_member_name(builder, "id");
 		json_builder_add_int_value(builder, static_cast<gint64>(view->session_id));
 		json_builder_set_member_name(builder, "appId");
-		json_builder_add_string_value(builder, view->wlr->app_id != nullptr
-			? view->wlr->app_id : "");
+		json_builder_add_string_value(builder, view->shell_app_id() != nullptr
+			? view->shell_app_id() : "");
 		json_builder_set_member_name(builder, "title");
-		json_builder_add_string_value(builder, view->wlr->title != nullptr
-			? view->wlr->title : "");
+		json_builder_add_string_value(builder, view->shell_title() != nullptr
+			? view->shell_title() : "");
 		json_builder_set_member_name(builder, "desktop");
 		if (desktop != nullptr) {
 			json_builder_add_int_value(builder, static_cast<int>(desktop->id()));
