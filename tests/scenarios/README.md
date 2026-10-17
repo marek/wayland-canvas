@@ -353,6 +353,25 @@ own the machine's Wayland display namespace and GPU.
   the recording (`state.recording` null again), the dot leaves the bar
   with it, and ffprobe reads the file as a playing screen-sized video.
 
+  Then the toolbar's edges. The themed foot window is focused and
+  Super+M minimizes it onto the shelf, and the overview that follows
+  shows the toolbar on its default right edge. Then each edge the
+  config can name is written into the scratch `shell.json` as an edit
+  (`toolbar.position: left`, `top`, `bottom`, then `right` again) —
+  each write reloads the shell, and the strip's placed box is read from
+  the compositor's layer surfaces, never assumed: a column or row of
+  44 px squares, 8 px from the edge (the top row below the bar),
+  centred along it. A side toolbar clears nothing — the shelf keeps its
+  place along the bottom — but the bottom edge must carry the shelf
+  above the strip (the layout's own numbers, the same ones its
+  hit-testing reads). On every edge the note button's colour flyout
+  must open toward the screen's centre — its yellow swatch row read on
+  the screenshot in the region the toolbar's own geometry puts the card
+  — and the button's second click must fold it, the pointer parked
+  clear throughout. The run leaves the overview with Escape — the
+  toolbar slides out, nothing outlives it — and the config back at
+  right. Screenshots land in `tmp/scenarios/bar/edges-*.png`.
+
   Last, the `canvas.settings` plugin end to end. The usage fixtures are
   dropped once more (with a reload) so the agents widget is back on the
   bar, and the overview's toolbar now holds a fifth button, the gear.
@@ -370,10 +389,15 @@ own the machine's Wayland display namespace and GPU.
   run with no reload, the row's switch shows off, every other stays on
   and the hidden label turns attention-red; the switch's second click
   empties the list and undoes all of it. The Toolbar tab shows Right
-  chosen by default, chooses Left (`toolbar.position` lands in the
-  config and only Left's dot is lit) and puts Right back (the strip's own
-  move to the edge is the toolbar's feature, proved with it). The
-  Shortcuts tab records a chord by pressing it (the fake keyboard's
+  chosen by default, then chooses Left, Top and Right in turn: each
+  choice writes `toolbar.position` into the scratch `shell.json`, lights
+  only its own dot, and moves the strip to that edge live (its placed
+  box read from the compositor, the bar surface unchanged: the host
+  wrote the file itself, so nothing reloads) while the open settings
+  card follows it to the strip's inner side — beside a column, level
+  with the gear; below the top row, centred on the gear — its tab row
+  checked against the screenshot at the place the placed strip implies.
+  The Shortcuts tab records a chord by pressing it (the fake keyboard's
   Super+T on the terminal row, whose key chip shrinks from Super+Return
   to Super+T): `canvas.conf` gains `terminal = Super+T`, no other line
   holds it, the running session's resolved keys give it to Terminal and

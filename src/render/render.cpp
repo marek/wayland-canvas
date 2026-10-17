@@ -1,5 +1,6 @@
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <ranges>
 #include <span>
@@ -533,6 +534,38 @@ void draw_tabs(const RenderCtx &ctx) {
 
 // --------------------------------------------------------------- shelf
 
+// The shell's overview toolbar on this output, while it is mapped: the
+// strip surface the overview's bottom UI keeps clear of when it sits on
+// the bottom edge. Keep the namespace in sync with plugins/canvas.toolbar
+// (docs/intents/shell/toolbar.md).
+constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
+
+const LayerSurface *output_toolbar(const Output &o) {
+	for (const auto &vec : o.layers) {
+		for (const std::unique_ptr<LayerSurface> &layer : vec) {
+			if (layer->mapped && layer->wlr->namespace_ != nullptr
+					&& std::strcmp(layer->wlr->namespace_, toolbar_namespace) == 0) {
+				return layer.get();
+			}
+		}
+	}
+	return nullptr;
+}
+
+// The y the overview's bottom UI — the help line, the hints, the shelf —
+// stays above: the output's bottom edge, or the top of a toolbar anchored
+// to it. The shelf's hit-testing reads the same layout
+// (input.cpp:overview_press_target), so what is drawn and what takes the
+// pointer are one box.
+int overview_bottom(const Output &o) {
+	const LayerSurface *toolbar = output_toolbar(o);
+	if (toolbar != nullptr
+			&& (toolbar->wlr->current.anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) != 0) {
+		return toolbar->geo.y;
+	}
+	return o.height;
+}
+
 // Shelf thumbnails: the view's frame fitted into the box, aspect kept.
 void draw_shelf(const RenderCtx &ctx) {
 	Shelf shelf = overview_shelf_layout(*ctx.output);
@@ -625,7 +658,7 @@ int draw_help_line(const RenderCtx &ctx) {
 	double fit = std::fmin(1.0, (ctx.output->width - 24.0) / help.w);
 	double w = help.w * fit, h = help.h * fit;
 	draw_ui_texture(ctx, help.texture.get(), (ctx.output->width - w) / 2.0,
-		ctx.output->height - 12 - h, w, h, 1.0);
+		overview_bottom(*ctx.output) - 12 - h, w, h, 1.0);
 	return static_cast<int>(std::ceil(h));
 }
 
@@ -648,8 +681,9 @@ void draw_hint(const RenderCtx &ctx, int help_h) {
 	if (hint.texture == nullptr || hint.w <= 0 || hint.h <= 0) {
 		return;
 	}
+	int bottom = overview_bottom(o);
 	int y = ctx.overview
-		? o.height - 12 - help_h - 8 - hint.h
+		? bottom - 12 - help_h - 8 - hint.h
 		: o.height - 48 - hint.h;
 	draw_ui_texture(ctx, hint.texture.get(),
 		(o.width - hint.w) / 2.0, y, hint.w, hint.h, 1.0);
@@ -899,7 +933,9 @@ Shelf overview_shelf_layout(const Output &o) {
 		shelf[i] = {.view = view, .box = {}};
 	}
 	int bw = 160, bh = 100, gap = 12;
-	int bottom = o.height - 12 - 28 - 16;
+	// The help line's margin and height, 16 px above it; the bottom is
+	// the toolbar's top when one sits on the bottom edge.
+	int bottom = overview_bottom(o) - 12 - 28 - 16;
 	int total = static_cast<int>(shelf.size()) * bw
 		+ (static_cast<int>(shelf.size()) - 1) * gap;
 	int x = (o.width - total) / 2;

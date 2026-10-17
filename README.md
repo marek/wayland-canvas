@@ -178,9 +178,12 @@ and your own.
   opens its panel under it (Wi-Fi networks, Bluetooth devices, volume and the
   output device, the backlight, power profiles and the session menu, the
   forecast, a calendar); widgets without a working source hide themselves.
-- **Overview toolbar**: on the right edge of a screen while it shows the
-  overview, holding the buttons plugins contribute: each runs an action, opens
-  a panel or folds out a submenu.
+- **Overview toolbar**: on an edge of a screen while it shows the overview —
+  the right by default, else the left, top or bottom as `toolbar.position` in
+  the shell config names — holding the buttons plugins contribute: each runs
+  an action, opens a panel or folds out a submenu, and everything it opens
+  opens toward the screen's centre. A toolbar on the bottom edge carries the
+  overview's shelf and help line above it.
 - **Sticky notes**: the toolbar's Note button and its colour menu put a note on
   the canvas; type over it, drag it anywhere; notes are kept across restarts.
 - **Light and dark**: the switch flips the shell and everything the compositor

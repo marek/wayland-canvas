@@ -1,13 +1,14 @@
-import Quickshell
 import QtQuick
 import WaylandCanvas.Ui
 import "."
 
 // A menu button's flyout: rows of a glyph or a colour swatch and a
-// label, expanding out of the toolbar to the left of its button.
-// Choosing a row runs that entry's action and folds the flyout; a
-// second click of the button or a click outside (the surface catches
-// those) folds it too.
+// label, on the toolbar's inner side toward the screen's centre, level
+// with its button along the strip, kept inside the output. It draws on
+// the chrome surface, whose window spans the output, so its coordinates
+// are the output's. Choosing a row runs that entry's action and folds
+// the flyout; a second click of the button or a click outside (the
+// surface catches those) folds it too.
 Rectangle {
 	id: root
 
@@ -21,29 +22,42 @@ Rectangle {
 	width: surface != null ? surface.flyoutWidth : 0
 	height: column.implicitHeight + 2 * UiTheme.panelPadding
 
-	TransformWatcher {
-		id: watcher
-		a: root.button != null && root.button.QsWindow.window != null
-			? root.button.QsWindow.window.contentItem : null
-		b: root.button
-	}
+	// The button's square, from the toolbar's layout of the strip.
+	readonly property var box: button != null && button.index >= 0
+		&& surface != null ? surface.buttonBox(button.index) : null
 
-	// To the left of the button, one margin away from the strip, centred
-	// on it, kept inside the output.
+	// Beside the strip on its inner side, one margin away from it; level
+	// with the button along the strip — the card's near edge sits at the
+	// button's near one, hanging along the edge — kept inside the output.
 	x: {
-		watcher.transform
-		return button != null
-			? Math.round(button.mapToItem(null, 0, 0).x
-				- UiTheme.edgeMargin - width) : 0
-	}
-	y: {
-		watcher.transform
-		if (button == null) {
+		if (box == null || surface == null) {
 			return 0
 		}
-		var top = button.mapToItem(null, 0, height / 2).y - height / 2
-		return Math.round(Math.max(UiTheme.edgeMargin,
-			Math.min(top, surface.height - height - UiTheme.edgeMargin)))
+		var want = 0
+		if (surface.edge === "right") {
+			want = box.x - UiTheme.edgeMargin - width
+		} else if (surface.edge === "left") {
+			want = box.x + box.width + UiTheme.edgeMargin
+		} else {
+			want = box.x
+		}
+		return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
+			surface.modelData.width - width - UiTheme.edgeMargin)))
+	}
+	y: {
+		if (box == null || surface == null) {
+			return 0
+		}
+		var want = 0
+		if (surface.edge === "top") {
+			want = box.y + box.height + UiTheme.edgeMargin
+		} else if (surface.edge === "bottom") {
+			want = box.y - UiTheme.edgeMargin - height
+		} else {
+			want = box.y
+		}
+		return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
+			surface.modelData.height - height - UiTheme.edgeMargin)))
 	}
 
 	// Swallow the card's own padding: only a click truly outside folds.

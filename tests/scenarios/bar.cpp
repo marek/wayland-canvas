@@ -3364,6 +3364,308 @@ bool watch_settle(const char *name, bool wider, bool light,
 	return true;
 }
 
+// ---- the toolbar edges phase (300+) ----
+// The strip on every edge the config can name, left, top and bottom
+// written into the scratch shell.json as an edit the shell reloads
+// with, then right again at the end. The placed box is read from the
+// compositor's layer surfaces, never assumed; the note button's colour
+// flyout must open toward the screen's centre and fold again; and the
+// overview's shelf, with a minimized window on it, must sit above a
+// bottom-edge strip.
+
+// The shelf's bottom line: the help line's 12 px margin and 28 px
+// height, 16 px above it (src/render/render.cpp's overview_shelf_layout
+// and the toolbar it clears). Keep in sync with it.
+constexpr int shelf_bottom_gap = 12 + 28 + 16;
+// The note button's place in the strip: order 3, the fourth square —
+// the scratch plugin's three buttons above it, the settings gear
+// (order 4) below. Keep in sync with the plugins' manifests.
+constexpr int notes_index = 3;
+
+// Writes the scratch shell.json with the toolbar's edge named, keeping
+// everything else it holds: an edit the host sees, so the shell
+// reloads with it.
+bool set_toolbar_position(const char *edge) {
+	JsonParser *parser = json_parser_new();
+	std::string text = read_file(shell_config);
+	bool ok = !text.empty()
+		&& json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)
+		&& json_node_get_node_type(json_parser_get_root(parser))
+			== JSON_NODE_OBJECT;
+	if (ok) {
+		JsonObject *config = json_node_get_object(json_parser_get_root(parser));
+		JsonNode *toolbar = json_object_get_member(config, "toolbar");
+		if (toolbar == nullptr
+				|| json_node_get_node_type(toolbar) != JSON_NODE_OBJECT) {
+			json_object_set_object_member(config, "toolbar", json_object_new());
+		}
+		json_object_set_string_member(
+			json_node_get_object(json_object_get_member(config, "toolbar")),
+			"position", edge);
+		JsonGenerator *generator = json_generator_new();
+		json_generator_set_root(generator, json_parser_get_root(parser));
+		gchar *out = json_generator_to_data(generator, nullptr);
+		write_file(shell_config, out);
+		g_free(out);
+		g_object_unref(generator);
+	}
+	g_object_unref(parser);
+	return ok;
+}
+
+// The toolbar.position the scratch shell.json names now.
+std::string toolbar_position_in_config() {
+	JsonParser *parser = json_parser_new();
+	std::string named;
+	if (json_parser_load_from_file(parser, shell_config.c_str(), nullptr)
+		&& json_node_get_node_type(json_parser_get_root(parser))
+			== JSON_NODE_OBJECT) {
+		JsonObject *config = json_node_get_object(json_parser_get_root(parser));
+		JsonNode *toolbar = json_object_get_member(config, "toolbar");
+		JsonObject *toolbar_object = toolbar != nullptr
+			&& json_node_get_node_type(toolbar) == JSON_NODE_OBJECT
+			? json_node_get_object(toolbar) : nullptr;
+		if (toolbar_object != nullptr
+				&& json_object_has_member(toolbar_object, "position")) {
+			JsonNode *position = json_object_get_member(toolbar_object, "position");
+			if (position != nullptr
+					&& json_node_get_value_type(position) == G_TYPE_STRING) {
+				named = json_node_get_string(position);
+			}
+		}
+	}
+	g_object_unref(parser);
+	return named;
+}
+
+// The strip's settled box, from the surface's placed one: the surface
+// is the strip plus the pocket it slides into — overhanging the screen
+// edge by a button square on the left, right and bottom (the pocket
+// past it), and past the screen's top on the top edge (the row sits
+// below the bar) — so the strip's near edge is the surface's own on
+// the right and bottom, the pocket's far one on the left and top.
+wlr_box toolbar_strip_box(const wlr_box &geo) {
+	if (geo.width == toolbar_button + toolbar_margin + toolbar_button) { // a column
+		return {geo.x > screen_w / 2 ? geo.x : geo.x + toolbar_margin + toolbar_button,
+			geo.y, toolbar_button, geo.height};
+	}
+	// a row: the top edge's pocket reaches past the screen's top
+	int pocket = geo.y < 0 ? bar_h() + toolbar_margin + toolbar_button
+		: toolbar_margin + toolbar_button;
+	return {geo.x, geo.y < 0 ? geo.y + pocket : geo.y, geo.width, toolbar_button};
+}
+
+// The strip's box as the compositor placed it for this edge, read from
+// the mapped toolbar surface: a 44 px column or row of whole buttons,
+// on the edge's margin (the top row below the bar). The wait loops on
+// it, so the reload has landed when it holds — the old surface stays
+// mapped at the old edge until the reload, so the geo, not the mapping,
+// is what moves.
+bool toolbar_on_edge(const char *edge) {
+	LayerSurface *toolbar = toolbar_layer();
+	if (toolbar == nullptr) {
+		return false;
+	}
+	wlr_box geo = toolbar_strip_box(toolbar->geo);
+	bool column = std::strcmp(edge, "left") == 0 || std::strcmp(edge, "right") == 0;
+	if (column && (geo.width != toolbar_button || geo.height % toolbar_button != 0)) {
+		return false;
+	}
+	if (!column && (geo.height != toolbar_button || geo.width % toolbar_button != 0)) {
+		return false;
+	}
+	if (std::strcmp(edge, "right") == 0) {
+		return geo.x == strip_left;
+	}
+	if (std::strcmp(edge, "left") == 0) {
+		return geo.x == toolbar_margin;
+	}
+	if (std::strcmp(edge, "top") == 0) {
+		return geo.y == bar_h() + toolbar_margin;
+	}
+	return geo.y + geo.height == screen_h - toolbar_margin;
+}
+
+// The strip is centred along its edge, from the placed box.
+bool toolbar_centred(const wlr_box &geo) {
+	if (geo.width == toolbar_button) {
+		return geo.y + geo.height / 2 == screen_h / 2;
+	}
+	return geo.x + geo.width / 2 == screen_w / 2;
+}
+
+// Where the settings card's top-left corner belongs for the toolbar as
+// the compositor has it placed now (PanelCard: on the strip's inner
+// side, one margin past it, kept inside the output). A column puts the
+// card beside it, level with the gear (the strip's fifth button); a row
+// puts it below or above the strip, centred on the gear. `height` is
+// the card's own.
+std::pair<int, int> settings_card_origin(int height) {
+	LayerSurface *toolbar = toolbar_layer();
+	wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+	double gear = 4 * toolbar_button + toolbar_button / 2.0; // along the strip
+	if (strip.width == toolbar_button) { // a column
+		int x = strip.x > screen_w / 2 ? strip.x - beside_gap - settings_panel
+			: strip.x + toolbar_button + beside_gap;
+		return {x, settings_card_top(height, strip.y + gear)};
+	}
+	int x = int(std::round(std::max(8.0, std::min(strip.x + gear - settings_panel / 2.0,
+		double(screen_w - settings_panel - 8)))));
+	int y = strip.y > screen_h / 2
+		? std::max(8, strip.y - beside_gap - height)
+		: std::min(strip.y + toolbar_button + beside_gap, screen_h - height - 8);
+	return {x, y};
+}
+
+// The Toolbar tab as a shot shows it, against the toolbar as placed now:
+// where the card belongs (settings_card_x follows it), whether its tab
+// row sits there with the Toolbar tab chosen, and which edge choices
+// show their dot.
+struct ToolbarCard {
+	int card_y = 0;
+	int first_top = 0; // the first edge choice's top
+	bool placed = false;
+	unsigned dots = 0;
+};
+
+ToolbarCard settings_toolbar_card(const char *shot_name) {
+	auto [x, y] = settings_card_origin(settings_card_height(settings_toolbar_column()));
+	settings_card_x = x;
+	ToolbarCard card;
+	card.card_y = y;
+	card.first_top = y + settings_pad + settings_row + settings_gap
+		+ settings_header + settings_gap;
+	cairo_surface_t *s = load_png(shot_name);
+	if (s != nullptr) {
+		card.placed = settings_chosen_tab(s, y) == 2
+			&& settings_tab_labels_centred(s, y);
+		card.dots = settings_dots(s, card.first_top, 4);
+		cairo_surface_destroy(s);
+	}
+	return card;
+}
+
+// The notes button's click point, from the placed surface.
+std::pair<double, double> notes_click(const wlr_box &geo) {
+	wlr_box strip = toolbar_strip_box(geo);
+	int along = notes_index * toolbar_button + toolbar_button / 2;
+	if (strip.width == toolbar_button) {
+		return {strip.x + toolbar_button / 2.0, double(strip.y + along)};
+	}
+	return {double(strip.x + along), strip.y + toolbar_button / 2.0};
+}
+
+// The generous region the notes flyout opens into: the card's own
+// place — a 200 px card of the six-row menu's height, one margin past
+// the strip on its inner side (the side the box's own place names),
+// its near edge at the button's near one — with slack on every side
+// for the clamping and the rounding.
+wlr_box flyout_region(const wlr_box &geo) {
+	wlr_box strip = toolbar_strip_box(geo);
+	int near = notes_index * toolbar_button; // the button's near edge
+	int x = 0, y = 0;
+	if (strip.width == toolbar_button) { // a column: the card beside it
+		x = strip.x > screen_w / 2 ? strip.x - beside_gap - scratch_card
+			: strip.x + toolbar_button + beside_gap;
+		y = strip.y + near;
+	} else { // a row: the card above or below it
+		y = strip.y > screen_h / 2 ? strip.y - beside_gap - note_menu_height
+			: strip.y + toolbar_button + beside_gap;
+		x = strip.x + near;
+	}
+	return {x - note_menu_margin, y - note_menu_margin,
+		scratch_card + 2 * note_menu_margin,
+		note_menu_height + 2 * note_menu_margin};
+}
+
+// The note menu's yellow swatch as pixel_is takes it: 0xRRGGBBAA.
+uint32_t note_swatch_colour() {
+	unsigned char rgb[3];
+	hex_colour(note_yellow, rgb);
+	return uint32_t(rgb[0]) << 24 | uint32_t(rgb[1]) << 16
+		| uint32_t(rgb[2]) << 8 | 0xff;
+}
+
+// The checks every edge shares, once the strip has arrived on it: the
+// placed box and the centring along the edge, then the shot. The shelf
+// checks differ — only a bottom toolbar moves it.
+void edge_checks(const char *edge, const char *shot_name) {
+	LayerSurface *toolbar = toolbar_layer();
+	wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+	const char *place = std::strcmp(edge, "left") == 0
+		? "8 px from the left edge"
+		: std::strcmp(edge, "top") == 0 ? "below the bar, 8 px down"
+		: std::strcmp(edge, "bottom") == 0 ? "8 px above the bottom edge"
+		: "8 px from the right edge";
+	check(toolbar != nullptr && toolbar_on_edge(edge),
+		std::format("the strip moved to {} (strip {},{} {}x{})", place,
+			toolbar != nullptr ? strip.x : -1, toolbar != nullptr ? strip.y : -1,
+			toolbar != nullptr ? strip.width : 0, toolbar != nullptr ? strip.height : 0));
+	check(toolbar != nullptr && toolbar_centred(strip),
+		"the strip is centred along its edge");
+	shot(shot_name);
+}
+
+// Clicks the notes button (its square, from the placed strip), then
+// parks the pointer clear of every edge's strip and card.
+void open_notes_flyout() {
+	LayerSurface *toolbar = toolbar_layer();
+	if (toolbar != nullptr) {
+		auto [x, y] = notes_click(toolbar->geo);
+		click(x, y);
+	}
+	park(640, 360);
+}
+
+// The open-flyout checks on a landed shot: the yellow swatch row, and
+// the rows with it. False while the click that opens it may have been
+// lost under load — the caller retries on the next tick (this
+// re-clicks on every third), and the shot re-takes itself through
+// shot_landed.
+bool flyout_open_checks(const char *shot_name, const char *toward) {
+	cairo_surface_t *s = load_png(shot_name);
+	LayerSurface *toolbar = toolbar_layer();
+	wlr_box region = toolbar != nullptr ? flyout_region(toolbar->geo) : wlr_box{};
+	int swatch = colour_count(s, region, note_swatch_colour());
+	std::vector<Band> rows = bands_in(s, region);
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	if (swatch <= 20 && retries++ < 10) {
+		if (retries % 3 == 1) {
+			open_notes_flyout();
+		}
+		return false;
+	}
+	retries = 0;
+	check(swatch > 20, std::format("the note flyout opened {} the strip, "
+		"toward the screen's centre ({} yellow swatch pixels)", toward, swatch));
+	check(rows.size() >= 2, std::format("the flyout's rows with it "
+		"({} bands)", rows.size()));
+	return true;
+}
+
+// The folded checks on a landed shot: the swatch gone. False while the
+// second click — the fold — may have been lost.
+bool flyout_folded_checks(const char *shot_name) {
+	cairo_surface_t *s = load_png(shot_name);
+	LayerSurface *toolbar = toolbar_layer();
+	wlr_box region = toolbar != nullptr ? flyout_region(toolbar->geo) : wlr_box{};
+	int swatch = colour_count(s, region, note_swatch_colour());
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	if (swatch > 20 && retries++ < 10) {
+		if (retries % 3 == 1) {
+			open_notes_flyout(); // the button again: the toggle folds
+		}
+		return false;
+	}
+	retries = 0;
+	check(swatch <= 20, "the flyout folded on the button's second click");
+	return true;
+}
 
 
 int run_step() {
@@ -6527,7 +6829,7 @@ int run_step() {
 		check(played,
 			std::format("ffprobe reads the recording as a playing {}x{} file ({})",
 				screen_w, screen_h, probe));
-		step = 400; // on to the settings window: the gear, its tabs, its writes
+		step = 300; // on to the toolbar's edges; the settings window chains from there
 		return -100; // without the advance: every other step moves on alone
 	}
 	// ---- the settings window, end to end (steps 400-430) ----
@@ -6872,73 +7174,110 @@ int run_step() {
 			+ settings_gap + settings_choice / 2.0);
 		return 400;
 	}
-	case 416: { // the write: toolbar.position into shell.json
+	case 416: { // the write: toolbar.position into shell.json; the strip follows live
 		std::string position = shell_toolbar_position();
-		if (position != "left" && retries++ < 30) {
+		bool moved = toolbar_on_edge("left");
+		if ((position != "left" || !moved) && retries++ < 30) {
 			return -300;
 		}
+		retries = 0;
 		check(position == "left",
 			"choosing Left wrote toolbar.position into shell.json");
+		check(moved, "the strip moved to the left edge with the choice, 8 px "
+			"from it");
+		check(settings_shell_kept(), "the strip moved to the left with no "
+			"reload of the shell");
 		shot("settings-toolbar-left");
 		return 500;
 	}
-	case 417: { // Left is the chosen edge now; Right puts it back
-		cairo_surface_t *s = load_png("settings-toolbar-left");
-		int card_y = settings_card_top(
-			settings_card_height(settings_toolbar_column()), settings_gear_y);
-		int first_top = card_y + settings_pad + settings_row + settings_gap
-			+ settings_header + settings_gap;
-		unsigned dots = s != nullptr ? settings_dots(s, first_top, 4) : 0;
-		cairo_surface_destroy(s);
-		if (dots != 2u && retries++ < 10) {
+	case 417: { // Left is chosen and the card sits beside the strip's new edge; Top next
+		ToolbarCard card = settings_toolbar_card("settings-toolbar-left");
+		if ((card.dots != 2u || !card.placed) && retries++ < 10) {
 			shot("settings-toolbar-left");
 			return -700;
 		}
 		retries = 0;
-		check(dots == 2u, "choosing Left lit its dot and only its dot: the "
-			"choice shows as the selected edge");
-		// The strip's own move to the edge is the toolbar's feature, not
-		// the panel's; this phase checks the write and the choice only.
-		click(settings_card_x + 100, first_top + settings_choice / 2.0);
-		return 400;
+		check(card.dots == 2u, "choosing Left lit its dot and only its dot: "
+			"the choice shows as the selected edge");
+		check(card.placed, std::format("the settings card moved with the "
+			"strip: beside it on the left edge, level with the gear (card at "
+			"{} px)", settings_card_x));
+		// The third choice, Top.
+		click(settings_card_x + 100, card.first_top
+			+ 2 * (settings_choice + settings_gap) + settings_choice / 2.0);
+		step = 440; // the move to the top: two steps of its own
+		return -400; // without the advance
 	}
-	case 418: { // the write: toolbar.position back to right
+	case 440: { // the write: Top; the strip is the row below the bar, live
 		std::string position = shell_toolbar_position();
-		if (position != "right" && retries++ < 30) {
+		bool moved = toolbar_on_edge("top");
+		if ((position != "top" || !moved) && retries++ < 30) {
 			return -300;
 		}
+		retries = 0;
+		check(position == "top",
+			"choosing Top wrote toolbar.position into shell.json");
+		check(moved, "the strip moved to the top edge with the choice: a row "
+			"below the bar, 8 px down");
+		check(settings_shell_kept(), "the strip moved to the top with no "
+			"reload of the shell");
+		shot("settings-toolbar-top");
+		return 500;
+	}
+	case 441: { // Top is chosen and the card hangs below the row, toward the centre; Right next
+		ToolbarCard card = settings_toolbar_card("settings-toolbar-top");
+		if ((card.dots != 4u || !card.placed) && retries++ < 10) {
+			shot("settings-toolbar-top");
+			return -700;
+		}
+		retries = 0;
+		LayerSurface *toolbar = toolbar_layer();
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		check(card.dots == 4u, "choosing Top lit its dot and only its dot");
+		check(card.placed && card.card_y == strip.y + strip.height + beside_gap,
+			std::format("the settings card hangs one margin below the top row, "
+				"centred on the gear (card at {},{}; the row's bottom at {})",
+				settings_card_x, card.card_y, strip.y + strip.height));
+		click(settings_card_x + 100, card.first_top + settings_choice / 2.0);
+		step = 418; // Right puts everything back
+		return -400; // without the advance
+	}
+	case 418: { // the write: toolbar.position back to right; the strip returns
+		std::string position = shell_toolbar_position();
+		bool moved = toolbar_on_edge("right");
+		if ((position != "right" || !moved) && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
 		check(position == "right",
 			"choosing Right wrote toolbar.position back");
+		check(moved, "the strip moved back to the right edge with the choice");
 		shot("settings-toolbar-right");
 		return 500;
 	}
-	case 419: { // Right is the chosen edge again; on to the Shortcuts tab
-		cairo_surface_t *s = load_png("settings-toolbar-right");
-		int card_y = settings_card_top(
-			settings_card_height(settings_toolbar_column()), settings_gear_y);
-		int first_top = card_y + settings_pad + settings_row + settings_gap
-			+ settings_header + settings_gap;
-		unsigned dots = s != nullptr ? settings_dots(s, first_top, 4) : 0;
-		cairo_surface_destroy(s);
-		if (dots != 1u && retries++ < 10) {
+	case 419: { // Right is the chosen edge again, the card back beside it; on to the Shortcuts tab
+		ToolbarCard card = settings_toolbar_card("settings-toolbar-right");
+		if ((card.dots != 1u || !card.placed) && retries++ < 10) {
 			shot("settings-toolbar-right");
 			return -700;
 		}
 		retries = 0;
-		check(dots == 1u, "Right is the only edge chosen again");
-		check(settings_shell_kept(), "choosing the toolbar's edge twice "
+		check(card.dots == 1u, "Right is the only edge chosen again");
+		check(card.placed && settings_card_x == settings_card_left(false),
+			std::format("the settings card is back beside the right edge, "
+				"level with the gear (card at {} px)", settings_card_x));
+		check(settings_shell_kept(), "choosing the toolbar's edge three times "
 			"wrote shell.json and reloaded nothing");
 		// The card keeps the Toolbar tab's shape until the click lands.
 		click(settings_card_x + settings_pad + settings_tab_w * 0.5,
-			card_y + settings_pad + settings_row / 2.0);
+			card.card_y + settings_pad + settings_row / 2.0);
 		return 700;
 	}
 	case 420: { // the Shortcuts tab drawn; the tall card clamps at the top
 		shot("settings-shortcuts-tab");
-		step = 422; // the toolbar's own move waits for its feature's merge
-		return -100;
+		return 700;
 	}
-	case 422: { // the Shortcuts tab: groups in registry order, chips as keys
+	case 421: { // the Shortcuts tab: groups in registry order, chips as keys
 		cairo_surface_t *s = load_png("settings-shortcuts-tab");
 		// The tall card clamps at the top; the terminal row is the second
 		// of the Apps group, under its header and the launcher row.
@@ -7120,6 +7459,212 @@ int run_step() {
 				&& mapped_views_of("foot") == terminals_before + 1,
 			"the chord the recording replaced opens nothing");
 		return 100; // done: the summary prints and the run ends
+	}
+	case 300: { // the themed window focused, for the shelf's item
+		View *v = titled("themed");
+		wlr_box f = v != nullptr ? v->frame_box() : wlr_box{};
+		if (v != nullptr && server->focused_view != v) {
+			click(f.x + f.width / 2.0, f.y + f.height / 2.0);
+		}
+		if (server->focused_view != v && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		check(server->focused_view == v, "the themed window is focused");
+		chord(KEY_M, KEY_LEFTMETA); // Super+M minimizes it
+		return 400;
+	}
+	case 301: { // minimized, then the overview the toolbar lives in
+		View *v = titled("themed");
+		if (v != nullptr && !v->minimized && retries++ < 20) {
+			if (retries % 5 == 2) {
+				chord(KEY_M, KEY_LEFTMETA); // a chord may be lost: send it again
+			}
+			return -400;
+		}
+		retries = 0;
+		check(v != nullptr && v->minimized,
+			"Super+M minimized the themed window (the shelf's item)");
+		chord(KEY_TAB, KEY_LEFTMETA); // the overview: the toolbar's home
+		return 400;
+	}
+	case 302: { // the toolbar on its default right edge, then the first write
+		if ((!overview_settled(true) || !toolbar_on_edge("right")) && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		LayerSurface *toolbar = toolbar_layer();
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		check(overview_settled(true), "the overview settled for the toolbar");
+		check(toolbar != nullptr && toolbar_on_edge("right"),
+			"the toolbar mapped 8 px from the right edge, its default");
+		check(toolbar != nullptr && toolbar_centred(strip),
+			"the strip is centred along its edge");
+		check(toolbar != nullptr && strip.height / toolbar_button >= 4,
+			std::format("the strip holds its buttons ({} squares)",
+				toolbar != nullptr ? strip.height / toolbar_button : 0));
+		check(set_toolbar_position("left"),
+			"toolbar.position: left written to the scratch shell.json");
+		return 800; // the reload the edit triggers takes its time
+	}
+	case 303: { // the left edge: a side toolbar clears nothing below
+		if (!toolbar_on_edge("left") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("left", "edges-left");
+		Shelf shelf = overview_shelf_layout(*server->outputs.front());
+		check(!shelf.empty(), "the minimized window sits on the shelf");
+		check(!shelf.empty()
+			&& shelf.front().box.y + shelf.front().box.height
+				== screen_h - shelf_bottom_gap,
+			"the shelf keeps its place along the bottom (a side toolbar "
+			"clears nothing)");
+		return 700;
+	}
+	case 304: { // the note button: its colour flyout, right of the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 305: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-left-flyout")
+				|| !flyout_open_checks("edges-left-flyout", "right of")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 306: { // folded; on to the top edge
+		if (!shot_landed("edges-left-folded")
+				|| !flyout_folded_checks("edges-left-folded")) {
+			return -100;
+		}
+		check(set_toolbar_position("top"),
+			"toolbar.position: top written to the scratch shell.json");
+		return 800;
+	}
+	case 307: { // the top edge: a row below the bar
+		if (!toolbar_on_edge("top") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("top", "edges-top");
+		return 700;
+	}
+	case 308: { // the note button: its colour flyout, below the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 309: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-top-flyout")
+				|| !flyout_open_checks("edges-top-flyout", "below")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 310: { // folded; on to the bottom edge
+		if (!shot_landed("edges-top-folded")
+				|| !flyout_folded_checks("edges-top-folded")) {
+			return -100;
+		}
+		check(set_toolbar_position("bottom"),
+			"toolbar.position: bottom written to the scratch shell.json");
+		return 800;
+	}
+	case 311: { // the bottom edge: the shelf above the toolbar
+		if (!toolbar_on_edge("bottom") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("bottom", "edges-bottom");
+		LayerSurface *toolbar = toolbar_layer();
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		Shelf shelf = overview_shelf_layout(*server->outputs.front());
+		check(!shelf.empty(), "the minimized window sits on the shelf");
+		check(!shelf.empty() && toolbar != nullptr
+			&& shelf.front().box.y + shelf.front().box.height
+				== strip.y - shelf_bottom_gap,
+			std::format("the shelf rose above the bottom toolbar (its bottom "
+				"at {}, the toolbar's top at {})",
+				!shelf.empty() ? shelf.front().box.y + shelf.front().box.height : 0,
+				toolbar != nullptr ? strip.y : 0));
+		return 700;
+	}
+	case 312: { // the note button: its colour flyout, above the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 313: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-bottom-flyout")
+				|| !flyout_open_checks("edges-bottom-flyout", "above")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 314: { // folded; back to the default right edge
+		if (!shot_landed("edges-bottom-folded")
+				|| !flyout_folded_checks("edges-bottom-folded")) {
+			return -100;
+		}
+		check(set_toolbar_position("right"),
+			"toolbar.position: right written to the scratch shell.json");
+		return 800;
+	}
+	case 315: { // the right edge again, as the run leaves it
+		if (!toolbar_on_edge("right") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("right", "edges-right");
+		return 700;
+	}
+	case 316: { // the note button: its colour flyout, left of the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 317: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-right-flyout")
+				|| !flyout_open_checks("edges-right-flyout", "left of")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 318: { // folded; the overview left behind
+		if (!shot_landed("edges-right-folded")
+				|| !flyout_folded_checks("edges-right-folded")) {
+			return -100;
+		}
+		check(toolbar_layer() != nullptr, "the toolbar stays after its edges");
+		tap(KEY_ESC); // Escape leaves the overview, folding everything
+		return 400;
+	}
+	case 319: { // the toolbar's edges done: the overview closed, the world left tidy
+		if ((!overview_settled(false) || toolbar_layer() != nullptr) && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		check(overview_settled(false), "the overview closed behind the toolbar's edges");
+		check(toolbar_layer() == nullptr, "the toolbar slid out with the overview");
+		check(panel_layers() == 0, "no panel outlived the toolbar's edges");
+		check(toolbar_position_in_config() == "right",
+			"the scratch shell.json ends with toolbar.position: right");
+		step = 400; // on to the settings window: the gear, its tabs, its writes
+		return -100; // without the advance: every other step moves on alone
 	}
 	default:
 		finished = true;

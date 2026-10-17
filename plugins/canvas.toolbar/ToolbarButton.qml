@@ -1,69 +1,54 @@
-import Quickshell
 import QtQuick
 import WaylandCanvas.Ui
 
-// One toolbar button: its glyph in a square, its label beside it on
-// hover — left of it, away from the screen edge — and a click routed to
-// the surface, which runs the action, opens the panel through the common
-// trigger or unfolds the flyout.
+// One toolbar button: its glyph in a square, a click routed to the
+// surface, which runs the action, opens the panel through the common
+// trigger or unfolds the flyout. The button places itself in the strip
+// (x and y bound to the surface's layout of its buttons), so a live
+// edge change moves it with the strip, and reports its hover, so the
+// surface can show its label beside it on the chrome surface.
 //
-// A panel-opening button also names where its panel belongs: the
-// toolbar's window spans its whole output, so the button can map itself
-// into output coordinates, which the panel card reads (panelRight,
-// panelCentreY) to hang the panel to the left of the toolbar, level with
-// this button.
+// A panel-opening button also names where its panel belongs, in output
+// coordinates: on the toolbar's inner side, one margin past the settled
+// strip, level with this button along it. Which properties carry that
+// depends on the edge — a right-edge strip gives panelRight with
+// panelCentreY (the card hangs to the left of it), a left one panelLeft
+// with panelCentreY, a top or bottom row panelTop or panelBottom with
+// panelCentreX — and a card reads whichever pair is defined
+// (shell/ui/WaylandCanvas/Ui/PanelCard.qml).
 Item {
 	id: root
 
 	property var spec: null // the registry entry this button shows
 	property var surface: null // the toolbar surface, which acts on clicks
-
-	// The label chip's shape: a gap before the square and padding around
-	// the text, so the label reads over the canvas.
-	readonly property int labelGap: 8
-	readonly property int labelPad: 6
+	property int index: -1 // its place in the strip
 
 	width: surface != null ? surface.buttonSize : 0
 	height: width
+	x: surface != null && surface.vertical ? 0 : index * surface.buttonSize
+	y: surface != null && surface.vertical ? index * surface.buttonSize : 0
 
-	TransformWatcher {
-		id: watcher
-		a: root.surface != null ? root.surface.contentItem : null
-		b: root
-	}
+	// This button's square, in output coordinates, from the surface's
+	// layout of the strip. (The settled place: a panel only opens with
+	// the strip in place.)
+	readonly property var spot: surface != null && index >= 0
+		? surface.buttonBox(index) : null
 
-	// Where a panel opened from this button belongs, in output
-	// coordinates: its right edge one margin left of the strip, its
-	// centre level with the button. (The strip's settled place: a panel
-	// only opens with the strip in place.)
-	readonly property real panelRight: {
-		watcher.transform
-		return surface != null
-			? surface.width - 2 * UiTheme.edgeMargin - surface.buttonSize : 0
-	}
-	readonly property real panelCentreY: {
-		watcher.transform
-		return mapToItem(null, width / 2, height / 2).y
-	}
-
-	// The label, beside the square on hover, on a chip so it reads over
-	// whatever the overview is showing.
-	Rectangle {
-		visible: mouse.containsMouse && root.spec != null && root.spec.label !== ""
-		anchors.right: parent.left
-		anchors.rightMargin: root.labelGap
-		anchors.verticalCenter: parent.verticalCenter
-		width: label.implicitWidth + 2 * root.labelPad
-		height: label.implicitHeight + 2 * root.labelPad
-		radius: 4
-		color: UiTheme.background
-
-		PanelText {
-			id: label
-			anchors.centerIn: parent
-			text: root.spec != null ? root.spec.label : ""
-		}
-	}
+	// Where a panel opened from this button belongs — undefined on every
+	// property the edge does not use, so a bar widget (which names none
+	// of them) and a button on another edge are told apart.
+	readonly property var panelRight: spot != null && surface.edge === "right"
+		? spot.x - surface.edgeMargin : undefined
+	readonly property var panelLeft: spot != null && surface.edge === "left"
+		? spot.x + spot.width + surface.edgeMargin : undefined
+	readonly property var panelTop: spot != null && surface.edge === "top"
+		? spot.y + spot.height + surface.edgeMargin : undefined
+	readonly property var panelBottom: spot != null && surface.edge === "bottom"
+		? spot.y - surface.edgeMargin : undefined
+	readonly property var panelCentreY: spot != null && surface.vertical
+		? spot.y + spot.height / 2 : undefined
+	readonly property var panelCentreX: spot != null && !surface.vertical
+		? spot.x + spot.width / 2 : undefined
 
 	// The square: a hover wash and the glyph.
 	Rectangle {
@@ -88,6 +73,16 @@ Item {
 		anchors.fill: parent
 		hoverEnabled: true
 		cursorShape: Qt.PointingHandCursor
+		onContainsMouseChanged: {
+			if (root.surface == null) {
+				return
+			}
+			if (mouse.containsMouse) {
+				root.surface.hoverButton = root
+			} else if (root.surface.hoverButton === root) {
+				root.surface.hoverButton = null
+			}
+		}
 		onClicked: if (root.surface != null) {
 			root.surface.buttonActivated(root)
 		}

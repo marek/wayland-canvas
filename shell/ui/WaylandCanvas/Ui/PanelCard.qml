@@ -88,16 +88,18 @@ PanelWindow {
 	readonly property real barH: anchorWindow ? anchorWindow.height : 26
 
 	// The card: placed by its anchor, kept inside the output. A bar
-	// widget hangs centred under its indicator. An anchor that the
-	// compositor places where Qt cannot see — the overview toolbar's
-	// button, whose window covers its whole output, so it can map itself
-	// into output coordinates — names the spot itself: panelRight, where
-	// the card's right edge belongs in output coordinates, and
-	// panelCentreY, the button's vertical centre; the card hangs to the
-	// left of the toolbar, level with the button. The watcher's transform
-	// is the reactive dependency that re-runs the position when the bar
-	// lays its widgets out or moves them — a bare mapToItem binding would
-	// only see the first, pre-layout position.
+	// widget hangs centred under its indicator. An anchor that Qt cannot
+	// place from here — the overview toolbar's button, whose window is
+	// only the strip — names the spot itself, in output coordinates, one
+	// pair of properties per edge of the strip: panelRight with
+	// panelCentreY for a right-edge column (the card hangs to the left
+	// of it, level with the button), panelLeft with panelCentreY for a
+	// left one, panelTop or panelBottom with panelCentreX for a top or
+	// bottom row; the card reads whichever pair is defined and hangs on
+	// the strip's inner side, toward the screen's centre. The watcher's
+	// transform is the reactive dependency that re-runs the position
+	// when the bar lays its widgets out or moves them — a bare
+	// mapToItem binding would only see the first, pre-layout position.
 	TransformWatcher {
 		id: anchorWatcher
 		a: root.anchorWindow ? root.anchorWindow.contentItem : null
@@ -105,15 +107,30 @@ PanelWindow {
 	}
 
 	// True when the anchor names its own spot (the toolbar's buttons);
-	// a bar widget names neither property.
+	// a bar widget names none of the properties.
 	readonly property bool beside: anchorItem != null
-		&& anchorItem.panelRight !== undefined
+		&& (anchorItem.panelRight !== undefined
+			|| anchorItem.panelLeft !== undefined
+			|| anchorItem.panelTop !== undefined
+			|| anchorItem.panelBottom !== undefined)
 
 	readonly property real cardX: {
 		anchorWatcher.transform
 		if (beside) {
+			// A column: the card's edge sits one margin past the strip.
+			if (anchorItem.panelRight !== undefined) {
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
+					anchorItem.panelRight - panelWidth,
+					screenW - panelWidth - UiTheme.edgeMargin)))
+			}
+			if (anchorItem.panelLeft !== undefined) {
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
+					anchorItem.panelLeft,
+					screenW - panelWidth - UiTheme.edgeMargin)))
+			}
+			// A row: centred on the button's square along it.
 			return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
-				anchorItem.panelRight - panelWidth,
+				anchorItem.panelCentreX - panelWidth / 2,
 				screenW - panelWidth - UiTheme.edgeMargin)))
 		}
 		var centre = anchorItem ? anchorItem.mapToItem(null, anchorItem.width / 2, 0).x : 0
@@ -123,6 +140,18 @@ PanelWindow {
 	readonly property real cardY: {
 		anchorWatcher.transform
 		if (beside) {
+			// A row: the card's edge sits one margin past the strip.
+			if (anchorItem.panelTop !== undefined) {
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
+					anchorItem.panelTop,
+					screenH - card.height - UiTheme.edgeMargin)))
+			}
+			if (anchorItem.panelBottom !== undefined) {
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
+					anchorItem.panelBottom - card.height,
+					screenH - card.height - UiTheme.edgeMargin)))
+			}
+			// A column: centred on the button's square along it.
 			return Math.round(Math.max(UiTheme.edgeMargin, Math.min(
 				anchorItem.panelCentreY - card.height / 2,
 				screenH - card.height - UiTheme.edgeMargin)))
