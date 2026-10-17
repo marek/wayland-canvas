@@ -9,7 +9,8 @@
 Shell plugins and scripts drive the compositor and follow its state without
 speaking a Wayland protocol: the bar's logo opens the launcher, the overview
 toolbar shows while a screen is in the overview, sticky notes sit on the
-canvas, and the light/dark switch reaches the title bars.
+canvas, the light/dark switch reaches the title bars, and the settings
+window reads and changes the shortcuts and gestures.
 
 ## Design considerations
 
@@ -45,7 +46,7 @@ the `$WAYLAND_DISPLAY` the session hands over (an absolute
 | Message | Shape |
 |---|---|
 | Request | `{"id": 7, "method": "overview.toggle", "params": {"output": "DP-1"}}`: `id` a number or string, echoed back; `params` optional |
-| Response | `{"id": 7, "result": …}` or `{"id": 7, "error": "…"}` — `capture.pick`'s only when the user has picked |
+| Response | `{"id": 7, "result": …}` or `{"id": 7, "error": "…"}` — `capture.pick`'s and `shortcut.capture`'s only when the user has finished |
 | Event | `{"event": "overview", "params": {…}}`, only on a connection that subscribed |
 
 A client may send several requests on one connection or reconnect per
@@ -67,6 +68,10 @@ request; responses come in request order.
 | `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
 | `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
 | `capture.stop` | — | `true`; an error (`not recording`) with nothing running |
+| `settings.get` | — | The settings (below) |
+| `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); `swipes` (a preset); `pinchScale` (a boolean) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action or preset, a chord that does not parse or is not allowed there, the file unwritable |
+| `shortcut.capture` | `scope`: `global` (the default) or `overview` | `{"keys": "Super+Shift+K"}` once the user presses a chord, `{"keys": null}` when cancelled |
+| `shortcut.cancel` | — | `true`; a capture under way answers `{"keys": null}` |
 
 `item.set` creates the item or updates the one with that id. Without `x`
 and `y`, a new item is centred on what the output under the cursor shows
@@ -80,13 +85,29 @@ keybinding can run a shell action without speaking to the shell directly —
 `wayland-canvas msg action.run '{"name":"canvas.notes/create",
 "args":{"color":"#ffd8f66"}}'`.
 
-`capture.pick` is the one method whose answer waits for the user: the
-compositor opens its own picker
+`capture.pick` and `shortcut.capture` are the methods whose answers wait
+for the user. `capture.pick` opens the compositor's own picker
 ([../apps/capture.md](../apps/capture.md)) and the response goes out
 when the pick completes; a cancel answers `cancelled`, and a second
 pick while one runs answers `a capture pick is already running`. The
 chooser of xdg-desktop-portal-wlr is this method through the msg
-client (below).
+client (below). `shortcut.capture` takes every key until a chord is
+pressed, Escape alone cancels, and a second capture cancels the first
+([../shell/settings.md](../shell/settings.md)); it reports what was
+pressed, and `settings.set` decides whether that chord is allowed.
+
+### Settings
+
+`settings.get`, `settings.set` and the `settings` event carry the effective
+settings of [../input/config-file.md](../input/config-file.md):
+
+| Key | Holds |
+|---|---|
+| `path` | The file |
+| `errors` | Each ignored line: `{"line", "text"}` |
+| `shortcuts` | Every action, in the bindings table's order, the overview's last: `scope`, `action` (its name), `label`, `group`, `keys` and `defaults` (chords as the file writes them) |
+| `commands` | `{"keys", "command"}` each |
+| `gestures` | `swipes` (the preset), `pinchScale` |
 
 
 ### State
@@ -110,6 +131,7 @@ client (below).
 | `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item, or a client ran `item.activate` |
 | `action` | `name`, `args` | A client ran `action.run`; the host runs the named plugin action |
 | `capture.recording` | `active`, `path` | A recording started (the file it writes) or stopped |
+| `settings` | The settings, as `settings.get` returns them | The effective settings change: the file saved by hand or deleted, or a `settings.set` |
 
 ### Canvas items
 

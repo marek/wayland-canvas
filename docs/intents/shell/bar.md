@@ -60,6 +60,10 @@ sit in 27 px slots.
 | Center | clock, weather |
 | Right | tray, agents, bluetooth, network, audio, brightness, power, theme |
 
+Any widget can be left out of the bar: the shell config's `bar.hidden`
+([plugins.md](plugins.md)), which the settings window's Bar page writes
+([settings.md](settings.md)); the others keep their places and order.
+
 Widgets and what a click does:
 
 | Widget | Shows | Left | Other |
@@ -140,8 +144,10 @@ installed (meson installs `shell/` and the built-in `plugins/` under the
 data dir, the plugins beside the shell where the host finds them) — or at
 `$WAYLAND_CANVAS_SHELL_DIR` when set. It is started with `QML_IMPORT_PATH`
 prefixed by the shell's `ui/` dir, so every plugin, wherever the host found
-it, can `import WaylandCanvas.Ui`. `-B` (and `Options::start_bar`) starts
-the compositor without it.
+it, can `import WaylandCanvas.Ui`, and with the compositor's own directory
+first on `PATH`, so the shell runs the helpers of the build it belongs to
+(`wayland-canvas-agent-usage`, `wayland-canvas`) — in the build tree too.
+`-B` (and `Options::start_bar`) starts the compositor without it.
 
 ## Cross-links
 
