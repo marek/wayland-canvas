@@ -865,6 +865,8 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
 		std::pair{std::string_view{"window.focus"}, &Ipc::m_window_focus},
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
+		std::pair{std::string_view{"surface.place"}, &Ipc::m_surface_place},
+		std::pair{std::string_view{"surface.unplace"}, &Ipc::m_surface_unplace},
 		std::pair{std::string_view{"capture.stop"}, &Ipc::m_capture_stop},
 		std::pair{std::string_view{"settings.get"}, &Ipc::m_settings_get},
 		std::pair{std::string_view{"settings.set"}, &Ipc::m_settings_set},
@@ -1174,6 +1176,75 @@ std::expected<std::string, std::string> Ipc::m_item_activate(Client &,
 			std::format("the item '{}' is on no output's screen", **id));
 	}
 	emit_item_activated(*item, *chosen);
+	return std::string{"true"};
+}
+
+// The layer surface a plugin named, on any output; nullptr when no
+// mapped surface carries that name.
+LayerSurface *named_surface(Server &server, std::string_view name) {
+	for (const std::unique_ptr<Output> &output : server.outputs) {
+		for (auto &surfaces : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &layer : surfaces) {
+				if (layer->name() == name) {
+					return layer.get();
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+std::expected<std::string, std::string> Ipc::m_surface_place(Client &,
+		JsonObject *params) {
+	constexpr std::string_view usage =
+		"params: surface (a layer surface's name), x, y, width, height";
+	std::expected<std::optional<std::string>, std::string> name =
+		opt_string(params, "surface");
+	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
+		return std::unexpected(std::string{usage});
+	}
+	std::expected<std::optional<long long>, std::string> x = opt_int(params, "x");
+	std::expected<std::optional<long long>, std::string> y = opt_int(params, "y");
+	std::expected<std::optional<long long>, std::string> width =
+		opt_int(params, "width");
+	std::expected<std::optional<long long>, std::string> height =
+		opt_int(params, "height");
+	for (const auto &value : {x, y, width, height}) {
+		if (!value.has_value()) {
+			return std::unexpected(value.error());
+		}
+		if (!value->has_value()) {
+			return std::unexpected(std::string{usage});
+		}
+	}
+	if (*(*width) < 1 || *(*height) < 1) {
+		return std::unexpected(std::string{"a surface needs an area to be placed in"});
+	}
+	LayerSurface *surface = named_surface(server_, *(*name));
+	if (surface == nullptr) {
+		return std::unexpected(std::format("no surface named '{}'", *(*name)));
+	}
+	surface->canvas_box = wlr_box{static_cast<int>(*(*x)), static_cast<int>(*(*y)),
+		static_cast<int>(*(*width)), static_cast<int>(*(*height))};
+	surface->output.arrange_layers();
+	server_.damage_all();
+	return std::string{"true"};
+}
+
+std::expected<std::string, std::string> Ipc::m_surface_unplace(Client &,
+		JsonObject *params) {
+	std::expected<std::optional<std::string>, std::string> name =
+		opt_string(params, "surface");
+	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
+		return std::unexpected(std::string{"params: surface (a layer surface's name)"});
+	}
+	LayerSurface *surface = named_surface(server_, *(*name));
+	if (surface == nullptr) {
+		return std::unexpected(std::format("no surface named '{}'", *(*name)));
+	}
+	surface->canvas_box.reset();
+	surface->output.arrange_layers();
+	server_.damage_all();
 	return std::string{"true"};
 }
 

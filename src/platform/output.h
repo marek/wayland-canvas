@@ -42,6 +42,8 @@ public:
 	// layer.cpp
 	void arrange_layers();
 	std::optional<LayerHit> layer_surface_at(int layer, double ox, double oy) const;
+	// A plugin's surface on the plane under an output-local point.
+	std::optional<LayerHit> canvas_surface_at(double ox, double oy) const;
 	bool has_wallpaper() const;
 
 	Server &server;

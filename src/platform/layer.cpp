@@ -200,6 +200,10 @@ void LayerSurface::handle_destroy() {
 	server.refocus_layers();
 } // `owned` releasing destroys this
 
+std::string LayerSurface::name() const {
+	return wlr->namespace_ != nullptr ? std::string{wlr->namespace_} : std::string{};
+}
+
 void Output::arrange_layers() {
 	wlr_box full{0, 0, width, height};
 	wlr_box usable = full;
@@ -213,6 +217,15 @@ void Output::arrange_layers() {
 				if ((pass == 0) != exclusive) {
 					continue;
 				}
+				if (layer->canvas_box.has_value()) {
+					// On the plane: the client is sized by the rectangle
+					// the plugin named, not by the output.
+					layer->geo = *layer->canvas_box;
+					wlr_layer_surface_v1_configure(layer->wlr,
+						static_cast<uint32_t>(layer->canvas_box->width),
+						static_cast<uint32_t>(layer->canvas_box->height));
+					continue;
+				}
 				layer_configure(*layer, full, usable);
 			}
 		}
@@ -223,10 +236,36 @@ void Output::arrange_layers() {
 	server.visibility_dirty = true;
 }
 
+// A surface a plugin put on the plane, under an output-local point: the
+// point is taken to the canvas first, so the hit follows the camera.
+std::optional<LayerHit> Output::canvas_surface_at(double ox, double oy) const {
+	Point on_plane = local_to_canvas(ox, oy);
+	for (const auto &surfaces : layers) {
+		for (const std::unique_ptr<LayerSurface> &l : surfaces) {
+			if (!l->mapped || !l->canvas_box.has_value()) {
+				continue;
+			}
+			const wlr_box &box = *l->canvas_box;
+			double sx = on_plane.x - box.x, sy = on_plane.y - box.y;
+			if (sx < 0 || sy < 0 || sx >= box.width || sy >= box.height) {
+				continue;
+			}
+			double in_x = 0, in_y = 0;
+			wlr_surface *surface = wlr_surface_surface_at(l->wlr->surface, sx, sy,
+				&in_x, &in_y);
+			if (surface != nullptr) {
+				return LayerHit{.layer = l.get(), .surface = surface,
+					.sx = in_x, .sy = in_y};
+			}
+		}
+	}
+	return std::nullopt;
+}
+
 std::optional<LayerHit> Output::layer_surface_at(int layer, double ox, double oy) const {
 	for (const std::unique_ptr<LayerSurface> &l : layers[layer]) {
-		if (!l->mapped) {
-			continue;
+		if (!l->mapped || l->canvas_box.has_value()) {
+			continue; // on the plane: canvas_surface_at finds it
 		}
 		double sx = 0, sy = 0;
 		wlr_surface *surface = wlr_layer_surface_v1_surface_at(
