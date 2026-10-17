@@ -55,7 +55,7 @@ offers is not loaded.
 ### Settings a plugin declares
 
 `settings` holds one entry per setting the plugin reads, and the settings
-window builds that plugin's page from the entries alone
+window builds its Plugins page from the entries alone
 ([settings.md](settings.md)), so no plugin's own choices need code in the
 settings window. An entry is the default value on its own, or an object:
 

@@ -132,6 +132,71 @@ Item {
 	readonly property bool appBarEnabled:
 		!(config.appbar && config.appbar.enabled === false)
 
+	// One page per plugin that declares settings the user may be asked
+	// about, for the settings window to render
+	// (docs/intents/shell/plugins.md): {id, name, groups: [{name, entries}]},
+	// each entry {key, type, label, description, choices, min, max, step,
+	// value}. A key without a type and a label is the plugin's own and
+	// appears nowhere.
+	readonly property var pluginSettingsPages: {
+		var pages = []
+		for (var i = 0; i < plugins.length; i++) {
+			var plugin = plugins[i]
+			var pluginApi = plugin.api.plugin
+			var schema = pluginApi.schema
+			var groups = []
+			var byGroup = ({})
+			var keys = Object.keys(schema)
+			for (var k = 0; k < keys.length; k++) {
+				var key = keys[k]
+				var spec = schema[key]
+				var kind = spec.type || ""
+				if (spec.label === undefined || (kind !== "switch"
+						&& kind !== "choice" && kind !== "number" && kind !== "text")) {
+					continue // the plugin's own: nothing to show
+				}
+				var name = spec.group !== undefined ? spec.group : plugin.manifest.name
+				if (byGroup[name] === undefined) {
+					byGroup[name] = {name: name, entries: []}
+					groups.push(byGroup[name])
+				}
+				byGroup[name].entries.push({
+					key: key,
+					type: kind,
+					label: spec.label,
+					description: spec.description !== undefined ? spec.description : "",
+					choices: spec.choices !== undefined ? spec.choices : [],
+					min: spec.min !== undefined ? spec.min : 0,
+					max: spec.max !== undefined ? spec.max : 100,
+					step: spec.step !== undefined ? spec.step : 1,
+					order: spec.order !== undefined ? spec.order : 0,
+					value: pluginApi.settings[key],
+				})
+			}
+			if (groups.length === 0) {
+				continue
+			}
+			for (var g = 0; g < groups.length; g++) {
+				groups[g].entries.sort(function(a, b) { return a.order - b.order })
+			}
+			pages.push({id: plugin.id, name: plugin.manifest.name, groups: groups})
+		}
+		return pages
+	}
+
+	// Writes one plugin's setting, through that plugin's own api: the live
+	// settings change at once and the override lands in the config.
+	function setPluginSetting(id, key, value) {
+		for (var i = 0; i < plugins.length; i++) {
+			if (plugins[i].id === id) {
+				plugins[i].api.plugin.setSetting(key, value)
+				rebuildRegistry()
+				return true
+			}
+		}
+		return false
+	}
+
 	// Whether the config's bar.hidden names this widget.
 	function barHidden(name) {
 		var hidden = config.bar && config.bar.hidden ? config.bar.hidden : null

@@ -4,3 +4,4 @@
 # a sibling names it here and imports "."
 ShortcutRow ShortcutRow.qml
 CommandRow CommandRow.qml
+PluginSettingRow PluginSettingRow.qml

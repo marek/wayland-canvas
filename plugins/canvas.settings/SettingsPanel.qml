@@ -390,14 +390,34 @@ PanelCard {
 
 	property string tab: "shortcuts"
 
+	// The pages plugins declare, each a tab of its own after the fixed ones
+	// (docs/intents/shell/plugins.md): the window knows no plugin by name.
+	readonly property var pluginPages: api != null && api.shell != null
+		&& api.shell.pluginSettingsPages !== undefined
+		? api.shell.pluginSettingsPages : []
+
+	function setPluginSetting(id, key, value) {
+		if (api != null && api.shell != null) {
+			api.shell.setPluginSetting(id, key, value)
+		}
+	}
+
 	PanelTabs {
-		tabs: [
-			{id: "shortcuts", label: "Shortcuts"},
-			{id: "gestures", label: "Gestures"},
-			{id: "session", label: "Session"},
-			{id: "toolbar", label: "Toolbar"},
-			{id: "bar", label: "Bar"},
-		]
+		// One tab holds every plugin's own settings: a tab per plugin would
+		// grow the row without bound, and the row's width is the card's.
+		tabs: {
+			var fixed = [
+				{id: "shortcuts", label: "Shortcuts"},
+				{id: "gestures", label: "Gestures"},
+				{id: "session", label: "Session"},
+				{id: "toolbar", label: "Toolbar"},
+				{id: "bar", label: "Bar"},
+			]
+			if (root.pluginPages.length > 0) {
+				fixed.push({id: "plugins", label: "Plugins"})
+			}
+			return fixed
+		}
 		current: root.tab
 		onChosen: function(id) { root.tab = id }
 	}
@@ -407,7 +427,84 @@ PanelCard {
 		sourceComponent: root.tab === "shortcuts" ? shortcutsTab
 			: root.tab === "gestures" ? gesturesTab
 			: root.tab === "session" ? sessionTab
-			: root.tab === "toolbar" ? toolbarTab : barTab
+			: root.tab === "toolbar" ? toolbarTab
+			: root.tab === "bar" ? barTab
+			: root.tab === "plugins" ? pluginsTab : barTab
+	}
+
+	// ---- the plugins' own settings, from their declarations alone ----
+
+	// Every declared setting of every plugin, flattened into rows with the
+	// headers that separate them: {header} or {entry, pluginId}. A page
+	// built from one model keeps the list scrollable as one.
+	readonly property var pluginRows: {
+		var rows = []
+		for (var i = 0; i < pluginPages.length; i++) {
+			var page = pluginPages[i]
+			for (var g = 0; g < page.groups.length; g++) {
+				var group = page.groups[g]
+				rows.push({
+					header: group.name === page.name
+						? page.name : page.name + " \u00b7 " + group.name,
+				})
+				for (var e = 0; e < group.entries.length; e++) {
+					rows.push({entry: group.entries[e], pluginId: page.id})
+				}
+			}
+		}
+		return rows
+	}
+
+	Component {
+		id: pluginsTab
+
+		Flickable {
+			width: parent.width
+			implicitHeight: Math.min(contentHeight, root.listMaxHeight)
+			height: implicitHeight
+			contentWidth: width
+			contentHeight: pluginColumn.implicitHeight
+			clip: true
+
+			Column {
+				id: pluginColumn
+				width: parent.width
+				spacing: UiTheme.panelSpacing
+
+				Repeater {
+					model: root.pluginRows
+
+					Loader {
+						required property var modelData
+
+						width: pluginColumn.width
+						sourceComponent: modelData.header !== undefined
+							? pluginHeader : pluginRow
+
+						property var row: modelData
+					}
+				}
+			}
+		}
+	}
+
+	Component {
+		id: pluginHeader
+
+		PanelSectionHeader {
+			text: parent.row.header
+		}
+	}
+
+	Component {
+		id: pluginRow
+
+		PluginSettingRow {
+			width: parent.width
+			entry: parent.row.entry
+			pluginId: parent.row.pluginId
+			panel: root
+		}
 	}
 
 	// Both files the panel edits, by path: the compositor's and the

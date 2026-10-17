@@ -38,7 +38,7 @@ window while it is open.
 |---|---|
 | Opening | The gear button in the overview toolbar ([toolbar.md](toolbar.md)); the window is a panel beside it, through the common trigger |
 | Closing | As any panel: a click outside, Escape, a second click of the gear, leaving the overview. Closing while a shortcut is being recorded cancels the recording |
-| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar, then one per plugin that declares settings with labels, by plugin name; a footer names the two files |
+| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar, and Plugins while any plugin declares settings; a footer names the two files |
 | Where a setting lives | What two surfaces must agree on — the edges the overview's strips take — is the shell config's own (`toolbar.position`, `appbar.*`) and sits on the Toolbar page; what one plugin alone reads is that plugin's, declared in its manifest and rendered from it |
 
 | Page | Holds | Writes |
@@ -48,7 +48,7 @@ window while it is open.
 | Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)"; the switch "Invert scrolling and swipes", which turns the direction of the pointer, the touchpad and the hops around together ([../input/gestures.md](../input/gestures.md)) | `canvas.conf`: `[gestures]` |
 | Toolbar | The toolbar's edge: right, left, top or bottom; then the app bar's switch and its own edge, left by default ([app-bar.md](app-bar.md)) | `shell.json`: `toolbar.position`, `appbar.enabled`, `appbar.position` |
 | Bar | Every bar widget by section, in bar order, with a switch; a widget that hides itself without a source says when it shows | `shell.json`: `bar.hidden` |
-| A plugin's own | Its declared settings, by group in declaration order: a switch, a choice, a number or a text field per entry, with its label and description ([plugins.md](plugins.md)) | `shell.json`: `plugins.<id>.settings` |
+| Plugins | Every plugin's declared settings, plugin by plugin and group by group in declaration order, a header naming each: a switch, a choice, a number or a text field per entry, with its label and description ([plugins.md](plugins.md)). The window names no plugin of its own; one page holds them all, so a new plugin's settings cost the window nothing | `shell.json`: `plugins.<id>.settings` |
 
 ### Recording a shortcut
 

@@ -5,10 +5,47 @@
 	"apiVersion": 1,
 	"description": "The notification server: popups, their actions, the history and the silence switch",
 	"settings": {
-		"popupSeconds": 5,
-		"criticalNeverExpires": true,
-		"maxPopups": 4,
-		"historyLimit": 50
+		"popupSeconds": {
+			"default": 5,
+			"type": "number",
+			"label": "Seconds a popup stays",
+			"description": "Before it fades on its own",
+			"group": "Popups",
+			"min": 1,
+			"max": 30,
+			"step": 1,
+			"order": 1
+		},
+		"criticalNeverExpires": {
+			"default": true,
+			"type": "switch",
+			"label": "Urgent popups stay until dismissed",
+			"description": "A critical notification never fades on its own",
+			"group": "Popups",
+			"order": 2
+		},
+		"maxPopups": {
+			"default": 4,
+			"type": "number",
+			"label": "Popups at once",
+			"description": "The oldest goes as a new one arrives",
+			"group": "Popups",
+			"min": 1,
+			"max": 10,
+			"step": 1,
+			"order": 3
+		},
+		"historyLimit": {
+			"default": 50,
+			"type": "number",
+			"label": "Notifications kept in the history",
+			"description": "The bell's panel lists these",
+			"group": "History",
+			"min": 10,
+			"max": 200,
+			"step": 10,
+			"order": 1
+		}
 	},
 	"contributes": {
 		"surfaces": [

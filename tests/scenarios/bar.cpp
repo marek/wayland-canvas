@@ -3007,7 +3007,10 @@ constexpr int settings_action = 2 * settings_row; // a shortcuts row: label and 
 constexpr int settings_footer = 2 * settings_detail + 2; // the two file paths
 constexpr int settings_sep = 1;
 constexpr int settings_switch_w = 38; // PanelSwitch's width
-constexpr int settings_tabs = 5;     // Shortcuts, Gestures, Session, Toolbar, Bar
+// Shortcuts, Gestures, Session, Toolbar, Bar, then one tab per plugin that
+// declares settings (docs/intents/shell/plugins.md): canvas.notifications is
+// the built-in one that does.
+constexpr int settings_tabs = 6;
 constexpr int settings_tab_w = (settings_panel - 2 * settings_pad) / settings_tabs;
 
 // One Bar-tab section's height: its header, its rows (a detailed row is
@@ -3041,6 +3044,15 @@ int settings_gestures_column() {
 		+ settings_section_height(0, 1)    // Pinch: scale a desktop
 		+ settings_section_height(0, 1)    // Direction: invert
 		+ 2 * settings_gap;
+}
+
+// The Plugins tab's column of content: what canvas.notifications declares —
+// the Popups group (three rows) and the History group (one)
+// (docs/intents/shell/plugins.md). Keep in sync with its manifest.
+int settings_plugins_column() {
+	return settings_section_height(0, 3)
+		+ settings_section_height(0, 1)
+		+ settings_gap;
 }
 
 // The Toolbar tab's column of content: a header and the toolbar's four edge
@@ -3578,6 +3590,42 @@ bool set_app_bar_position(const char *edge) {
 
 bool set_app_bar_enabled(bool on) {
 	return set_shell_config("appbar", "enabled", nullptr, &on);
+}
+
+// One plugin setting the scratch shell.json holds, as text ("true", "42",
+// a string's own value); empty when the config names none.
+std::string plugin_setting_text(const char *id, const char *key) {
+	JsonParser *parser = json_parser_new();
+	std::string out;
+	if (json_parser_load_from_file(parser, shell_config.c_str(), nullptr)
+			&& json_node_get_node_type(json_parser_get_root(parser))
+				== JSON_NODE_OBJECT) {
+		JsonObject *at = json_node_get_object(json_parser_get_root(parser));
+		for (const char *step : {"plugins", id, "settings"}) {
+			if (at == nullptr || !json_object_has_member(at, step)
+					|| json_node_get_node_type(json_object_get_member(at, step))
+						!= JSON_NODE_OBJECT) {
+				at = nullptr;
+				break;
+			}
+			at = json_node_get_object(json_object_get_member(at, step));
+		}
+		if (at != nullptr && json_object_has_member(at, key)) {
+			JsonNode *node = json_object_get_member(at, key);
+			if (json_node_get_node_type(node) == JSON_NODE_VALUE) {
+				GType type = json_node_get_value_type(node);
+				if (type == G_TYPE_BOOLEAN) {
+					out = json_node_get_boolean(node) ? "true" : "false";
+				} else if (type == G_TYPE_INT64) {
+					out = std::format("{}", json_node_get_int(node));
+				} else if (type == G_TYPE_STRING) {
+					out = json_node_get_string(node);
+				}
+			}
+		}
+	}
+	g_object_unref(parser);
+	return out;
 }
 
 // The toolbar.position the scratch shell.json names now.
@@ -8314,6 +8362,69 @@ int run_step() {
 			"switched off, the app bar shows on no screen");
 		check(toolbar != nullptr && toolbar_centred(strip),
 			"the toolbar is centred on its own again");
+		// On to the Plugins page: the settings window renders what a plugin
+		// declares, no plugin named in its own code
+		// (docs/intents/shell/plugins.md).
+		click(strip_left + toolbar_button / 2.0, settings_gear_y);
+		step = 530;
+		return -600;
+	}
+	case 530: { // the panel open again: the Plugins tab, the row's sixth share
+		if (panel_layer("settings") == nullptr && retries++ < 40) {
+			return -200;
+		}
+		retries = 0;
+		check(panel_layer("settings") != nullptr,
+			"the gear opened the settings panel for the Plugins page");
+		click(settings_card_x + settings_pad + settings_tab_w * 5.5,
+			8 + settings_pad + settings_row / 2.0);
+		return 700;
+	}
+	case 531: // the page redraws: the declared rows
+		shot("settings-plugins-tab");
+		return 700;
+	case 532: { // the declared rows drawn; the urgent switch is clicked
+		cairo_surface_t *s = load_png("settings-plugins-tab");
+		int column = settings_plugins_column();
+		int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
+		int first_top = card_y + settings_pad + settings_row + settings_gap
+			+ settings_header + settings_gap;
+		// The second row of the Popups group: the urgent-popups switch.
+		double switch_y = first_top + settings_choice + settings_gap
+			+ settings_choice / 2.0;
+		std::vector<Band> rows = bands_in(s,
+			{settings_card_x + 8, card_y, settings_label_w,
+				settings_card_height(column)});
+		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
+		bool on = s != nullptr && settings_switch_is(s, switch_y, true);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		auto row = settings_band_at(rows, switch_y);
+		bool labelled = row != rows.end()
+			&& std::abs(row->centre() - switch_y) <= 12;
+		if ((chosen != 5 || !labelled || !on) && retries++ < 10) {
+			shot("settings-plugins-tab");
+			return -700;
+		}
+		retries = 0;
+		check(chosen == 5, "the Plugins tab is the one chosen");
+		check(labelled, "the notification plugin's declared switch has its row");
+		check(on, "the switch shows the declared default, on");
+		click(settings_card_x + settings_panel - settings_pad - 8
+				- settings_switch_w / 2.0, switch_y);
+		return 500;
+	}
+	case 533: { // the click wrote the plugin's own override into shell.json
+		std::string held = plugin_setting_text("canvas.notifications",
+			"criticalNeverExpires");
+		if (held != "false" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(held == "false", std::format("the switch wrote"
+			" plugins.canvas.notifications.settings.criticalNeverExpires"
+			" into shell.json ({})", held.empty() ? "absent" : held));
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item
