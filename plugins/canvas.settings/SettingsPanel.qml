@@ -213,12 +213,21 @@ PanelCard {
 			})
 	}
 
+	// The draft's command line is what the field holds when its recording
+	// starts: set in place, the row stays up with the text in it until
+	// the chord arrives.
+	function holdDraftText(index, text) {
+		if (draft != null && index === commandCount()) {
+			draft.command = text
+		}
+	}
+
 	function commandKeys(index, keys) {
 		var commands = settings && settings.commands ? settings.commands.slice() : []
 		if (draft != null && index === commands.length) {
 			clearCommandsFault()
 			draft = {keys: keys, command: draft.command}
-			if (draft.command !== "") {
+			if (draft.command.trim() !== "") {
 				commands.push({keys: keys, command: draft.command})
 				saveCommands(commands)
 			}
@@ -475,17 +484,20 @@ PanelCard {
 							&& root.recording.action === "command" + index
 						fault: root.faultRow != null && root.faultRow.scope === "commands"
 							? root.faultText : ""
-						onRecord: root.capture("global", "command" + index,
-							function(keys, fault) {
+						onRecord: function(text) {
+							var at = commandRow.index
+							root.holdDraftText(at, text)
+							root.capture("global", "command" + at, function(keys, fault) {
 								if (fault !== "") {
 									root.faultRow = {scope: "commands"}
 									root.faultText = fault
 									return
 								}
 								if (keys != null) {
-									root.commandKeys(commandRow.index, keys)
+									root.commandKeys(at, keys)
 								}
 							})
+						}
 						onSave: function(text) { root.commandText(commandRow.index, text) }
 						onRemove: root.removeCommand(commandRow.index)
 					}

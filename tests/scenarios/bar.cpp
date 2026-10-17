@@ -6939,7 +6939,7 @@ int run_step() {
 		step = 300; // on to the toolbar's edges; the settings window chains from there
 		return -100; // without the advance: every other step moves on alone
 	}
-	// ---- the settings window, end to end (steps 400-500) ----
+	// ---- the settings window, end to end (steps 400-510) ----
 	// The world the panel needs: the agents widget back on the bar (the
 	// usage fixtures dropped again, a reload to collect them), the
 	// overview open, the toolbar's gear clicked, and the panel's four
@@ -7874,11 +7874,115 @@ int run_step() {
 		check(server->conf.commands.empty(),
 			"the running session has no command left");
 		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 40);
+		shot("settings-removed");
+		return 700;
+	}
+	case 500: { // the list at its end, the Add row last: clicked for a second draft
+		bool settled = settings_png_repeats("settings-removed");
+		if (!settled && retries++ < 8) {
+			shot("settings-removed");
+			return -700;
+		}
+		retries = 0;
+		check(settled, "the list stopped moving after the Remove");
+		click(settings_card_x + 60, settings_last_row_y);
+		return 400;
+	}
+	case 501: // the second draft row stands above the Add row
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 40);
+		shot("settings-draft-two");
+		return 700;
+	case 502: { // its command field is clicked: the command comes first this time
+		bool settled = settings_png_repeats("settings-draft-two");
+		if (!settled && retries++ < 8) {
+			shot("settings-draft-two");
+			return -700;
+		}
+		retries = 0;
+		check(settled, "the list stopped moving after the second Add");
+		click(settings_card_x + 180, settings_command_y);
+		return 500;
+	}
+	case 503: { // the command line typed, no Enter
+		unlink(command_marker.c_str());
+		type("markcmd");
+		shot("settings-text-first");
+		return 500;
+	}
+	case 504: { // typing wrote nothing; the chord chip is clicked, the row records
+		check(read_file(canvas_conf).find("Super+U =") == std::string::npos
+				&& server->conf_errors.empty(),
+			"the typed command line alone wrote nothing into canvas.conf");
+		click(settings_card_x + settings_pad + 8 + 12, settings_command_y);
+		return 400;
+	}
+	case 505: // the capture takes every key: the chord pressed is recorded
+		chord(KEY_U, KEY_LEFTMETA);
+		return 1000;
+	case 506: { // the typed text rode along: one line with both, and no error
+		std::string text = read_file(canvas_conf);
+		std::string command = conf_value("Super+U");
+		if (command != "markcmd" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		std::size_t lines = 0;
+		for (std::size_t at = text.find("Super+U ="); at != std::string::npos;
+				at = text.find("Super+U =", at + 1)) {
+			lines++;
+		}
+		check(command == "markcmd" && lines == 1, std::format("recording the "
+			"chord after typing, without Enter, wrote Super+U = markcmd once "
+			"(\"{}\", {} line(s))", command, lines));
+		check(server->conf_errors.empty()
+				&& !server->hint.text.starts_with("canvas.conf line"),
+			"and no file error followed it");
+		check(!std::filesystem::exists(command_marker),
+			"the command had not run before its chord was pressed");
+		chord(KEY_U, KEY_LEFTMETA);
+		return 400;
+	}
+	case 507: { // the marker is there; the list to its end again, for Remove
+		if (!std::filesystem::exists(command_marker) && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(std::filesystem::exists(command_marker),
+			"the chord recorded after typing runs the command (its marker appeared)");
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 40);
+		shot("settings-text-saved");
+		return 700;
+	}
+	case 508: { // Remove on the row
+		bool settled = settings_png_repeats("settings-text-saved");
+		if (!settled && retries++ < 8) {
+			shot("settings-text-saved");
+			return -700;
+		}
+		retries = 0;
+		check(settled, "the list stopped moving after the save");
+		click(settings_card_x + settings_panel - 40, settings_command_y);
+		return 400;
+	}
+	case 509: { // Remove took the line out
+		std::string text = read_file(canvas_conf);
+		if (text.find("Super+U =") != std::string::npos && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(text.find("Super+U =") == std::string::npos,
+			"Remove took the second command's line out of canvas.conf");
+		check(server->conf.commands.empty() && server->conf_errors.empty(),
+			"the running session has no command left, and no file error");
+		settings_last_png.clear();
 		scroll(settings_card_x + 100, 400, -150);
 		shot("settings-top-again");
 		return 700;
 	}
-	case 500: { // the list back at its top: the App launcher row is clicked to record
+	case 510: { // the list back at its top: the App launcher row is clicked to record
 		bool settled = settings_png_repeats("settings-top-again");
 		if (!settled && retries++ < 8) {
 			scroll(settings_card_x + 100, 400, -150);

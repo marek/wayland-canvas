@@ -435,9 +435,13 @@ own the machine's Wayland display namespace and GPU.
   Super+Y is pressed, then present. Emptying the saved row's field (Ctrl+A,
   Backspace, Enter) saves nothing: the line still holds `markcmd`. Remove
   takes the line out of the file and the command out of the running
-  session. The list is wheeled back to its top and the App launcher row
-  clicked to record again; the gear's second click closes the panel while
-  it records.
+  session. A second draft goes the other way round: `markcmd` typed into
+  its field without Enter, then the chip clicked and Super+U recorded.
+  The typed text rides along, so the one write is `Super+U = markcmd`,
+  once, with no file error, and the chord runs the command; Remove takes
+  it out again. The list is wheeled back to its top and the App launcher
+  row clicked to record again; the gear's second click closes the panel
+  while it records.
   Closing while recording cancels the recording, so the keys are free at
   once — Super+Return opens a foot window (`TERMINAL` pointed at a script
   that writes what it is typed into a marker file), Escape leaves the

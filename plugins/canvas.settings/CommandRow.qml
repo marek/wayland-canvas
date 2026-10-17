@@ -13,7 +13,7 @@ Item {
 	property bool recording: false
 	property string fault: ""
 
-	signal record()
+	signal record(string text) // the field's text as typed, saved or not
 	signal save(string text)
 	signal remove()
 
@@ -39,7 +39,7 @@ Item {
 		height: parent.height
 		hoverEnabled: true
 		cursorShape: Qt.PointingHandCursor
-		onClicked: root.record()
+		onClicked: root.record(field.text)
 	}
 
 	KeyChip {
@@ -48,7 +48,7 @@ Item {
 		anchors.leftMargin: 8
 		anchors.verticalCenter: parent.verticalCenter
 		chord: root.command && root.command.keys ? root.command.keys : "None"
-		onClicked: root.record()
+		onClicked: root.record(field.text)
 	}
 
 	PanelField {
