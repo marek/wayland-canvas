@@ -69,9 +69,20 @@ constexpr char usage_text[] =
 	"                     has picked. Bare `msg capture.pick` reads the portal's\n"
 	"                     chooser list on stdin and prints the chosen line\n"
 	"  capture.stop       stop a running recording\n"
+	"  settings.get       the shortcuts, the commands and the gestures, with\n"
+	"                     the file and its ignored lines\n"
+	"  settings.set       set one action's keys (\"keys\": null for the\n"
+	"                     defaults, [] for none), the commands, the swipe\n"
+	"                     preset or the pinch switch; the answer says where\n"
+	"                     a taken chord came from\n"
+	"  shortcut.capture   record a shortcut: the answer comes when the chord\n"
+	"                     is pressed (Esc alone cancels)\n"
+	"  shortcut.cancel    cancel a recording under way\n"
 	"  quit               end the session\n"
 	"\n"
-	"See the keyboard bindings in src/input/bindings.cpp.\n";
+	"Every keyboard shortcut and the gesture choices live in\n"
+	"~/.config/wayland-canvas/canvas.conf, written with every default on the\n"
+	"first run and re-read whenever it is saved.\n";
 
 } // namespace
 

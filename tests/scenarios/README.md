@@ -82,11 +82,29 @@ own the machine's Wayland display namespace and GPU.
   desktop into an untiled one keeping positions and telling the windows.
   Last, the overview's right clicks: on the empty canvas a new desktop, inside
   a desktop clear of windows and on its tab removing it (its windows staying
-  put, on no desktop), on a window nothing.
-- **`launcher.cpp`** — the app launcher: logo-key tap opens, panel renders,
-  search filters, Enter and result-click launch foot and close the launcher,
-  logo-as-modifier does not open it, Escape and outside-click close it,
-  no-match queries, and a custom desktop entry installed into
+  put, on no desktop), on a window nothing. Last, canvas.conf, in the run's
+  own scratch `$XDG_CONFIG_HOME` (never the user's): written with every
+  default on the first run, Super+Space opening the launcher where a lone
+  Super tap runs nothing by default, a hand edit saved over the file
+  applying to the running session without a restart (`launcher = Super+K`),
+  `settings.set` rewriting one line of a hand-written file with every other
+  byte kept and reporting the chord taken from the launcher, a `[commands]`
+  chord running its command, a bad line listed with its reason and the
+  first hinted on every screen, the file's swipe preset reaching the
+  gesture engine, the `settings` event reaching a subscriber, and
+  `shortcut.capture` over the socket through a forked raw client — the
+  recorded chord reported and run by nothing (the terminal it would spawn
+  never appears), the same chord unrecorded spawning it, a plain key
+  reaching its client, and the Super tap given to the launcher through the
+  socket opening and closing it.
+- **`launcher.cpp`** — the app launcher: Super+Space opens it — the first
+  run having written canvas.conf with every default into the run's own
+  scratch `$XDG_CONFIG_HOME` (never the user's), and a lone Super tap
+  running nothing by default — the panel renders, search filters, Enter
+  and result-click launch foot and close the launcher, the launcher's own
+  chord closes the open launcher, logo-as-modifier does not open it,
+  Escape and outside-click close it, no-match queries, and a custom
+  desktop entry installed into
   `$XDG_DATA_HOME/applications` before `Server::init`: found by typing its
   name, launched with Enter, and verified by the marker file its spec-quoted
   `Exec` writes plus the foot window it opens. The marker holds the launched

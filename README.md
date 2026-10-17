@@ -64,7 +64,8 @@ If `wlroots-0.20` isn't installed system-wide, meson fetches 0.20.2 into
 - Control a running compositor: `wayland-canvas msg <method> [<params as JSON>]`
   over `$WAYLAND_CANVAS_SOCKET` (set for every client it spawns): `state`,
   `subscribe`, `launcher.toggle`, `overview.toggle`, `theme.set`, `item.set`,
-  `item.remove`, `item.activate`, `action.run`, `quit`. `wayland-canvas -h`
+  `item.remove`, `item.activate`, `action.run`, `settings.get`, `settings.set`,
+  `shortcut.capture`, `shortcut.cancel`, `quit`. `wayland-canvas -h`
   lists them; [docs/intents/platform/ipc.md](docs/intents/platform/ipc.md) is
   the protocol.
 
@@ -263,31 +264,74 @@ under `off`).
 
 ## Keyboard (Super = logo key)
 
-| Keys | Action |
-|---|---|
-| Tap Super, Super+Space | App launcher |
-| Super+Return | Terminal |
-| Super+Q, Alt+F4 | Close window |
-| Super+M / Super+Shift+M | Minimize / restore last minimized |
-| Super+arrows / Super+F | Step the focused window's slice on a tiled desktop (Super+Up maximizes on a floating one) / fullscreen |
-| Super+Tab, Super+W | Toggle overview |
-| Super+Ctrl+Arrows | Go to the desktop in that direction (none that way: stay) |
-| Super+Ctrl+Shift+Arrows | Move the focused window to that desktop and follow |
-| Super+Alt+Arrows | Pan a third of a screen |
-| Super+Ctrl+D / Super+Ctrl+F4 | Make the current view a desktop / abandon the current desktop |
-| Super+T | Tile the current desktop (or view) |
-| Super+1…9 | Go to desktop N |
-| Super+0 | Return the desktop shown, or a free area, to 100 % |
-| Super+Shift+E, Ctrl+Alt+Backspace | Quit |
-| Super+Shift+3 / 4 / 5 | Whole-screen shot / the capture picker / the capture toolbar (Ctrl on a shot: clipboard) |
-| Print / Shift+Print / Alt+Print | The capture picker / whole-screen shot / stop a recording, else the toolbar on its recordings |
-| Ctrl+Alt+F1…F12 | Switch VT |
-| Overview: arrows, Return, Escape, Delete, T, M, N, 0, +/- | Jump, enter, back, abandon, tile, combine, new desktop, target back to 100 %, zoom |
+Every shortcut is the user's to change, in `canvas.conf` (below) or by
+pressing the new keys in the settings window; the table is the defaults.
+A lone tap of Super runs nothing by default — it is a key any action can
+hold (`Super` in `canvas.conf`). VT switching (Ctrl+Alt+F1…F12) is fixed:
+in no file, and no chord can take it, so the way out of a stuck session
+stays.
 
-## Configuration
+| Default keys | Name in `canvas.conf` | Action |
+|---|---|---|
+| Super+Space | `launcher` | App launcher |
+| Super+Return | `terminal` | Terminal |
+| Super+Q, Alt+F4 | `close` | Close window |
+| Super+M / Super+Shift+M | `minimize` / `restore` | Minimize / restore last minimized |
+| Super+arrows | `snap-left` … `snap-down` | Step the focused window's slice on a tiled desktop (Super+Up maximizes on a floating one) |
+| Super+F | `fullscreen` | Fullscreen |
+| Super+Tab, Super+W | `overview` | Toggle overview |
+| Super+Ctrl+arrows | `hop-left` … `hop-down` | Go to the desktop in that direction (none that way: stay) |
+| Super+Ctrl+Shift+arrows | `move-left` … `move-down` | Move the focused window to that desktop and follow |
+| Super+Alt+arrows | `pan-left` … `pan-down` | Pan a third of a screen |
+| Super+Ctrl+D / Super+Ctrl+F4 | `pin-desktop` / `abandon-desktop` | Make the current view a desktop / abandon the current desktop |
+| Super+T | `tiling` | Tile the current desktop (or view) |
+| Super+1…9 | `desktop-1` … `desktop-9` | Go to desktop N |
+| Super+0 | `zoom-reset` | Return the desktop shown, or a free area, to 100 % |
+| Super+Shift+3 / 4 / 5 | `shot-screen` / `capture-pick` / `capture-toolbar` | Whole-screen shot / the capture picker / the capture toolbar (Ctrl on a shot: clipboard) |
+| Print / Shift+Print / Alt+Print | `capture-pick` / `shot-screen` / `record-stop` | The capture picker / whole-screen shot / stop a recording, else the toolbar on its recordings |
+| Super+Shift+E, Ctrl+Alt+Backspace | `quit` | Quit |
+| Overview: arrows, Return, Escape, Delete, T, M, N, 0, +/- | `[overview]`: `hop-left` … `leave` | Jump, enter, back, abandon, tile, combine, new desktop, target back to 100 %, zoom; Super+Tab / Super+W leave |
 
-dwl-style: edit `src/core/config.h` (sizes, colours, gesture tuning, commands) and the
-binding table in `src/input/bindings.cpp`, then rebuild.
+## Configuration — canvas.conf
+
+`~/.config/wayland-canvas/canvas.conf` ($XDG_CONFIG_HOME respected) holds
+every keyboard shortcut and the touchpad gesture choices. The first run
+writes it with every default, commented, so the file is the list of what
+can change; a missing line means the default, `none` leaves an action
+without keys, and saving it — written in place or renamed over, as editors
+do — applies it to the running session at once. A line that cannot apply
+(an unknown action or value, a chord that does not parse or is not allowed
+there) is ignored with its line number, logged, and the first shows as a
+hint on every screen; everything else applies.
+
+```
+[shortcuts]
+launcher = Super+Space
+terminal = Super+Return
+
+[overview]
+go = Return, KP_Enter
+
+[commands]
+# Super+B = foot --hold
+
+[gestures]
+swipes = three-finger-hops
+pinch-scale = on
+```
+
+A chord written for one action is taken from any other that holds it only
+by default, so a rebinding never collides with a default the file does not
+show. Outside the overview a chord needs Super, Ctrl or Alt, or a key that
+types nothing (the function, media and Print keys); in the overview any
+chord works. In `[commands]` the chord runs its command through `/bin/sh`,
+as the terminal shortcut runs its own.
+
+The settings window (the gear in the overview toolbar) edits the same file,
+so the two never disagree, and records a new shortcut by pressing it.
+Sizes, colours and tuning stay compile-time in `src/core/config.h`
+(dwl-style: edit and rebuild); the shell's own settings — which bar widgets
+show, the toolbar's edge — are its `shell.json`.
 
 ## Settings
 
