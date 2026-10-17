@@ -64,6 +64,7 @@ their values.
 | [shell/toolbar.md](shell/toolbar.md) | The overview toolbar: its edge, when it shows, buttons, actions, panels and submenus |
 | [shell/settings.md](shell/settings.md) | The settings window: the gear, its pages, recording a shortcut, what each page writes |
 | [shell/notifications.md](shell/notifications.md) | Notifications: the popups, their actions and expiry, the history and its bar widget, the silence switch |
+| [shell/password-dialog.md](shell/password-dialog.md) | The password dialog for an app asking for admin rights: the polkit agent, what it shows, the keyboard, cancel |
 | [shell/lock.md](shell/lock.md) | The lock screen: what a locked session shows and blocks, the triggers and the idle timeout, the locker plugin and its PAM service |
 | [shell/notes.md](shell/notes.md) | Sticky notes: creating from the toolbar, colours, look, editing, moving, deleting, keeping |
 | [shell/theme.md](shell/theme.md) | The light/dark switch, the two palettes, what follows the mode, keeping it |

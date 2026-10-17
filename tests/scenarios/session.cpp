@@ -81,6 +81,21 @@ void mkdir_p(const std::string &path) {
 	std::filesystem::create_directories(path, ec);
 }
 
+std::string read_text(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return "";
+	}
+	std::string out;
+	char buf[256];
+	std::size_t n;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	return out;
+}
+
 void write_file(const std::string &path, std::string_view text) {
 	FILE *f = std::fopen(path.c_str(), "w");
 	if (f == nullptr) {
@@ -323,6 +338,19 @@ void type_text(std::string_view text) {
 
 // --------------------------------------------------------- the world
 
+// A shell action over the control socket, the way a key or a script runs
+// one.
+void run_action(std::string_view name, std::string_view args) {
+	spawn(std::format("'{}' msg action.run '{{\"name\":\"{}\",\"args\":{}}}'"
+		" >/dev/null 2>&1", std::getenv("WAYLAND_CANVAS_BIN"), name, args).c_str());
+}
+
+// What the stand-in polkit flow recorded, from the plugin's own storage in
+// the run's scratch state.
+std::string flow_log() {
+	return read_text(xdg + "/state/wayland-canvas/plugins/canvas.polkit/test-flow.json");
+}
+
 // notify-send on the private session bus, where the shell's own server is
 // the only one listening.
 void notify(std::string_view args) {
@@ -495,7 +523,78 @@ int run_step() {
 		check(!server->lock.locked(), "the right password unlocked the session");
 		return 300;
 	}
-	case 20: {
+	case 20: { // the password dialog, on the plugin's stand-in flow: the
+		// machine's own polkitd is never registered with.
+		run_action("canvas.polkit/test-dialog",
+			"{\"message\":\"Install a package\",\"user\":\"tester\","
+			"\"password\":\"canvas-scratch-password\"}");
+		return 1200;
+	}
+	case 21: {
+		if (layer_named("wayland-canvas-polkit") == nullptr && retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-polkit") != nullptr,
+			"a privileged action opens the password dialog");
+		check(server->focused_layer != nullptr
+				|| server->seat->keyboard_state.focused_surface != nullptr,
+			"the dialog holds the keyboard while it is open");
+		shot("polkit");
+		return 300;
+	}
+	case 22: { // what it says, then a wrong password
+		long ink = ink_in("polkit", {screen_w / 2 - 190, screen_h / 2 - 90, 380, 180});
+		check(ink > 2000, std::format("the dialog shows the action and its field "
+			"({} px of ink)", ink));
+		type_text("wrong-password");
+		key(KEY_ENTER, true);
+		key(KEY_ENTER, false);
+		return 1200;
+	}
+	case 23: {
+		check(layer_named("wayland-canvas-polkit") != nullptr,
+			"a wrong password leaves the dialog open");
+		check(flow_log().find("refused") != std::string::npos,
+			"polkit was told the answer was wrong");
+		type_text(password);
+		key(KEY_ENTER, true);
+		key(KEY_ENTER, false);
+		return 1200;
+	}
+	case 24: {
+		if (layer_named("wayland-canvas-polkit") != nullptr && retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-polkit") == nullptr,
+			"the right password closes the dialog");
+		check(flow_log().find("authenticated") != std::string::npos,
+			"polkit was told the password was right");
+		// And a cancel: Escape ends the request without an answer.
+		run_action("canvas.polkit/test-dialog",
+			"{\"message\":\"Something else\",\"password\":\"never typed\"}");
+		return 1200;
+	}
+	case 25: {
+		if (layer_named("wayland-canvas-polkit") == nullptr && retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-polkit") != nullptr,
+			"a second request opens the dialog again");
+		key(KEY_ESC, true);
+		key(KEY_ESC, false);
+		return 1200;
+	}
+	case 26: {
+		if (layer_named("wayland-canvas-polkit") != nullptr && retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-polkit") == nullptr,
+			"Escape cancels the dialog");
+		check(flow_log().find("cancelled") != std::string::npos,
+			"polkit was told the request was cancelled");
+		return 300;
+	}
+	case 27: {
 		finished = true;
 		wl_display_terminate(server->display);
 		return -1;

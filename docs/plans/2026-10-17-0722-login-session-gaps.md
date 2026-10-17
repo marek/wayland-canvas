@@ -96,19 +96,20 @@ These decisions close three open boxes of
 - [x] Shell: the lock plugin on every output, the password through PAM; the package installs the PAM service file
 - [ ] Settings window: the idle timeout on a Session page (landing with the night light's switch, which shares the page)
 - [x] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off
-- [ ] Scenario: a wrong password keeps it locked and the right one unlocks, through the lock plugin against a scratch PAM service
+- [x] Scenario: a wrong password keeps it locked and the right one unlocks, through the lock plugin against a scratch PAM service
 
 ## Notifications
 
-- [ ] Intent: notifications: popups (place, stacking, expiry per urgency, actions, icons and images), dismiss and dismiss-all keys, the history and its bar widget, the silence switch, another server already holding the name
-- [ ] Shell: the notifications plugin: popups, the history panel, the silence switch; the keys in `canvas.conf` and the settings window
-- [ ] Scenarios on a private bus: `notify-send` shows a popup with its text; an action click reaches the sender; a normal one expires and a critical one stays; the keys dismiss one and all; the history lists them; silence holds popups back; with another server holding the name the shell runs without one
+- [x] Intent: notifications: popups (place, stacking, expiry per urgency, actions, icons and images), dismiss and dismiss-all keys, the history and its bar widget, the silence switch, another server already holding the name
+- [x] Shell: the notifications plugin: popups, the history panel, the silence switch; the keys in `canvas.conf` and the settings window
+- [x] Scenarios on a private bus: `notify-send` shows a popup with its text; the keys dismiss one and all; the history lists them; silence holds popups back
+- [ ] Scenario: an action click reaches the sender, a normal popup expires while a critical one stays, and with another server holding the name the shell runs without one
 
 ## Password dialog
 
-- [ ] Intent: the password dialog: when it opens, what it shows (the action's message, the identity, the password field), the keyboard, a wrong password, cancel, which output, a session that already has an agent
-- [ ] Shell: the polkit plugin, registered for the session it runs in; a refused registration leaves the shell running
-- [ ] Proof: the dialog's states driven through a seam in a scenario, never the machine's polkit agent; `pkexec true` on screen (the user)
+- [x] Intent: the password dialog: when it opens, what it shows (the action's message, the identity, the password field), the keyboard, a wrong password, cancel, which output, a session that already has an agent
+- [x] Shell: the polkit plugin, registered for the session it runs in; a refused registration leaves the shell running
+- [x] Proof: the dialog's states driven through a seam in a scenario, never the machine's polkit agent; `pkexec true` on screen (the user)
 
 ## X11 apps
 
