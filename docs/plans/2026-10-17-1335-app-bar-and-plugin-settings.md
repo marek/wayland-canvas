@@ -31,21 +31,14 @@ should render them — so the app bar's edge and switch, and anything a
 later plugin adds, arrive in settings without the settings window being
 touched.
 
-## Decisions for the user
+## Decisions, settled by the user
 
-- [ ] **Does the invert switch change what clients see, or only canvas
-      movement?** Inverting libinput's natural scrolling changes
-      scrolling inside apps too (one system-wide direction, which is
-      what "invert the mouse" usually means); inverting only the
-      compositor's panning and hops leaves apps as they are. (the user
-      to decide — the plan assumes system-wide, apps included)
-- [ ] **One entry per app, or per window?** A dock groups windows under
-      one app icon with a mark for how many; a taskbar lists windows.
-      (the user to decide — the plan assumes one entry per app, its
-      windows reachable by repeated clicks, newest focused first)
-- [ ] **Does the app bar show in the normal view too, or only in the
-      overview?** (the user to decide — the plan assumes the overview
-      only, as the toolbar)
+- [x] **The invert switch is one system-wide direction**: the pointer,
+      the touchpad, the canvas pan, the hops and scrolling inside apps
+      all turn together, as libinput's natural-scroll setting does.
+- [x] **One entry per app**, its windows unfolding beside the entry on a
+      click; a single-window app goes straight there.
+- [x] **The app bar shows in the overview only**, as the toolbar does.
 
 ## Tasks
 
@@ -131,8 +124,8 @@ touched.
       the shell config's own, not one plugin's.
 - [x] Scenario: the bar suite — the app bar lists every open app, and a
       click lands the view on that window, focused.
-- [ ] Scenario, owed: two desktops at once, and a window on no desktop
-      landing on a centred view.
+- [x] Scenario: a window moved onto free canvas with a second desktop
+      beside the first lands on a view centred on it (the ipc suite).
 - [x] Shell: the app's icon and name from its desktop entry, the first
       letter standing in where it names none (the icon itself is owed on
       screen — the suite's scratch data home holds no desktop entries).
