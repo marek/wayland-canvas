@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build and run the test strands in order: `meson test --suite unit`, then
-# `meson test --suite packaging`, then `meson test --suite scenarios`. Exits
-# non-zero on the first failure.
+# Build (tools/build.sh) and run the test strands in order:
+# `meson test --suite unit`, then `meson test --suite packaging`, then
+# `meson test --suite scenarios`. Exits non-zero on the first failure.
 #
 # The scenarios need `foot` and `grim` on PATH and a GPU render node at run
 # time; when those programs are missing, meson registers no scenario tests
@@ -26,28 +26,13 @@ for arg in "$@"; do
 	fi
 done
 
-# Prefer meson/ninja on PATH; fall back to the repo's .venv.
-if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
-	if [[ -x .venv/bin/meson ]]; then
-		export PATH="$repo/.venv/bin:$PATH"
-		echo "check.sh: using .venv/bin meson/ninja"
-	else
-		echo "tools/check.sh: no meson/ninja on PATH and no .venv/bin/meson" >&2
-		exit 2
-	fi
-fi
+echo "check.sh: tools/build.sh"
+tools/build.sh
 
-native=(--native-file toolchain/llvm.ini)
-if [[ ! -d build ]]; then
-	echo "check.sh: meson setup build ${native[*]}"
-	meson setup build "${native[@]}"
-elif meson introspect build --compilers 2>/dev/null | grep -q '"id": "gcc"'; then
-	echo "check.sh: build/ was configured with GCC; meson setup --wipe build ${native[*]}"
-	meson setup --wipe build "${native[@]}"
+# the suites run through meson, from the build dir build.sh just made
+if ! command -v meson >/dev/null 2>&1; then
+	export PATH="$repo/.venv/bin:$PATH"
 fi
-
-echo "check.sh: meson compile -C build"
-meson compile -C build
 
 echo "check.sh: meson test -C build --suite unit --print-errorlogs"
 meson test -C build --suite unit --print-errorlogs

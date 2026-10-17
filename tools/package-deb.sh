@@ -3,9 +3,13 @@
 # downloaded once from the official image registry and cached under
 # $CANVAS_TMP/dl/. Everything inside the root filesystem runs through user
 # namespaces (unshare --map-root-user --map-auto), so no root, sudo or
-# docker is needed. Invoked by the meson run target `package-deb`:
-#   ninja -C build package-deb
-# The artifact lands in <build-root>/packages/.
+# docker is needed. Usually reached through tools/package.sh or the meson run
+# target `package-deb` (ninja -C build package-deb).
+# The artifact lands in <out-dir> (default dist/).
+#
+# --here says the current root filesystem already is that environment — the
+# debian:sid container of .github/workflows/packages.yml — so nothing is
+# downloaded or entered: the in-root build script runs right here, as root.
 #
 # The default release is the one whose toolchain builds the C++26 library
 # features the compositor needs (std::function_ref, std::inplace_vector,
@@ -25,9 +29,14 @@ S=${CANVAS_TMP:-$REPO/tmp}
 DL=$S/dl
 
 dist=debian:sid
-build_root=
+here=0
+out=
 while [ $# -gt 0 ]; do
 	case $1 in
+		--here)
+			here=1
+			shift
+			;;
 		--dist)
 			[ $# -ge 2 ] || {
 				echo "package-deb.sh: --dist needs a name" >&2
@@ -45,16 +54,13 @@ while [ $# -gt 0 ]; do
 			exit 2
 			;;
 		*)
-			build_root=$1
+			out=$1
 			shift
 			;;
 	esac
 done
-[ -n "$build_root" ] || {
-	echo "usage: package-deb.sh [--dist <name>] <build-root>" >&2
-	exit 2
-}
-mkdir -p "$build_root/packages"
+out=$(realpath -m "${out:-$REPO/dist}")
+mkdir -p "$out"
 
 rootfs_dir=
 staged_version=
@@ -151,18 +157,16 @@ setup_rootfs() { # $1 rootfs dir — DNS resolution for apt
 	fi
 }
 
-stage_in_rootfs() { # $1 rootfs dir; sets staged_version
-	local rootfs=$1
+stage_into() { # $1 stage dir; sets staged_version
+	local stage=$1
 	staged_version=$(sed -n "s/^[[:space:]]*version: '\(.*\)',/\1/p" "$REPO/meson.build")
 	[ -n "$staged_version" ] || {
 		echo "package-deb.sh: no version found in meson.build" >&2
 		return 2
 	}
-	# a previous in-root run may have left files owned through the uid map
-	unshare --map-auto --map-root-user rm -rf "$rootfs/stage"
-	mkdir -p "$rootfs/stage/packages"
-	"$P/make-source-tarball.sh" "$rootfs/stage/wayland-canvas-$staged_version.tar.xz"
-	cp "$P/debian/control" "$P/debian/prerm" "$P/debian/postrm" "$P/debian/build-deb.sh" "$rootfs/stage/"
+	mkdir -p "$stage/packages"
+	"$P/make-source-tarball.sh" "$stage/wayland-canvas-$staged_version.tar.xz"
+	cp "$P/debian/control" "$P/debian/prerm" "$P/debian/postrm" "$P/debian/build-deb.sh" "$stage/"
 }
 
 run_in_rootfs() { # $1 rootfs dir, rest: arguments for /stage/build-deb.sh
@@ -176,15 +180,29 @@ run_in_rootfs() { # $1 rootfs dir, rest: arguments for /stage/build-deb.sh
 		/bin/bash -e /stage/build-deb.sh "$@"
 }
 
-fetch_rootfs
-setup_rootfs "$rootfs_dir"
-stage_in_rootfs "$rootfs_dir"
-run_in_rootfs "$rootfs_dir" "$staged_version"
+if [ "$here" -eq 1 ]; then
+	[ "$(id -u)" -eq 0 ] || {
+		echo "package-deb.sh: --here needs root (apt installs the build dependencies); without it this script builds in a rootless Debian root filesystem instead" >&2
+		exit 2
+	}
+	stage=$S/deb-stage
+	rm -rf "$stage"
+	stage_into "$stage"
+	STAGE=$stage DEBIAN_FRONTEND=noninteractive bash -e "$stage/build-deb.sh" "$staged_version"
+else
+	fetch_rootfs
+	setup_rootfs "$rootfs_dir"
+	stage=$rootfs_dir/stage
+	# a previous in-root run may have left files owned through the uid map
+	unshare --map-auto --map-root-user rm -rf "$stage"
+	stage_into "$stage"
+	run_in_rootfs "$rootfs_dir" "$staged_version"
+fi
 
-deb=$(find "$rootfs_dir/stage/packages" -name '*.deb' | head -1)
+deb=$(find "$stage/packages" -name '*.deb' | head -1)
 [ -n "$deb" ] || {
-	echo "package-deb.sh: the in-root build produced no .deb" >&2
+	echo "package-deb.sh: the build produced no .deb" >&2
 	exit 2
 }
-cp "$deb" "$build_root/packages/"
-echo "package-deb.sh: $build_root/packages/$(basename "$deb")"
+cp "$deb" "$out/"
+echo "package-deb.sh: $out/$(basename "$deb")"

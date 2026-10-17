@@ -200,14 +200,19 @@ install_data(
 	install_mode: 'rwxr-xr-x',
 )
 
-# ninja -C build package-arch / package-deb — artifacts under build/packages/.
+# ninja -C build package-arch / package-deb / packages — artifacts under
+# dist/ at the repo root. tools/package.sh is the same thing without meson.
 run_target(
 	'package-arch',
-	command: [find_program('tools/package-arch.sh'), meson.project_build_root()],
+	command: [find_program('tools/package-arch.sh'), meson.project_source_root() / 'dist'],
 )
 run_target(
 	'package-deb',
-	command: [find_program('tools/package-deb.sh'), meson.project_build_root()],
+	command: [find_program('tools/package-deb.sh'), meson.project_source_root() / 'dist'],
+)
+run_target(
+	'packages',
+	command: [find_program('tools/package.sh'), meson.project_source_root() / 'dist'],
 )
 
 test(

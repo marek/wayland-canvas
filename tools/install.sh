@@ -86,10 +86,10 @@ cmd_install() {
 	else
 		echo "install.sh: building the package"
 		case $f in
-			arch) "$REPO/tools/package-arch.sh" "$REPO/build" >/dev/null ;;
-			debian) "$REPO/tools/package-deb.sh" "$REPO/build" >/dev/null ;;
+			arch) "$REPO/tools/package.sh" --arch >/dev/null ;;
+			debian) "$REPO/tools/package.sh" --deb >/dev/null ;;
 		esac
-		artifact=$(find "$REPO/build/packages" -maxdepth 1 \( -name '*.pkg.tar.zst' -o -name '*.deb' \) | head -1)
+		artifact=$(find "$REPO/dist" -maxdepth 1 \( -name '*.pkg.tar.zst' -o -name '*.deb' \) | head -1)
 	fi
 	[ -n "$artifact" ] || die "no package artifact found"
 

@@ -23,6 +23,7 @@ depends=(
 	'pango'
 	'pixman'
 	'seatd'
+	'sqlite'
 	'systemd-libs'
 	'wayland'
 )
@@ -49,6 +50,7 @@ makedepends=(
 	'librsvg'
 	'glib2'
 	'json-glib'
+	'sqlite'
 	'systemd-libs'
 )
 source=("wayland-canvas-$pkgver.tar.xz")

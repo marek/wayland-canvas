@@ -1,0 +1,108 @@
+name: packages
+
+# Runs only when a v* tag is pushed or when started by hand from the Actions
+# tab. Builds the two distribution packages — the Arch .pkg.tar.zst and the
+# Debian .deb — and keeps them as artifacts; a v* tag also drafts a release
+# from them. No source zip: the packages are the release.
+#
+# Both jobs run the script a contributor runs locally — `tools/package.sh
+# --arch` / `--deb` — with --here, which says the job's container already is
+# the distribution being packaged, so no Debian root filesystem is downloaded
+# and makepkg builds in place. The artifacts land in dist/, as they do
+# locally.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arch:
+    name: Arch package
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      # pacman first: actions/checkout needs git, and makepkg needs the
+      # makedepends of packaging/PKGBUILD present (it runs with --nodeps).
+      - name: build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git clang meson ninja pkgconf \
+            wayland wayland-protocols libdrm mesa libinput seatd libxkbcommon \
+            pixman libdisplay-info hwdata cairo pango librsvg glib2 json-glib \
+            systemd-libs
+          git config --system --add safe.directory '*'
+
+      - uses: actions/checkout@v7
+
+      - name: the tag names the project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: tools/ci-check-tag.sh "${{ github.ref_name }}"
+
+      - name: wlroots source
+        run: tools/fetch-wlroots.sh
+
+      - name: package
+        run: tools/package.sh --arch --here
+
+      - name: keep the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-arch
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
+
+  deb:
+    name: Debian package
+    runs-on: ubuntu-24.04
+    # the release whose toolchain has the C++26 library features the
+    # compositor needs; packaging/debian/build-deb.sh probes them first
+    container: debian:sid
+    steps:
+      - name: staging tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git xz-utils
+          git config --system --add safe.directory '*'
+
+      - uses: actions/checkout@v7
+
+      - name: the tag names the project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: tools/ci-check-tag.sh "${{ github.ref_name }}"
+
+      - name: wlroots source
+        run: tools/fetch-wlroots.sh
+
+      - name: package
+        run: tools/package.sh --deb --here
+
+      - name: keep the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [arch, deb]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            dist/* --draft --title "wayland-canvas ${{ github.ref_name }}"

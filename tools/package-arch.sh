@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build the Arch package (.pkg.tar.zst) with makepkg from the local source
-# tree. Invoked by the meson run target `package-arch`:
-#   ninja -C build package-arch
-# The artifact lands in <build-root>/packages/; scratch under $CANVAS_TMP.
+# tree. Usually reached through tools/package.sh or the meson run target
+# `package-arch` (ninja -C build package-arch).
+# The artifact lands in <out-dir> (default dist/); scratch under $CANVAS_TMP.
 set -euo pipefail
 
 T=$(cd "$(dirname "$0")" && pwd -P)
@@ -10,8 +10,8 @@ REPO=$(dirname "$T")
 P=$REPO/packaging
 S=${CANVAS_TMP:-$REPO/tmp}/packaging-arch
 
-build_root=${1:?usage: package-arch.sh <build-root>}
-build_root=$(realpath -m "$build_root")
+out=${1:-$REPO/dist}
+out=$(realpath -m "$out")
 
 # meson/ninja on PATH, the repo's .venv as fallback
 if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
@@ -27,7 +27,7 @@ export PACKAGER='Marek Kudlacz <marek@kudlacz.com>'
 
 stage=$S/stage
 rm -rf "$S"
-mkdir -p "$stage" "$build_root/packages"
+mkdir -p "$stage" "$out"
 
 version=$(sed -n "s/^[[:space:]]*version: '\(.*\)',/\1/p" "$REPO/meson.build")
 [ -n "$version" ] || {
@@ -63,5 +63,5 @@ pkg=$(find . -maxdepth 1 -name '*.pkg.tar.zst' | head -1)
 	echo "package-arch.sh: makepkg produced no .pkg.tar.zst" >&2
 	exit 2
 }
-cp "$pkg" "$build_root/packages/"
-echo "package-arch.sh: $build_root/packages/${pkg#./}"
+cp "$pkg" "$out/"
+echo "package-arch.sh: $out/${pkg#./}"
