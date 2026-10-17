@@ -83,6 +83,7 @@ public:
 	wlr_compositor *compositor = nullptr;
 	wlr_output_layout *output_layout = nullptr;
 	wlr_xdg_shell *xdg_shell = nullptr;
+	wlr_xwayland *xwayland = nullptr;
 	wlr_layer_shell_v1 *layer_shell = nullptr;
 	wlr_foreign_toplevel_manager_v1 *foreign_mgr = nullptr;
 	wlr_pointer_gestures_v1 *pointer_gestures = nullptr;
@@ -145,6 +146,12 @@ private:
 	// view.cpp
 	void init_views();
 	void finish_views();
+	// view_x11.cpp: Xwayland and the X11 windows it brings
+	void init_xwayland();
+	void finish_xwayland();
+	void handle_xwayland_ready();
+	void handle_new_xwayland_surface(wlr_xwayland_surface *surface);
+	Listener new_xwayland_surface_, xwayland_ready_;
 	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
 	void handle_new_xdg_popup(wlr_xdg_popup *popup);
 	Listener new_xdg_toplevel_, new_xdg_popup_;

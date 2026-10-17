@@ -380,6 +380,7 @@ what a graphical session needs:
 | Notifications | Popups top-right with their actions, a bell in the bar with the history behind it, and a silence switch. Super+N dismisses the newest, Super+Shift+N all of them. Another notification daemon (mako, dunst) can serve the session instead by taking the bus name first |
 | Password dialog | An app that asks for administrator rights (`pkexec`, a package manager) gets a dialog in the session; it holds the keyboard while it is open. A session that already has a polkit agent keeps it |
 | Night light | A switch and a colour temperature, in the brightness panel and the Session tab, toggled with Super+Ctrl+N. It rides the output's gamma ramp, so a screenshot stays in true colours; wlsunset and gammastep work through the gamma-control protocol and take over while they run |
+| X11 applications | Applications that speak only X11 run through Xwayland, which starts with the first of them. Their windows are windows like any other: title bar, desktop, overview, maximize, minimize, fullscreen, and a close button that asks them to close |
 | Session services | `wayland-canvas-session.target` is started once the compositor has handed its display to systemd, so `graphical-session.target` units and the XDG autostart entries come up with the session and stop with it |
 
 A nested or headless run leaves all of this to the session that owns it: no
@@ -387,7 +388,9 @@ session services are started, no logind session is watched.
 
 ## Limitations
 
-No Xwayland (X11-only applications do not run), no output-configuration
+X11 windows have no override-redirect placement yet (menus and tooltips of
+X11 apps), no clipboard bridge between X11 and wayland clients, and are
+drawn at scale 1 on a hi-dpi output; no output-configuration
 protocol (set the scale with `-S`), the night light needs an output with a
 gamma ramp of its own (a nested or headless run shows none), full repaint of
 an output per changed frame (no damage regions), no window open/close

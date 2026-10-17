@@ -56,6 +56,7 @@ their values.
 | [input/keyboard-and-pointer.md](input/keyboard-and-pointer.md) | Bindings table (every action's name and default keys), Super tap, why every default canvas shortcut includes Super, pointer focus, drags, scroll, touchpad settings, nested-mode notes |
 | [input/config-file.md](input/config-file.md) | `canvas.conf`: place, first run, sections, chords, resolution against the defaults, reload, errors, edits |
 | [windows/title-bars.md](windows/title-bars.md) | Server-side title bars ("menu bars"): the Windows 11 look, buttons, states, negotiation policy, resize zones |
+| [windows/x11.md](windows/x11.md) | X11 applications through Xwayland: the window as a view, the two shell halves, what is out of scope for now |
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |
 | [apps/launcher.md](apps/launcher.md) | Opening, layout, search ranking, keys, pointer, launching, Terminal=true |
 | [apps/capture.md](apps/capture.md) | Shots and recordings: the key chords, the region/window/output picker, the toolbar, the thumbnail, the recorder |

@@ -38,7 +38,7 @@ wlroots = dependency(
 		'examples=false',
 		'renderers=gles2',
 		'backends=drm,libinput',
-		'xwayland=disabled',
+		'xwayland=enabled',
 		'session=enabled',
 		'libliftoff=disabled',
 	],
@@ -66,6 +66,13 @@ sqlite3 = dependency('sqlite3', include_type: 'system')
 libsystemd = dependency('libsystemd', required: false, include_type: 'system')
 add_project_arguments(
 	'-DCANVAS_HAVE_LOGIND=' + (libsystemd.found() ? '1' : '0'),
+	language: 'cpp',
+)
+# X11 applications through Xwayland: the wlroots subproject builds its own
+# X11 window manager, and xcb is what it needs here.
+xcb = dependency('xcb', required: false, include_type: 'system')
+add_project_arguments(
+	'-DCANVAS_HAVE_XWAYLAND=' + (xcb.found() ? '1' : '0'),
 	language: 'cpp',
 )
 
@@ -190,6 +197,8 @@ core_lib = static_library(
 		'src/windows/decoration.cpp',
 		'src/windows/launches.cpp',
 		'src/windows/view.cpp',
+		'src/windows/view_x11.cpp',
+		'src/windows/view_xdg.cpp',
 	),
 	protocol_headers,
 	include_directories: src_inc,
@@ -394,6 +403,18 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env.set('CANVAS_GAMMA_CLIENT', gamma_client.full_path())
 	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
 		'nightlight']
+	# An X11 client of the scenarios' own: this machine has no xterm or
+	# xeyes, and the X11 half must be proven by a real X client.
+	if xcb.found()
+		x11_client = executable(
+			'x11-client',
+			'tests/clients/x11-client.c',
+			c_args: ['-Wno-unused-parameter'],
+			dependencies: [xcb],
+		)
+		scenario_env.set('CANVAS_X11_CLIENT', x11_client.full_path())
+		scenarios += ['xwayland']
+	endif
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.
 	scenarios += ['sharing']
