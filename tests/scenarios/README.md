@@ -426,13 +426,18 @@ own the machine's Wayland display namespace and GPU.
   row, restores the default once more. The list is wheeled to its end
   (two shots alike mean it stopped) and the Add a command row clicked: a
   draft row with a chord chip stands above it. The chip is clicked and
-  Super+Y recorded (a `[commands]` line appears), the row's field is
-  clicked and `markcmd` typed (a script on the run's tool PATH touching a
-  marker file), and Enter writes `Super+Y = markcmd`; the marker is
-  absent until Super+Y is pressed, then present. Remove takes the line
-  out of the file and the command out of the running session. The list
-  is wheeled back to its top and the App launcher row clicked to record
-  again; the gear's second click closes the panel while it records.
+  Super+Y recorded: the draft shows the chord it holds (a wider chip than
+  None) but `canvas.conf` gains no line, the compositor's parse errors
+  stay empty and no file-error hint appears, even after a pause long
+  enough for a write. The row's field is clicked and `markcmd` typed (a
+  script on the run's tool PATH touching a marker file), and only Enter
+  writes `Super+Y = markcmd`, with no error; the marker is absent until
+  Super+Y is pressed, then present. Emptying the saved row's field (Ctrl+A,
+  Backspace, Enter) saves nothing: the line still holds `markcmd`. Remove
+  takes the line out of the file and the command out of the running
+  session. The list is wheeled back to its top and the App launcher row
+  clicked to record again; the gear's second click closes the panel while
+  it records.
   Closing while recording cancels the recording, so the keys are free at
   once — Super+Return opens a foot window (`TERMINAL` pointed at a script
   that writes what it is typed into a marker file), Escape leaves the

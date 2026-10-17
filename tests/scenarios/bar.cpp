@@ -152,6 +152,7 @@ bool settings_esc_sent = false; // the Escape that closes the panel went out
 std::string keys_marker;    // what a plain key typed into the keys terminal lands in
 std::string command_marker; // the file the Commands row's command touches
 std::string settings_last_png; // the last list shot, to tell when a scroll has stopped
+int settings_draft_chip = 0; // the draft command row's chip width while it shows None
 
 
 // ---- isolation: private buses and the stand-in services on them ----
@@ -6938,7 +6939,7 @@ int run_step() {
 		step = 300; // on to the toolbar's edges; the settings window chains from there
 		return -100; // without the advance: every other step moves on alone
 	}
-	// ---- the settings window, end to end (steps 400-430) ----
+	// ---- the settings window, end to end (steps 400-500) ----
 	// The world the panel needs: the agents widget back on the bar (the
 	// usage fixtures dropped again, a reload to collect them), the
 	// overview open, the toolbar's gear clicked, and the panel's four
@@ -7764,33 +7765,38 @@ int run_step() {
 		cairo_surface_destroy(s);
 		check(settled && chip >= 20, std::format("the Add row opened a draft "
 			"command row above itself, with a chord chip ({} px wide)", chip));
+		settings_draft_chip = chip;
 		click(settings_card_x + settings_pad + 8 + 12, settings_command_y);
 		return 400;
 	}
 	case 489: // the capture takes every key: the chord pressed is recorded
 		chord(KEY_Y, KEY_LEFTMETA);
-		return 400;
-	case 490: { // the chord is in canvas.conf; the list to its end again
-		std::string text = read_file(canvas_conf);
-		if (text.find("Super+Y") == std::string::npos && retries++ < 30) {
-			return -300;
-		}
-		retries = 0;
-		check(text.find("Super+Y") != std::string::npos,
-			"recording Super+Y on the draft wrote its [commands] line");
+		return 1000; // long enough for a write, and the error it would bring, to land
+	case 490: { // the draft holds the chord; the file, errors and hint are untouched
+		check(read_file(canvas_conf).find("Super+Y") == std::string::npos,
+			"recording the draft's chord wrote nothing into canvas.conf");
+		check(server->conf_errors.empty()
+				&& !server->hint.text.starts_with("canvas.conf line"),
+			"and no file error followed it (none in the settings, no hint)");
 		settings_last_png.clear();
 		scroll(settings_card_x + 100, 400, 40);
 		shot("settings-recorded");
 		return 700;
 	}
-	case 491: { // the command field of the row is clicked
+	case 491: { // the row shows the chord it holds; the command field is clicked
 		bool settled = settings_png_repeats("settings-recorded");
 		if (!settled && retries++ < 8) {
 			shot("settings-recorded");
 			return -700;
 		}
 		retries = 0;
-		check(settled, "the list stopped moving after the recording");
+		cairo_surface_t *s = load_png("settings-recorded");
+		int chip = s != nullptr
+			? settings_chip_width(s, int(settings_command_y) + 7) : 0;
+		cairo_surface_destroy(s);
+		check(settled && chip > settings_draft_chip, std::format("the draft row "
+			"shows the chord it holds, in a chip wider than None ({} px, was {})",
+			chip, settings_draft_chip));
 		click(settings_card_x + 180, settings_command_y);
 		return 500;
 	}
@@ -7799,6 +7805,8 @@ int run_step() {
 		check(panel != nullptr
 				&& server->seat->keyboard_state.focused_surface == panel->wlr->surface,
 			"the settings panel holds the keyboard for the command field");
+		check(read_file(canvas_conf).find("Super+Y") == std::string::npos,
+			"the chord alone is still not in canvas.conf");
 		type("markcmd");
 		shot("settings-command-typed");
 		return 500;
@@ -7812,8 +7820,9 @@ int run_step() {
 			return -300;
 		}
 		retries = 0;
-		check(command == "markcmd", std::format("typing the command line wrote "
-			"Super+Y = markcmd into [commands] (\"{}\")", command));
+		check(command == "markcmd", std::format("Enter on the typed command line "
+			"wrote Super+Y = markcmd into [commands] (\"{}\")", command));
+		check(server->conf_errors.empty(), "and the file has no error");
 		check(!std::filesystem::exists(command_marker),
 			"the command had not run before its chord was pressed");
 		chord(KEY_Y, KEY_LEFTMETA);
@@ -7831,7 +7840,7 @@ int run_step() {
 		shot("settings-saved");
 		return 700;
 	}
-	case 496: { // Remove on the row
+	case 496: { // the saved row's command field is clicked, to be emptied
 		bool settled = settings_png_repeats("settings-saved");
 		if (!settled && retries++ < 8) {
 			shot("settings-saved");
@@ -7839,10 +7848,22 @@ int run_step() {
 		}
 		retries = 0;
 		check(settled, "the list stopped moving after the save");
+		click(settings_card_x + 180, settings_command_y);
+		return 500;
+	}
+	case 497: { // select all, delete, Enter: an emptied command field
+		chord(KEY_A, KEY_LEFTCTRL);
+		tap(KEY_BACKSPACE);
+		tap(KEY_ENTER);
+		return 1000;
+	}
+	case 498: { // saved nothing; Remove on the row
+		check(conf_value("Super+Y") == "markcmd" && server->conf_errors.empty(),
+			"an emptied command field saved nothing: the line still holds markcmd");
 		click(settings_card_x + settings_panel - 40, settings_command_y);
 		return 400;
 	}
-	case 497: { // Remove took the line out
+	case 499: { // Remove took the line out
 		std::string text = read_file(canvas_conf);
 		if (text.find("Super+Y") != std::string::npos && retries++ < 30) {
 			return -300;
@@ -7857,7 +7878,7 @@ int run_step() {
 		shot("settings-top-again");
 		return 700;
 	}
-	case 498: { // the list back at its top: the App launcher row is clicked to record
+	case 500: { // the list back at its top: the App launcher row is clicked to record
 		bool settled = settings_png_repeats("settings-top-again");
 		if (!settled && retries++ < 8) {
 			scroll(settings_card_x + 100, 400, -150);

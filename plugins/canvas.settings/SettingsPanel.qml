@@ -180,7 +180,10 @@ PanelCard {
 
 	// ---- the commands, one section of the Shortcuts tab ----
 
-	property var draft: null // {keys, command} being added, keys filled by a recording
+	// A command being added: the file never holds half of it. The chord
+	// and the command line wait here until both are given; one write
+	// then adds the line.
+	property var draft: null // {keys, command}, either still ""
 
 	function commands() {
 		var real = settings && settings.commands ? settings.commands : []
@@ -191,6 +194,12 @@ PanelCard {
 		return settings && settings.commands ? settings.commands.length : 0
 	}
 
+	function clearCommandsFault() {
+		if (faultRow != null && faultRow.scope === "commands") {
+			faultRow = null
+		}
+	}
+
 	function saveCommands(commands) {
 		api.compositor.call("settings.set", {commands: commands},
 			function(result, error) {
@@ -199,6 +208,7 @@ PanelCard {
 					faultText = String(error)
 					return
 				}
+				clearCommandsFault()
 				assignSettings(result)
 			})
 	}
@@ -206,9 +216,12 @@ PanelCard {
 	function commandKeys(index, keys) {
 		var commands = settings && settings.commands ? settings.commands.slice() : []
 		if (draft != null && index === commands.length) {
-			draft.keys = keys
-			commands.push({keys: keys, command: draft.command})
-			saveCommands(commands)
+			clearCommandsFault()
+			draft = {keys: keys, command: draft.command}
+			if (draft.command !== "") {
+				commands.push({keys: keys, command: draft.command})
+				saveCommands(commands)
+			}
 			return
 		}
 		if (index < commands.length) {
@@ -218,8 +231,12 @@ PanelCard {
 	}
 
 	function commandText(index, text) {
+		if (text.trim() === "") {
+			return // an emptied field is not a command; the file keeps its line
+		}
 		var commands = settings && settings.commands ? settings.commands.slice() : []
 		if (draft != null && index === commands.length) {
+			draft = {keys: draft.keys, command: text}
 			if (draft.keys == null || draft.keys === "") {
 				faultRow = {scope: "commands"}
 				faultText = "Record a chord first"
