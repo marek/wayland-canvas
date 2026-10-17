@@ -94,7 +94,7 @@ These decisions close three open boxes of
 - [x] Triggers: the `lock` action, `loginctl lock-session`, suspend and hibernate held until the lock is drawn, the idle timeout with inhibitors honoured — the action and the idle timeout proven in the lock scenario; the logind pair written against sd-bus
 - [ ] Triggers proof: the logind pair (Lock, PrepareForSleep with the delay inhibitor) against a stand-in logind on a private system bus
 - [x] Shell: the lock plugin on every output, the password through PAM; the package installs the PAM service file
-- [ ] Settings window: the idle timeout on a Session page (landing with the night light's switch, which shares the page)
+- [x] Settings window: the idle timeout on a Session page (landing with the night light's switch, which shares the page)
 - [x] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off
 - [x] Scenario: a wrong password keeps it locked and the right one unlocks, through the lock plugin against a scratch PAM service
 
@@ -139,5 +139,5 @@ These decisions close three open boxes of
 
 ## Verification
 
-- [ ] README (installing, the lock, notifications, X11, the night light, the session services, the new keys) and `-h`; warning-free build; `tools/check.sh` green
+- [x] README (installing, the lock, notifications, X11, the night light, the session services, the new keys) and `-h`; warning-free build; `tools/check.sh` green
 - [ ] On screen as the SDDM login: lock by key, after idle and on closing the lid; a notification with an action; `pkexec true`; an X11 app; the night light on and a screenshot in true colours; fcitx5, 1Password and the other session services running (the user)
