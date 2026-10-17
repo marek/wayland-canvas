@@ -14,6 +14,7 @@
 #include <vector>
 #include "canvas/desktop.h"
 #include "canvas/items.h"
+#include "input/gesture.h"
 
 class Output;
 class Server;
@@ -46,12 +47,18 @@ struct DrawnSurface {
 	bool frame_done = false;
 };
 
-// One scale-keyed slot of the help-line texture cache, reused by Painter.
+// One scale- and preset-keyed slot of the help-line texture cache, reused by
+// Painter.
 struct HelpSlot {
 	TexturePtr texture;
 	int w = 0, h = 0;
 	float scale = 0;
+	SwipePreset preset = SwipePreset::three_finger_hops;
 };
+
+// The overview's help line for the gesture options in force: the swipe
+// preset's gestures, or only the keys when no preset binds any.
+const char *overview_help_text(const GestureOptions &options);
 
 // Everything one render target's frame is drawn with: an output's on-screen
 // frame, or an offscreen capture of a rectangle of that output (see

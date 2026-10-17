@@ -229,6 +229,18 @@ compositor binary (build tree or install prefix) or at
 | Overview | 2-finger pinch / scroll | Zoom / pan the overview |
 | Overview | Super + 2-finger pinch | Zoom the desktop under the pointer (or the target); `0` returns the target to 100 % |
 
+The finger counts are a setting: the `swipes` line of `[gestures]` in
+`~/.config/wayland-canvas/canvas.conf` picks `three-finger-hops` (the table
+above, the default), `four-finger-hops` (the same table with every 3 and 4
+swapped: 4 fingers hop, 3 up open the overview, 3 down go in, 3 sideways
+abandon, a 4-finger pinch tiles and combines) or `off` — no 3- or 4-finger
+compositor gesture at all: in the normal view they are forwarded to the client
+under the pointer like 2-finger ones, in the overview they do nothing.
+`pinch-scale = off` in the same section makes a Super + 2-finger pinch a plain
+pinch: the client's in the normal view, the overview's zoom in the overview.
+The overview's help line names the gestures of the preset in force (keys only
+under `off`).
+
 ## Mouse
 
 | Where | Action | Result |

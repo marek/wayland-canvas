@@ -308,6 +308,12 @@ void super_pinch_to(double from, double to) {
 	key(KEY_LEFTMETA, false);
 }
 
+// Whether the overview help line names `word` for the options in force.
+bool help_names(const char *word) {
+	std::string_view text = overview_help_text(server->gestures.options());
+	return text.find(word) != std::string_view::npos;
+}
+
 int run_step() {
 	Output *o = out();
 	View *one = view_titled("one"), *two = view_titled("two"), *three = view_titled("three");
@@ -1341,6 +1347,272 @@ int run_step() {
 				&& o->desktop_showing() == desk(hop_b),
 			std::format("a late window starting maximized filled the free spot it was launched"
 				" for, not B (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
+		return 0;
+	}
+	case 95:
+		// The four-finger-hops preset: every 3 and 4 swaps roles.
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		server->gestures.set_options(
+			{.swipes = SwipePreset::four_finger_hops, .pinch_scale = true});
+		check(server->gestures.options().swipes == SwipePreset::four_finger_hops,
+			"set_options installed the four-finger-hops preset");
+		check(help_names("4 fingers") && help_names("3 down")
+				&& help_names("4-finger pinch"),
+			"the help line names the four-finger preset's gestures");
+		swipe(4, -200, 0, 8); // 4 fingers left: a hop, like 3 fingers today
+		return 900;
+	case 96: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera a = camera_for_box(desk(hop_a)->frame(), 1);
+		Camera cam = o->camera.current();
+		check(cam.cx == a.cx && cam.cy == a.cy && std::fabs(cam.zoom - 1) < 1e-9
+				&& o->desktop_showing() == desk(hop_a),
+			std::format("a 4-finger swipe hopped from B onto A in the normal view"
+				" (off by {:.0f},{:.0f})", cam.cx - a.cx, cam.cy - a.cy));
+		shot("33-four-finger-hop");
+		swipe(3, 0, -300, 20); // 3 fingers up: the overview
+		return 700;
+	}
+	case 97:
+		check(o->overview.active() && o->camera.current().zoom < 0.5,
+			std::format("a 3-finger swipe up opened the overview (zoom {:.3f})",
+				o->camera.current().zoom));
+		check(o->overview.target().desktop == hop_a, "the overview targets A");
+		swipe(4, 80, 0, 8); // 4 fingers right: a hop, in the overview too
+		return 500;
+	case 98:
+		check(o->overview.active() && o->overview.target().desktop == hop_b,
+			"a 4-finger swipe in the overview hopped the target onto B");
+		swipe(3, 0, 300, 20); // 3 fingers down: into the target
+		return 800;
+	case 99: {
+		Camera b = camera_for_box(desk(hop_b)->frame(), desk(hop_b)->scale());
+		check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
+				&& std::fabs(o->camera.current().cx - b.cx) < 1
+				&& std::fabs(o->camera.current().zoom - b.zoom) < 1e-9,
+			"a 3-finger swipe down went into the target, B");
+		o->overview.enter(); // for the abandon and the pinch previews
+		return 700;
+	}
+	case 100: {
+		check(o->overview.active() && o->overview.target().desktop == hop_b,
+			"the overview opened over B again");
+		// A 3-finger sideways swipe abandons: a fresh desktop, the pointer
+		// over it so the swipe has a desktop under the pointer.
+		const wlr_box &frame = desk(hop_b)->frame();
+		o->overview.new_desktop(frame.x + frame.width * 1.8,
+			frame.y + frame.height / 2.0);
+		std::optional<DesktopId> doomed = o->overview.target().desktop;
+		check(doomed.has_value() && doomed != hop_b, "a fresh desktop to abandon");
+		Camera cam = o->camera.drawn();
+		double z = cam.zoom;
+		double left = cam.cx - o->width / (2.0 * z);
+		double top = cam.cy - o->height / (2.0 * z);
+		const wlr_box &dframe = desk(doomed)->frame();
+		move_to((dframe.x + dframe.width / 2.0 - left) * z,
+			(dframe.y + dframe.height / 2.0 - top) * z);
+		swipe(3, 320, 0, 20);
+		return 500;
+	}
+	case 101: {
+		std::optional<DesktopId> doomed = o->overview.target().desktop;
+		check(doomed.has_value()
+				&& server->canvas.desktops.find(doomed) == nullptr,
+			"a 3-finger sideways swipe abandoned the desktop in the overview");
+		shot("37-overview-help-four-finger");
+		o->overview.set_target(desk(hop_a)->frame(), hop_a, false);
+		Camera cam = o->camera.drawn();
+		double z = cam.zoom;
+		double left = cam.cx - o->width / (2.0 * z);
+		double top = cam.cy - o->height / (2.0 * z);
+		const wlr_box &aframe = desk(hop_a)->frame();
+		move_to((aframe.x + aframe.width / 2.0 - left) * z,
+			(aframe.y + aframe.height / 2.0 - top) * z);
+		server->gestures.pinch_begin(t_ms, 4);
+		for (int i = 1; i <= 10; i++) {
+			t_ms += 8;
+			server->gestures.pinch_update(t_ms, 0, 0, 1 + 0.5 * i / 10, 0);
+		}
+		check(server->gestures.pinch() != nullptr
+				&& server->hint.text == std::format("Release to tile Desktop {}",
+					desk(hop_a)->number()),
+			std::format("a 4-finger spread previews tiling (hint {})",
+				server->hint.text));
+		t_ms += 8;
+		server->gestures.pinch_end(t_ms, true); // cancelled: the preview is the point
+		server->gestures.pinch_begin(t_ms, 4);
+		for (int i = 1; i <= 10; i++) {
+			t_ms += 8;
+			server->gestures.pinch_update(t_ms, 0, 0, 1 - 0.4 * i / 10, 0);
+		}
+		check(server->gestures.pinch() != nullptr
+				&& server->hint.text == std::format(
+					"Release to combine Desktop {} into Desktop {}",
+					desk(hop_b)->number(), desk(hop_a)->number()),
+			std::format("a 4-finger gather previews combining (hint {})",
+				server->hint.text));
+		t_ms += 8;
+		server->gestures.pinch_end(t_ms, true);
+		return 400;
+	}
+	case 102:
+		// Out of the overview, onto B, for the `off` preset.
+		o->overview.set_target(desk(hop_b)->frame(), hop_b, false);
+		o->overview.exit();
+		return 700;
+	case 103: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera b = camera_for_box(desk(hop_b)->frame(), desk(hop_b)->scale());
+		check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
+				&& std::fabs(o->camera.current().cx - b.cx) < 1,
+			"back on B in the normal view");
+		// `off`: no 3- or 4-finger compositor gesture; the client under the
+		// pointer gets them, like 2-finger ones.
+		server->gestures.set_options({.swipes = SwipePreset::off, .pinch_scale = true});
+		check(!help_names("finger"),
+			"with the preset off the help line names only keys");
+		Camera before = o->camera.current();
+		server->gestures.swipe_begin(t_ms += 8, 3);
+		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+			"a 3-finger swipe in the normal view is forwarded to the client");
+		server->gestures.swipe_update(t_ms += 8, 60, 0);
+		server->gestures.swipe_end(t_ms += 8, false);
+		server->gestures.swipe_begin(t_ms += 8, 4);
+		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+			"a 4-finger swipe in the normal view is forwarded to the client");
+		server->gestures.swipe_update(t_ms += 8, 0, -60);
+		server->gestures.swipe_end(t_ms += 8, false);
+		Camera now = o->camera.current();
+		check(!o->overview.active() && now.cx == before.cx && now.cy == before.cy
+				&& now.zoom == before.zoom && !o->camera.panning()
+				&& o->desktop_showing() == desk(hop_b),
+			"with the preset off, 3- and 4-finger swipes left the camera and"
+				" the overview state alone");
+		o->overview.enter();
+		return 700;
+	}
+	case 104: {
+		// In the overview the compositor owns every gesture: with no preset,
+		// 3- and 4-finger gestures do nothing at all.
+		check(o->overview.active(), "the overview opened with the preset off");
+		std::optional<DesktopId> target_before = o->overview.target().desktop;
+		Camera before = o->camera.current();
+		server->hint.set("");
+		server->gestures.swipe_begin(t_ms += 8, 3);
+		check(std::holds_alternative<Gestures::Ignored>(server->gestures.state()),
+			"a 3-finger swipe in the overview does nothing");
+		server->gestures.swipe_update(t_ms += 8, 60, 60);
+		server->gestures.swipe_end(t_ms += 8, false);
+		server->gestures.swipe_begin(t_ms += 8, 4);
+		check(std::holds_alternative<Gestures::Ignored>(server->gestures.state()),
+			"a 4-finger swipe in the overview does nothing");
+		server->gestures.swipe_update(t_ms += 8, 60, 60);
+		server->gestures.swipe_end(t_ms += 8, false);
+		server->gestures.pinch_begin(t_ms += 8, 3);
+		check(std::holds_alternative<Gestures::Ignored>(server->gestures.state()),
+			"a 3-finger pinch in the overview does nothing");
+		server->gestures.pinch_update(t_ms += 8, 0, 0, 1.5, 0);
+		server->gestures.pinch_end(t_ms += 8, false);
+		Camera now = o->camera.current();
+		check(o->overview.active() && now.cx == before.cx && now.cy == before.cy
+				&& now.zoom == before.zoom && server->hint.text.empty()
+				&& o->overview.target().desktop == target_before
+				&& std::holds_alternative<Gestures::Idle>(server->gestures.state()),
+			"in the overview, 3- and 4-finger gestures did nothing at all");
+		shot("36-overview-help-off");
+		return 400;
+	}
+	case 105:
+		o->overview.exit();
+		return 700;
+	case 106: {
+		// pinch-scale off: a Super + 2-finger pinch is a plain pinch.
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
+				&& o->interactive(), "back on B for the pinch-scale switch");
+		server->gestures.set_options(
+			{.swipes = SwipePreset::three_finger_hops, .pinch_scale = false});
+		Camera before = o->camera.current();
+		double scale_before = desk(hop_b)->scale();
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+			"with pinch-scale off, a Super + 2-finger pinch is forwarded to the"
+				" client");
+		pinch_move(1.5);
+		pinch_up(false);
+		key(KEY_LEFTMETA, false);
+		Camera now = o->camera.current();
+		check(now.cx == before.cx && now.cy == before.cy && now.zoom == before.zoom
+				&& desk(hop_b)->scale() == scale_before
+				&& !server->launcher.is_open(),
+			"with pinch-scale off, the Super pinch scaled no desktop and opened"
+				" no launcher");
+		return 400;
+	}
+	case 107:
+		o->overview.enter();
+		return 700;
+	case 108: {
+		// In the overview the same pinch zooms the overview camera.
+		check(o->overview.active(), "the overview opened for the pinch-scale switch");
+		double zoom_before = o->camera.current().zoom;
+		double scale_before = desk(hop_b)->scale();
+		key(KEY_LEFTMETA, true);
+		pinch_down(2);
+		check(std::holds_alternative<Gestures::OverviewZoom>(server->gestures.state()),
+			"in the overview, the Super pinch is the overview's zoom");
+		pinch_move(1.6);
+		check(std::fabs(o->camera.current().zoom - zoom_before) > 1e-9
+				&& std::holds_alternative<Gestures::OverviewZoom>(
+					server->gestures.state()),
+			std::format("the pinch zoomed the overview camera ({:.3f} -> {:.3f})",
+				zoom_before, o->camera.current().zoom));
+		pinch_up(false);
+		key(KEY_LEFTMETA, false);
+		check(desk(hop_b)->scale() == scale_before && !server->launcher.is_open(),
+			"the overview's Super pinch scaled no desktop and opened no launcher");
+		shot("34-overview-super-pinch-plain");
+		return 400;
+	}
+	case 109:
+		// The defaults restored: 3 and 4 back in their own roles.
+		o->overview.exit();
+		server->gestures.set_options(GestureOptions{});
+		check(server->gestures.options().swipes == SwipePreset::three_finger_hops
+				&& server->gestures.options().pinch_scale,
+			"the default options restored");
+		check(help_names("3 fingers") && help_names("4 down")
+				&& help_names("3-finger pinch"),
+			"the help line names the default preset's gestures");
+		return 700;
+	case 110:
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		check(!o->overview.active() && o->desktop_showing() == desk(hop_b),
+			"back on B with the defaults");
+		swipe(3, 200, 0, 8); // 3 fingers right: a hop again
+		return 900;
+	case 111: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera c = camera_for_box(desk(hop_c)->frame(), 1);
+		Camera cam = o->camera.current();
+		check(cam.cx == c.cx && cam.cy == c.cy && std::fabs(cam.zoom - 1) < 1e-9
+				&& o->desktop_showing() == desk(hop_c),
+			std::format("with the defaults back, a 3-finger swipe hopped onto C"
+				" (off by {:.0f},{:.0f})", cam.cx - c.cx, cam.cy - c.cy));
+		shot("35-default-restored");
 		return 0;
 	}
 	default:
