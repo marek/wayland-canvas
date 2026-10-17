@@ -63,6 +63,9 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Super+0 | `zoom-reset` | Return the view to 100 %: the desktop shown ([../canvas/desktops.md](../canvas/desktops.md)), or a free view ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Shift+3 / 4 / 5 | `shot-screen` / `capture-pick` / `capture-toolbar` | Whole-screen shot / the capture picker / the capture toolbar ([../apps/capture.md](../apps/capture.md)); with Ctrl added, the `-copy` action of each copies the shot |
 | Print / Shift+Print / Alt+Print | `capture-pick` / `shot-screen` / `record-stop` | The picker / whole-screen shot / stop a recording, else the toolbar on its recording choices; Ctrl added, the `-copy` actions ([../apps/capture.md](../apps/capture.md)) |
+| Super+L | `lock` | Lock the screen ([../shell/lock.md](../shell/lock.md)) |
+| Super+Ctrl+N | `night-light` | The night light on or off ([../render/night-light.md](../render/night-light.md)) |
+| Super+N / Super+Shift+N | `notifications-dismiss` / `notifications-dismiss-all` | Take the newest popup, or every popup, off the screen ([../shell/notifications.md](../shell/notifications.md)) |
 | Super+Shift+E, Ctrl+Alt+Backspace | `quit` | Quit the compositor |
 | Ctrl+Alt+F1..F12 | — | Switch to that VT; fixed |
 | In the overview | `[overview]`: `hop-left` … `hop-down`, `go`, `back`, `abandon`, `tiling`, `combine`, `new-desktop`, `zoom-reset`, `zoom-in`, `zoom-out`, `leave` | Arrows hop, Return go, Esc back, Delete/BackSpace abandon, `t` switch tiling, `m` combine, `n` new desktop, `0` the target desktop back to 100 %, `+`/`−` zoom, Super+Tab / Super+W leave ([../canvas/overview.md](../canvas/overview.md)) |
@@ -102,6 +105,8 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | A shell surface on the top or overlay layer asking for the keyboard on demand | Gets it when it appears and when it is clicked; gives it back to the focused window when it goes or a window is focused |
 | A shell surface asking for the keyboard exclusively | Holds it while mapped, the topmost first; windows and on-demand surfaces cannot take it |
 | No keyboard connected yet | Focus is assigned all the same, and the seat offers a keyboard from the start, so clients are ready: the first keyboard to connect (an on-screen one, `wtype`) types into the focus from its first key |
+| The password dialog | Holds the keyboard exclusively while it is open, so no part of a password reaches a window ([../shell/password-dialog.md](../shell/password-dialog.md)) |
+| A locked session | The locker's surface holds the keyboard; nothing else sees a key, and only VT switching is still a compositor chord ([../shell/lock.md](../shell/lock.md)) |
 | A chord being recorded for the settings | The compositor takes every key, modifiers included, until the chord is pressed or the recording is cancelled: nothing runs and no surface sees them ([../shell/settings.md](../shell/settings.md)) |
 
 ### Devices

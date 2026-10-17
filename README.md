@@ -292,6 +292,9 @@ stays.
 | Super+0 | `zoom-reset` | Return the desktop shown, or a free area, to 100 % |
 | Super+Shift+3 / 4 / 5 | `shot-screen` / `capture-pick` / `capture-toolbar` | Whole-screen shot / the capture picker / the capture toolbar (Ctrl on a shot: clipboard) |
 | Print / Shift+Print / Alt+Print | `capture-pick` / `shot-screen` / `record-stop` | The capture picker / whole-screen shot / stop a recording, else the toolbar on its recordings |
+| Super+L | `lock` | Lock the screen (the password is your login one, through PAM) |
+| Super+N / Super+Shift+N | `notifications-dismiss` / `notifications-dismiss-all` | Take the newest notification popup, or every one, off the screen |
+| Super+Ctrl+N | `night-light` | The night light on or off |
 | Super+Shift+E, Ctrl+Alt+Backspace | `quit` | Quit |
 | Overview: arrows, Return, Escape, Delete, T, M, N, 0, +/- | `[overview]`: `hop-left` … `leave` | Jump, enter, back, abandon, tile, combine, new desktop, target back to 100 %, zoom; Super+Tab / Super+W leave |
 
@@ -339,12 +342,13 @@ show, the toolbar's edge — are its `shell.json`.
 ## Settings
 
 The gear button in the overview toolbar opens the settings window, a panel
-with four tabs:
+with five tabs:
 
 | Tab | Sets | Written to |
 |---|---|---|
 | Shortcuts | Every keyboard shortcut — click a row and press the new chord (Esc cancels); Reset restores the defaults, Clear leaves the action without keys; a chord another action holds is taken from it, and the row says where it came from. Below them, commands: a chord and a shell command line each | `canvas.conf` |
 | Gestures | The swipe preset (three- or four-finger hops, or off) and the pinch-to-scale switch | `canvas.conf` |
+| Session | How long the screen may idle before it locks (never is one of the choices), and the night light's switch and temperature | `canvas.conf` |
 | Toolbar | The edge the overview toolbar sits on: right, left, top or bottom | `shell.json` |
 | Bar | Which bar widgets show, every one by section with a switch | `shell.json` |
 
@@ -359,15 +363,35 @@ clients that negotiate neither keep their own decorations), layer-shell (bars,
 launchers, wallpapers, notifications), foreign-toplevel management (taskbars can
 restore minimized windows), xdg-activation, pointer-gestures, relative-pointer,
 cursor-shape, screencopy/export-dmabuf (grim, and screen sharing through
-xdg-desktop-portal-wlr), data-control, primary selection,
+xdg-desktop-portal-wlr), ext-session-lock (the screen lock; swaylock and
+hyprlock work too), wlr-gamma-control (wlsunset, gammastep), data-control,
+primary selection,
 viewporter, fractional-scale, presentation-time, single-pixel-buffer, idle-notify,
 idle-inhibit, virtual-keyboard.
 
+## The session
+
+A login — picked at the display manager, or started from a TTY — brings up
+what a graphical session needs:
+
+| Part | What you get |
+|---|---|
+| Lock screen | Super+L, `loginctl lock-session`, suspend (the lock is drawn before the machine sleeps) and an idle timeout of 5 minutes, which the Session tab changes. The password is your own, checked through PAM against the service file the package installs. While locked, only the lock is on screen — in a screenshot and a shared screen too — and an idle inhibitor (a video player) holds the idle lock off |
+| Notifications | Popups top-right with their actions, a bell in the bar with the history behind it, and a silence switch. Super+N dismisses the newest, Super+Shift+N all of them. Another notification daemon (mako, dunst) can serve the session instead by taking the bus name first |
+| Password dialog | An app that asks for administrator rights (`pkexec`, a package manager) gets a dialog in the session; it holds the keyboard while it is open. A session that already has a polkit agent keeps it |
+| Night light | A switch and a colour temperature, in the brightness panel and the Session tab, toggled with Super+Ctrl+N. It rides the output's gamma ramp, so a screenshot stays in true colours; wlsunset and gammastep work through the gamma-control protocol and take over while they run |
+| Session services | `wayland-canvas-session.target` is started once the compositor has handed its display to systemd, so `graphical-session.target` units and the XDG autostart entries come up with the session and stop with it |
+
+A nested or headless run leaves all of this to the session that owns it: no
+session services are started, no logind session is watched.
+
 ## Limitations
 
-No Xwayland, no output-configuration protocol (set the scale with `-S`), no session
-lock, full repaint of an output per changed frame (no damage regions), no window
-open/close animations.
+No Xwayland (X11-only applications do not run), no output-configuration
+protocol (set the scale with `-S`), the night light needs an output with a
+gamma ramp of its own (a nested or headless run shows none), full repaint of
+an output per changed frame (no damage regions), no window open/close
+animations.
 
 ## Working on this repo
 

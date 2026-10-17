@@ -153,6 +153,9 @@ bool render_view_offscreen(View &view, float scale, wlr_buffer *buffer) {
 		return false;
 	}
 	Server &server = view.server;
+	if (server.lock.locked()) {
+		return false; // nothing behind the lock is captured
+	}
 	wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(server.renderer, buffer, nullptr);
 	if (pass == nullptr) {
 		wlr_log(WLR_ERROR, "capture: failed to begin the window's render pass");

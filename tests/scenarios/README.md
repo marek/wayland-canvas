@@ -115,6 +115,21 @@ own the machine's Wayland display namespace and GPU.
   the scenario process itself was started (the compositor's own ignore never
   reaches what it launches), and the desktop name `wayland-canvas:wlroots`.
 
+- **`lock.cpp`** — the lock screen, driven by the scenarios' own locker
+  (`tests/clients/lock-client.c`, an ext-session-lock-v1 client built with
+  the tests, so no swaylock or hyprlock is needed): the `lock` shortcut
+  pushes the locker's action to the shell and locks nothing by itself; the
+  locker then takes the session, and the screen is its own fill edge to
+  edge while a window capture is refused; a canvas shortcut does nothing,
+  the keys and a click reach the locker and the pointer focus is its
+  surface, and a three-finger swipe moves no camera; a killed locker leaves
+  the session locked behind an opaque fill, the next locker takes it over
+  and unlocks it, and the windows come back. Last the idle lock: the
+  countdown runs from `canvas.conf`'s default, the timeout asks the shell
+  to lock, an idle inhibitor stands the countdown down while it lives and
+  it runs again once the inhibitor is gone. Nothing in it touches the
+  machine's logind session.
+
 - **`capture.cpp`** — the shots-and-recordings UI, end to end, with the
   XDG pictures and videos dirs pointing into `tmp/scenarios/capture/`
   and an `xdg-open` stub on PATH (nothing touches the real user dirs or

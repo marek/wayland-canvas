@@ -39,6 +39,7 @@ void update_output_geometry(Output &output) {
 	if (resized) {
 		output.usable = wlr_box{0, 0, box.width, box.height};
 		output.arrange_layers();
+		output.server.lock.output_changed(output);
 	}
 	output.damage();
 }

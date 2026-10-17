@@ -169,6 +169,7 @@ private:
 	RenderCtx make_ctx(Output &output, wlr_render_pass *pass);
 	// Everything from the canvas clear to the drag icon, into ctx's target.
 	void draw_scene(const RenderCtx &ctx);
+	void draw_lock(const RenderCtx &ctx);
 
 	// One slot of the desktop-label cache: one texture per fill the label
 	// sits on — the panel of an ordinary tab, the accent of the target.

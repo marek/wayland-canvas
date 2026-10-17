@@ -17,7 +17,7 @@ restored before the session file disappears.
 
 | Subject | Rule |
 |---|---|
-| Contents | the `wayland-canvas` binary, `wayland-canvas-agent-usage` and `wayland-canvas-session` in `bin`, `wayland-canvas.desktop` in `share/wayland-sessions`, `wayland-canvas-portals.conf` in `share/xdg-desktop-portal`, the top bar's Quickshell config in `share/wayland-canvas/shell` and its plugins in `share/wayland-canvas/plugins`, the licence (`/usr/share/licenses` on Arch, `/usr/share/doc/wayland-canvas/copyright` on Debian) |
+| Contents | the `wayland-canvas` binary, `wayland-canvas-agent-usage` and `wayland-canvas-session` in `bin`, `wayland-canvas.desktop` in `share/wayland-sessions`, `wayland-canvas-portals.conf` in `share/xdg-desktop-portal`, the top bar's Quickshell config in `share/wayland-canvas/shell` and its plugins in `share/wayland-canvas/plugins`, the session target `wayland-canvas-session.target` in the systemd user unit directory ([session-services.md](session-services.md)), the lock screen's PAM service as `sysconfdir/pam.d/wayland-canvas` ([../shell/lock.md](../shell/lock.md)), the licence (`/usr/share/licenses` on Arch, `/usr/share/doc/wayland-canvas/copyright` on Debian) |
 | Build commands | `tools/package.sh` builds both formats, `--arch` / `--deb` one of them; `ninja -C build packages`, `package-arch`, `package-deb` call the same scripts. Artifacts land in `dist/` at the repo root, whoever built them |
 | Arch build | `makepkg` over a tarball of the local source tree (the wlroots subproject included, `.git` stripped), built by the same meson native file as a normal build, installed with `--skip-subprojects=wlroots` because wlroots is linked in statically |
 | Runtime dependencies | every installed binary decides them, not just the compositor: the Arch `depends` names sqlite because the agent-usage helper links it, and `dpkg-shlibdeps` is run over each ELF under `usr/bin` |
@@ -105,14 +105,25 @@ non-zero and changes nothing.
 
 ## Install and uninstall
 
-`tools/install.sh` detects the distro (`/etc/os-release`), builds — or takes,
-with `--package` — the matching artifact, installs it with the system package
-manager, asks "Make wayland-canvas the default session at login?" and runs
+`tools/install.sh` detects the distro (`/etc/os-release`; `$OS_RELEASE`
+overrides the file the tests read), builds — or takes, with `--package` — the
+matching artifact, installs it with the system package manager, asks "Make
+wayland-canvas the default session at login?" and runs
 `wayland-canvas-session set-default` on yes; the question needs a terminal,
 and without one the default is left unchanged. `--uninstall` restores the
 default first and then removes the package; the packages' own removal hooks
 run the same restore again, which is a no-op by then, so a plain
 `pacman -R` or `apt remove` is equally clean.
+
+Root is for the package manager and nothing else:
+
+| Subject | Rule |
+|---|---|
+| Where root starts | the install or the removal only. The package is built by the user's own copy of `install.sh`, before it asks for root |
+| The re-run through sudo | the root copy is given the step it has to do — `--package <artifact>` for an install, `--uninstall` for a removal — so an argument is never lost and nothing is built again as root. Run as root with no `--package`, `install.sh` says to run it as the user instead |
+| Which artifact | the one of this distro's format, newest first, whatever else `dist/` holds |
+| Building as root | `tools/package.sh` refuses, except with `--here` in the release container, where root is all there is. It never changes the owner of the checkout: only its own scratch directory and the output directory are handed to the unprivileged account makepkg runs as |
+| Proof | the packaging suite drives both copies of `install.sh` against a stub `sudo`, a stub package manager and a stub `package.sh`: the arguments reach the root copy, the root copy builds nothing, and a root `package.sh` without `--here` exits non-zero with the checkout untouched |
 
 ## Cross-links
 

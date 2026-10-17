@@ -1,0 +1,21 @@
+{
+	"id": "canvas.polkit",
+	"name": "Password dialog",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The password dialog an app asking for admin rights gets, through polkit",
+	"contributes": {
+		"surfaces": [
+			{
+				"id": "dialog",
+				"entry": "Dialog.qml"
+			}
+		],
+		"actions": [
+			{
+				"id": "test-dialog",
+				"entry": "TestDialog.qml"
+			}
+		]
+	}
+}

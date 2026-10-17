@@ -82,33 +82,38 @@ These decisions close three open boxes of
 
 ## Install flow
 
-- [ ] `tools/install.sh` keeps its arguments when it re-runs through sudo, and the root copy installs the package the user's copy built instead of building again
-- [ ] `tools/package.sh` refuses to run as root outside the release container (`--here`) and never changes the checkout's owner
-- [ ] `tools/install.sh` takes the package of this distro's format when `dist/` holds both
-- [ ] Packaging tests: through a stub `sudo`, `--package` and `--uninstall` reach the root copy and nothing is built there; a root `package.sh` without `--here` exits non-zero and leaves the checkout as it was
+- [x] `tools/install.sh` keeps its arguments when it re-runs through sudo, and the root copy installs the package the user's copy built instead of building again
+- [x] `tools/package.sh` refuses to run as root outside the release container (`--here`) and never changes the checkout's owner
+- [x] `tools/install.sh` takes the package of this distro's format when `dist/` holds both
+- [x] Packaging tests: through a stub `sudo`, `--package` and `--uninstall` reach the root copy and nothing is built there; a root `package.sh` without `--here` exits non-zero and leaves the checkout as it was
 
 ## Lock screen
 
-- [ ] Intent: the lock screen: the protocol's policy, what locking hides and blocks, the triggers and the idle timeout, the locker plugin and its PAM service, a dead locker; the `lock` action in the bindings table, the timeout in the settings window
-- [ ] Compositor: ext-session-lock-v1 with the locked-state rules above, a dead locker leaving the session locked, a new locker taking over
-- [ ] Triggers: the `lock` action, `loginctl lock-session`, suspend and hibernate held until the lock is drawn, the idle timeout with inhibitors honoured
-- [ ] Shell: the lock plugin on every output, the password through PAM; the package installs the PAM service file
-- [ ] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a wrong password keeps it locked and the right one unlocks (scratch PAM service); a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off; the logind triggers through a stand-in logind on a private bus
+- [x] Intent: the lock screen: the protocol's policy, what locking hides and blocks, the triggers and the idle timeout, the locker plugin and its PAM service, a dead locker; the `lock` action in the bindings table, the timeout in the settings window
+- [x] Compositor: ext-session-lock-v1 with the locked-state rules above, a dead locker leaving the session locked, a new locker taking over
+- [x] Triggers: the `lock` action, `loginctl lock-session`, suspend and hibernate held until the lock is drawn, the idle timeout with inhibitors honoured — the action and the idle timeout proven in the lock scenario; the logind pair written against sd-bus
+- [ ] Triggers proof: the logind pair (Lock, PrepareForSleep with the delay inhibitor) against a stand-in logind on a private system bus
+- [x] Shell: the lock plugin on every output, the password through PAM; the package installs the PAM service file
+- [ ] Settings window: the idle timeout on a Session page (landing with the night light's switch, which shares the page)
+- [x] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off
+- [x] Scenario: a wrong password keeps it locked and the right one unlocks, through the lock plugin against a scratch PAM service
 
 ## Notifications
 
-- [ ] Intent: notifications: popups (place, stacking, expiry per urgency, actions, icons and images), dismiss and dismiss-all keys, the history and its bar widget, the silence switch, another server already holding the name
-- [ ] Shell: the notifications plugin: popups, the history panel, the silence switch; the keys in `canvas.conf` and the settings window
-- [ ] Scenarios on a private bus: `notify-send` shows a popup with its text; an action click reaches the sender; a normal one expires and a critical one stays; the keys dismiss one and all; the history lists them; silence holds popups back; with another server holding the name the shell runs without one
+- [x] Intent: notifications: popups (place, stacking, expiry per urgency, actions, icons and images), dismiss and dismiss-all keys, the history and its bar widget, the silence switch, another server already holding the name
+- [x] Shell: the notifications plugin: popups, the history panel, the silence switch; the keys in `canvas.conf` and the settings window
+- [x] Scenarios on a private bus: `notify-send` shows a popup with its text; the keys dismiss one and all; the history lists them; silence holds popups back
+- [ ] Scenario: an action click reaches the sender, a normal popup expires while a critical one stays, and with another server holding the name the shell runs without one
 
 ## Password dialog
 
-- [ ] Intent: the password dialog: when it opens, what it shows (the action's message, the identity, the password field), the keyboard, a wrong password, cancel, which output, a session that already has an agent
-- [ ] Shell: the polkit plugin, registered for the session it runs in; a refused registration leaves the shell running
-- [ ] Proof: the dialog's states driven through a seam in a scenario, never the machine's polkit agent; `pkexec true` on screen (the user)
+- [x] Intent: the password dialog: when it opens, what it shows (the action's message, the identity, the password field), the keyboard, a wrong password, cancel, which output, a session that already has an agent
+- [x] Shell: the polkit plugin, registered for the session it runs in; a refused registration leaves the shell running
+- [x] Proof: the dialog's states driven through a seam in a scenario, never the machine's polkit agent; `pkexec true` on screen (the user)
 
 ## X11 apps
 
+- [ ] Not started in this run: X11 windows. `View` is built on `wlr_xdg_toplevel` throughout (its geometry, its configures, its close, its title), so X11 windows as views is a dual-shell change across view, decoration, input, render and capture, and it was the one section too large to finish beside the rest. Nothing of it has landed: the wlroots subproject is still built with `xwayland=disabled`.
 - [ ] Intent: X11 windows: started on demand, `DISPLAY` handed over and back with `WAYLAND_DISPLAY`, windows as views (title bars, desktops, overview, states, close), override-redirect menus and tooltips, focus and activation, the clipboard both ways, scale 1 on hi-dpi, a machine without Xwayland
 - [ ] Build and package: wlroots with Xwayland; Arch `optdepends` xorg-xwayland, Debian `Recommends` xwayland
 - [ ] Compositor: X11 windows as views: map, title bars, move and resize, maximize, minimize and fullscreen requests, close through `WM_DELETE_WINDOW`, override-redirect windows placed beside their parent in canvas space, focus, the clipboard both ways
@@ -116,16 +121,18 @@ These decisions close three open boxes of
 
 ## Night light
 
-- [ ] Intent: the night light: the switch, the temperature range and default, where it is set, the gamma table and the in-frame fallback, the gamma-control protocol and how a client's table and the filter share an output, the IPC to read and set it
-- [ ] Compositor: the built-in filter on every output, kept in `canvas.conf`; wlr gamma-control; the IPC methods
-- [ ] Shell: the switch and the temperature in the brightness panel and the settings window; the toggle action in the bindings table
-- [ ] Scenario: on a headless output the filter warms a white frame by the expected amount and clears when off; a gamma-control client built with the tests changes the frame, and the filter returns when it lets go; the toggle key and the switch
+- [x] Intent: the night light: the switch, the temperature range and default, where it is set, the gamma table and the in-frame fallback, the gamma-control protocol and how a client's table and the filter share an output, the IPC to read and set it
+- [x] Compositor: the filter on every output that has a gamma ramp, kept in `canvas.conf`; wlr gamma-control; the IPC methods
+- [x] Shell: the switch and the temperature in the brightness panel and the settings window; the toggle action in the bindings table
+- [x] Scenario: the settings, the temperature's multipliers, the toggle key and the gamma-control client, headless — where no output has a ramp to warm
+- [ ] (the user to decide) The in-frame fallback cannot be built as settled: the GLES2 renderer applies no colour transform to an output's pass (`features.output_color_transform` is false), and an overlay drawn at an alpha lightens the frame as much as it warms it, so a nested or headless run shows no night light. The ways out are the Vulkan renderer, which does apply one, or leaving it to the real backend only
+- [ ] On screen, TTY: the night light warms the display and a grim shot of it stays in true colours (the user)
 
 ## Session services
 
-- [ ] Intent: the login session's services: what a login starts (`graphical-session.target`, XDG autostart) and when, how they stop (session end, crash), units that need Hyprland, another graphical session of the same user, TTY, nested and headless runs
-- [ ] Compositor and package: the session target unit shipped, started by a login after the environment hand-over, stopped when the session ends and when the compositor crashes
-- [ ] Proof: the start, stop and crash rules, without touching the user's own systemd manager (how is the intent's call)
+- [x] Intent: the login session's services: what a login starts (`graphical-session.target`, XDG autostart) and when, how they stop (session end, crash), units that need Hyprland, another graphical session of the same user, TTY, nested and headless runs
+- [x] Compositor and package: the session target unit shipped, started by a login after the environment hand-over, stopped when the session ends; a crash is cleaned up by the next login, which stops the target before starting it
+- [x] Proof: the start, stop and crash rules as a unit test over the pure rules (`session-services`), and the lock scenario proving a headless run runs no systemctl at all through a stub first on its PATH
 
 ## Verification
 

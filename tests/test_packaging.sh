@@ -6,9 +6,15 @@
 # Covers: set-default then restore leaves every file byte-identical; restore
 # with nothing recorded is a no-op; repeated set-default is idempotent; a
 # missing previous session is restored as it was; an unknown display manager
-# changes nothing.
+# changes nothing. Then the install flow against stub sudo, package managers
+# and package.sh: the step reaches the root copy, the root copy builds
+# nothing, the artifact matches the distro's format, and a root package.sh
+# without --here refuses.
 #
-# Fake roots live under $CANVAS_TMP (default: the repo's git-ignored tmp/).
+# No check here installs anything, builds anything or runs a real sudo.
+#
+# Fake roots and stubs live under $CANVAS_TMP (default: the repo's
+# git-ignored tmp/).
 set -uo pipefail
 
 T=$(cd "$(dirname "$0")" && pwd -P)
@@ -209,6 +215,132 @@ run_check "unknown display manager set-default fails and explains" 'start waylan
 	env bash -c '"$1" --root "$2" set-default; test $? -eq 1' shell "$TOOL" "$r"
 check "unknown display manager changed nothing" same_tree "$r" "$S/unknown.pristine"
 check "unknown display manager created no state" test ! -e "$r/var/lib"
+
+
+# --- install.sh: the user builds, root installs --------------------------------
+
+I=$S/install
+export CANVAS_IT=$I
+mkdir -p "$I/bin" "$I/repo/tools" "$I/repo/dist"
+cp "$REPO/tools/install.sh" "$I/repo/tools/install.sh"
+
+# package.sh here records the format it was asked for and leaves an artifact
+# of it in dist/: no check in this file builds anything
+cat >"$I/repo/tools/package.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$CANVAS_IT/built"
+d=$(cd "$(dirname "$0")/../dist" && pwd -P)
+case $* in
+	*--deb*) : >"$d/wayland-canvas_9.9.9_amd64.deb" ;;
+	*) : >"$d/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst" ;;
+esac
+STUB
+
+# sudo here records the root copy's command line and runs nothing
+cat >"$I/bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$CANVAS_IT/sudo"
+STUB
+
+# a second PATH whose id says root drives the same script as the root copy
+mkdir -p "$I/rootbin"
+cat >"$I/rootbin/id" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "-u" ] && { echo 0; exit 0; }
+exec /usr/bin/id "$@"
+STUB
+
+for p in pacman apt-get dpkg-query wayland-canvas-session; do
+	cat >"$I/bin/$p" <<'STUB'
+#!/usr/bin/env bash
+printf '%s %s\n' "$(basename "$0")" "$*" >>"$CANVAS_IT/ran"
+case "$(basename "$0") $*" in
+	'pacman -Qi wayland-canvas') exit 0 ;;
+	'dpkg-query'*) echo 'install ok installed'; exit 0 ;;
+esac
+exit 0
+STUB
+done
+chmod +x "$I/bin"/* "$I/rootbin"/* "$I/repo/tools"/*.sh
+
+printf 'ID=arch\n' >"$I/arch-release"
+printf 'ID=debian\n' >"$I/debian-release"
+
+run_install() { # run_install <os-release> <extra PATH entries...> -- <args...>
+	local os=$1
+	shift
+	: >"$I/sudo"
+	: >"$I/ran"
+	: >"$I/built"
+	rm -f "$I/repo/dist"/*
+	env PATH="$I/bin:$PATH" OS_RELEASE="$I/$os-release" \
+		"$I/repo/tools/install.sh" "$@" >"$I/out" 2>&1
+}
+
+# the user's copy builds, then hands the artifact to the root copy
+run_install arch
+check "install builds as the user" grep -q -- '--arch' "$I/built"
+check "install hands --package to the root copy" grep -q -- "--package $I/repo/dist/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst" "$I/sudo"
+check "install runs no package manager as the user" test ! -s "$I/ran"
+
+# --uninstall survives the re-run as well
+run_install arch --uninstall
+check "uninstall reaches the root copy with its argument" grep -q -- '--uninstall' "$I/sudo"
+check "uninstall builds nothing" test ! -s "$I/built"
+
+# the root copy installs what it was given and builds nothing
+: >"$I/repo/dist/given.pkg.tar.zst"
+: >"$I/sudo"
+: >"$I/ran"
+: >"$I/built"
+env PATH="$I/rootbin:$I/bin:$PATH" OS_RELEASE="$I/arch-release" \
+	"$I/repo/tools/install.sh" --package "$I/repo/dist/given.pkg.tar.zst" >"$I/out" 2>&1
+check "the root copy installs the package it was given" grep -q -- "pacman -U $I/repo/dist/given.pkg.tar.zst" "$I/ran"
+check "the root copy builds nothing" test ! -s "$I/built"
+check "the root copy does not call sudo again" test ! -s "$I/sudo"
+check "the default session is left alone without a terminal" grep -q 'default session is unchanged' "$I/out"
+
+# a root run with nothing to install says to run it as the user
+: >"$I/built"
+env PATH="$I/rootbin:$I/bin:$PATH" OS_RELEASE="$I/arch-release" \
+	"$I/repo/tools/install.sh" >"$I/out" 2>&1
+check "a root run without a package refuses" grep -q 'run install.sh as yourself' "$I/out"
+check "a root run without a package builds nothing" test ! -s "$I/built"
+
+# dist/ holding both formats: this distro's one is taken
+rm -f "$I/repo/dist"/*
+: >"$I/repo/dist/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst"
+: >"$I/repo/dist/wayland-canvas_9.9.9_amd64.deb"
+: >"$I/sudo"
+env PATH="$I/bin:$PATH" OS_RELEASE="$I/debian-release" \
+	"$I/repo/tools/install.sh" >"$I/out" 2>&1
+check "a Debian install takes the .deb" grep -q -- '--package .*\.deb$' "$I/sudo"
+: >"$I/sudo"
+rm -f "$I/repo/dist"/*
+: >"$I/repo/dist/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst"
+: >"$I/repo/dist/wayland-canvas_9.9.9_amd64.deb"
+env PATH="$I/bin:$PATH" OS_RELEASE="$I/arch-release" \
+	"$I/repo/tools/install.sh" >"$I/out" 2>&1
+check "an Arch install takes the .pkg.tar.zst" grep -q -- '--package .*\.pkg\.tar\.zst$' "$I/sudo"
+
+# --- package.sh refuses to build as root ---------------------------------------
+
+P=$S/package
+mkdir -p "$P/repo/tools"
+cp "$REPO/tools/package.sh" "$P/repo/tools/"
+cp "$REPO/meson.build" "$P/repo/"
+cat >"$P/repo/tools/package-arch.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'built\n' >>"$CANVAS_IT/built-as-root"
+STUB
+chmod +x "$P/repo/tools"/*.sh
+cp -a "$P/repo" "$P/pristine"
+
+run_check "package.sh as root without --here refuses" 'refusing to build as root' \
+	env PATH="$I/rootbin:$I/bin:$PATH" CANVAS_IT="$I" bash -c '"$1" --arch "$2"; test $? -ne 0' shell \
+	"$P/repo/tools/package.sh" "$P/out"
+check "package.sh as root built nothing" test ! -e "$I/built-as-root"
+check "package.sh as root left the checkout as it was" same_tree "$P/repo" "$P/pristine"
 
 # ------------------------------------------------------------------------------
 

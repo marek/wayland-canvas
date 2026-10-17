@@ -33,11 +33,12 @@ window while it is open.
 |---|---|
 | Opening | The gear button in the overview toolbar ([toolbar.md](toolbar.md)); the window is a panel beside it, through the common trigger |
 | Closing | As any panel: a click outside, Escape, a second click of the gear, leaving the overview. Closing while a shortcut is being recorded cancels the recording |
-| Pages | Tabs: Shortcuts, Gestures, Toolbar, Bar; a footer names the two files |
+| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar; a footer names the two files |
 
 | Page | Holds | Writes |
 |---|---|---|
 | Shortcuts | The file's errors first, if any. Then every action by group in the bindings table's order, the overview's last: its label and its keys, or None. A click records new keys; reset puts the defaults back; clear leaves it without keys. Then the commands: each one's keys, recorded the same way, and its command line; add and remove | `canvas.conf`: `[shortcuts]`, `[overview]`, `[commands]` |
+| Session | The minutes of idleness before the screen locks, or never ([lock.md](lock.md)); the night light's switch and temperature ([../render/night-light.md](../render/night-light.md)) | `canvas.conf`: `[session]` |
 | Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)" | `canvas.conf`: `[gestures]` |
 | Toolbar | The edge: right, left, top or bottom | `shell.json`: `toolbar.position` |
 | Bar | Every bar widget by section, in bar order, with a switch; a widget that hides itself without a source says when it shows | `shell.json`: `bar.hidden` |

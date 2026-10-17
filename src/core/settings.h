@@ -24,6 +24,13 @@ enum class Scope { global, overview };
 // server.cpp maps between the two.
 enum class SwipePreset { three_finger_hops, four_finger_hops, off };
 
+// [session] bounds and defaults. The idle lock is in minutes, 0 for off;
+// the night light's temperature in kelvin, warm at the low end.
+inline constexpr int default_lock_idle_minutes = 5;
+inline constexpr int night_light_min_k = 1000;
+inline constexpr int night_light_max_k = 6500;
+inline constexpr int default_night_light_k = 4000;
+
 // Modifiers then one key. `key` 0 with `mods` the logo bit is the lone-Super
 // tap; parse_chord makes no other modifier-only chord.
 struct Chord {
@@ -79,6 +86,7 @@ struct Parsed {
 	std::vector<Entry> overview;
 	std::vector<Entry> commands;
 	std::vector<Entry> gestures;
+	std::vector<Entry> session; // [session]: the idle lock, the night light
 	std::vector<Error> errors;
 };
 
@@ -91,6 +99,9 @@ struct Resolved {
 	std::vector<Command> commands;
 	SwipePreset swipes = SwipePreset::three_finger_hops;
 	bool pinch_scale = true;
+	int lock_idle_minutes = default_lock_idle_minutes; // 0: no idle lock
+	bool night_light = false;
+	int night_light_k = default_night_light_k;
 
 	friend bool operator==(const Resolved &, const Resolved &) = default;
 };
@@ -151,6 +162,10 @@ public:
 	// Replaces the [commands] entries, keeping the section's comments.
 	// A chord twice in `commands` is an error.
 	std::expected<Edit, std::string> set_commands(const std::vector<Command> &commands);
+
+	// One [session] setting, by its name in the file.
+	std::expected<Edit, std::string> set_session(std::string_view name,
+		std::string_view value);
 
 	std::expected<Edit, std::string> set_swipes(SwipePreset preset);
 	std::expected<Edit, std::string> set_pinch_scale(bool on);

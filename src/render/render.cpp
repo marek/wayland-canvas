@@ -1024,8 +1024,28 @@ RenderCtx Painter::make_ctx(Output &output, wlr_render_pass *pass) {
 	return ctx;
 }
 
+// While the session is locked nothing behind the lock is drawn — on screen
+// or in a capture, which takes the same path: the locker's surface for this
+// output, or an opaque fill where it has none yet.
+void Painter::draw_lock(const RenderCtx &ctx) {
+	Output &output = *ctx.output;
+	ctx.drawn->clear();
+	draw_logical_rect(ctx, 0, 0, output.width, output.height,
+		color_rgba(config::lock_fill));
+	wlr_surface *surface = server_.lock.surface_for(output);
+	if (surface == nullptr) {
+		return;
+	}
+	ScreenIter it = {.ctx = &ctx, .ox = 0, .oy = 0};
+	wlr_surface_for_each_surface(surface, screen_surface_iter, &it);
+}
+
 void Painter::draw_scene(const RenderCtx &ctx) {
 	Output &output = *ctx.output;
+	if (server_.lock.locked()) {
+		draw_lock(ctx);
+		return;
+	}
 	ctx.drawn->clear(); // no-op for a capture's scratch buffer
 	// Drop the labels of desktops that are gone.
 	std::erase_if(label_cache_, [this](const LabelSlot &slot) {
@@ -1110,6 +1130,10 @@ void Painter::render(Output &output) {
 
 	wlr_output_state state;
 	wlr_output_state_init(&state);
+	// The night light rides the output's own gamma ramp where it can hold
+	// it, so a capture stays in true colours; where it cannot, the frame is
+	// rendered through the same transform instead.
+	server_.night_light.apply_to_output(output, state);
 	wlr_render_pass *pass = wlr_output_begin_render_pass(wlr_output, &state, nullptr);
 	if (pass == nullptr) {
 		wlr_output_state_finish(&state);

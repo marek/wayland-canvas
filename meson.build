@@ -61,6 +61,13 @@ glib = dependency('glib-2.0', include_type: 'system')
 gio = dependency('gio-2.0', include_type: 'system')
 json_glib = dependency('json-glib-1.0', include_type: 'system')
 sqlite3 = dependency('sqlite3', include_type: 'system')
+# logind: `loginctl lock-session` and the sleep the lock is drawn before.
+# Optional, so a machine without it still builds (it then has no triggers).
+libsystemd = dependency('libsystemd', required: false, include_type: 'system')
+add_project_arguments(
+	'-DCANVAS_HAVE_LOGIND=' + (libsystemd.found() ? '1' : '0'),
+	language: 'cpp',
+)
 
 protocol_headers = []
 foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
@@ -69,6 +76,29 @@ foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
 		input: xml,
 		output: '@BASENAME@-protocol.h',
 		command: [wayland_scanner_prog, 'server-header', '@INPUT@', '@OUTPUT@'],
+	)
+endforeach
+
+# Client-side protocol glue for the small test clients below.
+wayland_client = dependency('wayland-client', include_type: 'system')
+wl_protocol_dir = dependency('wayland-protocols').get_variable('pkgdatadir')
+client_protocols = []
+foreach xml : [
+	wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
+	wl_protocol_dir / 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml',
+	'protocols/wlr-gamma-control-unstable-v1.xml',
+]
+	client_protocols += custom_target(
+		xml.underscorify() + '_client_h',
+		input: xml,
+		output: '@BASENAME@-client-protocol.h',
+		command: [wayland_scanner_prog, 'client-header', '@INPUT@', '@OUTPUT@'],
+	)
+	client_protocols += custom_target(
+		xml.underscorify() + '_client_c',
+		input: xml,
+		output: '@BASENAME@-protocol.c',
+		command: [wayland_scanner_prog, 'private-code', '@INPUT@', '@OUTPUT@'],
 	)
 endforeach
 
@@ -97,6 +127,7 @@ theme_prefs_lib = static_library(
 session_bus_lib = static_library(
 	'canvas-session-bus',
 	'src/platform/session_bus.cpp',
+	'src/platform/session_services.cpp',
 	include_directories: src_inc,
 )
 
@@ -148,10 +179,13 @@ core_lib = static_library(
 		'src/input/input.cpp',
 		'src/platform/ipc.cpp',
 		'src/platform/image_capture.cpp',
+		'src/platform/lock.cpp',
+		'src/platform/logind.cpp',
 		'src/platform/layer.cpp',
 		'src/platform/output.cpp',
 		'src/render/capture.cpp',
 		'src/render/draw.cpp',
+		'src/render/night_light.cpp',
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
 		'src/windows/launches.cpp',
@@ -162,7 +196,7 @@ core_lib = static_library(
 	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib,
 		settings_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
-		glib, json_glib, libinput, libdrm],
+		glib, gio, json_glib, libinput, libdrm, libsystemd],
 )
 
 wayland_canvas = executable(
@@ -203,6 +237,22 @@ install_data(
 	'packaging/xdg-desktop-portal-wlr.conf',
 	rename: 'wayland-canvas',
 	install_dir: get_option('sysconfdir') / 'xdg' / 'xdg-desktop-portal-wlr',
+)
+# The lock screen's PAM service: the locker checks the password through it.
+# The session's own systemd target: a login starts it, so
+# graphical-session.target and XDG autostart come up with the compositor.
+systemd = dependency('systemd', required: false)
+systemd_user_dir = get_option('prefix') / 'lib/systemd/user'
+if systemd.found()
+	systemd_user_dir = systemd.get_variable(pkgconfig: 'systemduserunitdir')
+endif
+install_data(
+	'packaging/systemd/wayland-canvas-session.target',
+	install_dir: systemd_user_dir,
+)
+install_data(
+	'packaging/pam.d/wayland-canvas',
+	install_dir: get_option('sysconfdir') / 'pam.d',
 )
 install_data(
 	'packaging/wayland-canvas-session',
@@ -287,6 +337,17 @@ test(
 )
 
 test(
+	'session-services',
+	executable(
+		'test-session-services',
+		'tests/test_session_services.cpp',
+		include_directories: src_inc,
+		link_with: session_bus_lib,
+	),
+	suite: 'unit',
+)
+
+test(
 	'session-bus',
 	executable(
 		'test-session-bus',
@@ -311,7 +372,28 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
 	# The source tree, for scenarios that install a shipped file as-is.
 	scenario_env.set('CANVAS_SOURCE', meson.project_source_root())
-	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture']
+	# A locker of the scenarios' own: no swaylock or hyprlock is needed to
+	# prove the protocol.
+	lock_client = executable(
+		'lock-client',
+		'tests/clients/lock-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_LOCK_CLIENT', lock_client.full_path())
+	# A gamma-control client of the scenarios' own: no wlsunset or
+	# gammastep is needed to prove the protocol.
+	gamma_client = executable(
+		'gamma-client',
+		'tests/clients/gamma-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_GAMMA_CLIENT', gamma_client.full_path())
+	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
+		'nightlight']
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.
 	scenarios += ['sharing']
@@ -327,6 +409,12 @@ if foot_prog.found() and grim_prog.found()
 	)
 	if qs_prog.found() and dbus_daemon_prog.found() and bar_standins.returncode() == 0
 		scenarios += ['bar']
+		# The session scenario needs the same private world: the shell's
+		# notification server, locker and polkit agent may only ever run on
+		# buses of the run's own.
+		if find_program('notify-send', required: false).found()
+			scenarios += ['session']
+		endif
 		scenario_env.set('CANVAS_BAR_STANDIN_PY', bar_standins.stdout().strip().split('\n')[-1])
 		scenario_env.set(
 			'CANVAS_BAR_STANDINS',

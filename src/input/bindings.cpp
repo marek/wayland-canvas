@@ -222,6 +222,27 @@ void act_quit(Server &server, Output *, KeyArg) {
 	wl_display_terminate(server.display);
 }
 
+void act_lock(Server &server, Output *, KeyArg) {
+	server.lock.request("the lock shortcut");
+}
+
+// The night light on or off, written into canvas.conf so the choice holds
+// across a restart and the settings window shows it.
+void act_night_light(Server &server, Output *, KeyArg) {
+	settings::File file{server.conf_text};
+	std::expected<settings::Edit, std::string> edit =
+		file.set_session("night-light", server.conf.night_light ? "off" : "on");
+	if (!edit.has_value() || !server.write_conf(edit->text)) {
+		wlr_log(WLR_ERROR, "the night light could not be written to canvas.conf");
+	}
+}
+
+// A shortcut whose work belongs to a shell plugin: the compositor only
+// runs the named action, as `action.run` does.
+void act_shell(Server &server, Output *, KeyArg arg) {
+	server.ipc.run_action(std::get<const char *>(arg), "{}");
+}
+
 void act_vt(Server &server, Output *, KeyArg arg) {
 	if (server.session != nullptr) {
 		wlr_session_change_vt(server.session,
@@ -401,6 +422,12 @@ constexpr std::array runners = {
 		act_capture_toolbar, 1},
 	Runner{settings::Scope::global, "record-stop", act_record_stop, 0},
 	Runner{settings::Scope::global, "record-stop-copy", act_record_stop, 1},
+	Runner{settings::Scope::global, "lock", act_lock, 0},
+	Runner{settings::Scope::global, "night-light", act_night_light, 0},
+	Runner{settings::Scope::global, "notifications-dismiss", act_shell,
+		config::notification_dismiss_action},
+	Runner{settings::Scope::global, "notifications-dismiss-all", act_shell,
+		config::notification_dismiss_all_action},
 	Runner{settings::Scope::global, "quit", act_quit, 0},
 	Runner{settings::Scope::overview, "hop-left", act_ov_hop, Dir{-1, 0}},
 	Runner{settings::Scope::overview, "hop-right", act_ov_hop, Dir{1, 0}},
@@ -542,6 +569,19 @@ bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 	}
 	if (const Bind *bind = find(sym, mods, commands_)) {
 		return run(*bind, output);
+	}
+	return false;
+}
+
+bool Bindings::handle_locked(xkb_keysym_t sym, uint32_t mods, Output *output) {
+	sym = xkb_keysym_to_lower(sym);
+	// Only the way out of a stuck session; every other chord belongs to the
+	// locker while the session is locked.
+	for (const VtBind &vt : vt_keys) {
+		if (vt.keysym == sym && vt.mods == mods) {
+			act_vt(server_, output, vt.vt);
+			return true;
+		}
 	}
 	return false;
 }

@@ -1,0 +1,5 @@
+# The lock screen's PAM service: the locker asks for the user's own login
+# password and checks it through the system's own stack. It grants no
+# session and opens none — the only question is whether the password is
+# right. `login` is the stack both Arch and Debian keep.
+auth include login

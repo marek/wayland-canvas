@@ -163,6 +163,7 @@ struct PrivateBus {
 };
 
 PrivateBus private_system, private_session; // the world's own buses
+std::string bus_dir; // where their sockets live, kept short (see below)
 pid_t standins_pid = -1;
 
 // The panel widths shell/Panel.qml commits, one distinct width per panel so
@@ -170,6 +171,7 @@ pid_t standins_pid = -1;
 constexpr int network_panel = 340;
 constexpr int weather_panel = 320;
 constexpr int bluetooth_panel = 300;
+constexpr int history_panel = 310; // the notifications bell's panel
 constexpr int audio_panel = 280;
 constexpr int power_panel = 260;
 constexpr int brightness_panel = 240;
@@ -508,7 +510,10 @@ void outside_theme_set(const char *mode) {
 // it is allowed, it exists for this run only, and no machine service is
 // reachable through it.
 bool start_private_bus(PrivateBus &bus, const char *type, const char *name) {
-	std::string dir = shot_dir + "/bus";
+	// A unix socket path is capped near 108 bytes, which a scratch folder
+	// under a worktree can spend on its own: the buses sit in the
+	// shortest path under the run's scratch root.
+	std::string dir = bus_dir;
 	mkdir_p(dir);
 	std::string socket = std::format("{}/{}", dir, name);
 	std::string conf = socket + ".conf";
@@ -874,6 +879,35 @@ bool start_tool_standins() {
 	const char *path = std::getenv("PATH");
 	setenv("PATH", std::format("{}:{}", dir, path != nullptr ? path : "").c_str(), 1);
 	return true;
+}
+
+// What this machine's own Wi-Fi is called, asked of the real nmcli in a
+// child of its own with the run's private bus undone: the names stay in
+// memory for the one check that the panel never reached the real
+// NetworkManager, and are written nowhere. Empty when the machine has no
+// Wi-Fi or no nmcli.
+std::string machine_wifi(const char *field) {
+	std::string out = shot_dir + "/machine-wifi.txt";
+	std::string cmd = std::format(
+		"env -u DBUS_SYSTEM_BUS_ADDRESS -u DBUS_SESSION_BUS_ADDRESS "
+		"nmcli -t -f {} device status 2>/dev/null | "
+		"awk -F: '$2 == \"wifi\" {{ print $NF }}' | head -1 > '{}'",
+		field, out);
+	std::system(cmd.c_str());
+	std::string value = read_file(out);
+	unlink(out.c_str());
+	while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
+		value.pop_back();
+	}
+	return value;
+}
+
+std::string machine_wifi_device() {
+	return machine_wifi("DEVICE,TYPE");
+}
+
+std::string machine_wifi_ssid() {
+	return machine_wifi("CONNECTION,TYPE");
 }
 
 // The network panel's tool log, one line a call: what the panel asked of
@@ -1625,17 +1659,20 @@ std::vector<Run> bar_runs(cairo_surface_t *s, const wlr_box &bar) {
 		}
 	}
 	constexpr int merge_gap = 8;
-	int start = -1, gap = 0;
+	int start = -1, gap = 0, last = -1;
 	for (int x = 0; x <= bar.width; x++) {
 		bool on = x < bar.width && lit[x];
-		if (on && start < 0) {
-			start = x;
+		if (on) {
+			if (start < 0) {
+				start = x;
+			}
 			gap = 0;
-		} else if (on) {
-			gap = 0;
-		} else if (start >= 0 && ++gap > merge_gap) {
-			if (x - gap - start >= 3) { // drop sub-pixel noise
-				runs.push_back({double(start), double(x - gap)});
+			last = x;
+		} else if (start >= 0 && (++gap > merge_gap || x == bar.width)) {
+			// A run touching the box's right edge ends with the box: the
+			// gap after it never grows, so it is closed here.
+			if (last + 1 - start >= 3) { // drop sub-pixel noise
+				runs.push_back({double(start), double(last + 1)});
 			}
 			start = -1;
 		}
@@ -2963,7 +3000,8 @@ constexpr int settings_action = 2 * settings_row; // a shortcuts row: label and 
 constexpr int settings_footer = 2 * settings_detail + 2; // the two file paths
 constexpr int settings_sep = 1;
 constexpr int settings_switch_w = 38; // PanelSwitch's width
-constexpr int settings_tab_w = (settings_panel - 2 * settings_pad) / 4;
+constexpr int settings_tabs = 5;     // Shortcuts, Gestures, Session, Toolbar, Bar
+constexpr int settings_tab_w = (settings_panel - 2 * settings_pad) / settings_tabs;
 
 // One Bar-tab section's height: its header, its rows (a detailed row is
 // the taller), and the gaps between them.
@@ -2985,7 +3023,7 @@ int settings_bar_column() {
 	int backlight = has_sysfs_class("backlight") ? 1 : 0;
 	return settings_section_height(1, 0)              // Left: the logo
 		+ settings_section_height(2, 0)                // Center: clock, weather
-		+ settings_section_height(7 + backlight, 1)    // Right: tray to theme
+		+ settings_section_height(8 + backlight, 1)    // Right: tray to theme
 		+ 2 * settings_gap;
 }
 
@@ -3060,10 +3098,12 @@ constexpr uint32_t chip_hover_dark = 0x383943ff; // the same chip on its row's h
 // -1 when the row does not show exactly one chosen tab.
 int settings_chosen_tab(cairo_surface_t *s, int card_y) {
 	int chosen = -1;
-	for (int i = 0; i < 4; i++) {
-		// Six pixels into the tab, left of its centred label.
-		int x = settings_card_x + settings_pad + settings_tab_w * i + 6;
-		int y = card_y + settings_pad + settings_row / 2;
+	for (int i = 0; i < settings_tabs; i++) {
+		// The chip's own fill above the label: with five tabs the labels
+		// nearly fill their cells, so the row is read where no glyph is.
+		int x = settings_card_x + settings_pad + settings_tab_w * i
+			+ settings_tab_w / 2;
+		int y = card_y + settings_pad + 4;
 		bool tint = pixel_is(s, x, y, selected_dark);
 		bool plain = pixel_is(s, x, y, shell_bg_dark);
 		if (tint == plain || (tint && chosen >= 0)) {
@@ -3076,16 +3116,20 @@ int settings_chosen_tab(cairo_surface_t *s, int card_y) {
 	return chosen;
 }
 
-// The tab labels as lit runs of the tab row: four of them, each centred
-// in its share of the row.
+// The tab labels as lit runs of the tab row: one per tab, each centred in
+// its share of the row.
 bool settings_tab_labels_centred(cairo_surface_t *s, int card_y) {
-	std::vector<Run> runs = bar_runs(s, {settings_card_x + settings_pad,
-		card_y + settings_pad, settings_panel - 2 * settings_pad, settings_row});
-	if (runs.size() != 4) {
-		return false;
-	}
-	for (std::size_t i = 0; i < runs.size(); i++) {
-		if (std::abs(runs[i].centre() - settings_tab_w * (i + 0.5)) > 6) {
+	// Read one tab's cell at a time: with five tabs in the card's width the
+	// labels nearly touch, and a row read whole would run two into one.
+	for (int i = 0; i < settings_tabs; i++) {
+		std::vector<Run> runs = bar_runs(s,
+			{settings_card_x + settings_pad + settings_tab_w * i,
+				card_y + settings_pad, settings_tab_w, settings_row});
+		if (runs.empty()) {
+			return false;
+		}
+		double left = runs.front().x0, right = runs.back().x1;
+		if (std::abs((left + right) / 2 - settings_tab_w / 2.0) > 6) {
 			return false;
 		}
 	}
@@ -3110,8 +3154,9 @@ std::vector<double> settings_bar_rows(int card_y) {
 		{settings_row, settings_row},                     // Center: clock, weather
 		{settings_row, settings_choice},                  // Right: tray, agents
 	};
-	for (int i = 0; i < 6 + backlight; i++) {
-		sections[2].push_back(settings_row);              // bluetooth to theme
+	// bluetooth, network, audio, [brightness], notifications, power, theme
+	for (int i = 0; i < 7 + backlight; i++) {
+		sections[2].push_back(settings_row);
 	}
 	std::vector<double> centres;
 	int y = card_y + settings_pad + settings_row + settings_gap;
@@ -3623,7 +3668,7 @@ ToolbarCard settings_toolbar_card(const char *shot_name) {
 		+ settings_header + settings_gap;
 	cairo_surface_t *s = load_png(shot_name);
 	if (s != nullptr) {
-		card.placed = settings_chosen_tab(s, y) == 2
+		card.placed = settings_chosen_tab(s, y) == 3
 			&& settings_tab_labels_centred(s, y);
 		card.dots = settings_dots(s, card.first_top, 4);
 		cairo_surface_destroy(s);
@@ -3823,6 +3868,9 @@ int run_step() {
 		// backlight comes from this machine.
 		std::vector<Indicator> mandatory;
 		mandatory.push_back({"power", power_panel});
+		// The notifications bell sits between the backlight and the
+		// battery; its history panel is always there, like the bell.
+		mandatory.push_back({"history", history_panel});
 		if (has_sysfs_class("backlight")) {
 			mandatory.push_back({"brightness", brightness_panel});
 		}
@@ -3975,7 +4023,7 @@ int run_step() {
 		if (!runs.empty()) { // the theme switch, right-most of all
 			runs.pop_back();
 		}
-		std::size_t mandatory = 4 + (has_sysfs_class("backlight") ? 1 : 0);
+		std::size_t mandatory = 5 + (has_sysfs_class("backlight") ? 1 : 0);
 		std::size_t keep = runs.size() >= 1 + mandatory ? runs.size() - 1 - mandatory : 0;
 		std::size_t centre = 0;
 		for (std::size_t i = 1; i < 1 + keep; i++) {
@@ -6183,10 +6231,13 @@ int run_step() {
 		retries = 0;
 		check(gone, "Forget removed the known network from the settings");
 		std::string log = standin_log();
-		// The machine's own interface and SSID: had the panel reached the
-		// real NetworkManager, either would be all over this log.
-		check(log.find("wlp0s20f3") == std::string::npos
-				&& log.find("Acme") == std::string::npos,
+		// The machine's own interface and the SSID it is on, read here and
+		// never written down: had the panel reached the real
+		// NetworkManager, either would be all over this log.
+		std::string real_device = machine_wifi_device();
+		std::string real_ssid = machine_wifi_ssid();
+		check((real_device.empty() || log.find(real_device) == std::string::npos)
+				&& (real_ssid.empty() || log.find(real_ssid) == std::string::npos),
 			"the panel's tools were only ever asked about the fixture world: "
 			"no real interface or SSID in any call");
 		shot("wifi-final");
@@ -7060,7 +7111,7 @@ int run_step() {
 		shot("settings-panel");
 		return 700;
 	}
-	case 405: { // the card beside the strip, its four tabs on top
+	case 405: { // the card beside the strip, its tabs on top
 		cairo_surface_t *s = load_png("settings-panel");
 		settings_card_x = settings_card_left(false);
 		// The Shortcuts list is taller than the output, so the card sits
@@ -7073,12 +7124,12 @@ int run_step() {
 			return -700;
 		}
 		retries = 0;
-		check(tabs_ok, "the settings card shows tall, its four tabs clamped "
+		check(tabs_ok, "the settings card shows tall, its tabs clamped "
 			"at the top margin");
 		check(chosen == 0, "the Shortcuts tab is the one chosen when the panel "
 			"opens");
 		// The Bar tab is the row's fourth share.
-		click(settings_card_x + settings_pad + settings_tab_w * 3.5,
+		click(settings_card_x + settings_pad + settings_tab_w * 4.5,
 			8 + settings_pad + settings_row / 2.0);
 		return 400;
 	}
@@ -7118,13 +7169,13 @@ int run_step() {
 			attention_dark) : 0;
 		cairo_surface_destroy(s);
 		int expected = int(widgets.size());
-		if ((chosen != 3 || labelled != expected || on != expected || !detailed
+		if ((chosen != 4 || labelled != expected || on != expected || !detailed
 				|| marked >= 10) && retries++ < 10) {
 			shot("settings-bar-tab");
 			return -700;
 		}
 		retries = 0;
-		check(chosen == 3, "the Bar tab is the one chosen");
+		check(chosen == 4, "the Bar tab is the one chosen");
 		check(labelled == expected, std::format("the Bar tab lists every widget "
 			"by section, a label on each row ({} of {})", labelled, expected));
 		check(on == expected, std::format("every widget's switch is on while "
@@ -7244,7 +7295,7 @@ int run_step() {
 		// The card still wears the Bar tab's shape, so its tabs row sits
 		// where that card puts it; the shorter shape only re-centres the
 		// card once the click lands.
-		click(settings_card_x + settings_pad + settings_tab_w * 2.5,
+		click(settings_card_x + settings_pad + settings_tab_w * 3.5,
 			settings_card_y + settings_pad + settings_row / 2.0);
 		return 700;
 	}
@@ -7265,12 +7316,12 @@ int run_step() {
 		unsigned dots = s != nullptr ? settings_dots(s, first_top, 4) : 0;
 		cairo_surface_destroy(s);
 		int labelled = settings_choices_labelled(rows, first_top, 4);
-		if ((chosen != 2 || labelled != 4 || dots != 1u) && retries++ < 10) {
+		if ((chosen != 3 || labelled != 4 || dots != 1u) && retries++ < 10) {
 			shot("settings-toolbar-tab");
 			return -700;
 		}
 		retries = 0;
-		check(chosen == 2, "the Toolbar tab is the one chosen");
+		check(chosen == 3, "the Toolbar tab is the one chosen");
 		check(labelled == 4, std::format("the Toolbar tab lists the four "
 			"edges, a label on each ({} of 4)", labelled));
 		check(dots == 1u, "Right, the default edge, is the only one chosen "
@@ -8332,6 +8383,7 @@ int main() {
 	const char *env = std::getenv("CANVAS_TMP");
 	std::string root = env && *env ? env : "tmp"; // meson passes the repo's tmp/ via env
 	shot_dir = std::format("{}/scenarios/bar", root);
+	bus_dir = std::format("{}/bb", root);
 	mkdir_p(shot_dir);
 	// The machine's own environment, saved before this run's isolation
 	// replaces it: the adoption phase's last checks read the user's real
@@ -8357,8 +8409,8 @@ int main() {
 	// with their stand-ins — when either cannot come up, no bar runs at
 	// all, and the machine's buses are never touched. The stand-ins and
 	// every later child (the bar above all) inherit the addresses.
-	if (!start_private_bus(private_system, "system", "system")
-			|| !start_private_bus(private_session, "session", "session")) {
+	if (!start_private_bus(private_system, "system", "y")
+			|| !start_private_bus(private_session, "session", "n")) {
 		std::println("FAILED: the private buses did not start; the bar did not run");
 		stop_isolation();
 		return 2;

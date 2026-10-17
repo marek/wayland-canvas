@@ -11,9 +11,12 @@
 #include "input/input.h"
 #include "platform/ipc.h"
 #include "platform/image_capture.h"
+#include "platform/lock.h"
+#include "platform/logind.h"
 #include "apps/launcher.h"
 #include "apps/capture_ui.h"
 #include "core/theme.h"
+#include "render/night_light.h"
 #include "render/render.h"
 #include "core/util.h"
 #include "platform/session_bus.h"
@@ -116,6 +119,9 @@ public:
 	Ipc ipc;
 	ImageCapture image_capture;
 	CaptureUi capture_ui;
+	SessionLock lock;
+	NightLight night_light;
+	Logind logind;
 
 	// canvas.conf (core/settings.h): the file, its text as last read, the
 	// resolved settings, and the lines it ignored. `load_conf` applies them
@@ -167,4 +173,6 @@ private:
 	Listener new_surface_, request_activate_, new_inhibitor_;
 	// A login's hand-over of the portal, handed back on exit.
 	std::optional<session_bus::HandOver> hand_over_;
+	// Whether this run started the session's services and so stops them.
+	bool manages_services_ = false;
 };

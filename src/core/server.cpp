@@ -18,6 +18,7 @@
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "platform/session_bus.h"
+#include "platform/session_services.h"
 #include "core/server.h"
 #include "windows/view.h"
 
@@ -195,6 +196,7 @@ std::string shell_quote(std::string_view text) {
 void update_idle_inhibit(Server &server, int delta) {
 	int count = wl_list_length(&server.idle_inhibit->inhibitors) + delta;
 	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier, count > 0);
+	server.lock.set_idle_inhibited(count > 0);
 }
 
 // SIGPIPE as the compositor found it. The compositor ignores the signal for
@@ -232,10 +234,14 @@ session_bus::Handed systemd_handed() {
 // screen-sharing portal and its wlroots backend first among them — when
 // the bus is this run's to take (docs/intents/platform/protocols.md). A
 // login returns the values it replaced, for the hand-back on exit.
-std::optional<session_bus::Handed> hand_over_session_bus(bool login) {
+session_bus::Owner bus_owner(bool login) {
 	const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
 	const char *runtime = getenv("XDG_RUNTIME_DIR");
-	switch (session_bus::owner(address ? address : "", runtime ? runtime : "", login)) {
+	return session_bus::owner(address ? address : "", runtime ? runtime : "", login);
+}
+
+std::optional<session_bus::Handed> hand_over_session_bus(bool login) {
+	switch (bus_owner(login)) {
 	case session_bus::Owner::none:
 	case session_bus::Owner::host:
 		return std::nullopt;
@@ -401,7 +407,7 @@ Server::Server()
 	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this),
 	image_capture(*this),
-	capture_ui(*this) {
+	capture_ui(*this), lock(*this), night_light(*this), logind(*this) {
 }
 
 Server::~Server() {
@@ -410,6 +416,11 @@ Server::~Server() {
 		close(conf_inotify_fd_);
 		conf_inotify_fd_ = -1;
 	}
+	if (manages_services_) {
+		// The session ends: its services go with it. A crash runs nothing
+		// here, and the next login stops what it left behind.
+		spawn(session_services::stop_command().c_str());
+	}
 	if (hand_over_.has_value()) {
 		hand_back_session_bus(*hand_over_);
 	}
@@ -417,6 +428,9 @@ Server::~Server() {
 		wl_display_destroy_clients(display);
 	}
 	ipc.finish();
+	night_light.finish();
+	logind.finish();
+	lock.finish();
 	capture_ui.finish();
 	image_capture.finish();
 	launcher.finish();
@@ -536,6 +550,8 @@ bool Server::init(const Options &options) {
 	decorations.init();
 	input.init();
 	image_capture.init();
+	lock.init();
+	night_light.init();
 	return true;
 }
 
@@ -599,6 +615,15 @@ bool Server::start() {
 			.before = *before,
 		};
 	}
+	// A login watches its logind session: lock-session and sleep lock it.
+	logind.init(session != nullptr);
+	// ...and brings the session's own services up, once its environment is
+	// where the user manager can see it
+	// (docs/intents/workspace/session-services.md).
+	if (session_services::manages(bus_owner(session != nullptr))) {
+		manages_services_ = true;
+		spawn(session_services::start_command().c_str());
+	}
 	wlr_log(WLR_INFO, "Running wayland-canvas on WAYLAND_DISPLAY=%s", socket);
 	if (options.start_bar) {
 		start_bar();
@@ -650,6 +675,8 @@ void Server::load_conf(bool first) {
 	conf_errors = std::move(parsed.errors);
 	bindings.apply(conf);
 	gestures.set_options(gesture_options(conf));
+	lock.settings_changed();
+	night_light.settings_changed();
 	if (!conf_errors.empty()) {
 		for (const settings::Error &error : conf_errors) {
 			wlr_log(WLR_ERROR, "canvas.conf line %d: %s", error.line,
