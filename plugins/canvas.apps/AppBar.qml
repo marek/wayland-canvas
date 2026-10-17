@@ -71,8 +71,9 @@ Item {
 	// ---- the apps ----
 
 	// One entry per app, in the order the apps' first windows opened: the
-	// window list is in that order already. Each entry keeps its app's
-	// windows, newest-focused first, so a click walks them.
+	// window list is in that order already. Each entry keeps a stable key
+	// (the app id), its windows newest-first, and what its desktop entry
+	// says — the icon and the name a user knows the app by.
 	readonly property var apps: groupWindows()
 
 	function groupWindows() {
@@ -85,8 +86,10 @@ Item {
 			var key = w.appId !== "" ? w.appId : ("window:" + w.id)
 			if (byApp[key] === undefined) {
 				byApp[key] = {
+					key: key,
 					appId: w.appId,
-					name: w.appId !== "" ? w.appId : w.title,
+					name: entryName(w),
+					icon: entryIcon(w.appId),
 					windows: [],
 					minimized: true,
 					focused: false,
@@ -103,6 +106,52 @@ Item {
 			}
 		}
 		return out
+	}
+
+	// The app's desktop entry, by its app id: the name and icon come from
+	// it, as the launcher's do (docs/intents/apps/desktop-entries.md).
+	function desktopEntry(appId) {
+		if (appId === "") {
+			return null
+		}
+		var entry = DesktopEntries.byId(appId)
+		return entry != null ? entry : DesktopEntries.heuristicLookup(appId)
+	}
+
+	function entryName(w) {
+		var entry = desktopEntry(w.appId)
+		if (entry != null && entry.name !== "") {
+			return entry.name
+		}
+		return w.appId !== "" ? w.appId : w.title
+	}
+
+	function entryIcon(appId) {
+		var entry = desktopEntry(appId)
+		if (entry == null || entry.icon === "") {
+			return ""
+		}
+		return Quickshell.iconPath(entry.icon, true)
+	}
+
+	// The entry with `key`, as the list reads now: the list is rebuilt on
+	// every state change, so nothing may hold on to an entry object.
+	function appFor(key) {
+		for (var i = 0; i < apps.length; i++) {
+			if (apps[i].key === key) {
+				return apps[i]
+			}
+		}
+		return null
+	}
+
+	function indexOfKey(key) {
+		for (var i = 0; i < apps.length; i++) {
+			if (apps[i].key === key) {
+				return i
+			}
+		}
+		return -1
 	}
 
 	// Whether this screen shows the overview, from the compositor's state.
@@ -250,13 +299,33 @@ Item {
 		}
 	}
 
-	// ---- the hovered app's name ----
+	// ---- the chrome: the hovered app's name and the window flyout ----
+
+	// The hovered entry's square in output coordinates, from the same
+	// anchors and margins the strip commits.
+	function entryBox(index) {
+		if (index < 0) {
+			return null
+		}
+		var x = edge === "right"
+			? modelData.width - edgeMargin - entrySize
+			: edge === "left" ? edgeMargin
+			: along + index * entrySize
+		var y = edge === "bottom"
+			? modelData.height - edgeMargin - entrySize
+			: edge === "top" ? nearEdge
+			: along + index * entrySize
+		return {x: x, y: y, width: entrySize, height: entrySize}
+	}
 
 	PanelWindow {
+		id: chrome
+
 		screen: root.modelData
 		color: "transparent"
 		exclusionMode: ExclusionMode.Ignore
-		visible: root.switchedOn && root.hoveredApp != null && root.overview
+		visible: root.switchedOn && root.overview
+			&& (root.hoveredKey !== "" || root.flyoutKey !== "")
 		WlrLayershell.namespace: "wayland-canvas-app-bar-chrome"
 		WlrLayershell.layer: WlrLayer.Overlay
 		WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
@@ -266,31 +335,35 @@ Item {
 			left: true
 			right: true
 		}
-		mask: Region {} // nothing: the label never takes a click
 
+		// Input is the open flyout's alone: without one the pointer reaches
+		// the overview and the strip below, and a click anywhere else folds
+		// the flyout.
+		mask: Region {
+			width: root.flyoutKey !== "" ? root.modelData.width : 0
+			height: root.flyoutKey !== "" ? root.modelData.height : 0
+		}
+
+		MouseArea {
+			anchors.fill: parent
+			enabled: root.flyoutKey !== ""
+			onClicked: root.foldFlyout()
+		}
+
+		// The hovered app's name, on a chip beside its entry toward the
+		// screen's centre.
 		Rectangle {
 			readonly property int gap: 8
 			readonly property int pad: 6
-			readonly property int index: root.hoveredApp != null
-				? root.apps.indexOf(root.hoveredApp) : -1
-			// The hovered entry's square in output coordinates, from the
-			// same anchors and margins the strip commits.
-			readonly property int entryX: root.edge === "right"
-				? root.modelData.width - root.edgeMargin - root.entrySize
-				: root.edge === "left" ? root.edgeMargin
-				: root.along + Math.max(0, index) * root.entrySize
-			readonly property int entryY: root.edge === "bottom"
-				? root.modelData.height - root.edgeMargin - root.entrySize
-				: root.edge === "top" ? root.nearEdge
-				: root.along + Math.max(0, index) * root.entrySize
+			readonly property var box: root.entryBox(root.indexOfKey(root.hoveredKey))
 
-			visible: index >= 0
-			x: root.edge === "right" ? entryX - gap - width
-				: root.edge === "left" ? entryX + root.entrySize + gap
-				: entryX + root.entrySize / 2 - width / 2
-			y: root.edge === "top" ? entryY + root.entrySize + gap
-				: root.edge === "bottom" ? entryY - gap - height
-				: entryY + root.entrySize / 2 - height / 2
+			visible: box != null && root.flyoutKey === ""
+			x: box == null ? 0 : root.edge === "right" ? box.x - gap - width
+				: root.edge === "left" ? box.x + box.width + gap
+				: box.x + box.width / 2 - width / 2
+			y: box == null ? 0 : root.edge === "top" ? box.y + box.height + gap
+				: root.edge === "bottom" ? box.y - gap - height
+				: box.y + box.height / 2 - height / 2
 			width: labelText.implicitWidth + 2 * pad
 			height: labelText.implicitHeight + 2 * pad
 			radius: 4
@@ -299,33 +372,99 @@ Item {
 			PanelText {
 				id: labelText
 				anchors.centerIn: parent
-				text: root.hoveredApp != null ? root.hoveredApp.name : ""
+				text: {
+					var app = root.appFor(root.hoveredKey)
+					return app != null ? app.name : ""
+				}
+			}
+		}
+
+		// An app's windows, listed beside its entry: one row per window,
+		// the focused one marked. A click goes to that window.
+		Rectangle {
+			readonly property var app: root.appFor(root.flyoutKey)
+			readonly property var box: root.entryBox(root.indexOfKey(root.flyoutKey))
+
+			visible: app != null && box != null
+			width: 240
+			height: rows.implicitHeight + 2 * UiTheme.panelPadding
+			color: UiTheme.panel
+			border.width: 1
+			border.color: UiTheme.border
+			radius: 4
+			x: {
+				if (box == null) {
+					return 0
+				}
+				var want = root.edge === "right" ? box.x - UiTheme.edgeMargin - width
+					: root.edge === "left" ? box.x + box.width + UiTheme.edgeMargin
+					: box.x
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
+					root.modelData.width - width - UiTheme.edgeMargin)))
+			}
+			y: {
+				if (box == null) {
+					return 0
+				}
+				var want = root.edge === "top" ? box.y + box.height + UiTheme.edgeMargin
+					: root.edge === "bottom" ? box.y - UiTheme.edgeMargin - height
+					: box.y
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
+					root.modelData.height - height - UiTheme.edgeMargin)))
+			}
+
+			Column {
+				id: rows
+				anchors.fill: parent
+				anchors.margins: UiTheme.panelPadding
+				spacing: 2
+
+				Repeater {
+					model: parent.parent.app != null ? parent.parent.app.windows : []
+
+					PanelRow {
+						required property var modelData
+
+						label: modelData.title !== "" ? modelData.title
+							: (modelData.appId !== "" ? modelData.appId : "A window")
+						marked: modelData.focused === true
+						detail: modelData.minimized === true ? "Minimized" : ""
+						onClicked: root.goToWindow(modelData.id)
+					}
+				}
 			}
 		}
 	}
 
 	// ---- what a click does ----
 
-	// The app whose name is shown on hover.
-	property var hoveredApp: null
-	// The window each app was last sent to, so a second click on an app
-	// with several windows walks to the next one.
-	property var walked: ({})
+	// The entry the pointer is over, and the one whose window list is open,
+	// both by key: the grouped list is rebuilt on every state change, so an
+	// entry object held across one would no longer be in it.
+	property string hoveredKey: ""
+	property string flyoutKey: ""
 
-	// A click goes to the app's window: the focused one if it holds the
-	// focus, else the one after the last this entry went to.
+	// A click on an entry: one window goes straight there, several unfold
+	// the list of them, and a second click on the entry folds it again.
 	function appActivated(app) {
 		if (app.windows.length === 0) {
 			return
 		}
-		var key = app.appId !== "" ? app.appId : app.name
-		var next = 0
-		if (app.windows.length > 1) {
-			var last = walked[key]
-			next = last === undefined ? 0 : (last + 1) % app.windows.length
+		if (app.windows.length === 1) {
+			goToWindow(app.windows[0].id)
+			return
 		}
-		walked[key] = next
-		var id = app.windows[next].id
+		flyoutKey = flyoutKey === app.key ? "" : app.key
+	}
+
+	function foldFlyout() {
+		flyoutKey = ""
+	}
+
+	// The compositor focuses the window and moves the view to it: its
+	// desktop, else a view centred on it (docs/intents/platform/ipc.md).
+	function goToWindow(id) {
+		foldFlyout()
 		api.compositor.call("window.focus", {window: id}, function(result, error) {
 			// A window closed between the draw and the click: the list
 			// catches up with the next event, and the view stays put.
@@ -336,6 +475,7 @@ Item {
 	}
 
 	onOverviewChanged: if (!overview) {
-		hoveredApp = null
+		hoveredKey = ""
+		flyoutKey = ""
 	}
 }
