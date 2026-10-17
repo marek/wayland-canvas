@@ -22,8 +22,9 @@ on, not a standing state.
   `.claude/hooks/autopilot-stop.sh`) refuses to end a turn if any plan
   in `docs/plans/` has an open box that does not need the user, and
   names the next one.
-- **A question while on** ("what is left?", "progress check"): answer
-  in a few lines from the plan files and keep working in the same turn.
+- **A question while on** ("what is left?", "progress check", "why X?"):
+  answer it as the `answering-questions` skill says, from the plan
+  files where it is about progress, and keep working in the same turn.
 - **Off**: remove `.claude/autopilot.on` when the user says stop, when
   they give a different task or say to focus on one thing only, or when
   every remaining box needs them. A different task is done on its own;
