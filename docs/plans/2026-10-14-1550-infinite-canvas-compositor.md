@@ -56,10 +56,10 @@ What was decided is in the intents: [canvas/infinite-canvas.md](../intents/canva
 
 ## Decisions for the user
 
-- [ ] Xwayland for X11 applications (the user to decide)
+- [x] Xwayland for X11 applications (decided: yes, started with the first X11 client — [2026-10-17-0722-login-session-gaps.md](2026-10-17-0722-login-session-gaps.md))
 - [ ] Output configuration protocol, so wlr-randr and kanshi can set modes and scale at run time (the user to decide)
-- [ ] Session lock for screen lockers (the user to decide)
-- [ ] Gamma control for night light (the user to decide)
+- [x] Session lock for screen lockers (decided: yes, with the shell's own locker — [2026-10-17-0722-login-session-gaps.md](2026-10-17-0722-login-session-gaps.md))
+- [x] Gamma control for night light (decided: yes, with a built-in night light — [2026-10-17-0722-login-session-gaps.md](2026-10-17-0722-login-session-gaps.md))
 - [ ] Repainting only damaged regions instead of whole outputs (the user to decide)
 - [ ] Window open and close animations (the user to decide)
 - [x] A configuration file read at run time instead of `src/core/config.h` (decided: `canvas.conf` for shortcuts, commands and gestures, written on first run; tuning constants stay in `src/core/config.h` — [2026-10-16-2055-settings-and-config-file.md](2026-10-16-2055-settings-and-config-file.md))

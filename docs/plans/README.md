@@ -13,7 +13,7 @@ be worked.
 
 | Plan | Covers | Done | Open |
 |---|---|---|---|
-| [2026-10-14-1550-infinite-canvas-compositor.md](2026-10-14-1550-infinite-canvas-compositor.md) | The compositor: canvas, cameras, desktops, overview, gestures, Windows-style title bars, window management, layer shell, scale, scenarios; on-screen runs owed; undecided extensions | 29 | 8 |
+| [2026-10-14-1550-infinite-canvas-compositor.md](2026-10-14-1550-infinite-canvas-compositor.md) | The compositor: canvas, cameras, desktops, overview, gestures, Windows-style title bars, window management, layer shell, scale, scenarios; on-screen runs owed; undecided extensions | 32 | 5 |
 | [2026-10-14-1715-app-launcher.md](2026-10-14-1715-app-launcher.md) | The Start-style launcher, desktop entries, icons, custom entries the standard way; the taskbar decision | 10 | 2 |
 | [2026-10-14-1802-triple-helix-adoption.md](2026-10-14-1802-triple-helix-adoption.md) | Intents, tests, plans, skills, roles and hooks adopted from `MilitaryForcesWorkspace`, generic to whoever works | 12 | 1 |
 | [2026-10-14-1803-code-review-findings.md](2026-10-14-1803-code-review-findings.md) | The reviewer's four bugs and two checks; scenarios still owed for drag-and-drop, output unplug and mixed scales | 6 | 3 |
@@ -33,3 +33,4 @@ be worked.
 | [2026-10-16-1458-trackpad-clicks-and-overview-launch.md](2026-10-16-1458-trackpad-clicks-and-overview-launch.md) | Two-finger press is a right click; in the overview a right click makes or removes a desktop; an app launched from the overview opens in its target | 4 | 2 |
 | [2026-10-16-1929-answering-questions.md](2026-10-16-1929-answering-questions.md) | A question from the user is answered, never acted on: the skill, and an omp extension pinning each answer above the input until it is dismissed | 5 | 1 |
 | [2026-10-16-2055-settings-and-config-file.md](2026-10-16-2055-settings-and-config-file.md) | A settings window from the overview toolbar's gear and `canvas.conf` written on first run: every shortcut recorded by pressing it, swipe presets, the pinch switch, the toolbar on any edge, bar widgets on and off | 16 | 1 |
+| [2026-10-17-0722-login-session-gaps.md](2026-10-17-0722-login-session-gaps.md) | What a wayland-canvas login lacks next to Omarchy's Hyprland session: the lock screen, notifications, the password dialog, X11 apps, the night light, the session services; the install script's root re-run | 0 | 28 |
