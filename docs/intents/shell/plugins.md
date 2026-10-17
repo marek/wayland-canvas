@@ -36,7 +36,7 @@ compositor.
 | Part | Rule |
 |---|---|
 | Folder | `<plugin directory>/<plugin id>/`; the id is lowercase and dotted (`canvas.network`) and equals the folder name |
-| Manifest | `plugin.json`: `id`, `name`, `version`, `apiVersion`, `description`, `contributes`, `settings` (the defaults) |
+| Manifest | `plugin.json`: `id`, `name`, `version`, `apiVersion`, `description`, `contributes`, `settings` (the declarations below) |
 | Code | The QML components and JavaScript files the manifest names, relative to the folder |
 
 What `contributes` may hold:
@@ -51,6 +51,27 @@ What `contributes` may hold:
 
 `apiVersion` is an integer. A plugin asking for a newer API than the shell
 offers is not loaded.
+
+### Settings a plugin declares
+
+`settings` holds one entry per setting the plugin reads, and the settings
+window builds its Plugins page from the entries alone
+([settings.md](settings.md)), so no plugin's own choices need code in the
+settings window. An entry is the default value on its own, or an object:
+
+| Key | Meaning |
+|---|---|
+| `default` | The value when the config overrides nothing |
+| `type` | `switch`, `choice`, `number` or `text`; without a type the setting is the plugin's own and shows nowhere |
+| `label`, `description` | Its row's label and the smaller line under it |
+| `group` | The section header it sits under, in declaration order |
+| `choices` | For a `choice`: entries of `value`, `label` and an optional `description` |
+| `min`, `max`, `step` | For a `number` |
+| `order` | Its place within its group; equal orders keep declaration order |
+
+A setting written from the window goes through `api.plugin.setSetting`,
+which writes `plugins.<id>.settings` in the shell config and applies it at
+once.
 
 ### Where plugins are found
 
@@ -77,6 +98,8 @@ in an earlier one:
 | `bar.hidden` | Bar widget names (`canvas.agents/agents`) left out of the bar |
 | `toolbar.order` | Toolbar button names in order |
 | `toolbar.position` | The toolbar's edge: `right` (the default), `left`, `top`, `bottom` ([toolbar.md](toolbar.md)) |
+| `appbar.position` | The app bar's edge: `left` (the default), `right`, `top`, `bottom`; the toolbar's own edge makes one shared strip ([app-bar.md](app-bar.md)) |
+| `appbar.enabled` | `false` leaves the app bar off every screen |
 
 Edits to the config, a plugin folder or a plugin's files apply while the
 shell runs: the shell reloads with them. What the host writes itself — a
@@ -131,6 +154,7 @@ switches, tabs, choice rows, key chips, text and fields, all coloured from
 | `canvas.clock`, `canvas.weather`, `canvas.tray`, `canvas.network`, `canvas.bluetooth`, `canvas.audio`, `canvas.brightness`, `canvas.power`, `canvas.agents` | A bar widget each, with its panel |
 | `canvas.theme` | The light/dark switch, the right-most bar widget |
 | `canvas.toolbar` | The overview toolbar surface, hosting every toolbar button |
+| `canvas.apps` | The app bar surface, one per output: every open app, and the jump to its window ([app-bar.md](app-bar.md)) |
 | `canvas.notes` | Sticky notes: a toolbar button with a colour menu, and the notes |
 | `canvas.settings` | The settings window: the gear toolbar button and its panel ([settings.md](settings.md)) |
 | `canvas.notifications` | The notification server: the popups, the bell widget with its history panel, and the dismiss and silence actions ([notifications.md](notifications.md)) |
@@ -152,4 +176,6 @@ switches, tabs, choice rows, key chips, text and fields, all coloured from
 - [../platform/ipc.md](../platform/ipc.md) - the compositor API over the
   control socket.
 - [bar.md](bar.md) - the bar and its widgets.
+- [app-bar.md](app-bar.md) - the app bar, a surface plugin like the bar.
+- [settings.md](settings.md) - the window that renders declared settings.
 - [../apps/launcher.md](../apps/launcher.md).

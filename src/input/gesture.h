@@ -11,13 +11,15 @@ class Server;
 
 // What canvas.conf's [gestures] section chooses
 // (docs/intents/input/gestures.md): the finger count that hops and the one
-// that opens the overview, or no 3- and 4-finger gestures at all; and whether
-// Super + a 2-finger pinch scales a desktop.
+// that opens the overview, or no 3- and 4-finger gestures at all; whether
+// Super + a 2-finger pinch scales a desktop; and which way scrolling and the
+// swipes point.
 enum class SwipePreset { three_finger_hops, four_finger_hops, off };
 
 struct GestureOptions {
 	SwipePreset swipes = SwipePreset::three_finger_hops;
 	bool pinch_scale = true;
+	bool invert = false;
 };
 
 // The touchpad gesture in progress, one state per kind of gesture.

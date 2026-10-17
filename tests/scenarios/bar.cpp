@@ -119,6 +119,9 @@ struct NoteEntry {
 
 NoteEntry note; // the note under test
 int note_retries = 0; // the notes phase's retry counter
+// The window the app bar's clicked entry stands for, kept between the
+// click and the check that the view landed on it.
+View *app_bar_target = nullptr;
 double note_button_y = 0; // the note button's band centre, on the strip
 wlr_box note_flyout{}; // its menu's card: left of the strip, centred on it
 LayerSurface *bar_before_reload = nullptr;
@@ -179,6 +182,10 @@ constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
 constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
+constexpr const char *app_bar_namespace = "wayland-canvas-app-bar";
+// The gap the shared strip leaves between the toolbar's buttons and the
+// apps, the separator drawn in it (shell/ui/WaylandCanvas/Ui/StripLayout.qml).
+constexpr int strip_separator = 9;
 
 // The shell's own colours the theme phase samples (the UI kit's palette;
 // the compositor's half comes from config.h's palettes). Keep in sync with
@@ -3000,7 +3007,10 @@ constexpr int settings_action = 2 * settings_row; // a shortcuts row: label and 
 constexpr int settings_footer = 2 * settings_detail + 2; // the two file paths
 constexpr int settings_sep = 1;
 constexpr int settings_switch_w = 38; // PanelSwitch's width
-constexpr int settings_tabs = 5;     // Shortcuts, Gestures, Session, Toolbar, Bar
+// Shortcuts, Gestures, Session, Toolbar, Bar, then one tab per plugin that
+// declares settings (docs/intents/shell/plugins.md): canvas.notifications is
+// the built-in one that does.
+constexpr int settings_tabs = 6;
 constexpr int settings_tab_w = (settings_panel - 2 * settings_pad) / settings_tabs;
 
 // One Bar-tab section's height: its header, its rows (a detailed row is
@@ -3027,10 +3037,31 @@ int settings_bar_column() {
 		+ 2 * settings_gap;
 }
 
-// The Toolbar tab's column of content: one header and the four edge
-// choices, each a two-line choice row.
+// The Gestures tab's column of content: the swipe presets, the pinch
+// switch and the invert switch, a header over each section.
+int settings_gestures_column() {
+	return settings_section_height(0, 3)  // Swipes: the three presets
+		+ settings_section_height(0, 1)    // Pinch: scale a desktop
+		+ settings_section_height(0, 1)    // Direction: invert
+		+ 2 * settings_gap;
+}
+
+// The Plugins tab's column of content: what canvas.notifications declares —
+// the Popups group (three rows) and the History group (one)
+// (docs/intents/shell/plugins.md). Keep in sync with its manifest.
+int settings_plugins_column() {
+	return settings_section_height(0, 3)
+		+ settings_section_height(0, 1)
+		+ settings_gap;
+}
+
+// The Toolbar tab's column of content: a header and the toolbar's four edge
+// choices, then the app bar's header, its switch row and its own four edges
+// (docs/intents/shell/app-bar.md); every row is a two-line one.
 int settings_toolbar_column() {
-	return settings_header + 4 * settings_choice + 4 * settings_gap;
+	return settings_section_height(0, 4)   // the toolbar's edges
+		+ settings_section_height(0, 5)     // the app bar: the switch, 4 edges
+		+ settings_gap;
 }
 
 // Where PanelCard puts the card: level with the gear button, clamped
@@ -3512,10 +3543,11 @@ constexpr int shelf_bottom_gap = 12 + 28 + 16;
 // (order 4) below. Keep in sync with the plugins' manifests.
 constexpr int notes_index = 3;
 
-// Writes the scratch shell.json with the toolbar's edge named, keeping
-// everything else it holds: an edit the host sees, so the shell
-// reloads with it.
-bool set_toolbar_position(const char *edge) {
+// Writes one key of one section into the scratch shell.json, keeping
+// everything else it holds: an edit the host sees, so the shell reloads
+// with it. `edge` names a string value; `on` a boolean one.
+bool set_shell_config(const char *section, const char *key,
+		const char *edge, const bool *on = nullptr) {
 	JsonParser *parser = json_parser_new();
 	std::string text = read_file(shell_config);
 	bool ok = !text.empty()
@@ -3525,14 +3557,18 @@ bool set_toolbar_position(const char *edge) {
 			== JSON_NODE_OBJECT;
 	if (ok) {
 		JsonObject *config = json_node_get_object(json_parser_get_root(parser));
-		JsonNode *toolbar = json_object_get_member(config, "toolbar");
-		if (toolbar == nullptr
-				|| json_node_get_node_type(toolbar) != JSON_NODE_OBJECT) {
-			json_object_set_object_member(config, "toolbar", json_object_new());
+		JsonNode *held = json_object_get_member(config, section);
+		if (held == nullptr
+				|| json_node_get_node_type(held) != JSON_NODE_OBJECT) {
+			json_object_set_object_member(config, section, json_object_new());
 		}
-		json_object_set_string_member(
-			json_node_get_object(json_object_get_member(config, "toolbar")),
-			"position", edge);
+		JsonObject *object = json_node_get_object(
+			json_object_get_member(config, section));
+		if (on != nullptr) {
+			json_object_set_boolean_member(object, key, *on);
+		} else {
+			json_object_set_string_member(object, key, edge);
+		}
 		JsonGenerator *generator = json_generator_new();
 		json_generator_set_root(generator, json_parser_get_root(parser));
 		gchar *out = json_generator_to_data(generator, nullptr);
@@ -3542,6 +3578,54 @@ bool set_toolbar_position(const char *edge) {
 	}
 	g_object_unref(parser);
 	return ok;
+}
+
+bool set_toolbar_position(const char *edge) {
+	return set_shell_config("toolbar", "position", edge);
+}
+
+bool set_app_bar_position(const char *edge) {
+	return set_shell_config("appbar", "position", edge);
+}
+
+bool set_app_bar_enabled(bool on) {
+	return set_shell_config("appbar", "enabled", nullptr, &on);
+}
+
+// One plugin setting the scratch shell.json holds, as text ("true", "42",
+// a string's own value); empty when the config names none.
+std::string plugin_setting_text(const char *id, const char *key) {
+	JsonParser *parser = json_parser_new();
+	std::string out;
+	if (json_parser_load_from_file(parser, shell_config.c_str(), nullptr)
+			&& json_node_get_node_type(json_parser_get_root(parser))
+				== JSON_NODE_OBJECT) {
+		JsonObject *at = json_node_get_object(json_parser_get_root(parser));
+		for (const char *step : {"plugins", id, "settings"}) {
+			if (at == nullptr || !json_object_has_member(at, step)
+					|| json_node_get_node_type(json_object_get_member(at, step))
+						!= JSON_NODE_OBJECT) {
+				at = nullptr;
+				break;
+			}
+			at = json_node_get_object(json_object_get_member(at, step));
+		}
+		if (at != nullptr && json_object_has_member(at, key)) {
+			JsonNode *node = json_object_get_member(at, key);
+			if (json_node_get_node_type(node) == JSON_NODE_VALUE) {
+				GType type = json_node_get_value_type(node);
+				if (type == G_TYPE_BOOLEAN) {
+					out = json_node_get_boolean(node) ? "true" : "false";
+				} else if (type == G_TYPE_INT64) {
+					out = std::format("{}", json_node_get_int(node));
+				} else if (type == G_TYPE_STRING) {
+					out = json_node_get_string(node);
+				}
+			}
+		}
+	}
+	g_object_unref(parser);
+	return out;
 }
 
 // The toolbar.position the scratch shell.json names now.
@@ -3617,12 +3701,69 @@ bool toolbar_on_edge(const char *edge) {
 	return geo.y + geo.height == screen_h - toolbar_margin;
 }
 
-// The strip is centred along its edge, from the placed box.
-bool toolbar_centred(const wlr_box &geo) {
-	if (geo.width == toolbar_button) {
-		return geo.y + geo.height / 2 == screen_h / 2;
+// The app bar surface, shown with the overview on the edge its config
+// names (the left by default): one entry per open app
+// (docs/intents/shell/app-bar.md).
+LayerSurface *app_bar_layer() {
+	return named_layer(app_bar_namespace);
+}
+
+// The app bar's own strip, from its placed surface: like the toolbar's, the
+// surface is the strip plus the pocket it slides into.
+wlr_box app_bar_strip_box(const wlr_box &geo) {
+	return toolbar_strip_box(geo);
+}
+
+// How many apps the compositor has open: the app bar draws one entry each,
+// grouped by app id (a window without one stands alone).
+int apps_open() {
+	std::vector<std::string> seen;
+	for (const std::unique_ptr<View> &view : server->toplevels) {
+		if (!view->mapped) {
+			continue;
+		}
+		const char *app_id = view->shell_app_id();
+		std::string key = app_id != nullptr && *app_id != '\0'
+			? std::string{app_id}
+			: std::format("window:{}", view->session_id);
+		if (std::ranges::find(seen, key) == seen.end()) {
+			seen.push_back(key);
+		}
 	}
-	return geo.x + geo.width / 2 == screen_w / 2;
+	return static_cast<int>(seen.size());
+}
+
+// The app bar's length along the edge it shares with the toolbar, 0 when it
+// is on another edge or absent: the two are centred as one strip, so the
+// toolbar's own centring is only its share of it.
+int shared_apps_length(const wlr_box &toolbar) {
+	LayerSurface *apps = app_bar_layer();
+	if (apps == nullptr) {
+		return 0;
+	}
+	wlr_box strip = app_bar_strip_box(apps->geo);
+	bool column = toolbar.width == toolbar_button;
+	if (column != (strip.width == toolbar_button)) {
+		return 0; // one is a column, the other a row: different edges
+	}
+	if (column ? strip.x != toolbar.x : strip.y != toolbar.y) {
+		return 0; // the same orientation on opposite edges
+	}
+	return column ? strip.height : strip.width;
+}
+
+// The strip is centred along its edge, from the placed box: the pair is,
+// where the app bar shares the edge — the toolbar first, then the gap and
+// the apps.
+bool toolbar_centred(const wlr_box &geo) {
+	bool column = geo.width == toolbar_button;
+	int apps = shared_apps_length(geo);
+	int length = column ? geo.height : geo.width;
+	if (apps > 0) {
+		length += strip_separator + apps;
+	}
+	return column ? geo.y + length / 2 == screen_h / 2
+		: geo.x + length / 2 == screen_w / 2;
 }
 
 // Where the settings card's top-left corner belongs for the toolbar as
@@ -7523,8 +7664,7 @@ int run_step() {
 		return 700;
 	case 426: { // the choices drawn; Four-finger hops is clicked
 		cairo_surface_t *s = load_png("settings-gestures-tab");
-		int column = 2 * settings_header + 3 * settings_choice + settings_choice
-			+ 5 * settings_gap;
+		int column = settings_gestures_column();
 		int card_y = settings_card_top(settings_card_height(column),
 			settings_gear_y);
 		int first_top = card_y + settings_pad + settings_row + settings_gap
@@ -7532,6 +7672,9 @@ int run_step() {
 		// The pinch row: under the second header, a detailed row.
 		double pinch_y = first_top + 3 * (settings_choice + settings_gap)
 			+ settings_header + settings_gap + settings_choice / 2.0;
+		// The invert row: one header further down again.
+		double invert_y = pinch_y + settings_choice + settings_header
+			+ 2 * settings_gap;
 		// Labels only: the dots and the switch would light a row by themselves.
 		std::vector<Band> rows = bands_in(s,
 			{settings_card_x + 8, card_y, settings_label_w,
@@ -7539,13 +7682,17 @@ int run_step() {
 		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
 		unsigned dots = s != nullptr ? settings_dots(s, first_top, 3) : 0;
 		bool pinch_on = s != nullptr && settings_switch_is(s, pinch_y, true);
+		bool invert_off = s != nullptr && settings_switch_is(s, invert_y, false);
 		cairo_surface_destroy(s);
 		int labelled = settings_choices_labelled(rows, first_top, 3);
 		auto pinch = settings_band_at(rows, pinch_y);
 		bool pinch_labelled = pinch != rows.end()
 			&& std::abs(pinch->centre() - pinch_y) <= 12;
+		auto invert = settings_band_at(rows, invert_y);
+		bool invert_labelled = invert != rows.end()
+			&& std::abs(invert->centre() - invert_y) <= 12;
 		if ((chosen != 1 || labelled != 3 || !pinch_labelled || dots != 1u
-				|| !pinch_on) && retries++ < 10) {
+				|| !pinch_on || !invert_labelled || !invert_off) && retries++ < 10) {
 			shot("settings-gestures-tab");
 			return -700;
 		}
@@ -7557,6 +7704,8 @@ int run_step() {
 		check(dots == 1u, "Three-finger hops, the default, is the only "
 			"preset chosen before any click");
 		check(pinch_on, "the pinch switch shows on, its default");
+		check(invert_labelled && invert_off,
+			"the Gestures tab ends with the invert row, its switch off by default");
 		settings_first_top = first_top;
 		click(settings_card_x + 100, first_top + settings_choice
 			+ settings_gap + settings_choice / 2.0);
@@ -7636,8 +7785,7 @@ int run_step() {
 		return 700;
 	}
 	case 462: { // the Gestures tab, as it was left: the Shortcuts tab is clicked
-		int column = 2 * settings_header + 3 * settings_choice + settings_choice
-			+ 5 * settings_gap;
+		int column = settings_gestures_column();
 		int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
 		cairo_surface_t *s = load_png("settings-again");
 		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
@@ -8132,6 +8280,152 @@ int run_step() {
 			"after the close, a plain key reached the focused client");
 		check(conf_value("terminal") == "Super+Return",
 			"and no recording took it: terminal is still Super+Return in canvas.conf");
+		// The app bar's own phase: both strips on the right edge, so they
+		// make one (docs/intents/shell/app-bar.md).
+		check(set_toolbar_position("right") && set_app_bar_position("right"),
+			"the toolbar and the app bar put on one edge in shell.json");
+		step = 520; // the app bar's own steps
+		return -900; // the reload the edits trigger takes its time
+	}
+	case 520: // into the overview, where both strips live
+		chord(KEY_TAB, KEY_LEFTMETA);
+		return 600;
+	case 521: { // one strip: the buttons, the separator's gap, the apps last
+		LayerSurface *toolbar = toolbar_layer();
+		LayerSurface *apps = app_bar_layer();
+		bool ready = overview_settled(true) && toolbar != nullptr && apps != nullptr
+			&& toolbar_on_edge("right");
+		if (!ready && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		check(toolbar != nullptr && apps != nullptr,
+			"both strips mapped on the shared edge");
+		check(app_strip.x == strip.x,
+			std::format("the apps sit in the same column as the buttons"
+				" ({} and {})", app_strip.x, strip.x));
+		check(app_strip.y == strip.y + strip.height + strip_separator,
+			std::format("the apps come last, a separator's gap after the"
+				" buttons ({} after {}+{})", app_strip.y, strip.y, strip.height));
+		check(toolbar_centred(strip), "the pair is centred along the edge as one");
+		shot("app-bar-shared-edge");
+		return 500;
+	}
+	case 522: { // a click on an app's entry goes to its window
+		LayerSurface *apps = app_bar_layer();
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		app_bar_target = nullptr;
+		for (const std::unique_ptr<View> &view : server->toplevels) {
+			if (view->mapped) {
+				app_bar_target = view.get(); // the first app's entry, the topmost row
+				break;
+			}
+		}
+		check(apps != nullptr && app_bar_target != nullptr,
+			"an app bar entry to click, and the window it stands for");
+		if (apps != nullptr) {
+			click(app_strip.x + toolbar_button / 2.0,
+				app_strip.y + toolbar_button / 2.0);
+		}
+		return 900;
+	}
+	case 523: { // the overview left, the view on that window, focused
+		Output *output = server->outputs.front().get();
+		bool landed = !output->overview.active() && !output->camera.panning()
+			&& !output->camera.zooming() && app_bar_target != nullptr
+			&& app_bar_target->frame_rect().intersects(output->viewport());
+		if (!landed && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		check(landed, "clicking an app left the overview and put its window "
+			"on the screen");
+		check(server->focused_view == app_bar_target,
+			"and focused it");
+		check(set_app_bar_enabled(false), "appbar.enabled: false written");
+		return 900;
+	}
+	case 524: // back to the overview, with the app bar switched off
+		chord(KEY_TAB, KEY_LEFTMETA);
+		return 600;
+	case 525: { // the toolbar alone, centred again, and no app bar at all
+		LayerSurface *toolbar = toolbar_layer();
+		bool ready = overview_settled(true) && toolbar != nullptr
+			&& app_bar_layer() == nullptr;
+		if (!ready && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		check(app_bar_layer() == nullptr,
+			"switched off, the app bar shows on no screen");
+		check(toolbar != nullptr && toolbar_centred(strip),
+			"the toolbar is centred on its own again");
+		// On to the Plugins page: the settings window renders what a plugin
+		// declares, no plugin named in its own code
+		// (docs/intents/shell/plugins.md).
+		click(strip_left + toolbar_button / 2.0, settings_gear_y);
+		step = 530;
+		return -600;
+	}
+	case 530: { // the panel open again: the Plugins tab, the row's sixth share
+		if (panel_layer("settings") == nullptr && retries++ < 40) {
+			return -200;
+		}
+		retries = 0;
+		check(panel_layer("settings") != nullptr,
+			"the gear opened the settings panel for the Plugins page");
+		click(settings_card_x + settings_pad + settings_tab_w * 5.5,
+			8 + settings_pad + settings_row / 2.0);
+		return 700;
+	}
+	case 531: // the page redraws: the declared rows
+		shot("settings-plugins-tab");
+		return 700;
+	case 532: { // the declared rows drawn; the urgent switch is clicked
+		cairo_surface_t *s = load_png("settings-plugins-tab");
+		int column = settings_plugins_column();
+		int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
+		int first_top = card_y + settings_pad + settings_row + settings_gap
+			+ settings_header + settings_gap;
+		// The second row of the Popups group: the urgent-popups switch.
+		double switch_y = first_top + settings_choice + settings_gap
+			+ settings_choice / 2.0;
+		std::vector<Band> rows = bands_in(s,
+			{settings_card_x + 8, card_y, settings_label_w,
+				settings_card_height(column)});
+		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
+		bool on = s != nullptr && settings_switch_is(s, switch_y, true);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		auto row = settings_band_at(rows, switch_y);
+		bool labelled = row != rows.end()
+			&& std::abs(row->centre() - switch_y) <= 12;
+		if ((chosen != 5 || !labelled || !on) && retries++ < 10) {
+			shot("settings-plugins-tab");
+			return -700;
+		}
+		retries = 0;
+		check(chosen == 5, "the Plugins tab is the one chosen");
+		check(labelled, "the notification plugin's declared switch has its row");
+		check(on, "the switch shows the declared default, on");
+		click(settings_card_x + settings_panel - settings_pad - 8
+				- settings_switch_w / 2.0, switch_y);
+		return 500;
+	}
+	case 533: { // the click wrote the plugin's own override into shell.json
+		std::string held = plugin_setting_text("canvas.notifications",
+			"criticalNeverExpires");
+		if (held != "false" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(held == "false", std::format("the switch wrote"
+			" plugins.canvas.notifications.settings.criticalNeverExpires"
+			" into shell.json ({})", held.empty() ? "absent" : held));
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item
@@ -8177,6 +8471,21 @@ int run_step() {
 		check(toolbar != nullptr && strip.height / toolbar_button >= 4,
 			std::format("the strip holds its buttons ({} squares)",
 				toolbar != nullptr ? strip.height / toolbar_button : 0));
+		// The app bar: its default left edge, opposite the toolbar's, one
+		// entry per open app (docs/intents/shell/app-bar.md).
+		LayerSurface *apps = app_bar_layer();
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		check(apps != nullptr && app_strip.x == toolbar_margin
+				&& app_strip.width == toolbar_button,
+			std::format("the app bar mapped 8 px from the left edge, its default"
+				" (strip {},{} {}x{})", app_strip.x, app_strip.y,
+				app_strip.width, app_strip.height));
+		check(apps != nullptr && app_strip.height / toolbar_button == apps_open(),
+			std::format("the app bar holds one entry per open app ({} of {})",
+				apps != nullptr ? app_strip.height / toolbar_button : 0, apps_open()));
+		check(apps != nullptr
+				&& app_strip.y + app_strip.height / 2 == screen_h / 2,
+			"the app bar's strip is centred along its own edge");
 		check(set_toolbar_position("left"),
 			"toolbar.position: left written to the scratch shell.json");
 		return 800; // the reload the edit triggers takes its time

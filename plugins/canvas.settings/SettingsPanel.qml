@@ -306,6 +306,8 @@ PanelCard {
 
 	readonly property bool pinchScale: !(settings && settings.gestures)
 		|| settings.gestures.pinchScale !== false
+	readonly property bool invert: settings && settings.gestures
+		? settings.gestures.invert === true : false
 
 	// ---- the Session tab ----
 
@@ -354,6 +356,25 @@ PanelCard {
 		}
 	}
 
+	// The app bar shares this page: it is the other strip of the overview
+	// (docs/intents/shell/app-bar.md).
+	readonly property string appBarPosition: api != null && api.shell != null
+		? api.shell.appBarPosition : "left"
+	readonly property bool appBarEnabled: api == null || api.shell == null
+		|| api.shell.appBarEnabled !== false
+
+	function setAppBarEdge(edge) {
+		if (api != null && api.shell != null) {
+			api.shell.setAppBarPosition(edge)
+		}
+	}
+
+	function setAppBarEnabled(on) {
+		if (api != null && api.shell != null) {
+			api.shell.setAppBarEnabled(on)
+		}
+	}
+
 	function setHidden(name, hidden) {
 		if (api != null && api.shell != null) {
 			api.shell.setBarHidden(name, hidden)
@@ -369,14 +390,34 @@ PanelCard {
 
 	property string tab: "shortcuts"
 
+	// The pages plugins declare, each a tab of its own after the fixed ones
+	// (docs/intents/shell/plugins.md): the window knows no plugin by name.
+	readonly property var pluginPages: api != null && api.shell != null
+		&& api.shell.pluginSettingsPages !== undefined
+		? api.shell.pluginSettingsPages : []
+
+	function setPluginSetting(id, key, value) {
+		if (api != null && api.shell != null) {
+			api.shell.setPluginSetting(id, key, value)
+		}
+	}
+
 	PanelTabs {
-		tabs: [
-			{id: "shortcuts", label: "Shortcuts"},
-			{id: "gestures", label: "Gestures"},
-			{id: "session", label: "Session"},
-			{id: "toolbar", label: "Toolbar"},
-			{id: "bar", label: "Bar"},
-		]
+		// One tab holds every plugin's own settings: a tab per plugin would
+		// grow the row without bound, and the row's width is the card's.
+		tabs: {
+			var fixed = [
+				{id: "shortcuts", label: "Shortcuts"},
+				{id: "gestures", label: "Gestures"},
+				{id: "session", label: "Session"},
+				{id: "toolbar", label: "Toolbar"},
+				{id: "bar", label: "Bar"},
+			]
+			if (root.pluginPages.length > 0) {
+				fixed.push({id: "plugins", label: "Plugins"})
+			}
+			return fixed
+		}
 		current: root.tab
 		onChosen: function(id) { root.tab = id }
 	}
@@ -386,7 +427,84 @@ PanelCard {
 		sourceComponent: root.tab === "shortcuts" ? shortcutsTab
 			: root.tab === "gestures" ? gesturesTab
 			: root.tab === "session" ? sessionTab
-			: root.tab === "toolbar" ? toolbarTab : barTab
+			: root.tab === "toolbar" ? toolbarTab
+			: root.tab === "bar" ? barTab
+			: root.tab === "plugins" ? pluginsTab : barTab
+	}
+
+	// ---- the plugins' own settings, from their declarations alone ----
+
+	// Every declared setting of every plugin, flattened into rows with the
+	// headers that separate them: {header} or {entry, pluginId}. A page
+	// built from one model keeps the list scrollable as one.
+	readonly property var pluginRows: {
+		var rows = []
+		for (var i = 0; i < pluginPages.length; i++) {
+			var page = pluginPages[i]
+			for (var g = 0; g < page.groups.length; g++) {
+				var group = page.groups[g]
+				rows.push({
+					header: group.name === page.name
+						? page.name : page.name + " \u00b7 " + group.name,
+				})
+				for (var e = 0; e < group.entries.length; e++) {
+					rows.push({entry: group.entries[e], pluginId: page.id})
+				}
+			}
+		}
+		return rows
+	}
+
+	Component {
+		id: pluginsTab
+
+		Flickable {
+			width: parent.width
+			implicitHeight: Math.min(contentHeight, root.listMaxHeight)
+			height: implicitHeight
+			contentWidth: width
+			contentHeight: pluginColumn.implicitHeight
+			clip: true
+
+			Column {
+				id: pluginColumn
+				width: parent.width
+				spacing: UiTheme.panelSpacing
+
+				Repeater {
+					model: root.pluginRows
+
+					Loader {
+						required property var modelData
+
+						width: pluginColumn.width
+						sourceComponent: modelData.header !== undefined
+							? pluginHeader : pluginRow
+
+						property var row: modelData
+					}
+				}
+			}
+		}
+	}
+
+	Component {
+		id: pluginHeader
+
+		PanelSectionHeader {
+			text: parent.row.header
+		}
+	}
+
+	Component {
+		id: pluginRow
+
+		PluginSettingRow {
+			width: parent.width
+			entry: parent.row.entry
+			pluginId: parent.row.pluginId
+			panel: root
+		}
 	}
 
 	// Both files the panel edits, by path: the compositor's and the
@@ -608,6 +726,28 @@ PanelCard {
 					onToggled: root.setGesture("pinchScale", !root.pinchScale)
 				}
 			}
+
+			PanelSectionHeader {
+				text: "Direction"
+			}
+
+			PanelRow {
+				label: "Invert scrolling and swipes"
+				// A write that failed says why in place of the explanation.
+				detail: root.faultRow != null && root.faultRow.what === "invert"
+					? root.faultText
+					: "The pointer, the touchpad and the hops together"
+				marked: root.faultRow != null && root.faultRow.what === "invert"
+				clickable: false
+
+				PanelSwitch {
+					anchors.right: parent.right
+					anchors.rightMargin: 8
+					anchors.verticalCenter: parent.verticalCenter
+					checked: root.invert
+					onToggled: root.setGesture("invert", !root.invert)
+				}
+			}
 		}
 	}
 
@@ -709,6 +849,52 @@ PanelCard {
 				description: "A row above the bottom edge"
 				chosen: root.toolbarPosition === "bottom"
 				onPicked: root.setEdge("bottom")
+			}
+
+			PanelSectionHeader {
+				text: "The app bar"
+			}
+
+			PanelRow {
+				label: "Show the app bar"
+				detail: "Every open app on an edge of the overview"
+				clickable: false
+
+				PanelSwitch {
+					anchors.right: parent.right
+					anchors.rightMargin: 8
+					anchors.verticalCenter: parent.verticalCenter
+					checked: root.appBarEnabled
+					onToggled: root.setAppBarEnabled(!root.appBarEnabled)
+				}
+			}
+
+			ChoiceRow {
+				label: "Left"
+				description: "A column on the left edge"
+				chosen: root.appBarPosition === "left"
+				onPicked: root.setAppBarEdge("left")
+			}
+
+			ChoiceRow {
+				label: "Right"
+				description: "A column on the right edge"
+				chosen: root.appBarPosition === "right"
+				onPicked: root.setAppBarEdge("right")
+			}
+
+			ChoiceRow {
+				label: "Top"
+				description: "A row under the bar"
+				chosen: root.appBarPosition === "top"
+				onPicked: root.setAppBarEdge("top")
+			}
+
+			ChoiceRow {
+				label: "Bottom"
+				description: "A row above the bottom edge"
+				chosen: root.appBarPosition === "bottom"
+				onPicked: root.setAppBarEdge("bottom")
 			}
 		}
 	}

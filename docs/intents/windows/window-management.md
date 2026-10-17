@@ -60,11 +60,14 @@ Minimize hides the window from rendering and from input; the state is
 published on its foreign-toplevel handle
 ([../platform/protocols.md](../platform/protocols.md)). Restoring a
 window always brings you to it: it is un-minimized, focused, raised,
-and the camera moves to it.
+and the camera moves to it: to its desktop at that desktop's scale when
+it is on one, else to a view centred on the window, and a screen in the
+overview leaves the overview with the move.
 
 | Restore path | Rule |
 |---|---|
 | Overview shelf | clicking a shelf item restores that window and zooms to it ([../canvas/overview.md](../canvas/overview.md)) |
+| App bar | clicking an app's entry goes to its window the same way, minimized or not ([../shell/app-bar.md](../shell/app-bar.md)); the control socket's `window.focus` is that path for any client ([../platform/ipc.md](../platform/ipc.md)) |
 | Key | Super+Shift+M restores the last minimized window |
 | Activation | an xdg-activation request carrying a token granted for real input |
 | Foreign-toplevel | an activate request from a foreign-toplevel-management client |

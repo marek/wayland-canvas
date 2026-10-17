@@ -104,6 +104,10 @@ public:
 	LayerSurface *focused_layer = nullptr; // keyboard-interactive layer surface
 	uint64_t minimize_counter = 0;
 	bool visibility_dirty = false;
+	// A window list subscribers have not been told about yet: opened, closed,
+	// moved, retitled, minimized or focused. Flushed once per frame, and only
+	// when the list really reads differently (docs/intents/shell/app-bar.md).
+	bool windows_dirty = false;
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame
 
 	Input input;

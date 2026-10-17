@@ -39,6 +39,9 @@ public:
 	void emit_overview(const Output &output, bool active);
 	void emit_outputs(); // an output appeared, went, or changed size or scale
 	void emit_desktops(); // a desktop was created, moved, combined or abandoned
+	// A window opened, closed, moved, was retitled, minimized, restored or
+	// focused (docs/intents/shell/app-bar.md).
+	void emit_windows();
 	void emit_theme(); // the mode changed
 	void emit_settings(); // the effective settings changed
 	void emit_item_moved(const Item &item); // the user dropped a dragged item
@@ -98,6 +101,8 @@ private:
 		JsonObject *params);
 	std::expected<std::string, std::string> m_item_remove(Client &client,
 		JsonObject *params);
+	std::expected<std::string, std::string> m_window_focus(Client &client,
+		JsonObject *params);
 	std::expected<std::string, std::string> m_item_activate(Client &client,
 		JsonObject *params);
 	std::expected<std::string, std::string> m_action_run(Client &client,
@@ -144,6 +149,8 @@ private:
 	// the id its response echoes. Cleared in ~Client when that client goes.
 	Client *pick_client_ = nullptr;
 	std::string pick_id_;
+	// The window list as it was last pushed: an identical one is no event.
+	std::string last_windows_;
 	// Likewise the pending `shortcut.capture` request.
 	Client *capture_client_ = nullptr;
 	std::string capture_id_;

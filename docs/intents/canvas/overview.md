@@ -83,7 +83,7 @@ config file's `[overview]` section
 | Right click on a window, an item or the shelf | Nothing |
 | Tab buttons | The Tile switch, Abandon ([desktops.md](desktops.md)) |
 | Keys | Esc back; Return go; arrows hop; Delete/BackSpace abandon the target desktop; `t` switch tiling on the target; `m` combine; `n` new desktop; `0` returns the target desktop to 100 % ([desktops.md](desktops.md)); `+`/`−` zoom. Super+Tab / Super+W toggle |
-| Shell surfaces | The bar, the toolbar, panels and the note editor take the pointer over them as in the normal view; one that holds the keyboard ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) takes the keys, and the overview's own keys act only while none does |
+| Shell surfaces | The bar, the toolbar, the app bar ([../shell/app-bar.md](../shell/app-bar.md)), panels and the note editor take the pointer over them as in the normal view; one that holds the keyboard ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) takes the keys, and the overview's own keys act only while none does |
 
 A press becomes a drag only past a small travel; under it, the release
 is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)).
@@ -118,5 +118,6 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
   [../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md),
   [../input/config-file.md](../input/config-file.md),
   [../shell/toolbar.md](../shell/toolbar.md),
+  [../shell/app-bar.md](../shell/app-bar.md),
   [../windows/window-management.md](../windows/window-management.md),
   [../render/rendering.md](../render/rendering.md).

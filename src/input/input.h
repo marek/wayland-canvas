@@ -16,6 +16,7 @@ class Output;
 class Server;
 class View;
 struct Item;
+struct libinput_device;
 
 struct CanvasPos {
 	Output *output = nullptr;
@@ -42,6 +43,25 @@ private:
 	Listener modifiers_, key_, destroy_;
 };
 
+class Input;
+
+// One libinput pointer the backend handed over, kept so a settings change
+// reaches the devices already here; it goes with its device.
+class PointerDevice {
+public:
+	PointerDevice(Input &input, wlr_input_device *device, libinput_device *dev);
+	PointerDevice(const PointerDevice &) = delete;
+	PointerDevice &operator=(const PointerDevice &) = delete;
+
+	libinput_device *const dev;
+
+private:
+	void handle_destroy();
+
+	Input &input_;
+	Listener destroy_;
+};
+
 // Seat, cursor and keyboards: pointer focus, keybindings, drag and drop.
 // The compositor-owned pointer interaction in progress is `grab`.
 class Input {
@@ -60,6 +80,10 @@ public:
 	void set_cursor_image(const char *name);
 	// A view was unmapped or destroyed: drop what referred to it.
 	void forget(const View &view);
+
+	// canvas.conf was (re-)read: re-applies what the file decides about the
+	// devices — the scroll direction (input/gestures.md's `invert`).
+	void settings_changed();
 
 	// A shortcut capture, for the settings window: from begin to end every
 	// key, modifiers included, belongs to it — nothing runs and no surface
@@ -81,6 +105,8 @@ public:
 	PointerGrab grab;
 
 	std::vector<std::unique_ptr<Keyboard>> keyboards;
+
+	std::vector<std::unique_ptr<PointerDevice>> pointers;
 
 	wlr_drag_icon *drag_icon = nullptr;
 	double drag_icon_dx = 0, drag_icon_dy = 0;
@@ -114,6 +140,8 @@ private:
 	void handle_new_virtual_keyboard(wlr_virtual_keyboard_v1 *keyboard);
 	void new_keyboard(wlr_input_device *device, bool has_keymap);
 	void new_pointer(wlr_input_device *device);
+	// The settings' share of a device's libinput configuration.
+	void apply_pointer_settings(libinput_device *dev);
 
 	// Key events.
 	void process_key(Keyboard &keyboard, wlr_keyboard_key_event *event);

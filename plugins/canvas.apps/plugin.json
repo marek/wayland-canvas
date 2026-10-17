@@ -1,0 +1,16 @@
+{
+	"id": "canvas.apps",
+	"name": "App bar",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The app bar: every open app on an edge of the overview, a click going to its window",
+	"contributes": {
+		"surfaces": [
+			{
+				"id": "appbar",
+				"entry": "AppBar.qml",
+				"perOutput": true
+			}
+		]
+	}
+}

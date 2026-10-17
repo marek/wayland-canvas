@@ -162,6 +162,17 @@ std::string event_line(std::string_view name, std::string_view params) {
 // ------------------------------------------------------------- params
 
 // A string param: nullopt when absent; an error naming it when not one.
+// A boolean parameter the caller has already found on `params`.
+std::expected<bool, std::string> req_bool(JsonObject *params, const char *name) {
+	JsonNode *node = json_object_get_member(params, name);
+	if (json_node_get_node_type(node) != JSON_NODE_VALUE
+			|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
+		return std::unexpected(std::format(
+			"params: {} must be true or false", name));
+	}
+	return static_cast<bool>(json_node_get_boolean(node));
+}
+
 std::expected<std::optional<std::string>, std::string> opt_string(
 		JsonObject *params, const char *name) {
 	if (params == nullptr || !json_object_has_member(params, name)) {
@@ -279,6 +290,42 @@ void add_desktops_array(JsonBuilder *builder, Server &server) {
 	}
 	json_builder_end_array(builder);
 }
+// The open windows, in the order they opened: what the app bar draws
+// (docs/intents/shell/app-bar.md).
+void add_windows_array(JsonBuilder *builder, Server &server) {
+	json_builder_set_member_name(builder, "windows");
+	json_builder_begin_array(builder);
+	// toplevels is creation order; views is the stacking order.
+	for (const std::unique_ptr<View> &owned : server.toplevels) {
+		View *view = owned.get();
+		if (!view->mapped) {
+			continue; // nothing to go to before it maps
+		}
+		const Desktop *desktop = server.canvas.desktop_of(*view);
+		json_builder_begin_object(builder);
+		json_builder_set_member_name(builder, "id");
+		json_builder_add_int_value(builder, static_cast<gint64>(view->session_id));
+		json_builder_set_member_name(builder, "appId");
+		json_builder_add_string_value(builder, view->shell_app_id() != nullptr
+			? view->shell_app_id() : "");
+		json_builder_set_member_name(builder, "title");
+		json_builder_add_string_value(builder, view->shell_title() != nullptr
+			? view->shell_title() : "");
+		json_builder_set_member_name(builder, "desktop");
+		if (desktop != nullptr) {
+			json_builder_add_int_value(builder, static_cast<int>(desktop->id()));
+		} else {
+			json_builder_add_null_value(builder);
+		}
+		json_builder_set_member_name(builder, "minimized");
+		json_builder_add_boolean_value(builder, view->minimized);
+		json_builder_set_member_name(builder, "focused");
+		json_builder_add_boolean_value(builder, server.focused_view == view);
+		json_builder_end_object(builder);
+	}
+	json_builder_end_array(builder);
+}
+
 void add_item(JsonBuilder *builder, const Item &item) {
 	std::string id = item.id; // NUL-terminated for the C API
 	std::string color = color_text(item.color);
@@ -400,6 +447,8 @@ void add_settings(JsonBuilder *builder, Server &server) {
 	add_string("swipes", swipe_name(server.conf.swipes));
 	json_builder_set_member_name(builder, "pinchScale");
 	json_builder_add_boolean_value(builder, server.conf.pinch_scale);
+	json_builder_set_member_name(builder, "invert");
+	json_builder_add_boolean_value(builder, server.conf.invert);
 	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "session");
 	json_builder_begin_object(builder);
@@ -814,6 +863,7 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"item.set"}, &Ipc::m_item_set},
 		std::pair{std::string_view{"item.remove"}, &Ipc::m_item_remove},
 		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
+		std::pair{std::string_view{"window.focus"}, &Ipc::m_window_focus},
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
 		std::pair{std::string_view{"capture.stop"}, &Ipc::m_capture_stop},
 		std::pair{std::string_view{"settings.get"}, &Ipc::m_settings_get},
@@ -832,6 +882,7 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 	return object_text([&](JsonBuilder *builder) {
 		add_outputs_array(builder, server_);
 		add_desktops_array(builder, server_);
+		add_windows_array(builder, server_);
 		add_items_array(builder, server_);
 		json_builder_set_member_name(builder, "theme");
 		std::string mode = std::string{theme_name(server_.theme.mode())};
@@ -1062,6 +1113,28 @@ std::expected<std::string, std::string> Ipc::m_item_remove(Client &, JsonObject 
 	return std::string{"true"};
 }
 
+// Goes to a window by its session id: the same restore path a shelf click
+// takes (docs/intents/windows/window-management.md).
+std::expected<std::string, std::string> Ipc::m_window_focus(Client &,
+		JsonObject *params) {
+	std::expected<std::optional<long long>, std::string> id =
+		opt_int(params, "window");
+	if (!id.has_value()) {
+		return std::unexpected(id.error());
+	}
+	if (!id->has_value()) {
+		return std::unexpected(std::string{"params: window must be a number"});
+	}
+	auto wanted = static_cast<uint64_t>(**id);
+	for (const std::unique_ptr<View> &view : server_.toplevels) {
+		if (view->session_id == wanted && view->mapped) {
+			view->activate();
+			return std::string{"true"};
+		}
+	}
+	return std::unexpected(std::format("unknown window id '{}'", wanted));
+}
+
 std::expected<std::string, std::string> Ipc::m_item_activate(Client &,
 		JsonObject *params) {
 	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
@@ -1150,7 +1223,7 @@ std::expected<std::string, std::string> Ipc::m_settings_get(Client &,
 std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 		JsonObject *params) {
 	constexpr std::string_view usage =
-		R"(params: exactly one of action with keys, commands, swipes or pinchScale)";
+		R"(params: exactly one of action with keys, commands, swipes, pinchScale or invert)";
 	if (params == nullptr) {
 		return std::unexpected(std::string{usage});
 	}
@@ -1158,11 +1231,12 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 	bool has_commands = json_object_has_member(params, "commands");
 	bool has_swipes = json_object_has_member(params, "swipes");
 	bool has_pinch = json_object_has_member(params, "pinchScale");
+	bool has_invert = json_object_has_member(params, "invert");
 	bool has_idle = json_object_has_member(params, "lockIdleMinutes");
 	bool has_night = json_object_has_member(params, "nightLight");
 	bool has_temperature = json_object_has_member(params, "nightLightTemperature");
-	if (has_action + has_commands + has_swipes + has_pinch + has_idle + has_night
-			+ has_temperature != 1) {
+	if (has_action + has_commands + has_swipes + has_pinch + has_invert + has_idle
+			+ has_night + has_temperature != 1) {
 		return std::unexpected(std::string{usage});
 	}
 	settings::File file{server_.conf_text};
@@ -1291,22 +1365,23 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 		}
 		edit = file.set_swipes(*preset);
 	} else if (has_pinch) {
-		JsonNode *node = json_object_get_member(params, "pinchScale");
-		if (json_node_get_node_type(node) != JSON_NODE_VALUE
-				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
-			return std::unexpected(std::string{
-				"params: pinchScale must be true or false"});
+		std::expected<bool, std::string> on = req_bool(params, "pinchScale");
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
 		}
-		edit = file.set_pinch_scale(json_node_get_boolean(node));
+		edit = file.set_pinch_scale(*on);
+	} else if (has_invert) {
+		std::expected<bool, std::string> on = req_bool(params, "invert");
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
+		}
+		edit = file.set_invert(*on);
 	} else if (has_night) {
-		JsonNode *node = json_object_get_member(params, "nightLight");
-		if (json_node_get_node_type(node) != JSON_NODE_VALUE
-				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
-			return std::unexpected(std::string{
-				"params: nightLight must be true or false"});
+		std::expected<bool, std::string> on = req_bool(params, "nightLight");
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
 		}
-		edit = file.set_session("night-light",
-			json_node_get_boolean(node) ? "on" : "off");
+		edit = file.set_session("night-light", *on ? "on" : "off");
 	} else {
 		const char *name = has_idle ? "lockIdleMinutes" : "nightLightTemperature";
 		JsonNode *node = json_object_get_member(params, name);
@@ -1471,9 +1546,26 @@ void Ipc::emit_outputs() {
 }
 
 void Ipc::emit_desktops() {
+	// A desktop created, moved, combined or abandoned changes which desktop
+	// the windows report.
+	server_.windows_dirty = true;
 	push_event("desktops", object_text([&](JsonBuilder *builder) {
 		add_desktops_array(builder, server_);
 	}));
+}
+
+void Ipc::emit_windows() {
+	// The list is rebuilt from state that changes far more often than it
+	// reads differently (a drag damages per frame): an unchanged list is no
+	// event at all.
+	std::string params = object_text([&](JsonBuilder *builder) {
+		add_windows_array(builder, server_);
+	});
+	if (params == last_windows_) {
+		return;
+	}
+	last_windows_ = params;
+	push_event("windows", params);
 }
 
 void Ipc::emit_theme() {

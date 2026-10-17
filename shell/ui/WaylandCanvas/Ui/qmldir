@@ -1,5 +1,6 @@
 module WaylandCanvas.Ui
 singleton UiTheme UiTheme.qml
+singleton StripLayout StripLayout.qml
 BarButton BarButton.qml
 ChoiceRow ChoiceRow.qml
 KeyChip KeyChip.qml

@@ -34,6 +34,7 @@ a submenu, and the settings gear opens the settings window
 
 | Subject | Rule |
 |---|---|
+| Shared edge | The app bar on this same edge: one strip holds these buttons first, then a separator, then the apps ([app-bar.md](app-bar.md)) |
 | Place | The edge the shell config's `toolbar.position` names ([plugins.md](plugins.md)), right by default: on the right or left edge a column centred vertically, on the top or bottom a row centred horizontally, 8 px from the edge — the top one below the bar. Above the canvas and below panels (the surface's namespace: `wayland-canvas-toolbar`). A new edge applies at once |
 | When | Slides in as that screen enters the overview and out as it leaves; each screen on its own |
 | Below it | In the overview, the compositor's shelf and help line stay clear of a bottom toolbar ([../canvas/overview.md](../canvas/overview.md)) |
@@ -66,6 +67,8 @@ A button names exactly one of `action`, `panel` and `menu`.
 
 - [plugins.md](plugins.md) — manifests, actions, the common trigger and the
   shell config.
+- [app-bar.md](app-bar.md) — the app bar, and the strip they share on one
+  edge.
 - [notes.md](notes.md) — the note button and its colour submenu.
 - [settings.md](settings.md) — the settings gear, and the window that picks
   the edge.

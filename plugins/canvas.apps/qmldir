@@ -1,0 +1,4 @@
+# The components this plugin's own files reference by name: the host
+# compiles the manifest's entry from outside this folder, so a sibling is
+# named here and imported with `import "."`.
+AppEntry AppEntry.qml

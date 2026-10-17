@@ -369,6 +369,9 @@ int main() {
 	install_custom_entry();
 	// Before the server starts: the launcher scans $XDG_DATA_HOME/applications first.
 	setenv("XDG_DATA_HOME", xdg_dir.c_str(), 1);
+	// A conf left by an earlier run would make this run's start no first
+	// run at all, and the template it checks is the build's own.
+	unlink(canvas_conf.c_str());
 	// Before the server starts: canvas.conf lives in this run's scratch,
 	// never in the user's real ~/.config.
 	setenv("XDG_CONFIG_HOME",

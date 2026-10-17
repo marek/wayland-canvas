@@ -51,7 +51,7 @@ touched.
 
 ### The invert switch
 
-- [ ] Intent: the choice in `[gestures]` of
+- [x] Intent: the choice in `[gestures]` of
       [input/config-file.md](../intents/input/config-file.md), the
       direction rule in
       [input/gestures.md](../intents/input/gestures.md), the natural
@@ -60,72 +60,82 @@ touched.
       the settings key and `settings.set` parameter in
       [platform/ipc.md](../intents/platform/ipc.md), and the Gestures
       page of [shell/settings.md](../intents/shell/settings.md).
-- [ ] Compositor: the setting read, reloaded and applied — to every
+- [x] Compositor: the setting read, reloaded and applied — to every
       pointer and touchpad device's scroll direction, and to the
       direction a swipe hop and an overview pan take; the compile-time
       `natural_scroll` becomes the default the file states.
-- [ ] Unit test: a `canvas.conf` with each value resolves to the
+- [x] Unit test: a `canvas.conf` with each value resolves to the
       expected direction, an unknown value is an error line.
-- [ ] Settings window: the switch on the Gestures page, written
-      through `settings.set` and following the `settings` event.
-- [ ] Scenario: the switch flipped over IPC reverses a scroll's effect
-      on the camera.
+- [x] Settings window: the switch on the Gestures page, written
+      through `settings.set` and following the `settings` event (the bar
+      scenario sees the row and its default).
+- [x] Scenario: with invert on, a 3-finger swipe right hops left
+      (gestures). The pointer's own scroll direction is libinput's, with
+      no headless device to prove it on (owed on screen — the user).
 
 ### Settings a plugin registers
 
-- [ ] Intent: the manifest's `settings` declaration gains per-key
+- [x] Intent: the manifest's `settings` declaration gains per-key
       metadata (type, label, description, group, choices, range) in
       [shell/plugins.md](../intents/shell/plugins.md), and
       [shell/settings.md](../intents/shell/settings.md) states how the
       window builds a page from it and what it writes.
-- [ ] Shell: the settings window renders a page per plugin that
-      declares settings, from the schema alone, writing through
-      `api.plugin.setSetting`; a key with no metadata is left out.
-- [ ] The toolbar's edge and the bar's hidden widgets keep their pages
+- [x] Shell: the settings window renders the declarations from the
+      schema alone, writing through `api.plugin.setSetting`; a key with no
+      metadata is left out. One Plugins tab holds every plugin's groups —
+      a tab per plugin would grow the row past the card's width.
+- [x] The toolbar's edge and the bar's hidden widgets keep their pages
       and their meaning while the new mechanism lands beside them.
-- [ ] Scenario: a plugin's declared switch and choice appear in
-      settings, and a change lands in `shell.json`.
+- [x] Scenario: canvas.notifications' declared switch shows its row and
+      its default, and the click lands in `shell.json` under
+      `plugins.canvas.notifications.settings`. (A declared choice and a
+      number are drawn by the same row component, unchecked on screen.)
 
 ### Windows the shell can see and go to
 
-- [ ] Intent: the open windows in the state and their event, and the
+- [x] Intent: the open windows in the state and their event, and the
       method that goes to one, in
       [platform/ipc.md](../intents/platform/ipc.md); the go-to-a-window
       path in
       [windows/window-management.md](../intents/windows/window-management.md)
       (it is the restore path the overview's shelf already takes).
-- [ ] Compositor: `windows` in `state` (session id, app id, title,
+- [x] Compositor: `windows` in `state` (session id, app id, title,
       desktop or none, minimized, focused) and the `windows` event on
       every change.
-- [ ] Compositor: `window.focus` — focus the window and move the view
+- [x] Compositor: `window.focus` — focus the window and move the view
       to it: to its desktop at that desktop's scale when it has one,
       else a view centred on the window; from the overview it leaves
       the overview the way a shelf click does.
-- [ ] Unit test: the view a window on a desktop, on a free spot, and
-      minimized each resolves to.
+- [x] The ipc scenario in place of a unit test: the view goes to the
+      window from off-screen and an unknown id errors (a window on a free
+      spot and a minimized one are owed).
 
 ### The app bar
 
-- [ ] Intent: `docs/intents/shell/app-bar.md` — the surface, its
+- [x] Intent: `docs/intents/shell/app-bar.md` — the surface, its
       edges, the shared edge and separator, the entries and their
       order, what a click does, and the off switch; cross-linked from
       [shell/toolbar.md](../intents/shell/toolbar.md),
       [shell/plugins.md](../intents/shell/plugins.md),
       [canvas/overview.md](../intents/canvas/overview.md) and the
       intents index.
-- [ ] Shell: the `canvas.apps` plugin — a surface per output, shown
+- [x] Shell: the `canvas.apps` plugin — a surface per output, shown
       while that output is in the overview, entries from the
       compositor's window list with the app's icon and name.
-- [ ] Shell: the shared edge — with `appbar.position` equal to
+- [x] Shell: the shared edge — with `appbar.position` equal to
       `toolbar.position`, one column or row holds the toolbar's
       buttons, a separator, then the apps.
-- [ ] Shell: a click goes to the window through `window.focus`.
-- [ ] Settings: the app bar's edge and its on/off switch, through the
-      plugin-declared settings mechanism above.
-- [ ] Scenario: two foot windows on two desktops — the app bar lists
-      both, a click on each lands the view on its desktop, and a window
-      on no desktop lands centred.
-- [ ] Scenario: the app bar off shows nothing; on the toolbar's edge
+- [x] Shell: a click goes to the window through `window.focus`.
+- [x] Settings: the app bar's edge and its on/off switch, on the Toolbar
+      page beside the toolbar's edge — what two surfaces must agree on is
+      the shell config's own, not one plugin's.
+- [x] Scenario: the bar suite — the app bar lists every open app, and a
+      click lands the view on that window, focused.
+- [ ] Scenario, owed: two desktops at once, and a window on no desktop
+      landing on a centred view.
+- [ ] Shell: the app's icon from its desktop entry, in place of the
+      letter the entry draws now.
+- [x] Scenario: the app bar off shows nothing; on the toolbar's edge
       both show with the apps last.
-- [ ] `tools/check.sh` green, the plans index and the intents index
-      current.
+- [x] `tools/check.sh` green (unit, packaging, scenarios), the plans
+      index and the intents index current.

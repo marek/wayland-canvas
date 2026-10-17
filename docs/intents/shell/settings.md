@@ -8,7 +8,8 @@
 ## Requirement
 
 A gear button in the overview toolbar opens the settings: every keyboard
-shortcut, set by pressing it; the swipe preset and the pinch switch; the
+shortcut, set by pressing it; the swipe preset, the pinch switch and the
+scroll direction; the
 toolbar's edge; which bar widgets show. A change applies at once and is
 written to the file that holds it, and a hand edit of that file shows in the
 window while it is open.
@@ -21,6 +22,10 @@ window while it is open.
   and no app sees it.
 - **Gestures are chosen, not recorded**: a few presets, each keeping the
   gesture vocabulary whole ([../input/gestures.md](../input/gestures.md)).
+- **A plugin's settings come from its manifest, not from this window.** A
+  plugin declares what it can be asked ([plugins.md](plugins.md)) and the
+  window renders it; nothing here knows any plugin by name, so a new
+  plugin's choices arrive in settings with the plugin.
 - **The window is a plugin**, `canvas.settings`, like the rest of the shell
   ([plugins.md](plugins.md)): it changes the compositor only through the
   control socket and the shell only through the host.
@@ -33,15 +38,17 @@ window while it is open.
 |---|---|
 | Opening | The gear button in the overview toolbar ([toolbar.md](toolbar.md)); the window is a panel beside it, through the common trigger |
 | Closing | As any panel: a click outside, Escape, a second click of the gear, leaving the overview. Closing while a shortcut is being recorded cancels the recording |
-| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar; a footer names the two files |
+| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar, and Plugins while any plugin declares settings; a footer names the two files |
+| Where a setting lives | What two surfaces must agree on — the edges the overview's strips take — is the shell config's own (`toolbar.position`, `appbar.*`) and sits on the Toolbar page; what one plugin alone reads is that plugin's, declared in its manifest and rendered from it |
 
 | Page | Holds | Writes |
 |---|---|---|
 | Shortcuts | The file's errors first, if any. Then every action by group in the bindings table's order, the overview's last: its label and its keys, or None. A click records new keys; reset puts the defaults back; clear leaves it without keys. Then the commands: each one's keys, recorded the same way, and its command line; add and remove | `canvas.conf`: `[shortcuts]`, `[overview]`, `[commands]` |
 | Session | The minutes of idleness before the screen locks, or never ([lock.md](lock.md)); the night light's switch and temperature ([../render/night-light.md](../render/night-light.md)) | `canvas.conf`: `[session]` |
-| Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)" | `canvas.conf`: `[gestures]` |
-| Toolbar | The edge: right, left, top or bottom | `shell.json`: `toolbar.position` |
+| Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)"; the switch "Invert scrolling and swipes", which turns the direction of the pointer, the touchpad and the hops around together ([../input/gestures.md](../input/gestures.md)) | `canvas.conf`: `[gestures]` |
+| Toolbar | The toolbar's edge: right, left, top or bottom; then the app bar's switch and its own edge, left by default ([app-bar.md](app-bar.md)) | `shell.json`: `toolbar.position`, `appbar.enabled`, `appbar.position` |
 | Bar | Every bar widget by section, in bar order, with a switch; a widget that hides itself without a source says when it shows | `shell.json`: `bar.hidden` |
+| Plugins | Every plugin's declared settings, plugin by plugin and group by group in declaration order, a header naming each: a switch, a choice, a number or a text field per entry, with its label and description ([plugins.md](plugins.md)). The window names no plugin of its own; one page holds them all, so a new plugin's settings cost the window nothing | `shell.json`: `plugins.<id>.settings` |
 
 ### Recording a shortcut
 

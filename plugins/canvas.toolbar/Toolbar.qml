@@ -140,14 +140,48 @@ Item {
 	// built-in bar's height (the same metric the bar sizes itself by), so
 	// the row sits below the bar.
 	readonly property int stripLength: buttons.length * buttonSize
+	// The app bar on this same edge shares the strip: the two place
+	// themselves from StripLayout with both lengths, the buttons first and
+	// the apps after the separator (docs/intents/shell/app-bar.md). Neither
+	// surface knows the other: this length comes from the shell config and
+	// the compositor's window list, which the app bar reads too.
+	readonly property int appsLength: {
+		var section = shell != null && shell.config != null
+			? shell.config.appbar : null
+		if (section != null && section.enabled === false) {
+			return 0
+		}
+		var named = section != null && section.position !== undefined
+			? section.position : ""
+		var appEdge = named === "right" || named === "top" || named === "bottom"
+			? named : "left"
+		if (appEdge !== edge) {
+			return 0
+		}
+		var windows = api != null && api.compositor != null
+			? (api.compositor.state.windows || []) : []
+		var seen = ({})
+		var apps = 0
+		for (var i = 0; i < windows.length; i++) {
+			var key = windows[i].appId !== ""
+				? windows[i].appId : ("window:" + windows[i].id)
+			if (seen[key] === undefined) {
+				seen[key] = true
+				apps++
+			}
+		}
+		return apps * buttonSize
+	}
+	readonly property int along: StripLayout.toolbarStart(
+		vertical ? modelData.height : modelData.width, stripLength, appsLength)
 	readonly property real stripX: edge === "right"
 		? modelData.width - edgeMargin - buttonSize
 		: edge === "left" ? edgeMargin
-		: (modelData.width - stripLength) / 2
+		: along
 	readonly property real stripY: edge === "bottom"
 		? modelData.height - edgeMargin - buttonSize
 		: edge === "top" ? UiTheme.barHeight + edgeMargin
-		: (modelData.height - stripLength) / 2
+		: along
 
 	// The strip's live displacement from its settled place while it
 	// slides: off the screen, past the edge.
@@ -201,14 +235,19 @@ Item {
 		// strip's top. On the top edge the pocket reaches past the
 		// screen's top, over the bar's area: transparent and without
 		// input there, so the bar keeps its clicks.
+		// Its edge, and the leading edge along it: the margin along the edge
+		// is where StripLayout puts this part, which is the strip centred on
+		// its own, or its share of the strip the app bar is on too.
 		anchors.right: root.edge === "right"
-		anchors.left: root.edge === "left"
-		anchors.top: root.edge === "top"
+		anchors.left: root.edge === "left" || !root.vertical
+		anchors.top: root.edge === "top" || root.vertical
 		anchors.bottom: root.edge === "bottom"
-		WlrLayershell.margins.left: root.edge === "left" ? -root.buttonSize : 0
+		WlrLayershell.margins.left: root.edge === "left" ? -root.buttonSize
+			: root.vertical ? 0 : root.along
 		WlrLayershell.margins.right: root.edge === "right" ? -root.buttonSize : 0
 		WlrLayershell.margins.top: root.edge === "top"
-			? root.nearEdge - root.pocket : 0
+			? root.nearEdge - root.pocket
+			: root.vertical ? root.along : 0
 		WlrLayershell.margins.bottom: root.edge === "bottom" ? -root.buttonSize : 0
 
 		// The free dimension of the anchored edge carries the strip's
