@@ -86,7 +86,7 @@ other desktop.
 | Subject | Rule |
 |---|---|
 | Range | 25 % to 200 %; a new desktop starts at 100 %, one pinned from a free view at the view's zoom |
-| Change | Super + 2-finger pinch on the desktop shown ([../input/gestures.md](../input/gestures.md)): pinching in scales down, spreading scales up, following the fingers |
+| Change | Super + 2-finger pinch on the desktop shown, while the pinch switch is on ([../input/gestures.md](../input/gestures.md)): pinching in scales down, spreading scales up, following the fingers |
 | Frame | Resizes around its centre, which no zoom moves, so the desktop keeps filling the screen and is back where it began at 100 %; its windows stay where they are on the canvas, at their size |
 | Settling | Released, the scale settles on the nearest 5 % step, catching at 100 % |
 | Windows | Shown at the scale and fully usable, and never told it: their size, layout and rendering stay as they are, and the compositor scales what they drew ([../render/hidpi.md](../render/hidpi.md)) |

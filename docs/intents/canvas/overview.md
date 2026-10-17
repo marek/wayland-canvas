@@ -31,6 +31,12 @@ or free area, is one gesture away.
 
 ## Behavior
 
+Finger counts here are the default preset's: the four-finger preset swaps 3
+and 4, and under off there are no 3- or 4-finger gestures
+([../input/gestures.md](../input/gestures.md)). Keys are the defaults of the
+config file's `[overview]` section
+([../input/config-file.md](../input/config-file.md)).
+
 ### Entering and leaving
 
 | Subject | Rule |
@@ -87,8 +93,8 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
 | Element | Rule |
 |---|---|
 | Tabs | Each desktop has a tab: its name, its scale when not 100 %, the Tile switch (lit while tiling is on) and Abandon |
-| Shelf | Minimized windows along the bottom; clicking one restores it and goes there ([../windows/window-management.md](../windows/window-management.md)) |
-| Help line | Along the bottom, naming the gestures |
+| Shelf | Minimized windows along the bottom, above the toolbar when it is on the bottom edge ([../shell/toolbar.md](../shell/toolbar.md)); clicking one restores it and goes there ([../windows/window-management.md](../windows/window-management.md)) |
+| Help line | Along the bottom, above a bottom toolbar, naming the gestures of the preset in force; under off, the keys |
 | Hints | Transient messages for completed actions (e.g. "Tiling on for Desktop 2", "Desktop 2 at 80 %") |
 | Previews | While a pinch is in tiling or combine range, what release will do (e.g. "Release to combine Desktop 2 into Desktop 3"); backing out of range clears it |
 
@@ -110,5 +116,7 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
 - [infinite-canvas.md](infinite-canvas.md), [desktops.md](desktops.md),
   [../input/gestures.md](../input/gestures.md),
   [../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md),
+  [../input/config-file.md](../input/config-file.md),
+  [../shell/toolbar.md](../shell/toolbar.md),
   [../windows/window-management.md](../windows/window-management.md),
   [../render/rendering.md](../render/rendering.md).

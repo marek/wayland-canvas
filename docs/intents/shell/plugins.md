@@ -22,7 +22,8 @@ compositor.
   compositor down. What plugins need from the compositor goes over its
   control socket.
 - **Presence is enough.** A folder with a valid manifest is loaded; the
-  config only disables plugins, adds directories and sets settings.
+  config only disables plugins, hides and orders contributions, adds
+  directories and sets settings.
 - **Plugins contribute to named places and call the API**; they never
   reach into another plugin. Everything a plugin contributes has a global
   name, `<plugin id>/<item id>`.
@@ -73,10 +74,14 @@ in an earlier one:
 | `plugins.<id>.enabled` | `false` disables a found plugin |
 | `plugins.<id>.settings` | Overrides of that plugin's setting defaults |
 | `bar.layout.left`, `.center`, `.right` | Bar widget names in order; widgets not listed follow in their declared section and order |
+| `bar.hidden` | Bar widget names (`canvas.agents/agents`) left out of the bar |
 | `toolbar.order` | Toolbar button names in order |
+| `toolbar.position` | The toolbar's edge: `right` (the default), `left`, `top`, `bottom` ([toolbar.md](toolbar.md)) |
 
 Edits to the config, a plugin folder or a plugin's files apply while the
-shell runs: the shell reloads with them.
+shell runs: the shell reloads with them. What the host writes itself — a
+plugin setting, the mode, a change from the settings window
+([settings.md](settings.md)) — applies at once without a reload.
 
 ### The common trigger
 
@@ -124,6 +129,7 @@ switches, text and fields, all coloured from `api.theme`.
 | `canvas.theme` | The light/dark switch, the right-most bar widget |
 | `canvas.toolbar` | The overview toolbar surface, hosting every toolbar button |
 | `canvas.notes` | Sticky notes: a toolbar button with a colour menu, and the notes |
+| `canvas.settings` | The settings window: the gear toolbar button and its panel ([settings.md](settings.md)) |
 
 ## Error states, corner cases
 
