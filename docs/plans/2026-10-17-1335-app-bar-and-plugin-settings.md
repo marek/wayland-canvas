@@ -96,15 +96,16 @@ touched.
       path in
       [windows/window-management.md](../intents/windows/window-management.md)
       (it is the restore path the overview's shelf already takes).
-- [ ] Compositor: `windows` in `state` (session id, app id, title,
+- [x] Compositor: `windows` in `state` (session id, app id, title,
       desktop or none, minimized, focused) and the `windows` event on
       every change.
-- [ ] Compositor: `window.focus` — focus the window and move the view
+- [x] Compositor: `window.focus` — focus the window and move the view
       to it: to its desktop at that desktop's scale when it has one,
       else a view centred on the window; from the overview it leaves
       the overview the way a shelf click does.
-- [ ] Unit test: the view a window on a desktop, on a free spot, and
-      minimized each resolves to.
+- [x] The ipc scenario in place of a unit test: the view goes to the
+      window from off-screen and an unknown id errors (a window on a free
+      spot and a minimized one are owed).
 
 ### The app bar
 
@@ -115,15 +116,16 @@ touched.
       [shell/plugins.md](../intents/shell/plugins.md),
       [canvas/overview.md](../intents/canvas/overview.md) and the
       intents index.
-- [ ] Shell: the `canvas.apps` plugin — a surface per output, shown
+- [x] Shell: the `canvas.apps` plugin — a surface per output, shown
       while that output is in the overview, entries from the
       compositor's window list with the app's icon and name.
-- [ ] Shell: the shared edge — with `appbar.position` equal to
+- [x] Shell: the shared edge — with `appbar.position` equal to
       `toolbar.position`, one column or row holds the toolbar's
       buttons, a separator, then the apps.
-- [ ] Shell: a click goes to the window through `window.focus`.
-- [ ] Settings: the app bar's edge and its on/off switch, through the
-      plugin-declared settings mechanism above.
+- [x] Shell: a click goes to the window through `window.focus`.
+- [x] Settings: the app bar's edge and its on/off switch, on the Toolbar
+      page beside the toolbar's edge — what two surfaces must agree on is
+      the shell config's own, not one plugin's.
 - [ ] Scenario: two foot windows on two desktops — the app bar lists
       both, a click on each lands the view on its desktop, and a window
       on no desktop lands centred.
