@@ -122,6 +122,7 @@ int note_retries = 0; // the notes phase's retry counter
 // The window the app bar's clicked entry stands for, kept between the
 // click and the check that the view landed on it.
 View *app_bar_target = nullptr;
+wlr_box app_bar_entry{}; // its entry's square, for the flyout's rows
 double note_button_y = 0; // the note button's band centre, on the strip
 wlr_box note_flyout{}; // its menu's card: left of the strip, centred on it
 LayerSurface *bar_before_reload = nullptr;
@@ -3712,6 +3713,74 @@ LayerSurface *app_bar_layer() {
 // surface is the strip plus the pocket it slides into.
 wlr_box app_bar_strip_box(const wlr_box &geo) {
 	return toolbar_strip_box(geo);
+}
+
+// The app bar's flyout surface: an app's windows, unfolded beside its entry
+// (docs/intents/shell/app-bar.md).
+LayerSurface *app_bar_flyout_layer() {
+	return named_layer("wayland-canvas-app-bar-chrome");
+}
+
+// How many windows the app `view` belongs to holds: an app with more than
+// one unfolds them instead of jumping straight there.
+int app_bar_windows_of(const View *view) {
+	if (view == nullptr) {
+		return 0;
+	}
+	const char *app_id = view->shell_app_id();
+	int n = 0;
+	for (const std::unique_ptr<View> &other : server->toplevels) {
+		if (!other->mapped) {
+			continue;
+		}
+		const char *id = other->shell_app_id();
+		bool same = (app_id == nullptr || *app_id == '\0')
+			? other.get() == view
+			: (id != nullptr && std::strcmp(id, app_id) == 0);
+		if (same) {
+			n++;
+		}
+	}
+	return n;
+}
+
+// Where the flyout's row for `view` sits, from the entry's square: the card
+// hangs beside the strip, one margin away, its rows from its top padding
+// down. Keep in sync with AppBar.qml.
+std::pair<double, double> app_bar_flyout_row(const wlr_box &entry,
+		const View *view) {
+	constexpr int card_w = 240;
+	constexpr int pad = 10;
+	constexpr int gap = 2;
+	int top = 0, height = 0, total = 2 * pad;
+	bool before = true;
+	const char *app_id = view != nullptr ? view->shell_app_id() : nullptr;
+	for (const std::unique_ptr<View> &other : server->toplevels) {
+		if (!other->mapped) {
+			continue;
+		}
+		const char *id = other->shell_app_id();
+		bool same = (app_id == nullptr || *app_id == '\0')
+			? other.get() == view
+			: (id != nullptr && std::strcmp(id, app_id) == 0);
+		if (!same) {
+			continue;
+		}
+		int row = other->minimized ? settings_row + settings_detail : settings_row;
+		if (other.get() == view) {
+			before = false;
+			height = row;
+		} else if (before) {
+			top += row + gap;
+		}
+		total += row + gap;
+	}
+	total -= gap;
+	double card_x = entry.x > screen_w / 2
+		? entry.x - toolbar_margin - card_w : entry.x + entry.width + toolbar_margin;
+	double card_y = std::max(double(toolbar_margin),
+		std::min(double(entry.y), double(screen_h - total - toolbar_margin)));
+	return {card_x + card_w / 2.0, card_y + pad + top + height / 2.0};
 }
 
 // How many apps the compositor has open: the app bar draws one entry each,
@@ -8326,12 +8395,30 @@ int run_step() {
 		check(apps != nullptr && app_bar_target != nullptr,
 			"an app bar entry to click, and the window it stands for");
 		if (apps != nullptr) {
+			app_bar_entry = {app_strip.x, app_strip.y, toolbar_button,
+				toolbar_button};
 			click(app_strip.x + toolbar_button / 2.0,
 				app_strip.y + toolbar_button / 2.0);
 		}
+		return 700;
+	}
+	case 523: { // an app with several windows unfolds them: its first row
+		int windows = app_bar_windows_of(app_bar_target);
+		if (windows <= 1) {
+			return 100; // one window: the click already went there
+		}
+		LayerSurface *flyout = app_bar_flyout_layer();
+		if (flyout == nullptr && retries++ < 40) {
+			return -200;
+		}
+		retries = 0;
+		check(flyout != nullptr, std::format("an app with {} windows unfolded "
+			"them beside its entry", windows));
+		auto [x, y] = app_bar_flyout_row(app_bar_entry, app_bar_target);
+		click(x, y);
 		return 900;
 	}
-	case 523: { // the overview left, the view on that window, focused
+	case 524: { // the overview left, the view on that window, focused
 		Output *output = server->outputs.front().get();
 		bool landed = !output->overview.active() && !output->camera.panning()
 			&& !output->camera.zooming() && app_bar_target != nullptr
@@ -8347,10 +8434,10 @@ int run_step() {
 		check(set_app_bar_enabled(false), "appbar.enabled: false written");
 		return 900;
 	}
-	case 524: // back to the overview, with the app bar switched off
+	case 525: // back to the overview, with the app bar switched off
 		chord(KEY_TAB, KEY_LEFTMETA);
 		return 600;
-	case 525: { // the toolbar alone, centred again, and no app bar at all
+	case 526: { // the toolbar alone, centred again, and no app bar at all
 		LayerSurface *toolbar = toolbar_layer();
 		bool ready = overview_settled(true) && toolbar != nullptr
 			&& app_bar_layer() == nullptr;
@@ -8426,6 +8513,86 @@ int run_step() {
 		check(held == "false", std::format("the switch wrote"
 			" plugins.canvas.notifications.settings.criticalNeverExpires"
 			" into shell.json ({})", held.empty() ? "absent" : held));
+		// Back to the app bar, on its own default edge this time: the hover
+		// label and the jump are the two things a user touches
+		// (docs/intents/shell/app-bar.md).
+		tap(KEY_ESC); // the settings panel closes; the overview stays
+		check(set_app_bar_enabled(true) && set_app_bar_position("left"),
+			"the app bar switched back on, on its default left edge");
+		step = 540;
+		return -900;
+	}
+	case 540: { // the strip back on the left: the pointer onto its first entry
+		LayerSurface *apps = app_bar_layer();
+		if ((apps == nullptr || !overview_settled(true)) && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		wlr_box strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		check(apps != nullptr && strip.x == toolbar_margin,
+			std::format("the app bar is back on the left edge (strip {},{} {}x{})",
+				strip.x, strip.y, strip.width, strip.height));
+		park(strip.x + toolbar_button / 2.0, strip.y + toolbar_button / 2.0);
+		return 500;
+	}
+	case 541: // the hover, drawn
+		shot("app-bar-hover");
+		return 600;
+	case 542: { // the hovered app's name, on a chip toward the screen's centre
+		LayerSurface *apps = app_bar_layer();
+		wlr_box strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		cairo_surface_t *s = load_png("app-bar-hover");
+		// The chip sits one gap right of the strip, level with the entry.
+		std::vector<Run> runs = s != nullptr ? bar_runs(s,
+			{strip.x + toolbar_button, strip.y, 240, toolbar_button})
+			: std::vector<Run>{};
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		if (runs.empty() && retries++ < 10) {
+			shot("app-bar-hover");
+			return -600;
+		}
+		retries = 0;
+		check(!runs.empty(), std::format("hovering an entry shows the app's "
+			"name beside it, toward the screen's centre ({} runs)", runs.size()));
+		app_bar_target = nullptr;
+		for (const std::unique_ptr<View> &view : server->toplevels) {
+			if (view->mapped) {
+				app_bar_target = view.get();
+				break;
+			}
+		}
+		app_bar_entry = {strip.x, strip.y, toolbar_button, toolbar_button};
+		click(strip.x + toolbar_button / 2.0, strip.y + toolbar_button / 2.0);
+		return 700;
+	}
+	case 543: { // several windows: the unfolded list, and the row for that one
+		if (app_bar_windows_of(app_bar_target) <= 1) {
+			return 300; // one window: the click already went there
+		}
+		LayerSurface *flyout = app_bar_flyout_layer();
+		if (flyout == nullptr && retries++ < 40) {
+			return -200;
+		}
+		retries = 0;
+		check(flyout != nullptr,
+			"the left-edge entry unfolded its windows beside it");
+		auto [x, y] = app_bar_flyout_row(app_bar_entry, app_bar_target);
+		click(x, y);
+		return 900;
+	}
+	case 544: { // the click took the view to that window
+		Output *output = server->outputs.front().get();
+		bool landed = !output->overview.active() && !output->camera.panning()
+			&& !output->camera.zooming() && app_bar_target != nullptr
+			&& app_bar_target->frame_rect().intersects(output->viewport());
+		if (!landed && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		check(landed, "a click on the left-edge app bar took the view to the "
+			"window");
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item
