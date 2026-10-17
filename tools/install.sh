@@ -11,6 +11,9 @@
 # --uninstall restores the default first (the packages' own removal hooks run
 # the same restore again — it is idempotent), so the login is never left
 # pointing at a session that no longer exists.
+#
+# The package is built by the user's own copy; root is asked for only to
+# install or remove it, and the root copy is handed the step to do.
 set -euo pipefail
 
 T=$(cd "$(dirname "$0")" && pwd -P)
@@ -42,7 +45,7 @@ while [ $# -gt 0 ]; do
 done
 
 family() { # which package format this distro takes
-	. /etc/os-release
+	. "${OS_RELEASE:-/etc/os-release}"
 	case "${ID:-}" in
 		arch) echo arch; return 0 ;;
 		debian | ubuntu) echo debian; return 0 ;;
@@ -56,6 +59,8 @@ family() { # which package format this distro takes
 	echo unknown
 }
 
+# require_root <step...> — re-runs this script through sudo with the step the
+# root copy has to do, so nothing of the user's command line is lost
 require_root() {
 	if [ "$(id -u)" -ne 0 ]; then
 		if command -v sudo >/dev/null 2>&1; then
@@ -63,6 +68,11 @@ require_root() {
 		fi
 		die "this step needs root (installing and removing packages)"
 	fi
+}
+
+newest() { # newest <dir> <name pattern> — the newest matching file, if any
+	find "$1" -maxdepth 1 -name "$2" -printf '%T@ %p\n' 2>/dev/null |
+		sort -nr | head -1 | cut -d' ' -f2-
 }
 
 installed() {
@@ -81,19 +91,27 @@ cmd_install() {
 		*) die "unsupported distro: build from source instead (see README), or package it yourself" ;;
 	esac
 
+	local pattern
+	case $f in
+		arch) pattern='*.pkg.tar.zst' ;;
+		debian) pattern='*.deb' ;;
+	esac
+
 	if [ -n "$package" ]; then
 		artifact=$(realpath "$package")
+		[ -f "$artifact" ] || die "no such package: $package"
 	else
+		[ "$(id -u)" -ne 0 ] || die "run install.sh as yourself: it builds the package and asks for root only to install it (or pass --package <artifact>)"
 		echo "install.sh: building the package"
 		case $f in
 			arch) "$REPO/tools/package.sh" --arch >/dev/null ;;
 			debian) "$REPO/tools/package.sh" --deb >/dev/null ;;
 		esac
-		artifact=$(find "$REPO/dist" -maxdepth 1 \( -name '*.pkg.tar.zst' -o -name '*.deb' \) | head -1)
+		artifact=$(newest "$REPO/dist" "$pattern")
 	fi
 	[ -n "$artifact" ] || die "no package artifact found"
 
-	require_root
+	require_root --package "$artifact"
 	echo "install.sh: installing $artifact"
 	case $f in
 		arch) pacman -U "$artifact" ;;
@@ -141,7 +159,7 @@ cmd_uninstall() {
 		echo "install.sh: wayland-canvas is not installed"
 		return 0
 	fi
-	require_root
+	require_root --uninstall
 	# restore before the files go; the removal hooks run the same restore
 	# again, which is a no-op by then
 	if command -v wayland-canvas-session >/dev/null 2>&1; then

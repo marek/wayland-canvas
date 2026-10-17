@@ -105,14 +105,25 @@ non-zero and changes nothing.
 
 ## Install and uninstall
 
-`tools/install.sh` detects the distro (`/etc/os-release`), builds — or takes,
-with `--package` — the matching artifact, installs it with the system package
-manager, asks "Make wayland-canvas the default session at login?" and runs
+`tools/install.sh` detects the distro (`/etc/os-release`; `$OS_RELEASE`
+overrides the file the tests read), builds — or takes, with `--package` — the
+matching artifact, installs it with the system package manager, asks "Make
+wayland-canvas the default session at login?" and runs
 `wayland-canvas-session set-default` on yes; the question needs a terminal,
 and without one the default is left unchanged. `--uninstall` restores the
 default first and then removes the package; the packages' own removal hooks
 run the same restore again, which is a no-op by then, so a plain
 `pacman -R` or `apt remove` is equally clean.
+
+Root is for the package manager and nothing else:
+
+| Subject | Rule |
+|---|---|
+| Where root starts | the install or the removal only. The package is built by the user's own copy of `install.sh`, before it asks for root |
+| The re-run through sudo | the root copy is given the step it has to do — `--package <artifact>` for an install, `--uninstall` for a removal — so an argument is never lost and nothing is built again as root. Run as root with no `--package`, `install.sh` says to run it as the user instead |
+| Which artifact | the one of this distro's format, newest first, whatever else `dist/` holds |
+| Building as root | `tools/package.sh` refuses, except with `--here` in the release container, where root is all there is. It never changes the owner of the checkout: only its own scratch directory and the output directory are handed to the unprivileged account makepkg runs as |
+| Proof | the packaging suite drives both copies of `install.sh` against a stub `sudo`, a stub package manager and a stub `package.sh`: the arguments reach the root copy, the root copy builds nothing, and a root `package.sh` without `--here` exits non-zero with the checkout untouched |
 
 ## Cross-links
 

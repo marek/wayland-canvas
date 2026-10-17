@@ -82,10 +82,10 @@ These decisions close three open boxes of
 
 ## Install flow
 
-- [ ] `tools/install.sh` keeps its arguments when it re-runs through sudo, and the root copy installs the package the user's copy built instead of building again
-- [ ] `tools/package.sh` refuses to run as root outside the release container (`--here`) and never changes the checkout's owner
-- [ ] `tools/install.sh` takes the package of this distro's format when `dist/` holds both
-- [ ] Packaging tests: through a stub `sudo`, `--package` and `--uninstall` reach the root copy and nothing is built there; a root `package.sh` without `--here` exits non-zero and leaves the checkout as it was
+- [x] `tools/install.sh` keeps its arguments when it re-runs through sudo, and the root copy installs the package the user's copy built instead of building again
+- [x] `tools/package.sh` refuses to run as root outside the release container (`--here`) and never changes the checkout's owner
+- [x] `tools/install.sh` takes the package of this distro's format when `dist/` holds both
+- [x] Packaging tests: through a stub `sudo`, `--package` and `--uninstall` reach the root copy and nothing is built there; a root `package.sh` without `--here` exits non-zero and leaves the checkout as it was
 
 ## Lock screen
 

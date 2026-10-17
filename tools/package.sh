@@ -51,6 +51,13 @@ if [ "$want_arch" -eq 0 ] && [ "$want_deb" -eq 0 ]; then
 	want_arch=1
 	want_deb=1
 fi
+# Root belongs to the release container (--here), where the system already is
+# the build environment; a root build on a contributor's machine writes root's
+# files into their checkout and their caches.
+if [ "$(id -u)" -eq 0 ] && [ "$here" -eq 0 ]; then
+	echo "package.sh: refusing to build as root; run it as yourself (--here is for the release container)" >&2
+	exit 2
+fi
 out=$(realpath -m "$out")
 mkdir -p "$out"
 
@@ -65,17 +72,20 @@ build_arch() {
 		echo "package.sh: --arch needs makepkg (an Arch system or container)" >&2
 		exit 2
 	}
-	# makepkg refuses to run as root, and in a container root is all there
-	# is: drop to the image's own unprivileged nobody, with the tree and a
-	# scratch HOME it can write. No account is created or changed.
+	# makepkg refuses to run as root, and in the release container root is
+	# all there is: drop to the image's own unprivileged nobody, with a
+	# scratch tree and a HOME it can write. No account is created or
+	# changed, and the checkout keeps its owner.
 	local exec_as=()
 	if [ "$(id -u)" -eq 0 ]; then
-		local home=${CANVAS_TMP:-$REPO/tmp}/makepkg-home
-		mkdir -p "$home"
-		chown -R nobody "$REPO" "$out" "$home"
+		local scratch=${CANVAS_TMP:-$REPO/tmp}
+		local home=$scratch/makepkg-home
+		mkdir -p "$home" "$scratch/packaging-arch" "$out"
+		chown nobody "$scratch"
+		chown -R nobody "$scratch/packaging-arch" "$out" "$home"
 		echo "package.sh: makepkg as nobody (root cannot run it)"
 		exec_as=(setpriv --reuid nobody --regid nobody --clear-groups
-			env "HOME=$home" "CANVAS_TMP=${CANVAS_TMP:-$REPO/tmp}")
+			env "HOME=$home" "CANVAS_TMP=$scratch")
 	fi
 	"${exec_as[@]}" "$T/package-arch.sh" "$out"
 }
