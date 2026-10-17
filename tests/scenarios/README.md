@@ -337,6 +337,25 @@ own the machine's Wayland display namespace and GPU.
   the recording (`state.recording` null again), the dot leaves the bar
   with it, and ffprobe reads the file as a playing screen-sized video.
 
+  Last, the toolbar's edges. The themed foot window is focused and
+  Super+M minimizes it onto the shelf, and the overview that follows
+  shows the toolbar on its default right edge. Then each edge the
+  config can name is written into the scratch `shell.json` as an edit
+  (`toolbar.position: left`, `top`, `bottom`, then `right` again) —
+  each write reloads the shell, and the strip's placed box is read from
+  the compositor's layer surfaces, never assumed: a column or row of
+  44 px squares, 8 px from the edge (the top row below the bar),
+  centred along it. A side toolbar clears nothing — the shelf keeps its
+  place along the bottom — but the bottom edge must carry the shelf
+  above the strip (the layout's own numbers, the same ones its
+  hit-testing reads). On every edge the note button's colour flyout
+  must open toward the screen's centre — its yellow swatch row read on
+  the screenshot in the region the toolbar's own geometry puts the card
+  — and the button's second click must fold it, the pointer parked
+  clear throughout. The run leaves the overview with Escape — the
+  toolbar slides out, nothing outlives it — and the config back at
+  right. Screenshots land in `tmp/scenarios/bar/edges-*.png`.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only
