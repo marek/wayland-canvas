@@ -122,6 +122,16 @@ Item {
 			|| position === "right" ? position : "right"
 	}
 
+	// The app bar's edge and switch, live from the config: the left edge and
+	// on when unset (docs/intents/shell/app-bar.md).
+	readonly property string appBarPosition: {
+		var position = config.appbar ? config.appbar.position : undefined
+		return position === "right" || position === "top" || position === "bottom"
+			|| position === "left" ? position : "left"
+	}
+	readonly property bool appBarEnabled:
+		!(config.appbar && config.appbar.enabled === false)
+
 	// Whether the config's bar.hidden names this widget.
 	function barHidden(name) {
 		var hidden = config.bar && config.bar.hidden ? config.bar.hidden : null
@@ -158,6 +168,28 @@ Item {
 		}
 		config.toolbar = config.toolbar || {}
 		config.toolbar.position = edge
+		writeConfig()
+		rebuildRegistry()
+		return true
+	}
+
+	// Writes appbar.position and appbar.enabled; both bars follow the live
+	// bindings. Anything but an edge is refused.
+	function setAppBarPosition(edge) {
+		if (edge !== "right" && edge !== "left" && edge !== "top"
+				&& edge !== "bottom") {
+			return false
+		}
+		config.appbar = config.appbar || {}
+		config.appbar.position = edge
+		writeConfig()
+		rebuildRegistry()
+		return true
+	}
+
+	function setAppBarEnabled(on) {
+		config.appbar = config.appbar || {}
+		config.appbar.enabled = on === true
 		writeConfig()
 		rebuildRegistry()
 		return true

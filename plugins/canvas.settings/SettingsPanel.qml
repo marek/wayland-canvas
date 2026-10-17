@@ -356,6 +356,25 @@ PanelCard {
 		}
 	}
 
+	// The app bar shares this page: it is the other strip of the overview
+	// (docs/intents/shell/app-bar.md).
+	readonly property string appBarPosition: api != null && api.shell != null
+		? api.shell.appBarPosition : "left"
+	readonly property bool appBarEnabled: api == null || api.shell == null
+		|| api.shell.appBarEnabled !== false
+
+	function setAppBarEdge(edge) {
+		if (api != null && api.shell != null) {
+			api.shell.setAppBarPosition(edge)
+		}
+	}
+
+	function setAppBarEnabled(on) {
+		if (api != null && api.shell != null) {
+			api.shell.setAppBarEnabled(on)
+		}
+	}
+
 	function setHidden(name, hidden) {
 		if (api != null && api.shell != null) {
 			api.shell.setBarHidden(name, hidden)
@@ -733,6 +752,52 @@ PanelCard {
 				description: "A row above the bottom edge"
 				chosen: root.toolbarPosition === "bottom"
 				onPicked: root.setEdge("bottom")
+			}
+
+			PanelSectionHeader {
+				text: "The app bar"
+			}
+
+			PanelRow {
+				label: "Show the app bar"
+				detail: "Every open app on an edge of the overview"
+				clickable: false
+
+				PanelSwitch {
+					anchors.right: parent.right
+					anchors.rightMargin: 8
+					anchors.verticalCenter: parent.verticalCenter
+					checked: root.appBarEnabled
+					onToggled: root.setAppBarEnabled(!root.appBarEnabled)
+				}
+			}
+
+			ChoiceRow {
+				label: "Left"
+				description: "A column on the left edge"
+				chosen: root.appBarPosition === "left"
+				onPicked: root.setAppBarEdge("left")
+			}
+
+			ChoiceRow {
+				label: "Right"
+				description: "A column on the right edge"
+				chosen: root.appBarPosition === "right"
+				onPicked: root.setAppBarEdge("right")
+			}
+
+			ChoiceRow {
+				label: "Top"
+				description: "A row under the bar"
+				chosen: root.appBarPosition === "top"
+				onPicked: root.setAppBarEdge("top")
+			}
+
+			ChoiceRow {
+				label: "Bottom"
+				description: "A row above the bottom edge"
+				chosen: root.appBarPosition === "bottom"
+				onPicked: root.setAppBarEdge("bottom")
 			}
 		}
 	}

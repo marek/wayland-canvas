@@ -3040,10 +3040,13 @@ int settings_gestures_column() {
 		+ 2 * settings_gap;
 }
 
-// The Toolbar tab's column of content: one header and the four edge
-// choices, each a two-line choice row.
+// The Toolbar tab's column of content: a header and the toolbar's four edge
+// choices, then the app bar's header, its switch row and its own four edges
+// (docs/intents/shell/app-bar.md); every row is a two-line one.
 int settings_toolbar_column() {
-	return settings_header + 4 * settings_choice + 4 * settings_gap;
+	return settings_section_height(0, 4)   // the toolbar's edges
+		+ settings_section_height(0, 5)     // the app bar: the switch, 4 edges
+		+ settings_gap;
 }
 
 // Where PanelCard puts the card: level with the gear button, clamped
