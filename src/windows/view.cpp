@@ -144,14 +144,6 @@ bool shown_anywhere(const View &view) {
 	return false;
 }
 
-// The client process behind the view.
-pid_t client_pid(const View &view) {
-	pid_t pid = 0;
-	wl_client_get_credentials(wl_resource_get_client(view.wlr->resource), &pid, nullptr,
-		nullptr);
-	return pid;
-}
-
 // For the hint about a window that opened unseen: where it is.
 std::string opened_where(View &view) {
 	const Desktop *desktop = view.server.canvas.desktop_of(view);
@@ -168,7 +160,7 @@ void place(View &view) {
 		view.y = 0;
 		return;
 	}
-	wlr_box geo = view.wlr->base->geometry;
+	wlr_box geo = view.shell_geometry();
 	int tb = view.deco.titlebar();
 	int bw = view.deco.border();
 	int fw = geo.width + 2 * bw;
@@ -239,7 +231,7 @@ void place(View &view) {
 }
 
 bool is_initialized(const View &view) {
-	return view.wlr->base->initialized;
+	return view.initialized();
 }
 
 // ---- interactive move/resize requests ----
@@ -308,7 +300,7 @@ bool popup_unconstrain(Popup &popup) {
 		}
 		if (picked != nullptr) {
 			Rect viewport = picked->viewport();
-			wlr_box geo = view->wlr->base->geometry;
+			wlr_box geo = view->shell_geometry();
 			// Canvas -> toplevel surface-local: the surface origin sits at
 			// (view->x - geo.x, view->y - geo.y) on the canvas.
 			wlr_box box{
@@ -342,7 +334,7 @@ bool popup_unconstrain(Popup &popup) {
 // ---- geometry ----
 
 wlr_box View::content_box() const {
-	wlr_box geo = wlr->base->geometry;
+	wlr_box geo = shell_geometry();
 	return wlr_box{x, y, geo.width, geo.height};
 }
 
@@ -386,7 +378,7 @@ void View::move(int new_x, int new_y) {
 }
 
 void View::close() {
-	wlr_xdg_toplevel_send_close(wlr);
+	send_close();
 }
 
 void View::activate() {
@@ -433,7 +425,7 @@ void View::set_maximized(bool want) {
 		if (fullscreen) {
 			fullscreen = false;
 			if (is_initialized(*this)) {
-				wlr_xdg_toplevel_set_fullscreen(wlr, false);
+				tell_fullscreen(false);
 			}
 			if (foreign_) {
 				wlr_foreign_toplevel_handle_v1_set_fullscreen(foreign_.get(), false);
@@ -444,19 +436,19 @@ void View::set_maximized(bool want) {
 		x = area.x;
 		y = area.y + tb;
 		if (is_initialized(*this)) {
-			wlr_xdg_toplevel_set_maximized(wlr, true);
-			wlr_xdg_toplevel_set_size(wlr, area.width, area.height - tb);
+			tell_maximized(true);
+			configure_size(area.width, area.height - tb);
 		}
 	} else {
 		maximized = false;
 		if (is_initialized(*this)) {
-			wlr_xdg_toplevel_set_maximized(wlr, false);
+			tell_maximized(false);
 			if (!wlr_box_empty(&saved)) {
-				wlr_xdg_toplevel_set_size(wlr, saved.width, saved.height);
+				configure_size(saved.width, saved.height);
 				x = saved.x;
 				y = saved.y;
 			} else {
-				wlr_xdg_toplevel_set_size(wlr, 0, 0);
+				configure_size(0, 0);
 			}
 		}
 	}
@@ -488,7 +480,7 @@ void View::set_fullscreen(bool want) {
 		if (maximized) {
 			maximized = false;
 			if (is_initialized(*this)) {
-				wlr_xdg_toplevel_set_maximized(wlr, false);
+				tell_maximized(false);
 			}
 			if (foreign_) {
 				wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), false);
@@ -498,8 +490,8 @@ void View::set_fullscreen(bool want) {
 		x = area.x;
 		y = area.y;
 		if (is_initialized(*this)) {
-			wlr_xdg_toplevel_set_fullscreen(wlr, true);
-			wlr_xdg_toplevel_set_size(wlr, area.width, area.height);
+			tell_fullscreen(true);
+			configure_size(area.width, area.height);
 		}
 		// Fullscreen windows sit above everything else.
 		if (mapped) {
@@ -509,13 +501,13 @@ void View::set_fullscreen(bool want) {
 	} else {
 		fullscreen = false;
 		if (is_initialized(*this)) {
-			wlr_xdg_toplevel_set_fullscreen(wlr, false);
+			tell_fullscreen(false);
 			if (!wlr_box_empty(&saved)) {
-				wlr_xdg_toplevel_set_size(wlr, saved.width, saved.height);
+				configure_size(saved.width, saved.height);
 				x = saved.x;
 				y = saved.y;
 			} else {
-				wlr_xdg_toplevel_set_size(wlr, 0, 0);
+				configure_size(0, 0);
 			}
 		}
 	}
@@ -556,14 +548,13 @@ void View::set_frame(wlr_box frame) {
 	fullscreen = false;
 	if (is_initialized(*this)) {
 		if (was_maximized) {
-			wlr_xdg_toplevel_set_maximized(wlr, false);
+			tell_maximized(false);
 		}
 		if (was_fullscreen) {
-			wlr_xdg_toplevel_set_fullscreen(wlr, false);
+			tell_fullscreen(false);
 		}
-		wlr_xdg_toplevel_set_tiled(wlr,
-			WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT | WLR_EDGE_RIGHT);
-		wlr_xdg_toplevel_set_size(wlr, content.width, content.height);
+		tell_tiled(true);
+		configure_size(content.width, content.height);
 	}
 	if (foreign_) {
 		if (was_maximized) {
@@ -588,9 +579,7 @@ void View::set_tiled(bool want) {
 	}
 	tiled = want;
 	if (is_initialized(*this)) {
-		wlr_xdg_toplevel_set_tiled(wlr, want
-			? WLR_EDGE_TOP | WLR_EDGE_BOTTOM | WLR_EDGE_LEFT | WLR_EDGE_RIGHT
-			: 0);
+		tell_tiled(want);
 	}
 }
 
@@ -600,31 +589,10 @@ View *View::from_surface(wlr_surface *surface) {
 	if (surface == nullptr) {
 		return nullptr;
 	}
-	surface = wlr_surface_get_root_surface(surface);
-	while (true) {
-		wlr_xdg_popup *popup = wlr_xdg_popup_try_from_wlr_surface(surface);
-		if (popup == nullptr || popup->parent == nullptr) {
-			break;
-		}
-		surface = wlr_surface_get_root_surface(popup->parent);
+	if (View *view = from_xdg_surface(surface)) {
+		return view;
 	}
-	wlr_xdg_toplevel *toplevel = wlr_xdg_toplevel_try_from_wlr_surface(surface);
-	if (toplevel == nullptr || toplevel->base == nullptr) {
-		return nullptr;
-	}
-	return static_cast<View *>(toplevel->base->data);
-}
-
-void View::for_each_surface(
-	std::function_ref<void(wlr_surface *surface, int sx, int sy)> fn) const {
-	wlr_xdg_surface_for_each_surface(
-		wlr->base,
-		[](wlr_surface *surface, int sx, int sy, void *data) {
-			auto &callback =
-				*static_cast<std::function_ref<void(wlr_surface *, int, int)> *>(data);
-			callback(surface, sx, sy);
-		},
-		&fn);
+	return from_x11_surface(surface);
 }
 
 // ---- foreign toplevel handle ----
@@ -660,11 +628,11 @@ void View::create_foreign() {
 	}
 	foreign_.reset(handle);
 	handle->data = this;
-	if (wlr->title != nullptr) {
-		wlr_foreign_toplevel_handle_v1_set_title(handle, wlr->title);
+	if (shell_title() != nullptr) {
+		wlr_foreign_toplevel_handle_v1_set_title(handle, shell_title());
 	}
-	if (wlr->app_id != nullptr) {
-		wlr_foreign_toplevel_handle_v1_set_app_id(handle, wlr->app_id);
+	if (shell_app_id() != nullptr) {
+		wlr_foreign_toplevel_handle_v1_set_app_id(handle, shell_app_id());
 	}
 	if (maximized) {
 		wlr_foreign_toplevel_handle_v1_set_maximized(handle, true);
@@ -689,7 +657,7 @@ void View::create_foreign() {
 	// clients (image_capture.cpp reads it back through ->data).
 	if (server.image_capture.list != nullptr) {
 		wlr_ext_foreign_toplevel_handle_v1_state state{
-			.title = wlr->title, .app_id = wlr->app_id};
+			.title = shell_title(), .app_id = shell_app_id()};
 		wlr_ext_foreign_toplevel_handle_v1 *ext =
 			wlr_ext_foreign_toplevel_handle_v1_create(server.image_capture.list, &state);
 		if (ext != nullptr) {
@@ -729,28 +697,6 @@ const char *View::ext_toplevel_identifier() const {
 }
 
 // ---- toplevel events ----
-
-View::View(Server &server, wlr_xdg_toplevel *wlr)
-	: server(server), wlr(wlr), deco(*this) {
-	static std::atomic<uint64_t> next_session_id = 1;
-	session_id = next_session_id++;
-	wlr->base->data = this;
-	map_.connect<&View::handle_map>(wlr->base->surface->events.map, this);
-	unmap_.connect<&View::handle_unmap>(wlr->base->surface->events.unmap, this);
-	commit_.connect<&View::handle_commit>(wlr->base->surface->events.commit, this);
-	destroy_.connect<&View::handle_destroy>(wlr->events.destroy, this);
-	request_move_.connect<&View::handle_request_move>(wlr->events.request_move, this);
-	request_resize_.connect<&View::handle_request_resize>(
-		wlr->events.request_resize, this);
-	request_maximize_.connect<&View::handle_request_maximize>(
-		wlr->events.request_maximize, this);
-	request_minimize_.connect<&View::handle_request_minimize>(
-		wlr->events.request_minimize, this);
-	request_fullscreen_.connect<&View::handle_request_fullscreen>(
-		wlr->events.request_fullscreen, this);
-	set_title_.connect<&View::handle_set_title>(wlr->events.set_title, this);
-	set_app_id_.connect<&View::handle_set_app_id>(wlr->events.set_app_id, this);
-}
 
 View::~View() = default;
 
@@ -800,42 +746,38 @@ void View::handle_unmap() {
 	damage();
 }
 
-void View::handle_commit() {
-	wlr_xdg_surface *base = wlr->base;
-	if (base->initial_commit) {
-		wlr_xdg_toplevel_set_wm_capabilities(wlr,
-			WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE
-			| WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN
-			| WLR_XDG_TOPLEVEL_WM_CAPABILITIES_MINIMIZE);
-		deco.handle_initial_commit();
-		launched_for = server.launches.spot_for(client_pid(*this));
-		// Until it maps, the frame waits where the window will open: a request
-		// to start maximized or fullscreen, sent before this commit or after
-		// it (foot asks after), fills the area around that spot.
-		place(*this);
-		if (wlr->requested.fullscreen) {
-			set_fullscreen(true);
-		} else if (wlr->requested.maximized) {
-			set_maximized(true);
-		} else {
-			wlr_xdg_toplevel_set_size(wlr, 0, 0);
-		}
-		return;
+// The client's first commit, whichever shell it speaks: the window learns
+// where it will open and what state it asked to open in.
+void View::handle_first_commit() {
+	deco.handle_initial_commit();
+	launched_for = server.launches.spot_for(client_pid());
+	// Until it maps, the frame waits where the window will open: a request
+	// to start maximized or fullscreen, sent before this commit or after
+	// it (foot asks after), fills the area around that spot.
+	place(*this);
+	if (wants_fullscreen()) {
+		set_fullscreen(true);
+	} else if (wants_maximized()) {
+		set_maximized(true);
+	} else {
+		configure_size(0, 0);
 	}
+}
+
+void View::handle_commit() {
 	if (!mapped) {
 		return;
 	}
 	if (resize_edges != 0) {
 		// Interactive resize: keep the opposite edge anchored.
-		wlr_box geo = base->geometry;
+		wlr_box geo = shell_geometry();
 		if (resize_edges & WLR_EDGE_LEFT) {
 			x = resize_start.x + resize_start.width - geo.width;
 		}
 		if (resize_edges & WLR_EDGE_TOP) {
 			y = resize_start.y + resize_start.height - geo.height;
 		}
-		if (resize_end_serial != 0
-				&& base->current.configure_serial >= resize_end_serial) {
+		if (resize_end_serial != 0 && resize_settled(resize_end_serial)) {
 			resize_edges = 0;
 			resize_end_serial = 0;
 		}
@@ -879,49 +821,28 @@ void View::handle_request_resize(wlr_xdg_toplevel_resize_event *event) {
 	}
 }
 
-void View::handle_request_maximize() {
-	if (!is_initialized(*this)) {
-		return; // the initial commit will honour the request
-	}
-	set_maximized(wlr->requested.maximized);
-	wlr_xdg_surface_schedule_configure(wlr->base);
-}
 
-void View::handle_request_minimize() {
-	if (!is_initialized(*this)) {
-		return;
-	}
-	set_minimized(wlr->requested.minimized);
-	wlr_xdg_surface_schedule_configure(wlr->base);
-}
 
-void View::handle_request_fullscreen() {
-	if (!is_initialized(*this)) {
-		return;
-	}
-	set_fullscreen(wlr->requested.fullscreen);
-	wlr_xdg_surface_schedule_configure(wlr->base);
-}
 
 void View::handle_set_title() {
-	if (foreign_ != nullptr && wlr->title != nullptr) {
-		wlr_foreign_toplevel_handle_v1_set_title(foreign_.get(), wlr->title);
+	if (foreign_ != nullptr && shell_title() != nullptr) {
+		wlr_foreign_toplevel_handle_v1_set_title(foreign_.get(), shell_title());
 	}
 	if (ext_foreign_ != nullptr) {
 		wlr_ext_foreign_toplevel_handle_v1_state state{
-			.title = wlr->title, .app_id = wlr->app_id};
+			.title = shell_title(), .app_id = shell_app_id()};
 		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
 	damage();
 }
 
 void View::handle_set_app_id() {
-	if (foreign_ != nullptr && wlr->app_id != nullptr) {
-		wlr_foreign_toplevel_handle_v1_set_app_id(foreign_.get(), wlr->app_id);
+	if (foreign_ != nullptr && shell_app_id() != nullptr) {
+		wlr_foreign_toplevel_handle_v1_set_app_id(foreign_.get(), shell_app_id());
 	}
 	if (ext_foreign_ != nullptr) {
 		wlr_ext_foreign_toplevel_handle_v1_state state{
-			.title = wlr->title, .app_id = wlr->app_id};
+			.title = shell_title(), .app_id = shell_app_id()};
 		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
 	damage();
@@ -958,13 +879,12 @@ std::optional<ViewHit> Server::view_at(double cx, double cy, double zoom) {
 		if (!view->mapped || view->minimized) {
 			continue;
 		}
-		wlr_box geo = view->wlr->base->geometry;
+		wlr_box geo = view->shell_geometry();
 		// Canvas point -> toplevel surface-local coordinates.
 		double lx = cx - (view->x - geo.x);
 		double ly = cy - (view->y - geo.y);
 		double sub_x = 0, sub_y = 0;
-		wlr_surface *found = wlr_xdg_surface_surface_at(
-			view->wlr->base, lx, ly, &sub_x, &sub_y);
+		wlr_surface *found = view->surface_at(lx, ly, &sub_x, &sub_y);
 		if (found != nullptr) {
 			return ViewHit{view, found, sub_x, sub_y, DecoPart::none, 0};
 		}
@@ -1006,7 +926,7 @@ void Server::focus_view(View *view) {
 	View *prev = focused_view;
 	if (prev != view) {
 		if (prev != nullptr) {
-			wlr_xdg_toplevel_set_activated(prev->wlr, false);
+			prev->tell_activated(false);
 			if (prev->foreign_) {
 				wlr_foreign_toplevel_handle_v1_set_activated(prev->foreign_.get(), false);
 			}
@@ -1017,7 +937,7 @@ void Server::focus_view(View *view) {
 			// Raise to the top of the stacking order.
 			std::erase(views, view);
 			views.insert(views.begin(), view);
-			wlr_xdg_toplevel_set_activated(view->wlr, true);
+			view->tell_activated(true);
 			if (view->foreign_) {
 				wlr_foreign_toplevel_handle_v1_set_activated(view->foreign_.get(), true);
 			}
@@ -1032,7 +952,7 @@ void Server::focus_view(View *view) {
 		focused_layer = nullptr;
 	}
 	if (focused_layer == nullptr) {
-		focus_keyboard(view != nullptr ? view->wlr->base->surface : nullptr);
+		focus_keyboard(view != nullptr ? view->surface() : nullptr);
 	}
 }
 

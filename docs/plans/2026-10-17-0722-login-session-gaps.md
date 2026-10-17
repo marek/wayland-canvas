@@ -113,11 +113,14 @@ These decisions close three open boxes of
 
 ## X11 apps
 
-- [ ] Not started in this run: X11 windows. `View` is built on `wlr_xdg_toplevel` throughout (its geometry, its configures, its close, its title), so X11 windows as views is a dual-shell change across view, decoration, input, render and capture, and it was the one section too large to finish beside the rest. Nothing of it has landed: the wlroots subproject is still built with `xwayland=disabled`.
-- [ ] Intent: X11 windows: started on demand, `DISPLAY` handed over and back with `WAYLAND_DISPLAY`, windows as views (title bars, desktops, overview, states, close), override-redirect menus and tooltips, focus and activation, the clipboard both ways, scale 1 on hi-dpi, a machine without Xwayland
-- [ ] Build and package: wlroots with Xwayland; Arch `optdepends` xorg-xwayland, Debian `Recommends` xwayland
-- [ ] Compositor: X11 windows as views: map, title bars, move and resize, maximize, minimize and fullscreen requests, close through `WM_DELETE_WINDOW`, override-redirect windows placed beside their parent in canvas space, focus, the clipboard both ways
-- [ ] Scenario: an xcb client built with the tests maps a window with a title bar on the current desktop, takes a click and a key, is maximized and closed from its title bar; its popup lands beside its parent; text copied in it pastes in a Wayland client and back; with `WLR_XWAYLAND` naming a missing binary the compositor runs without X11
+- [x] The shell seam: `View` answers the canvas the same whichever shell a window speaks, with the two halves in `view_xdg.cpp` and `view_x11.cpp` and no protocol left in the shared code
+- [x] Intent: X11 windows: started on demand, `DISPLAY` handed over and back with `WAYLAND_DISPLAY`, windows as views (title bars, desktops, overview, states, close), override-redirect menus and tooltips, focus and activation, the clipboard both ways, scale 1 on hi-dpi, a machine without Xwayland
+- [x] Build and package: wlroots with Xwayland; Arch `optdepends` xorg-xwayland, Debian `Recommends` xwayland
+- [x] Compositor: X11 windows as views: map, title bars, move and resize, maximize, minimize and fullscreen requests, close through `WM_DELETE_WINDOW`, focus
+- [ ] Compositor: override-redirect windows placed beside their parent in canvas space and kept out of the window list, and the clipboard both ways between X11 and wayland clients
+- [ ] Hi-dpi: an X11 window drawn at scale 1 and enlarged on a scaled output (the user: it needs a hi-dpi screen)
+- [x] Scenario: an xcb client built with the tests maps a window with a title bar where the user is looking, takes a click and a key, is maximized from its title bar and closed by its × through `WM_DELETE_WINDOW`
+- [ ] Scenario: the popup beside its parent, the clipboard both ways, and `WLR_XWAYLAND` naming a missing binary leaving the compositor without X11
 
 ## Night light
 

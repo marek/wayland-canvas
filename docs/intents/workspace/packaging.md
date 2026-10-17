@@ -26,6 +26,7 @@ restored before the session file disappears.
 | Prompts | never from the packages themselves: pacman forbids prompts in install scripts, and the Debian maintainer scripts stay non-interactive. `tools/install.sh` is the one flow that asks, for both formats |
 | Removal hooks | Arch `pre_remove` and Debian `prerm` run `wayland-canvas-session restore`; Debian `postrm purge` removes `/var/lib/wayland-canvas` |
 | Tag builds | a `v<version>` tag — or a manual run — builds both formats on GitHub Actions and drafts a release from them (below) |
+| X11 runtime | optional: xorg-xwayland is `optdepends` on Arch and `Recommends` on Debian — X11 applications run through it ([../windows/x11.md](../windows/x11.md)), and the package is complete without it |
 | Top bar runtime | optional: quickshell is `optdepends` on Arch and `Recommends` on Debian (in sid) — the compositor starts the bar when `qs` is on PATH (`-B` turns it off), and the package is complete without it ([../shell/bar.md](../shell/bar.md)) |
 | Screen sharing runtime | optional: xdg-desktop-portal-wlr is `optdepends` on Arch and `Recommends` on Debian — apps share screens through it ([../platform/protocols.md](../platform/protocols.md#screen-sharing)), and the package is complete without it |
 

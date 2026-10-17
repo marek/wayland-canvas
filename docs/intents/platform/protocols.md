@@ -12,6 +12,7 @@ without a policy is not added.
 | Protocol | Enables / policy |
 |---|---|
 | xdg-shell | application windows ([../windows/window-management.md](../windows/window-management.md)) |
+| Xwayland | X11 applications: the window manager is the compositor, and an X11 window is a view ([../windows/x11.md](../windows/x11.md)); the X server starts with the first X11 client |
 | xdg-decoration | negotiating server-side decorations; server-side is what the compositor offers ([../windows/title-bars.md](../windows/title-bars.md)) |
 | server-decoration (KDE) | server-side decorations for clients that speak the KDE protocol instead |
 | layer-shell | bars, launchers, wallpapers, notifications; the top layer hides under a fullscreen window; exclusive zones carve the usable area ([outputs.md](outputs.md)) |

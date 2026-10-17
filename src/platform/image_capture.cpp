@@ -184,10 +184,11 @@ void ImageCapture::handle_new_request(
 	source->base.height = std::max(1, size.height);
 	ToplevelSource *s = source.get();
 	s->commit_.connect<&ToplevelSource::handle_commit>(
-		view->wlr->base->surface->events.commit, s);
+		view->surface()->events.commit, s);
 	s->unmap_.connect<&ToplevelSource::handle_unmap>(
-		view->wlr->base->surface->events.unmap, s);
-	s->destroy_.connect<&ToplevelSource::handle_destroy>(view->wlr->events.destroy, s);
+		view->surface()->events.unmap, s);
+	s->destroy_.connect<&ToplevelSource::handle_destroy>(
+		view->surface()->events.destroy, s);
 	sources_.push_back(std::move(source));
 	wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(request, &s->base);
 }
