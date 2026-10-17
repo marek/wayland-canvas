@@ -5,6 +5,9 @@
 //   KEY <keycode>     a key press arrived
 //   BUTTON <n>        a pointer button arrived
 //   CONFIGURED <w>x<h> the window manager resized it
+//   POPUP <x>,<y>     an override-redirect window was mapped there
+//   OFFERED           the client owns the X11 clipboard
+//   PASTED <text>     what the X11 clipboard holds, read back
 //   CLOSING           WM_DELETE_WINDOW arrived; the client exits
 //
 // so the compositor's X11 half can be proven without installing an X11
@@ -16,6 +19,15 @@
 #include <unistd.h>
 #include <xcb/xcb.h>
 
+// The atom of a name, interned once.
+static xcb_atom_t intern(xcb_connection_t *connection, const char *name) {
+	xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(connection,
+		xcb_intern_atom(connection, 0, (uint16_t)strlen(name), name), NULL);
+	xcb_atom_t atom = reply != NULL ? reply->atom : XCB_ATOM_NONE;
+	free(reply);
+	return atom;
+}
+
 static void say(const char *format, ...) {
 	va_list args;
 	va_start(args, format);
@@ -26,12 +38,26 @@ static void say(const char *format, ...) {
 
 int main(int argc, char **argv) {
 	int width = 400, height = 300;
+	// Where the menu goes, in the same space the window manager places
+	// windows in.
+	int popup_x = 120, popup_y = 140, popup_w = 160, popup_h = 90;
 	uint32_t colour = 0x00c04040;
 	for (int i = 1; i < argc; i++) {
 		if (strncmp(argv[i], "--size=", 7) == 0) {
 			sscanf(argv[i] + 7, "%dx%d", &width, &height);
 		} else if (strncmp(argv[i], "--colour=", 9) == 0) {
 			colour = (uint32_t)strtoul(argv[i] + 9, NULL, 16);
+		}
+	}
+	const char *offer = NULL;
+	int popup = 0, paste = 0, paste_tries = 0;
+	for (int i = 1; i < argc; i++) {
+		if (strncmp(argv[i], "--offer=", 8) == 0) {
+			offer = argv[i] + 8;
+		} else if (strcmp(argv[i], "--popup") == 0) {
+			popup = 1;
+		} else if (strcmp(argv[i], "--paste") == 0) {
+			paste = 1;
 		}
 	}
 	int screen_number = 0;
@@ -81,6 +107,41 @@ int main(int argc, char **argv) {
 	xcb_flush(connection);
 	say("MAPPED %dx%d\n", width, height);
 
+	// A menu of our own: an override-redirect window beside the first one,
+	// which the window manager must place where we put it and decorate not
+	// at all.
+	xcb_window_t menu = XCB_NONE;
+	if (popup) {
+		menu = xcb_generate_id(connection);
+		uint32_t menu_values[2] = {0x0040c040, 1}; // colour, override-redirect
+		xcb_create_window(connection, XCB_COPY_FROM_PARENT, menu, screen->root,
+			(int16_t)popup_x, (int16_t)popup_y, (uint16_t)popup_w,
+			(uint16_t)popup_h, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+			screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT,
+			menu_values);
+		xcb_map_window(connection, menu);
+		xcb_flush(connection);
+		say("POPUP %d,%d\n", popup_x, popup_y);
+	}
+
+	// The clipboard, this side of it: owning the X11 selection, and
+	// reading back whatever owns it (a wayland client's copy arrives the
+	// same way, through the compositor's bridge).
+	xcb_atom_t clipboard = intern(connection, "CLIPBOARD");
+	xcb_atom_t utf8 = intern(connection, "UTF8_STRING");
+	xcb_atom_t targets = intern(connection, "TARGETS");
+	xcb_atom_t selection_prop = intern(connection, "CANVAS_SELECTION");
+	if (offer != NULL) {
+		xcb_set_selection_owner(connection, window, clipboard, XCB_CURRENT_TIME);
+		xcb_flush(connection);
+		say("OFFERED\n");
+	}
+	if (paste) {
+		xcb_convert_selection(connection, window, clipboard, utf8,
+			selection_prop, XCB_CURRENT_TIME);
+		xcb_flush(connection);
+	}
+
 	xcb_generic_event_t *event = NULL;
 	while ((event = xcb_wait_for_event(connection)) != NULL) {
 		switch (event->response_type & ~0x80) {
@@ -94,6 +155,69 @@ int main(int argc, char **argv) {
 			xcb_configure_notify_event_t *configure =
 				(xcb_configure_notify_event_t *)event;
 			say("CONFIGURED %dx%d\n", configure->width, configure->height);
+			break;
+		}
+		case XCB_SELECTION_REQUEST: {
+			// Someone (the compositor, for a wayland client) wants what we
+			// put on the clipboard.
+			xcb_selection_request_event_t *request =
+				(xcb_selection_request_event_t *)event;
+			xcb_selection_notify_event_t notify = {
+				.response_type = XCB_SELECTION_NOTIFY,
+				.time = request->time,
+				.requestor = request->requestor,
+				.selection = request->selection,
+				.target = request->target,
+				.property = request->property,
+			};
+			if (offer != NULL && request->target == utf8) {
+				xcb_change_property(connection, XCB_PROP_MODE_REPLACE,
+					request->requestor, request->property, utf8, 8,
+					(uint32_t)strlen(offer), offer);
+			} else if (offer != NULL && request->target == targets) {
+				xcb_atom_t list[2] = {targets, utf8};
+				xcb_change_property(connection, XCB_PROP_MODE_REPLACE,
+					request->requestor, request->property, XCB_ATOM_ATOM, 32,
+					2, list);
+			} else {
+				notify.property = XCB_NONE;
+			}
+			xcb_send_event(connection, 0, request->requestor, 0,
+				(const char *)&notify);
+			xcb_flush(connection);
+			break;
+		}
+		case XCB_SELECTION_NOTIFY: {
+			xcb_selection_notify_event_t *notify =
+				(xcb_selection_notify_event_t *)event;
+			// The offer may not have crossed the compositor's bridge yet:
+			// ask again rather than report an empty clipboard.
+			if (notify->property == XCB_NONE) {
+				if (++paste_tries < 20) {
+					usleep(200000);
+					xcb_convert_selection(connection, window, clipboard, utf8,
+						selection_prop, XCB_CURRENT_TIME);
+					xcb_flush(connection);
+					break;
+				}
+				say("PASTED\n");
+				break;
+			}
+			xcb_get_property_reply_t *value = xcb_get_property_reply(connection,
+				xcb_get_property(connection, 1, window, notify->property,
+					XCB_GET_PROPERTY_TYPE_ANY, 0, 1024), NULL);
+			int length = value != NULL ? xcb_get_property_value_length(value) : 0;
+			if (length == 0 && ++paste_tries < 20) {
+				free(value);
+				usleep(200000);
+				xcb_convert_selection(connection, window, clipboard, utf8,
+					selection_prop, XCB_CURRENT_TIME);
+				xcb_flush(connection);
+				break;
+			}
+			say("PASTED %.*s\n", length,
+				value != NULL ? (char *)xcb_get_property_value(value) : "");
+			free(value);
 			break;
 		}
 		case XCB_CLIENT_MESSAGE: {

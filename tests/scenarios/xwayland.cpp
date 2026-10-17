@@ -63,7 +63,25 @@ void mkdir_p(const std::string &path) {
 	std::filesystem::create_directories(path, ec);
 }
 
-bool start_client() {
+std::string read_text(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "r");
+	if (f == nullptr) {
+		return "";
+	}
+	std::string out;
+	char buf[256];
+	std::size_t n;
+	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+		out.append(buf, n);
+	}
+	std::fclose(f);
+	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+		out.pop_back();
+	}
+	return out;
+}
+
+bool start_client(const char *extra = nullptr, const char *extra2 = nullptr) {
 	const char *bin = std::getenv("CANVAS_X11_CLIENT");
 	if (bin == nullptr || *bin == '\0') {
 		return false;
@@ -80,8 +98,8 @@ bool start_client() {
 		close(fds[0]);
 		dup2(fds[1], 1);
 		close(fds[1]);
-		execl(bin, "x11-client",
-			std::format("--size={}x{}", client_w, client_h).c_str(),
+		std::string size = std::format("--size={}x{}", client_w, client_h);
+		execl(bin, "x11-client", size.c_str(), extra, extra2,
 			static_cast<char *>(nullptr));
 		_exit(127);
 	}
@@ -274,6 +292,114 @@ int run_step() {
 	case 8: {
 		check(x11_view() == nullptr, "its view went with it");
 		reap_client();
+		// A menu of the client's own: an override-redirect window.
+		check(start_client("--popup"), "an X11 client with a menu started");
+		return 1500;
+	}
+	case 9: {
+		if (client_said().find("POPUP") == std::string_view::npos && retries++ < 200) {
+			return -100;
+		}
+		check(client_said().find("POPUP") != std::string_view::npos,
+			"the client mapped its menu");
+		return 800;
+	}
+	case 10: { // the menu is where the client put it, and undecorated
+		View *menu = nullptr;
+		View *window = nullptr;
+		for (View *view : server->views) {
+			if (!view->mapped || !view->is_x11()) {
+				continue;
+			}
+			(view->override_redirect ? menu : window) = view;
+		}
+		if (menu == nullptr && retries++ < 50) {
+			return -100;
+		}
+		check(menu != nullptr, "the menu is on the canvas as its own surface");
+		check(window != nullptr, "beside the window it belongs to");
+		if (menu != nullptr) {
+			check(menu->deco.titlebar() == 0,
+				"an override-redirect window wears no title bar");
+			check(menu->x == 120 && menu->y == 140, std::format(
+				"it sits where its client put it ({},{})", menu->x, menu->y));
+			check(server->focused_view != menu,
+				"and it took no focus from the window");
+		}
+		reap_client();
+		return 800;
+	}
+	case 11: { // the clipboard: X11 to wayland
+		check(start_client("--offer=from-x11"), "an X11 client owning the clipboard started");
+		return 1500;
+	}
+	case 12: {
+		if (client_said().find("OFFERED") == std::string_view::npos && retries++ < 200) {
+			return -100;
+		}
+		check(client_said().find("OFFERED") != std::string_view::npos,
+			"the client owns the X11 clipboard");
+		spawn(std::format("wl-paste -n > '{}/paste.txt' 2>/dev/null", shot_dir).c_str());
+		return 1500;
+	}
+	case 13: {
+		std::string pasted = read_text(shot_dir + "/paste.txt");
+		if (!pasted.starts_with("from-x11") && retries++ < 60) {
+			spawn(std::format("wl-paste -n > '{}/paste.txt' 2>/dev/null",
+				shot_dir).c_str());
+			return -400;
+		}
+		check(pasted.starts_with("from-x11"), std::format(
+			"what an X11 client copied pastes in a wayland client ('{}')", pasted));
+		reap_client();
+		return 500;
+	}
+	case 14: { // and wayland to X11
+		spawn("wl-copy from-wayland");
+		return 1000;
+	}
+	case 15: {
+		check(start_client("--paste"), "an X11 client reading the clipboard started");
+		return 2000;
+	}
+	case 16: {
+		if (client_said().find("PASTED from-wayland") == std::string_view::npos
+				&& retries++ < 200) {
+			return -100;
+		}
+		std::string_view said = client_said();
+		check(said.find("PASTED from-wayland") != std::string_view::npos,
+			std::format("what a wayland client copied pastes in an X11 client ({})",
+				said.substr(said.find("PASTED"),
+					said.find('\n', said.find("PASTED")) - said.find("PASTED"))));
+		reap_client();
+		return 300;
+	}
+	case 17: { // a machine whose Xwayland is missing: no X11, and the
+		// compositor runs all the same. A compositor of its own, headless
+		// and on its own display, so this run's X server is untouched.
+		check(server->xwayland != nullptr,
+			"this run has an X server, its binary being there");
+		std::string log = shot_dir + "/no-xwayland.log";
+		spawn(std::format(
+			"env WLR_BACKENDS=headless WLR_RENDERER=gles2 "
+			"WLR_XWAYLAND='{}/not-an-xwayland' WAYLAND_DISPLAY= "
+			"XDG_CONFIG_HOME='{}/xdg-config' '{}' -B "
+			"-s \"sleep 2; '{}' msg quit\" > '{}' 2>&1; echo done >> '{}'",
+			shot_dir, shot_dir, std::getenv("WAYLAND_CANVAS_BIN"),
+			std::getenv("WAYLAND_CANVAS_BIN"), log, log).c_str());
+		return 2000;
+	}
+	case 18: {
+		std::string log = read_text(shot_dir + "/no-xwayland.log");
+		if (log.find("done") == std::string::npos && retries++ < 100) {
+			return -300;
+		}
+		check(log.find("done") != std::string::npos,
+			"a compositor whose Xwayland binary is missing starts and stops");
+		check(log.find("Running wayland-canvas on WAYLAND_DISPLAY=")
+				!= std::string::npos,
+			"it served its own display while it ran");
 		return 300;
 	}
 	case 90: {

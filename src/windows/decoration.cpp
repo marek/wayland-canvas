@@ -295,7 +295,7 @@ void Decoration::refresh_mode() {
 	// An X11 window has no decoration protocol to negotiate with: the
 	// window manager decorates it, which here means our own title bar
 	// (docs/intents/windows/x11.md).
-	bool negotiated = view_.is_x11();
+	bool negotiated = view_.is_x11() && !view_.override_redirect;
 	if (!negotiated) {
 		negotiated = xdg_decoration_ != nullptr
 			&& xdg_decoration_->current.mode

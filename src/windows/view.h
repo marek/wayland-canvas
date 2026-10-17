@@ -126,6 +126,10 @@ public:
 	int x = 0, y = 0;
 	bool mapped = false, minimized = false, maximized = false, fullscreen = false,
 		tiled = false;
+	// An X11 override-redirect window: a menu, a tooltip or a drag icon,
+	// which the window manager must not decorate, list or place
+	// (docs/intents/windows/x11.md). Always false for a wayland window.
+	bool override_redirect = false;
 	// The tiled desktop whose board holds the window. A zoom moves a frame's
 	// edges past windows without moving them, so the board, not the centre,
 	// says whose it is until it leaves the board; a minimized window keeps
@@ -185,6 +189,7 @@ private:
 	void handle_xdg_request_fullscreen();
 
 	// view_x11.cpp
+	void x11_place_override_redirect();
 	wlr_surface *x11_surface() const;
 	wlr_box x11_geometry() const;
 	bool x11_initialized() const;

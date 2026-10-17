@@ -704,6 +704,15 @@ void View::handle_map() {
 	mapped = true;
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
+	if (override_redirect) {
+		// A menu or a tooltip belongs where its client put it, beside the
+		// window it hangs from; it joins no board and takes no focus
+		// unless it asks for one.
+		x11_place_override_redirect();
+		server.visibility_dirty = true;
+		damage();
+		return;
+	}
 	place(*this);
 	// A window opened on a tiled desktop joins its board.
 	server.canvas.settle(*this);

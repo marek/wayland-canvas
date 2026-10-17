@@ -117,10 +117,10 @@ These decisions close three open boxes of
 - [x] Intent: X11 windows: started on demand, `DISPLAY` handed over and back with `WAYLAND_DISPLAY`, windows as views (title bars, desktops, overview, states, close), override-redirect menus and tooltips, focus and activation, the clipboard both ways, scale 1 on hi-dpi, a machine without Xwayland
 - [x] Build and package: wlroots with Xwayland; Arch `optdepends` xorg-xwayland, Debian `Recommends` xwayland
 - [x] Compositor: X11 windows as views: map, title bars, move and resize, maximize, minimize and fullscreen requests, close through `WM_DELETE_WINDOW`, focus
-- [ ] Compositor: override-redirect windows placed beside their parent in canvas space and kept out of the window list, and the clipboard both ways between X11 and wayland clients
+- [x] Compositor: override-redirect windows placed beside their parent in canvas space and kept out of the window list, and the clipboard both ways between X11 and wayland clients
 - [ ] Hi-dpi: an X11 window drawn at scale 1 and enlarged on a scaled output (the user: it needs a hi-dpi screen)
 - [x] Scenario: an xcb client built with the tests maps a window with a title bar where the user is looking, takes a click and a key, is maximized from its title bar and closed by its × through `WM_DELETE_WINDOW`
-- [ ] Scenario: the popup beside its parent, the clipboard both ways, and `WLR_XWAYLAND` naming a missing binary leaving the compositor without X11
+- [x] Scenario: the popup beside its parent, the clipboard both ways, and `WLR_XWAYLAND` naming a missing binary leaving the compositor without X11
 
 ## Night light
 
