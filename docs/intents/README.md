@@ -34,7 +34,7 @@ their values.
 | [input/](input/) | Touchpad gestures, keyboard and pointer, the config file |
 | [windows/](windows/) | Title bars and window management |
 | [apps/](apps/) | Applications: the launcher, the desktop entries it finds them by, and the capture UI |
-| [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, sticky notes, light and dark, the settings window |
+| [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, the app bar, sticky notes, light and dark, the settings window |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
 | [platform/](platform/) | wlroots, protocols, outputs, the C++ standard, the control IPC |
 | [bugs/](bugs/) | Bug case studies — the one place history is told |
@@ -63,6 +63,7 @@ their values.
 | [shell/bar.md](shell/bar.md) | The top bar: look, sections, widgets, click actions, panels, autostart |
 | [shell/plugins.md](shell/plugins.md) | What a plugin is, where plugins are found, the config, the common trigger, the API, the UI kit, the built-in plugins |
 | [shell/toolbar.md](shell/toolbar.md) | The overview toolbar: its edge, when it shows, buttons, actions, panels and submenus |
+| [shell/app-bar.md](shell/app-bar.md) | The app bar in the overview: its edge, the open apps it lists, the jump to a window, the strip it shares with the toolbar |
 | [shell/settings.md](shell/settings.md) | The settings window: the gear, its pages, recording a shortcut, what each page writes |
 | [shell/notifications.md](shell/notifications.md) | Notifications: the popups, their actions and expiry, the history and its bar widget, the silence switch |
 | [shell/password-dialog.md](shell/password-dialog.md) | The password dialog for an app asking for admin rights: the polkit agent, what it shows, the keyboard, cancel |
@@ -98,6 +99,8 @@ their values.
 - **Changing the launcher**: apps/launcher → apps/desktop-entries.
 - **Changing the top bar or the control IPC**: shell/bar → shell/plugins →
   platform/ipc → apps/launcher.
+- **Changing the app bar**: shell/app-bar → shell/toolbar →
+  shell/plugins → platform/ipc → windows/window-management.
 - **Changing rendering**: render/rendering → render/hidpi →
   platform/outputs.
 - **Adding a protocol**: platform/protocols → platform/wlroots →

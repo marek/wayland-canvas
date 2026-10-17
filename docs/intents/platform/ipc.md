@@ -56,7 +56,7 @@ request; responses come in request order.
 
 | Method | Params | Result |
 |---|---|---|
-| `state` | — | `{"outputs": […], "desktops": […], "items": […], "theme": "dark"}` |
+| `state` | — | `{"outputs": […], "desktops": […], "windows": […], "items": […], "theme": "dark"}` |
 | `subscribe` | — | `true`; from then on every event goes to this connection |
 | `launcher.toggle` | `output` (optional; default the output under the cursor) | `true` |
 | `overview.toggle` | `output` (optional, as above) | `true`; an error without an output |
@@ -64,6 +64,7 @@ request; responses come in request order.
 | `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (a seat session) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
 | `item.set` | `id`; `color` (`#rrggbb`); `text`; `width`, `height` (canvas px); `x`, `y` (canvas, the top-left) | The item as placed: `{"id", "x", "y", "width", "height"}` |
 | `item.remove` | `id` | `true`; an error for an unknown id |
+| `window.focus` | `window` (a session id from the window list) | `true`: the window is focused and the view moves to it — to its desktop at that desktop's scale, else to a view centred on the window; a screen in the overview leaves it as a shelf click does, and a minimized window is restored first ([../windows/window-management.md](../windows/window-management.md)). An error for an unknown id |
 | `item.activate` | `id` | `true`; the compositor reports the item exactly as a double-click does — the `item.activated` event with its output and output-local box — so a plugin can open an editor over an item it just placed. An error for an unknown id, or when the item is on no output's screen |
 | `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
 | `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
@@ -117,6 +118,7 @@ settings of [../input/config-file.md](../input/config-file.md):
 |---|---|
 | `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `overview` (true while the output shows the overview) |
 | `desktops` | `id`, `number`, `x`, `y`, `width`, `height` (canvas px) |
+| `windows` | `id` (the session id), `appId`, `title`, `desktop` (its desktop's id, or null on free canvas), `minimized`, `focused`, and `x`, `y`, `width`, `height`: its frame in canvas px. In the order the windows opened ([../shell/app-bar.md](../shell/app-bar.md)) |
 | `items` | as last set, with the place the user dragged it to |
 | `recording` | `null`, or `{"path": …}` while a recording runs |
 
@@ -127,6 +129,7 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `overview` | `output`, `active` | An output enters or leaves the overview |
 | `outputs` | `outputs`, as in the state | An output appears, goes, or changes size or scale |
 | `desktops` | `desktops`, as in the state | A desktop is created, moved, combined or abandoned |
+| `windows` | `windows`, as in the state | A window opens, closes, is moved, retitled, minimized, restored or focused |
 | `theme` | `mode` | The mode changes, by any client; the shell adopts it — [../shell/theme.md](../shell/theme.md) |
 | `item.moved` | `id`, `x`, `y` | The user dropped a dragged item |
 | `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item, or a client ran `item.activate` |
@@ -176,6 +179,8 @@ means the user cancelled. That command is the portal's `chooser_cmd`.
 - [../shell/plugins.md](../shell/plugins.md) — the shell's API over this
   socket.
 - [../shell/notes.md](../shell/notes.md) — the canvas items' one user.
+- [../shell/app-bar.md](../shell/app-bar.md) — the window list's and
+  `window.focus`'s one user.
 - [../shell/theme.md](../shell/theme.md) — the mode the compositor follows.
 - [../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md) —
   the bindings whose actions the methods share.

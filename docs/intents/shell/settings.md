@@ -22,6 +22,10 @@ window while it is open.
   and no app sees it.
 - **Gestures are chosen, not recorded**: a few presets, each keeping the
   gesture vocabulary whole ([../input/gestures.md](../input/gestures.md)).
+- **A plugin's settings come from its manifest, not from this window.** A
+  plugin declares what it can be asked ([plugins.md](plugins.md)) and the
+  window renders it; nothing here knows any plugin by name, so a new
+  plugin's choices arrive in settings with the plugin.
 - **The window is a plugin**, `canvas.settings`, like the rest of the shell
   ([plugins.md](plugins.md)): it changes the compositor only through the
   control socket and the shell only through the host.
@@ -34,7 +38,7 @@ window while it is open.
 |---|---|
 | Opening | The gear button in the overview toolbar ([toolbar.md](toolbar.md)); the window is a panel beside it, through the common trigger |
 | Closing | As any panel: a click outside, Escape, a second click of the gear, leaving the overview. Closing while a shortcut is being recorded cancels the recording |
-| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar; a footer names the two files |
+| Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar, then one per plugin that declares settings with labels, by plugin name; a footer names the two files |
 
 | Page | Holds | Writes |
 |---|---|---|
@@ -43,6 +47,7 @@ window while it is open.
 | Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)"; the switch "Invert scrolling and swipes", which turns the direction of the pointer, the touchpad and the hops around together ([../input/gestures.md](../input/gestures.md)) | `canvas.conf`: `[gestures]` |
 | Toolbar | The edge: right, left, top or bottom | `shell.json`: `toolbar.position` |
 | Bar | Every bar widget by section, in bar order, with a switch; a widget that hides itself without a source says when it shows | `shell.json`: `bar.hidden` |
+| A plugin's own | Its declared settings, by group in declaration order: a switch, a choice, a number or a text field per entry, with its label and description ([plugins.md](plugins.md)). The app bar's edge and its on/off switch are such a page | `shell.json`: `plugins.<id>.settings` |
 
 ### Recording a shortcut
 
