@@ -2,9 +2,11 @@
 
 #include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+#include "core/settings.h"
 #include "core/util.h"
 
 class Output;
@@ -38,6 +40,7 @@ public:
 	void emit_outputs(); // an output appeared, went, or changed size or scale
 	void emit_desktops(); // a desktop was created, moved, combined or abandoned
 	void emit_theme(); // the mode changed
+	void emit_settings(); // the effective settings changed
 	void emit_item_moved(const Item &item); // the user dropped a dragged item
 	// The user double-clicked an item; `box` is the item on `output` in
 	// output-local logical px.
@@ -46,6 +49,10 @@ public:
 	// its client now. `payload` is the result's JSON text, or the plain
 	// error message when `ok` is false. No request pending: a no-op.
 	void answer_pick(bool ok, std::string_view payload);
+	// The user pressed a chord (or cancelled) a `shortcut.capture`
+	// request: answers its client with the chord's text, or null. No
+	// request pending: a no-op.
+	void answer_capture(std::optional<settings::Chord> chord);
 	// A recording started (with its file) or stopped (empty path).
 	void emit_recording(bool active, const std::string &path);
 
@@ -94,6 +101,12 @@ private:
 		JsonObject *params);
 	std::expected<std::string, std::string> m_capture_stop(Client &client,
 		JsonObject *params);
+	std::expected<std::string, std::string> m_settings_get(Client &client,
+		JsonObject *params);
+	std::expected<std::string, std::string> m_settings_set(Client &client,
+		JsonObject *params);
+	std::expected<std::string, std::string> m_shortcut_cancel(Client &client,
+		JsonObject *params);
 	// An `action` event: `args_json` is a whole JSON object's text.
 	void emit_action(std::string_view name, std::string_view args_json);
 	// An `output` param by name; nullptr when absent and none is under the
@@ -103,9 +116,13 @@ private:
 	static int handle_listen(int fd, uint32_t mask, void *data);
 	static int handle_client(int fd, uint32_t mask, void *data);
 	void handle_line(Client &client, std::string_view line);
-	// `capture.pick` — the one method whose answer waits for the user:
-	// starts the picker; the response goes out through answer_pick().
+	// `capture.pick` — a method whose answer waits for the user: starts
+	// the picker; the response goes out through answer_pick().
 	void capture_pick(Client &client, std::string_view id_json,
+		JsonObject *params);
+	// `shortcut.capture` — likewise: starts the capture; the response goes
+	// out through answer_capture() once the chord is pressed.
+	void shortcut_capture(Client &client, std::string_view id_json,
 		JsonObject *params);
 	void push_event(std::string_view name, std::string_view params);
 	void queue(Client &client, std::string_view line); // append, flush, cap-check
@@ -124,6 +141,9 @@ private:
 	// the id its response echoes. Cleared in ~Client when that client goes.
 	Client *pick_client_ = nullptr;
 	std::string pick_id_;
+	// Likewise the pending `shortcut.capture` request.
+	Client *capture_client_ = nullptr;
+	std::string capture_id_;
 	std::vector<std::unique_ptr<Client>> clients_;
 };
 

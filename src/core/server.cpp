@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <sys/inotify.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -58,15 +59,9 @@ bool program_on_path(const char *name) {
 	return false;
 }
 
-// The directory holding the bar's Quickshell config: $WAYLAND_CANVAS_SHELL_DIR
-// when set, else beside the compositor binary — the build tree's shell/, then
-// the installed share/wayland-canvas/shell.
-std::optional<std::string> bar_shell_dir() {
-	if (const char *env = getenv("WAYLAND_CANVAS_SHELL_DIR")) {
-		if (is_dir(env)) {
-			return env;
-		}
-	}
+// The directory of the running executable, when it can be read: the
+// shell's own helpers sit beside it.
+std::optional<std::string> self_dir() {
 	char self[PATH_MAX];
 	ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
 	if (n <= 0) {
@@ -76,13 +71,109 @@ std::optional<std::string> bar_shell_dir() {
 	if (std::size_t slash = dir.rfind('/'); slash != std::string::npos) {
 		dir.resize(slash);
 	}
+	return dir;
+}
+
+// The directory holding the bar's Quickshell config: $WAYLAND_CANVAS_SHELL_DIR
+// when set, else beside the compositor binary — the build tree's shell/, then
+// the installed share/wayland-canvas/shell.
+std::optional<std::string> bar_shell_dir() {
+	if (const char *env = getenv("WAYLAND_CANVAS_SHELL_DIR")) {
+		if (is_dir(env)) {
+			return env;
+		}
+	}
+	std::optional<std::string> dir = self_dir();
+	if (!dir) {
+		return std::nullopt;
+	}
 	for (const char *rel : {config::bar_shell_build_dir, config::bar_shell_install_dir}) {
-		std::string candidate = dir + "/" + rel;
+		std::string candidate = *dir + "/" + rel;
 		if (is_dir(candidate)) {
 			return candidate;
 		}
 	}
 	return std::nullopt;
+}
+
+
+// ---- canvas.conf (core/settings.h) ----
+
+// $XDG_CONFIG_HOME when absolute, else ~/.config.
+std::string config_home() {
+	if (const char *xdg = getenv("XDG_CONFIG_HOME");
+			xdg != nullptr && xdg[0] == '/') {
+		return xdg;
+	}
+	if (const char *home = getenv("HOME"); home != nullptr && home[0] == '/') {
+		return std::string(home) + "/.config";
+	}
+	return {};
+}
+
+// Reads a whole file; empty when missing or unreadable, so every default
+// applies (docs/intents/input/config-file.md).
+std::string read_text_file(const std::string &path) {
+	std::FILE *file = std::fopen(path.c_str(), "rb");
+	if (file == nullptr) {
+		return {};
+	}
+	std::string text;
+	char chunk[4096];
+	std::size_t n = 0;
+	while ((n = std::fread(chunk, 1, sizeof chunk, file)) > 0) {
+		text.append(chunk, n);
+	}
+	std::fclose(file);
+	return text;
+}
+
+// Writes a whole file; false when it cannot.
+bool write_text_file(const std::string &path, const std::string &text) {
+	std::FILE *file = std::fopen(path.c_str(), "wb");
+	if (file == nullptr) {
+		return false;
+	}
+	bool ok = text.empty() || std::fwrite(text.data(), 1, text.size(), file) == text.size();
+	ok = std::fflush(file) == 0 && ok;
+	if (std::fclose(file) != 0) {
+		ok = false;
+	}
+	return ok;
+}
+
+// mkdir -p.
+void mkdir_p(const std::string &path) {
+	for (std::size_t slash = path.find('/'); ; slash = path.find('/', slash + 1)) {
+		std::string made = path.substr(0, slash == std::string::npos
+			? path.size() : slash);
+		if (!made.empty() && mkdir(made.c_str(), 0755) != 0 && errno != EEXIST) {
+			return; // the write that follows fails and is logged there
+		}
+		if (slash == std::string::npos) {
+			return;
+		}
+	}
+}
+
+// The gesture code's own options from the settings' own preset enum: the
+// settings library links no wlroots, so it carries its own (the values
+// match one for one).
+GestureOptions gesture_options(const settings::Resolved &conf) {
+	GestureOptions options;
+	switch (conf.swipes) {
+	case settings::SwipePreset::three_finger_hops:
+		options.swipes = SwipePreset::three_finger_hops;
+		break;
+	case settings::SwipePreset::four_finger_hops:
+		options.swipes = SwipePreset::four_finger_hops;
+		break;
+	case settings::SwipePreset::off:
+		options.swipes = SwipePreset::off;
+		break;
+	}
+	options.pinch_scale = conf.pinch_scale;
+	return options;
 }
 
 // Single-quotes `text` for /bin/sh.
@@ -314,6 +405,11 @@ Server::Server()
 }
 
 Server::~Server() {
+	conf_inotify_source_.reset();
+	if (conf_inotify_fd_ >= 0) {
+		close(conf_inotify_fd_);
+		conf_inotify_fd_ = -1;
+	}
 	if (hand_over_.has_value()) {
 		hand_back_session_bus(*hand_over_);
 	}
@@ -463,6 +559,38 @@ bool Server::start() {
 	unsetenv("NIRI_SOCKET");
 	// Before any client is spawned, so they inherit the socket path.
 	ipc.init();
+	// canvas.conf: written with every default when missing (its directory
+	// created with it), then watched — a save or a delete re-reads it and
+	// applies to the running session (docs/intents/input/config-file.md).
+	conf_path = config_home() + "/wayland-canvas/canvas.conf";
+	if (config_home().size() > 0) {
+		if (access(conf_path.c_str(), F_OK) != 0) {
+			mkdir_p(config_home() + "/wayland-canvas");
+			if (!write_text_file(conf_path, settings::template_text())) {
+				wlr_log(WLR_ERROR, "could not write %s: the defaults apply",
+					conf_path.c_str());
+			}
+		}
+		conf_inotify_fd_ = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+		if (conf_inotify_fd_ < 0 || inotify_add_watch(conf_inotify_fd_,
+				(config_home() + "/wayland-canvas").c_str(),
+				IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE) < 0) {
+			wlr_log(WLR_ERROR, "could not watch %s for changes",
+				conf_path.c_str());
+			if (conf_inotify_fd_ >= 0) {
+				close(conf_inotify_fd_);
+				conf_inotify_fd_ = -1;
+			}
+		} else {
+			conf_inotify_source_.reset(wl_event_loop_add_fd(
+				wl_display_get_event_loop(display), conf_inotify_fd_,
+				WL_EVENT_READABLE, handle_conf_change, this));
+		}
+	} else {
+		wlr_log(WLR_ERROR, "neither $XDG_CONFIG_HOME nor $HOME is set: "
+			"canvas.conf is unreadable, the defaults apply");
+	}
+	load_conf(true);
 	// Every client is in a wayland-canvas session.
 	setenv("XDG_CURRENT_DESKTOP", desktop_name, true);
 	if (std::optional<session_bus::Handed> before = hand_over_session_bus(session != nullptr)) {
@@ -499,7 +627,88 @@ void Server::start_bar() {
 	std::string cmd = "QML_IMPORT_PATH=" + shell_quote(*dir + "/ui")
 		+ "${QML_IMPORT_PATH:+:$QML_IMPORT_PATH} " + config::bar_program
 		+ " -p " + shell_quote(*dir);
+	// The shell's helpers (its msg client among them) sit beside the
+	// compositor: its own directory comes first on the shell's PATH.
+	if (std::optional<std::string> self = self_dir()) {
+		cmd = "PATH=" + shell_quote(*self) + ":$PATH " + cmd;
+	}
 	spawn(cmd.c_str());
+}
+
+// Reads canvas.conf and applies it to the running session: the bindings'
+// tables, the gesture options, and — when the file has lines it ignored —
+// the hint that names the first on every screen. The first load never
+// emits the settings event; later ones only when something changed, so
+// the watch's own echo of a write_conf is silent.
+void Server::load_conf(bool first) {
+	std::string text = read_text_file(conf_path);
+	settings::Parsed parsed = settings::parse(text);
+	settings::Resolved resolved = settings::resolve(parsed);
+	bool changed = !first && !(resolved == conf);
+	conf = std::move(resolved);
+	conf_text = text;
+	conf_errors = std::move(parsed.errors);
+	bindings.apply(conf);
+	gestures.set_options(gesture_options(conf));
+	if (!conf_errors.empty()) {
+		for (const settings::Error &error : conf_errors) {
+			wlr_log(WLR_ERROR, "canvas.conf line %d: %s", error.line,
+				error.text.c_str());
+		}
+		const settings::Error &first_error = conf_errors.front();
+		std::string hint_text = std::format("canvas.conf line {}: {}",
+			first_error.line, first_error.text);
+		if (conf_errors.size() > 1) {
+			hint_text += std::format(" (+{} more)", conf_errors.size() - 1);
+		}
+		hint.set(hint_text);
+	}
+	if (changed) {
+		ipc.emit_settings();
+	}
+}
+
+// Writes `text` as canvas.conf — beside the old file, then renamed over
+// it, so neither an editor nor a crash sees half a file — and applies it
+// at once. False, logged, when the file cannot be written: the running
+// settings stay.
+bool Server::write_conf(const std::string &text) {
+	std::string tmp = conf_path + ".tmp-" + std::to_string(getpid());
+	if (!write_text_file(tmp, text)
+			|| rename(tmp.c_str(), conf_path.c_str()) != 0) {
+		wlr_log(WLR_ERROR, "could not write %s: the running settings stay",
+			conf_path.c_str());
+		unlink(tmp.c_str());
+		return false;
+	}
+	load_conf(false); // the settings event leaves with it; the watch echoes
+	return true;
+}
+
+int Server::handle_conf_change(int fd, uint32_t mask, void *data) {
+	auto *server = static_cast<Server *>(data);
+	if ((mask & WL_EVENT_READABLE) == 0) {
+		return 0;
+	}
+	// Read every event pending: a save of canvas.conf — written in place
+	// or renamed over, as editors do — or its deletion re-reads it.
+	alignas(struct inotify_event) char buf[4096];
+	bool reload = false;
+	ssize_t n = 0;
+	while ((n = read(fd, buf, sizeof buf)) > 0) {
+		char *at = buf;
+		while (at + sizeof(struct inotify_event) <= buf + n) {
+			auto *event = reinterpret_cast<struct inotify_event *>(at);
+			at += sizeof(struct inotify_event) + event->len;
+			if (event->len > 0 && strcmp(event->name, "canvas.conf") == 0) {
+				reload = true;
+			}
+		}
+	}
+	if (reload) {
+		server->load_conf(false);
+	}
+	return 0;
 }
 
 void Server::set_theme(ThemeMode mode) {

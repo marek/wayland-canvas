@@ -100,6 +100,15 @@ session_bus_lib = static_library(
 	include_directories: src_inc,
 )
 
+# canvas.conf: the action registry, chords, parsing, resolution, the
+# first-run template and the in-place edits settings.set makes.
+settings_lib = static_library(
+	'canvas-settings',
+	'src/core/settings.cpp',
+	include_directories: src_inc,
+	dependencies: [xkbcommon],
+)
+
 # The AI usage collector the agents panel's widget runs: pure logic over
 # the tools' own records, unit-tested on its own, and a thin helper
 # executable installed beside the compositor for the widget to run by
@@ -150,7 +159,8 @@ core_lib = static_library(
 	),
 	protocol_headers,
 	include_directories: src_inc,
-	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib],
+	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib,
+		settings_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
 		glib, json_glib, libinput, libdrm],
 )
@@ -260,6 +270,18 @@ test(
 		include_directories: src_inc,
 		link_with: agent_usage_lib,
 		dependencies: [glib, json_glib, sqlite3],
+	),
+	suite: 'unit',
+)
+
+test(
+	'settings',
+	executable(
+		'test-settings',
+		'tests/test_settings.cpp',
+		include_directories: src_inc,
+		link_with: settings_lib,
+		dependencies: [xkbcommon],
 	),
 	suite: 'unit',
 )
