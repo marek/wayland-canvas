@@ -51,7 +51,7 @@ touched.
 
 ### The invert switch
 
-- [ ] Intent: the choice in `[gestures]` of
+- [x] Intent: the choice in `[gestures]` of
       [input/config-file.md](../intents/input/config-file.md), the
       direction rule in
       [input/gestures.md](../intents/input/gestures.md), the natural
@@ -60,16 +60,18 @@ touched.
       the settings key and `settings.set` parameter in
       [platform/ipc.md](../intents/platform/ipc.md), and the Gestures
       page of [shell/settings.md](../intents/shell/settings.md).
-- [ ] Compositor: the setting read, reloaded and applied — to every
+- [x] Compositor: the setting read, reloaded and applied — to every
       pointer and touchpad device's scroll direction, and to the
       direction a swipe hop and an overview pan take; the compile-time
       `natural_scroll` becomes the default the file states.
-- [ ] Unit test: a `canvas.conf` with each value resolves to the
+- [x] Unit test: a `canvas.conf` with each value resolves to the
       expected direction, an unknown value is an error line.
-- [ ] Settings window: the switch on the Gestures page, written
-      through `settings.set` and following the `settings` event.
-- [ ] Scenario: the switch flipped over IPC reverses a scroll's effect
-      on the camera.
+- [x] Settings window: the switch on the Gestures page, written
+      through `settings.set` and following the `settings` event (the bar
+      scenario sees the row and its default).
+- [x] Scenario: with invert on, a 3-finger swipe right hops left
+      (gestures). The pointer's own scroll direction is libinput's, with
+      no headless device to prove it on (owed on screen — the user).
 
 ### Settings a plugin registers
 
