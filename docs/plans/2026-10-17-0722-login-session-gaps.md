@@ -89,11 +89,14 @@ These decisions close three open boxes of
 
 ## Lock screen
 
-- [ ] Intent: the lock screen: the protocol's policy, what locking hides and blocks, the triggers and the idle timeout, the locker plugin and its PAM service, a dead locker; the `lock` action in the bindings table, the timeout in the settings window
-- [ ] Compositor: ext-session-lock-v1 with the locked-state rules above, a dead locker leaving the session locked, a new locker taking over
-- [ ] Triggers: the `lock` action, `loginctl lock-session`, suspend and hibernate held until the lock is drawn, the idle timeout with inhibitors honoured
-- [ ] Shell: the lock plugin on every output, the password through PAM; the package installs the PAM service file
-- [ ] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a wrong password keeps it locked and the right one unlocks (scratch PAM service); a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off; the logind triggers through a stand-in logind on a private bus
+- [x] Intent: the lock screen: the protocol's policy, what locking hides and blocks, the triggers and the idle timeout, the locker plugin and its PAM service, a dead locker; the `lock` action in the bindings table, the timeout in the settings window
+- [x] Compositor: ext-session-lock-v1 with the locked-state rules above, a dead locker leaving the session locked, a new locker taking over
+- [x] Triggers: the `lock` action, `loginctl lock-session`, suspend and hibernate held until the lock is drawn, the idle timeout with inhibitors honoured — the action and the idle timeout proven in the lock scenario; the logind pair written against sd-bus
+- [ ] Triggers proof: the logind pair (Lock, PrepareForSleep with the delay inhibitor) against a stand-in logind on a private system bus
+- [x] Shell: the lock plugin on every output, the password through PAM; the package installs the PAM service file
+- [ ] Settings window: the idle timeout on a Session page (landing with the night light's switch, which shares the page)
+- [x] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off
+- [ ] Scenario: a wrong password keeps it locked and the right one unlocks, through the lock plugin against a scratch PAM service
 
 ## Notifications
 
