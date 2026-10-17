@@ -7,13 +7,13 @@ import QtQuick
 // replaces one with the same id in an earlier one — reads their manifests,
 // skips what cannot load, with a line saying why, and hands every
 // contributed component one api: plugin, storage, panels, actions, theme,
-// compositor. The panels are instantiated hidden and opened through the
-// panel manager; the surfaces are instantiated here, one per output where a
-// manifest asks, along with the registry of everything loaded for the
-// surfaces that host others (the bar's widgets, the toolbar's buttons).
-// Edits to the config or any plugin's files reload the whole shell with
-// them. The host draws nothing itself: everything on screen belongs to a
-// plugin.
+// compositor, shell. The panels are instantiated hidden and
+// opened through the panel manager; the surfaces are instantiated here, one
+// per output where a manifest asks, along with the registry of everything
+// loaded for the surfaces that host others (the bar's widgets, the
+// toolbar's buttons). Edits to the config or any plugin's files reload the
+// whole shell with them. The host draws nothing itself: everything on
+// screen belongs to a plugin.
 Item {
 	id: host
 
@@ -24,12 +24,14 @@ Item {
 	// The plugins that loaded, in discovery order: {id, dir, manifest, api}.
 	property var plugins: []
 
-	// Everything the plugins contributed, for the surfaces that host them:
-	// barWidgets: {name, section, order, panel, component, api} — `panel`
-	//   is the global name of the panel a left click opens, "" for none;
-	// toolbarButtons: {name, icon, label, action, args, panel, menu, order} —
-	//   `action`, `panel` and every menu entry's action are global names.
-	property var registry: ({barWidgets: [], toolbarButtons: []})
+// Everything the plugins contributed, for the surfaces that host them:
+// barWidgets: {name, section, order, panel, component, api} — `panel`
+//   is the global name of the panel a left click opens, "" for none;
+//   a widget the config's bar.hidden names is left out of this list and
+//   still listed by api.shell.barWidgets, flagged;
+// toolbarButtons: {name, icon, label, action, args, panel, menu, order} —
+//   `action`, `panel` and every menu entry's action are global names.
+property var registry: ({barWidgets: [], toolbarButtons: []})
 
 	// The screens, so per-output surfaces can follow them coming and going.
 	property var screens: Quickshell.screens
@@ -94,10 +96,71 @@ Item {
 	}
 
 	// Persists the config; the shell keeps running on the values it already
-	// applied, and the write is not mistaken for an edit.
+	// applied, and the write is not mistaken for an edit. The parsed copy
+	// reassigns `config` — a var property mutated in place fires no change
+	// signal, and every binding on the config must run on the host's own
+	// writes just as on a load.
 	function writeConfig() {
 		lastConfigWrite = Date.now()
-		configFile.setText(JSON.stringify(config, null, "\t") + "\n")
+		var raw = JSON.stringify(config, null, "\t") + "\n"
+		configFile.setText(raw)
+		config = JSON.parse(raw)
+	}
+
+	// ---- api.shell: the shell's own settings (the settings panel's) ----
+
+	// Every bar widget in bar order, hidden ones included and flagged:
+	// {name, pluginName, section, order, panel, component, api, hidden}.
+	// Rebuilt with the registry, so a hide or show reaches the panel and
+	// the bar together.
+	property var barWidgets: []
+
+	// The toolbar's edge, live from the config; "right" when unset.
+	readonly property string toolbarPosition: {
+		var position = config.toolbar ? config.toolbar.position : undefined
+		return position === "left" || position === "top" || position === "bottom"
+			|| position === "right" ? position : "right"
+	}
+
+	// Whether the config's bar.hidden names this widget.
+	function barHidden(name) {
+		var hidden = config.bar && config.bar.hidden ? config.bar.hidden : null
+		return hidden != null && hidden.indexOf(name) >= 0
+	}
+
+	// Adds or removes one widget from bar.hidden. The bar loses or
+	// regains the widget at once — the registry is re-derived, never the
+	// whole shell reloaded.
+	function setBarHidden(name, hidden) {
+		var list = []
+		var current = config.bar && config.bar.hidden ? config.bar.hidden : []
+		for (var i = 0; i < current.length; i++) {
+			if (current[i] !== name) {
+				list.push(current[i])
+			}
+		}
+		if (hidden) {
+			list.push(name)
+		}
+		config.bar = config.bar || {}
+		config.bar.hidden = list
+		writeConfig()
+		rebuildRegistry()
+		return true
+	}
+
+	// Writes toolbar.position; the toolbar follows the live
+	// toolbarPosition binding. Anything but an edge is refused.
+	function setToolbarPosition(edge) {
+		if (edge !== "right" && edge !== "left" && edge !== "top"
+				&& edge !== "bottom") {
+			return false
+		}
+		config.toolbar = config.toolbar || {}
+		config.toolbar.position = edge
+		writeConfig()
+		rebuildRegistry()
+		return true
 	}
 
 	// ---- the shared api pieces ----
@@ -242,14 +305,15 @@ Item {
 				id: id,
 				dir: candidate.dir,
 				manifest: manifest,
-				api: {
-					plugin: pluginApi,
-					storage: storage,
-					panels: panels,
-					actions: actions,
-					theme: theme,
-					compositor: compositor,
-				},
+			api: {
+				plugin: pluginApi,
+				storage: storage,
+				panels: panels,
+				actions: actions,
+				theme: theme,
+				compositor: compositor,
+				shell: host,
+			},
 			})
 		}
 		// Each plugin's storage directory appears when its api does.
@@ -343,7 +407,7 @@ Item {
 				}
 				var component = Qt.createComponent(plugin.dir + "/" + entry.entry)
 				if (component.status === Component.Error) {
-					problem = entry.entry + ": " + component.errorString
+					problem = entry.entry + ": " + component.errorString()
 					break
 				}
 				compiled.push([byKind[j][0], entry, component])
@@ -375,14 +439,15 @@ Item {
 					problem = "bar widget " + e.id + " has no valid section"
 					break
 				}
-				pluginWidgets.push({
-					name: plugin.id + "/" + e.id,
-					section: e.section,
-					order: e.order || 0,
-					panel: e.panel ? plugin.id + "/" + e.panel : "",
-					component: piece,
-					api: plugin.api,
-				})
+			pluginWidgets.push({
+				name: plugin.id + "/" + e.id,
+				pluginName: plugin.manifest.name || plugin.id,
+				section: e.section,
+				order: e.order || 0,
+				panel: e.panel ? plugin.id + "/" + e.panel : "",
+				component: piece,
+				api: plugin.api,
+			})
 			} else if (kind === "panels") {
 				var instance = piece.createObject(host)
 				if (instance == null) {
@@ -424,40 +489,71 @@ Item {
 	}
 	plugins = kept
 	surfaceEntries = surfaces
-	registry = {
-		barWidgets: orderedWidgets(widgets),
-		toolbarButtons: orderedButtons(buttons),
-	}
+	allWidgets = widgets
+	allButtons = buttons
+	rebuildRegistry()
 	start()
 	}
 
-	// One section's widgets: those the config's bar.layout lists, in the
-	// listed order, then the rest in their declared order.
-	function orderedWidgets(all) {
-		var out = []
-		var sections = ["left", "center", "right"]
-		for (var s = 0; s < sections.length; s++) {
-			var section = all.filter(function(w) { return w.section === sections[s] })
-			var layout = config.bar && config.bar.layout ? config.bar.layout[sections[s]] : null
-			var rest = section.slice()
-			if (layout != null) {
-				for (var i = 0; i < layout.length; i++) {
-					for (var j = 0; j < rest.length; j++) {
-						if (rest[j].name === layout[i]) {
-							out.push(rest[j])
-							rest.splice(j, 1)
-							break
-						}
+// Every contribution that loaded, before the config orders and filters
+// them: the registry is derived from these, so it can be re-derived when
+// the config changes without compiling or registering anything again.
+property var allWidgets: []
+property var allButtons: []
+
+// Rebuilds the registry (and the shell api's bar-widget list) from the
+// contributions and the config as it stands. A reload ends in
+// buildRegistry; the host's own config writes — which never reload —
+// end here, so what they change reaches every live binding.
+function rebuildRegistry() {
+	var ordered = orderedWidgets(allWidgets)
+	barWidgets = ordered
+	registry = {
+		barWidgets: ordered.filter(function(w) { return !w.hidden }),
+		toolbarButtons: orderedButtons(allButtons),
+	}
+}
+
+// One section's widgets: those the config's bar.layout lists, in the
+// listed order, then the rest in their declared order. Each entry is a
+// copy of the contribution carrying its hidden flag, so the bar can
+// leave hidden widgets out and the settings panel can list them marked.
+function widgetEntry(widget) {
+	var entry = {}
+	for (var key in widget) {
+		entry[key] = widget[key]
+	}
+	entry.hidden = barHidden(widget.name)
+	return entry
+}
+
+function orderedWidgets(all) {
+	var out = []
+	var sections = ["left", "center", "right"]
+	for (var s = 0; s < sections.length; s++) {
+		var section = all.filter(function(w) { return w.section === sections[s] })
+		var layout = config.bar && config.bar.layout ? config.bar.layout[sections[s]] : null
+		var rest = section.slice()
+		if (layout != null) {
+			for (var i = 0; i < layout.length; i++) {
+				for (var j = 0; j < rest.length; j++) {
+					if (rest[j].name === layout[i]) {
+						out.push(widgetEntry(rest[j]))
+						rest.splice(j, 1)
+						break
 					}
 				}
 			}
-			rest.sort(function(a, b) {
-				return a.order - b.order || (a.name < b.name ? -1 : 1)
-			})
-			out = out.concat(rest)
 		}
-		return out
+		rest.sort(function(a, b) {
+			return a.order - b.order || (a.name < b.name ? -1 : 1)
+		})
+		for (var r = 0; r < rest.length; r++) {
+			out.push(widgetEntry(rest[r]))
+		}
 	}
+	return out
+}
 
 	// The toolbar buttons: those the config's toolbar.order lists, in the
 	// listed order, then the rest in their declared order.

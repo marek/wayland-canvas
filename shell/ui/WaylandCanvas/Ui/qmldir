@@ -1,6 +1,8 @@
 module WaylandCanvas.Ui
 singleton UiTheme UiTheme.qml
 BarButton BarButton.qml
+ChoiceRow ChoiceRow.qml
+KeyChip KeyChip.qml
 PanelCard PanelCard.qml
 PanelField PanelField.qml
 PanelHero PanelHero.qml
@@ -9,4 +11,5 @@ PanelSectionHeader PanelSectionHeader.qml
 PanelSeparator PanelSeparator.qml
 PanelSlider PanelSlider.qml
 PanelSwitch PanelSwitch.qml
+PanelTabs PanelTabs.qml
 PanelText PanelText.qml

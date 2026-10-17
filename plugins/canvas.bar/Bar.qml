@@ -4,10 +4,14 @@ import QtQuick
 import WaylandCanvas.Ui
 
 // One bar surface: a top layer-shell panel with an exclusive zone, so
-// maximized windows start below it. The host hands the bar every loaded
-// bar widget, by section and order (the config's bar.layout first, then
-// each widget's declared order); each carries its own plugin's api and,
-// when its manifest names one, the panel a left click opens.
+// maximized windows start below it. The bar reads every loaded widget
+// from the host's live list, by section and order (the config's
+// bar.layout first, then each widget's declared order); a widget the
+// config's bar.hidden names is flagged there and left out here, and
+// because the list is live the settings panel hides or shows a widget
+// without reloading the shell — this bar rebuilds its rows when the
+// list changes. Each widget carries its own plugin's api and, when its
+// manifest names one, the panel a left click opens.
 PanelWindow {
 	id: root
 
@@ -26,6 +30,12 @@ PanelWindow {
 	color: UiTheme.background
 	WlrLayershell.namespace: "wayland-canvas-bar"
 	WlrLayershell.layer: WlrLayer.Top
+
+	readonly property var widgets: api != null && api.shell != null
+		? api.shell.barWidgets : []
+
+	onWidgetsChanged: buildWidgets()
+	Component.onCompleted: buildWidgets()
 
 	Item {
 		anchors.fill: parent
@@ -53,13 +63,21 @@ PanelWindow {
 		}
 	}
 
-	Component.onCompleted: {
-		var widgets = registry != null ? registry.barWidgets : []
-		for (var i = 0; i < widgets.length; i++) {
-			var widget = widgets[i]
-			var section = widget.section === "left" ? leftSection
-				: widget.section === "center" ? centreSection : rightSection
-			widget.component.createObject(section, {api: widget.api, panel: widget.panel})
+	function buildWidgets() {
+		var rows = {left: leftSection, center: centreSection, right: rightSection}
+		for (var section in rows) {
+			var children = rows[section].children
+			for (var i = children.length - 1; i >= 0; i--) {
+				children[i].destroy()
+			}
+		}
+		for (var j = 0; j < widgets.length; j++) {
+			var widget = widgets[j]
+			if (widget.hidden) {
+				continue
+			}
+			widget.component.createObject(rows[widget.section],
+				{api: widget.api, panel: widget.panel})
 		}
 	}
 }

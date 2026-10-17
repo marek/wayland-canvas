@@ -308,6 +308,28 @@ own the machine's Wayland display namespace and GPU.
   the recording (`state.recording` null again), the dot leaves the bar
   with it, and ffprobe reads the file as a playing screen-sized video.
 
+  Last, the `canvas.settings` plugin end to end. The usage fixtures are
+  dropped once more (with a reload) so the agents widget is back on the
+  bar, and the overview's toolbar now holds a fifth button, the gear.
+  Clicking it maps the settings panel as a `wayland-canvas-panel-settings`
+  layer surface of the shell client; its tab row and every row the phase
+  clicks are aimed from the panel's fixed metrics and cross-checked
+  against the screenshot's bands first. The Bar tab's switch on the
+  agents row writes `bar.hidden` into the scratch `shell.json` and the
+  bar loses the widget's run with no reload (the same bar surface), then
+  shows it again with the switch's second click. The Toolbar tab chooses
+  Left: `toolbar.position` lands in the config, the strip of five
+  buttons moves to the left edge live, and the panel re-anchors there —
+  reopened through the gear at the new edge, Right puts it back. The
+  Shortcuts tab records a chord by pressing it (the fake keyboard's
+  Super+T on the terminal row): `canvas.conf` gains
+  `terminal = Super+T`, the chord is taken from Tiling (it appears once
+  in the file), and with the panel closed the new chord opens a terminal
+  while the one it replaced opens nothing. The Gestures tab chooses
+  Four-finger hops: `swipes = four-finger-hops` in the file. Screenshots
+  of the panel, its four tabs and both file-writing steps land in
+  `tmp/scenarios/bar/` as `settings-*.png`.
+
 ## What they need
 
 - `foot` and `grim` on `$PATH` at configure time (the tests are only

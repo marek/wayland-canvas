@@ -187,6 +187,9 @@ and your own.
   (started from a TTY or a login manager), it also sets the applications'
   preference, GNOME's `color-scheme`, which GTK, Qt through the portal and
   browsers follow; nested and headless runs leave it alone.
+- **Settings**: the toolbar's gear opens the settings window — every
+  keyboard shortcut (set by pressing it), the swipe presets, the toolbar's
+  edge and which bar widgets show.
 
 A plugin is a folder with a `plugin.json` manifest. Plugins are found built in,
 then in `$XDG_DATA_HOME/wayland-canvas/plugins`, then in the config's
@@ -273,6 +276,22 @@ compositor binary (build tree or install prefix) or at
 
 dwl-style: edit `src/core/config.h` (sizes, colours, gesture tuning, commands) and the
 binding table in `src/input/bindings.cpp`, then rebuild.
+
+## Settings
+
+The gear button in the overview toolbar opens the settings window, a panel
+with four tabs:
+
+| Tab | Sets | Written to |
+|---|---|---|
+| Shortcuts | Every keyboard shortcut — click a row and press the new chord (Esc cancels); Reset restores the defaults, Clear leaves the action without keys; a chord another action holds is taken from it, and the row says where it came from. Below them, commands: a chord and a shell command line each | `canvas.conf` |
+| Gestures | The swipe preset (three- or four-finger hops, or off) and the pinch-to-scale switch | `canvas.conf` |
+| Toolbar | The edge the overview toolbar sits on: right, left, top or bottom | `shell.json` |
+| Bar | Which bar widgets show, every one by section with a switch | `shell.json` |
+
+A change applies at once and is written to the file that holds it; a hand
+edit of either file shows in the window while it is open. The footer names
+both files.
 
 ## Protocols
 

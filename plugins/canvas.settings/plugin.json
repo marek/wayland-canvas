@@ -1,0 +1,24 @@
+{
+	"id": "canvas.settings",
+	"name": "Settings",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The settings window: shortcuts, commands and gestures from canvas.conf, the bar and the toolbar from shell.json, opened from the overview toolbar's gear",
+	"contributes": {
+		"toolbarButtons": [
+			{
+				"id": "settings",
+				"icon": "\uf013",
+				"label": "Settings",
+				"panel": "settings",
+				"order": 4
+			}
+		],
+		"panels": [
+			{
+				"id": "settings",
+				"entry": "SettingsPanel.qml"
+			}
+		]
+	}
+}
