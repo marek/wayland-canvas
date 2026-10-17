@@ -339,12 +339,14 @@ void draw_view(const RenderCtx &ctx, View &view) {
 		}
 	}
 
-	wlr_box geo = view.wlr->base->geometry;
+	wlr_box geo = view.shell_geometry();
 	if (wlr_box_empty(&geo)) {
 		// No window geometry set yet: the base surface fills it.
 		geo = {.x = 0, .y = 0,
-			.width = view.wlr->base->surface->current.width,
-			.height = view.wlr->base->surface->current.height};
+			.width = view.surface() != nullptr
+				? view.surface()->current.width : geo.width,
+			.height = view.surface() != nullptr
+				? view.surface()->current.height : geo.height};
 	}
 	double ox = view.x - geo.x, oy = view.y - geo.y;
 	// View surfaces (incl. subsurfaces and popups), positioned via the camera.
@@ -586,11 +588,13 @@ void draw_shelf(const RenderCtx &ctx) {
 			fit = std::fmin(box.width / static_cast<double>(frame.width),
 				(box.height - 16.0) / frame.height);
 		}
-		wlr_box geo = view->wlr->base->geometry;
+		wlr_box geo = view->shell_geometry();
 		if (wlr_box_empty(&geo)) {
 			geo = {.x = 0, .y = 0,
-				.width = view->wlr->base->surface->current.width,
-				.height = view->wlr->base->surface->current.height};
+				.width = view->surface() != nullptr
+					? view->surface()->current.width : geo.width,
+				.height = view->surface() != nullptr
+					? view->surface()->current.height : geo.height};
 		}
 		double ox = view->x - geo.x, oy = view->y - geo.y;
 		view->for_each_surface([&](wlr_surface *surface, int sx, int sy) {
@@ -611,7 +615,7 @@ void draw_shelf(const RenderCtx &ctx) {
 			draw_surface_logical(ctx, surface, x, y, cw * fit, ch * fit, 1.0f, true);
 		});
 
-		const char *title = view->wlr->title;
+		const char *title = view->shell_title();
 		if (title != nullptr && title[0] != '\0') {
 			TextTexture t = draw_text(ctx.output->server.renderer, title, config::ui_font,
 				ctx.output->server.theme.colors().panel_text, 0x00000000u, ctx.scale, 0, 0);

@@ -121,7 +121,7 @@ wlr_texture *Decoration::texture() const {
 
 void Decoration::update(float scale) {
 	Server &server = view_.server;
-	const char *title = view_.wlr->title;
+	const char *title = view_.shell_title();
 	bool active = server.focused_view == &view_;
 
 	if (titlebar() == 0) {
@@ -292,11 +292,17 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 // Clients that negotiate neither protocol (GTK4/libadwaita) draw their
 // own header bar; adding ours would double the title bar.
 void Decoration::refresh_mode() {
-	bool negotiated = xdg_decoration_ != nullptr
-		&& xdg_decoration_->current.mode
-			== WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
-	if (view_.server.decorations.kde_server_mode(view_.wlr->base->surface)) {
-		negotiated = true;
+	// An X11 window has no decoration protocol to negotiate with: the
+	// window manager decorates it, which here means our own title bar
+	// (docs/intents/windows/x11.md).
+	bool negotiated = view_.is_x11() && !view_.override_redirect;
+	if (!negotiated) {
+		negotiated = xdg_decoration_ != nullptr
+			&& xdg_decoration_->current.mode
+				== WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+		if (view_.server.decorations.kde_server_mode(view_.surface())) {
+			negotiated = true;
+		}
 	}
 
 	if (negotiated == ssd) {
@@ -310,7 +316,7 @@ void Decoration::refresh_mode() {
 }
 
 void Decoration::handle_initial_commit() {
-	if (xdg_decoration_ != nullptr && view_.wlr->base->initialized) {
+	if (xdg_decoration_ != nullptr && view_.initialized()) {
 		wlr_xdg_toplevel_decoration_v1_set_mode(xdg_decoration_,
 			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 	}
@@ -322,7 +328,7 @@ void Decoration::attach(wlr_xdg_toplevel_decoration_v1 *decoration) {
 		decoration->events.request_mode, this);
 	deco_destroy_.connect<&Decoration::handle_deco_destroy>(
 		decoration->events.destroy, this);
-	if (view_.wlr->base->initialized) {
+	if (view_.initialized()) {
 		wlr_xdg_toplevel_decoration_v1_set_mode(decoration,
 			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 	}
@@ -334,7 +340,7 @@ void Decoration::handle_request_mode() {
 	}
 	// We always decide server-side; the client gets to know once the
 	// toplevel is initialized (before that the initial commit tells it).
-	if (view_.wlr->base->initialized) {
+	if (view_.initialized()) {
 		wlr_xdg_toplevel_decoration_v1_set_mode(xdg_decoration_,
 			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 	}

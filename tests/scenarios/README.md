@@ -130,6 +130,22 @@ own the machine's Wayland display namespace and GPU.
   it runs again once the inhibitor is gone. Nothing in it touches the
   machine's logind session.
 
+- **`xwayland.cpp`** — X11 applications, driven by an xcb client of the
+  scenarios' own (`tests/clients/x11-client.c`, built with the tests
+  because this machine has no xterm or xeyes): the session names an X
+  display, no X11 window exists before a client runs, and the client's
+  window then maps as a view with its X11 title and the same title bar
+  every window gets, where the user is looking. A click and a key reach
+  the client, the title bar's maximize button maximizes it (the client is
+  told its new size), and the × closes it through `WM_DELETE_WINDOW` —
+  the client says so itself and its view goes with it. Then the client's
+  own menu — an override-redirect window — which must sit exactly where
+  the client put it, wear no title bar and take no focus; the clipboard
+  both ways, an X11 client's copy read with `wl-paste` and a `wl-copy`
+  read back inside the client; and last a compositor of its own, headless
+  on its own display, whose `WLR_XWAYLAND` names a binary that is not
+  there: it starts, serves its display and stops.
+
 - **`capture.cpp`** — the shots-and-recordings UI, end to end, with the
   XDG pictures and videos dirs pointing into `tmp/scenarios/capture/`
   and an `xdg-open` stub on PATH (nothing touches the real user dirs or

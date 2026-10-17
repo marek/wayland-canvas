@@ -441,6 +441,7 @@ Server::~Server() {
 	input.finish();
 	decorations.finish();
 	finish_layers();
+	finish_xwayland();
 	finish_views();
 	finish_outputs();
 	new_surface_.disconnect();
@@ -568,6 +569,10 @@ bool Server::start() {
 	}
 	setenv("WAYLAND_DISPLAY", socket, true);
 	unsetenv("DISPLAY");
+	// Xwayland after the unset, so $DISPLAY names this session's X server
+	// and not the one the compositor was started from. It is created now
+	// and started by the first X11 client (view_x11.cpp).
+	init_xwayland();
 	// A nested run inherits the host compositor's control sockets; unset them
 	// so no client of ours reaches the host.
 	unsetenv("HYPRLAND_INSTANCE_SIGNATURE");

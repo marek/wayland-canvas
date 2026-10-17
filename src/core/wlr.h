@@ -93,6 +93,13 @@ extern "C" {
 #include <wlr/util/log.h>
 #include <wlr/util/transform.h>
 #include <wlr/xcursor.h>
+#if CANVAS_HAVE_XWAYLAND
+// xwayland.h names a member `class`, as the layer shell names one
+// `namespace`: the same trick, undone immediately after.
+#define class class_
+#include <wlr/xwayland.h>
+#undef class
+#endif
 #undef namespace
 #undef static
 #pragma clang diagnostic pop
