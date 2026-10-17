@@ -47,6 +47,14 @@ Gestures::Gestures(Server &server)
 	: server_(server) {
 }
 
+void Gestures::set_options(const GestureOptions &options) {
+	options_ = options;
+}
+
+const GestureOptions &Gestures::options() const {
+	return options_;
+}
+
 std::optional<DesktopId> Gestures::desktop_under(Output &out) {
 	if (std::optional<CanvasPos> pos = server_.input.cursor_canvas_pos()) {
 		if (Desktop *desktop = server_.canvas.desktops.at(pos->cx, pos->cy)) {

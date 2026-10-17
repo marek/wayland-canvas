@@ -9,6 +9,17 @@
 class Output;
 class Server;
 
+// What canvas.conf's [gestures] section chooses
+// (docs/intents/input/gestures.md): the finger count that hops and the one
+// that opens the overview, or no 3- and 4-finger gestures at all; and whether
+// Super + a 2-finger pinch scales a desktop.
+enum class SwipePreset { three_finger_hops, four_finger_hops, off };
+
+struct GestureOptions {
+	SwipePreset swipes = SwipePreset::three_finger_hops;
+	bool pinch_scale = true;
+};
+
 // The touchpad gesture in progress, one state per kind of gesture.
 class Gestures {
 public:
@@ -56,6 +67,10 @@ public:
 	const Pinch *pinch() const; // the pinch in progress, for the tile/combine preview
 	void output_gone(const Output &output); // its output was unplugged
 
+	// Takes effect from the next gesture; one in progress keeps going.
+	void set_options(const GestureOptions &options);
+	const GestureOptions &options() const;
+
 private:
 	// Classifies a pending gesture now that enough travel has accumulated;
 	// replaces the state, so the pending struct must not be read afterwards.
@@ -70,4 +85,5 @@ private:
 	State state_ = Idle{};
 	uint32_t last_time_ = 0;
 	bool hold_forwarded_ = false; // whether the current hold gesture was forwarded to a client
+	GestureOptions options_;
 };
