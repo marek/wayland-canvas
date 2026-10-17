@@ -3027,6 +3027,15 @@ int settings_bar_column() {
 		+ 2 * settings_gap;
 }
 
+// The Gestures tab's column of content: the swipe presets, the pinch
+// switch and the invert switch, a header over each section.
+int settings_gestures_column() {
+	return settings_section_height(0, 3)  // Swipes: the three presets
+		+ settings_section_height(0, 1)    // Pinch: scale a desktop
+		+ settings_section_height(0, 1)    // Direction: invert
+		+ 2 * settings_gap;
+}
+
 // The Toolbar tab's column of content: one header and the four edge
 // choices, each a two-line choice row.
 int settings_toolbar_column() {
@@ -7523,8 +7532,7 @@ int run_step() {
 		return 700;
 	case 426: { // the choices drawn; Four-finger hops is clicked
 		cairo_surface_t *s = load_png("settings-gestures-tab");
-		int column = 2 * settings_header + 3 * settings_choice + settings_choice
-			+ 5 * settings_gap;
+		int column = settings_gestures_column();
 		int card_y = settings_card_top(settings_card_height(column),
 			settings_gear_y);
 		int first_top = card_y + settings_pad + settings_row + settings_gap
@@ -7532,6 +7540,9 @@ int run_step() {
 		// The pinch row: under the second header, a detailed row.
 		double pinch_y = first_top + 3 * (settings_choice + settings_gap)
 			+ settings_header + settings_gap + settings_choice / 2.0;
+		// The invert row: one header further down again.
+		double invert_y = pinch_y + settings_choice + settings_header
+			+ 2 * settings_gap;
 		// Labels only: the dots and the switch would light a row by themselves.
 		std::vector<Band> rows = bands_in(s,
 			{settings_card_x + 8, card_y, settings_label_w,
@@ -7539,13 +7550,17 @@ int run_step() {
 		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
 		unsigned dots = s != nullptr ? settings_dots(s, first_top, 3) : 0;
 		bool pinch_on = s != nullptr && settings_switch_is(s, pinch_y, true);
+		bool invert_off = s != nullptr && settings_switch_is(s, invert_y, false);
 		cairo_surface_destroy(s);
 		int labelled = settings_choices_labelled(rows, first_top, 3);
 		auto pinch = settings_band_at(rows, pinch_y);
 		bool pinch_labelled = pinch != rows.end()
 			&& std::abs(pinch->centre() - pinch_y) <= 12;
+		auto invert = settings_band_at(rows, invert_y);
+		bool invert_labelled = invert != rows.end()
+			&& std::abs(invert->centre() - invert_y) <= 12;
 		if ((chosen != 1 || labelled != 3 || !pinch_labelled || dots != 1u
-				|| !pinch_on) && retries++ < 10) {
+				|| !pinch_on || !invert_labelled || !invert_off) && retries++ < 10) {
 			shot("settings-gestures-tab");
 			return -700;
 		}
@@ -7557,6 +7572,8 @@ int run_step() {
 		check(dots == 1u, "Three-finger hops, the default, is the only "
 			"preset chosen before any click");
 		check(pinch_on, "the pinch switch shows on, its default");
+		check(invert_labelled && invert_off,
+			"the Gestures tab ends with the invert row, its switch off by default");
 		settings_first_top = first_top;
 		click(settings_card_x + 100, first_top + settings_choice
 			+ settings_gap + settings_choice / 2.0);
@@ -7636,8 +7653,7 @@ int run_step() {
 		return 700;
 	}
 	case 462: { // the Gestures tab, as it was left: the Shortcuts tab is clicked
-		int column = 2 * settings_header + 3 * settings_choice + settings_choice
-			+ 5 * settings_gap;
+		int column = settings_gestures_column();
 		int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
 		cairo_surface_t *s = load_png("settings-again");
 		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;

@@ -315,6 +315,16 @@ void Keyboard::handle_destroy() {
 	destroy_owned(keyboards, this);
 }
 
+PointerDevice::PointerDevice(Input &input, wlr_input_device *device,
+		libinput_device *handle)
+		: dev(handle), input_(input) {
+	destroy_.connect<&PointerDevice::handle_destroy>(device->events.destroy, this);
+}
+
+void PointerDevice::handle_destroy() {
+	destroy_owned(input_.pointers, this);
+}
+
 Input::Input(Server &server)
 	: grab(server), server_(server) {
 }
@@ -346,13 +356,28 @@ void Input::new_pointer(wlr_input_device *device) {
 	if ((libinput_device_config_click_get_methods(dev) & click) != 0) {
 		libinput_device_config_click_set_method(dev, click);
 	}
-	if (libinput_device_config_scroll_has_natural_scroll(dev)) {
-		libinput_device_config_scroll_set_natural_scroll_enabled(dev,
-			config::natural_scroll);
-	}
 	if (libinput_device_config_dwt_is_available(dev)) {
 		libinput_device_config_dwt_set_enabled(dev, config::disable_while_typing
 			? LIBINPUT_CONFIG_DWT_ENABLED : LIBINPUT_CONFIG_DWT_DISABLED);
+	}
+	apply_pointer_settings(dev);
+	pointers.push_back(std::make_unique<PointerDevice>(*this, device, dev));
+}
+
+// The scroll direction canvas.conf chooses: natural scrolling as the
+// default, reversed while [gestures] invert is on — one direction for the
+// pointer, the touchpad and what clients are scrolled by
+// (docs/intents/input/gestures.md).
+void Input::apply_pointer_settings(libinput_device *dev) {
+	if (libinput_device_config_scroll_has_natural_scroll(dev)) {
+		libinput_device_config_scroll_set_natural_scroll_enabled(dev,
+			config::natural_scroll != server_.conf.invert);
+	}
+}
+
+void Input::settings_changed() {
+	for (const std::unique_ptr<PointerDevice> &pointer : pointers) {
+		apply_pointer_settings(pointer->dev);
 	}
 }
 

@@ -306,6 +306,8 @@ PanelCard {
 
 	readonly property bool pinchScale: !(settings && settings.gestures)
 		|| settings.gestures.pinchScale !== false
+	readonly property bool invert: settings && settings.gestures
+		? settings.gestures.invert === true : false
 
 	// ---- the Session tab ----
 
@@ -606,6 +608,28 @@ PanelCard {
 					anchors.verticalCenter: parent.verticalCenter
 					checked: root.pinchScale
 					onToggled: root.setGesture("pinchScale", !root.pinchScale)
+				}
+			}
+
+			PanelSectionHeader {
+				text: "Direction"
+			}
+
+			PanelRow {
+				label: "Invert scrolling and swipes"
+				// A write that failed says why in place of the explanation.
+				detail: root.faultRow != null && root.faultRow.what === "invert"
+					? root.faultText
+					: "The pointer, the touchpad and the hops together"
+				marked: root.faultRow != null && root.faultRow.what === "invert"
+				clickable: false
+
+				PanelSwitch {
+					anchors.right: parent.right
+					anchors.rightMargin: 8
+					anchors.verticalCenter: parent.verticalCenter
+					checked: root.invert
+					onToggled: root.setGesture("invert", !root.invert)
 				}
 			}
 		}

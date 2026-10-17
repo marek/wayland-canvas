@@ -99,6 +99,9 @@ struct Resolved {
 	std::vector<Command> commands;
 	SwipePreset swipes = SwipePreset::three_finger_hops;
 	bool pinch_scale = true;
+	// [gestures] invert: on reverses the pointer and touchpad scroll
+	// direction and the direction a swipe hop takes (input/gestures.md).
+	bool invert = false;
 	int lock_idle_minutes = default_lock_idle_minutes; // 0: no idle lock
 	bool night_light = false;
 	int night_light_k = default_night_light_k;
@@ -169,8 +172,13 @@ public:
 
 	std::expected<Edit, std::string> set_swipes(SwipePreset preset);
 	std::expected<Edit, std::string> set_pinch_scale(bool on);
+	std::expected<Edit, std::string> set_invert(bool on);
 
 private:
+	// One on/off line of [gestures], by its name in the file.
+	std::expected<Edit, std::string> set_gesture_switch(std::string_view name,
+		bool on);
+
 	Parsed parsed_;
 	Resolved resolved_;
 	std::string text_;

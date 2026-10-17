@@ -43,7 +43,7 @@ constexpr char usage_text[] =
 	"  four-finger-hops (every 3 and 4 swapped) or off (no 3- or 4-finger\n"
 	"  compositor gesture; the client's in the normal view, nothing in the\n"
 	"  overview); pinch-scale = off makes a Super + 2-finger pinch a plain\n"
-	"  pinch\n"
+	"  pinch; invert = on reverses scrolling and every swipe direction\n"
 	"\n"
 	"Screen capture:\n"
 	"  Super+Shift+3      screenshot of the whole screen\n"

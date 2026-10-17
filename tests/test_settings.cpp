@@ -278,6 +278,27 @@ void errors_carry_line_numbers() {
 		"the good lines apply around the errors");
 }
 
+// [gestures] invert: the scroll and swipe direction
+// (docs/intents/input/gestures.md).
+void gesture_invert() {
+	check(!settings::resolve(settings::parse("")).invert,
+		"invert defaults to off: natural scrolling stays");
+	settings::Parsed on = settings::parse("[gestures]\ninvert = on\n");
+	check(on.errors.empty() && settings::resolve(on).invert,
+		"invert = on resolves to the inverted direction");
+	settings::Parsed bad = settings::parse("[gestures]\ninvert = backwards\n");
+	check(error_at(bad, 2, "invert must be on or off"),
+		"an unknown invert value is an error with its line");
+	check(!settings::resolve(bad).invert, "the bad line leaves the default");
+
+	settings::File file{"[gestures]\ninvert = off\ninvert = on\n"};
+	auto edit = file.set_invert(true);
+	check(edit.has_value() && edit->text == "[gestures]\ninvert = on\n",
+		"set_invert rewrites the first line and drops the duplicate");
+	check(settings::File{edit->text}.resolved().invert,
+		"the written value resolves");
+}
+
 void template_parses_back() {
 	std::string text = settings::template_text();
 	settings::Parsed parsed = settings::parse(text);
@@ -291,7 +312,8 @@ void template_parses_back() {
 		"the template holds an empty [commands] with a commented example");
 	check(text.find("[gestures]\n") != std::string::npos
 			&& text.find("swipes = three-finger-hops") != std::string::npos
-			&& text.find("pinch-scale = on") != std::string::npos,
+			&& text.find("pinch-scale = on") != std::string::npos
+			&& text.find("invert = off") != std::string::npos,
 		"the template holds [gestures] at its defaults");
 	check(text.find("# Apps\n") != std::string::npos
 			&& text.find("# Windows\n") != std::string::npos
@@ -492,6 +514,7 @@ int main() {
 	precedence_none();
 	precedence_taken_from_default_holders();
 	errors_carry_line_numbers();
+	gesture_invert();
 	template_parses_back();
 	edit_keeps_every_other_byte();
 	edit_appends_into_missing_section();

@@ -1613,6 +1613,24 @@ int run_step() {
 			std::format("with the defaults back, a 3-finger swipe hopped onto C"
 				" (off by {:.0f},{:.0f})", cam.cx - c.cx, cam.cy - c.cy));
 		shot("35-default-restored");
+		// invert on: the same swipe hops the other way
+		// (docs/intents/input/gestures.md).
+		server->gestures.set_options({.swipes = SwipePreset::three_finger_hops,
+			.pinch_scale = true, .invert = true});
+		swipe(3, 200, 0, 8); // 3 fingers right, inverted: back onto B
+		return 900;
+	}
+	case 112: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Camera b = camera_for_box(desk(hop_b)->frame(), 0.8);
+		Camera cam = o->camera.current();
+		check(cam.cx == b.cx && cam.cy == b.cy && o->desktop_showing() == desk(hop_b),
+			std::format("with invert on, a 3-finger swipe right hopped left, onto B"
+				" (off by {:.0f},{:.0f})", cam.cx - b.cx, cam.cy - b.cy));
+		server->gestures.set_options(GestureOptions{});
+		check(!server->gestures.options().invert, "invert off again");
 		return 0;
 	}
 	default:

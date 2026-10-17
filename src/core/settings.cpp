@@ -543,10 +543,10 @@ Parsed parse(std::string_view text) {
 					out.gestures.push_back({.line = line_no, .name = std::string{name},
 						.value = std::string{value}});
 				}
-			} else if (name == "pinch-scale") {
+			} else if (name == "pinch-scale" || name == "invert") {
 				if (value != "on" && value != "off") {
 					out.errors.push_back({.line = line_no,
-						.text = "pinch-scale must be on or off"});
+						.text = std::format("{} must be on or off", name)});
 				} else {
 					out.gestures.push_back({.line = line_no, .name = std::string{name},
 						.value = std::string{value}});
@@ -663,7 +663,7 @@ Resolved resolve(const Parsed &parsed) {
 			temp_set = true;
 		}
 	}
-	bool swipes_set = false, pinch_set = false;
+	bool swipes_set = false, pinch_set = false, invert_set = false;
 	for (const Entry &entry : parsed.gestures) {
 		if (entry.name == "swipes" && !swipes_set) {
 			out.swipes = *parse_swipes(entry.value);
@@ -671,6 +671,9 @@ Resolved resolve(const Parsed &parsed) {
 		} else if (entry.name == "pinch-scale" && !pinch_set) {
 			out.pinch_scale = entry.value == "on";
 			pinch_set = true;
+		} else if (entry.name == "invert" && !invert_set) {
+			out.invert = entry.value == "on";
+			invert_set = true;
 		}
 	}
 	return out;
@@ -720,7 +723,9 @@ std::string template_text() {
 		"# swipes = three-finger-hops | four-finger-hops | off\n"
 		"swipes = three-finger-hops\n"
 		"# pinch-scale = on | off\n"
-		"pinch-scale = on\n";
+		"pinch-scale = on\n"
+		"# invert = on | off: on reverses scrolling and the swipe hops\n"
+		"invert = off\n";
 	out += std::format("\n[session]\n"
 		"# lock-idle = minutes of idleness before the screen locks, or off\n"
 		"lock-idle = {}\n"
@@ -1008,19 +1013,31 @@ std::expected<Edit, std::string> File::set_session(std::string_view name,
 	return Edit{text_, {}};
 }
 
-std::expected<Edit, std::string> File::set_pinch_scale(bool on) {
+// The one shape every on/off line of [gestures] is written in: the first
+// line that sets it is rewritten, any later duplicate dropped, and a
+// setting the file does not name is appended to its section.
+std::expected<Edit, std::string> File::set_gesture_switch(
+		std::string_view name, bool on) {
 	std::string value = on ? "on" : "off";
-	std::vector<int> lines = entry_lines("gestures", "pinch-scale");
+	std::vector<int> lines = entry_lines("gestures", name);
 	if (lines.empty()) {
-		append_entry("gestures", "pinch-scale", value);
+		append_entry("gestures", name, value);
 	} else {
 		for (std::size_t k = lines.size(); k > 1; k--) {
 			lines_.erase(lines_.begin() + lines[k - 1]);
 		}
-		write_line(lines.front(), "pinch-scale", value, false);
+		write_line(lines.front(), name, value, false);
 	}
 	rejoin();
 	return Edit{text_, {}};
+}
+
+std::expected<Edit, std::string> File::set_pinch_scale(bool on) {
+	return set_gesture_switch("pinch-scale", on);
+}
+
+std::expected<Edit, std::string> File::set_invert(bool on) {
+	return set_gesture_switch("invert", on);
 }
 
 } // namespace settings

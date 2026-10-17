@@ -162,6 +162,17 @@ std::string event_line(std::string_view name, std::string_view params) {
 // ------------------------------------------------------------- params
 
 // A string param: nullopt when absent; an error naming it when not one.
+// A boolean parameter the caller has already found on `params`.
+std::expected<bool, std::string> req_bool(JsonObject *params, const char *name) {
+	JsonNode *node = json_object_get_member(params, name);
+	if (json_node_get_node_type(node) != JSON_NODE_VALUE
+			|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
+		return std::unexpected(std::format(
+			"params: {} must be true or false", name));
+	}
+	return static_cast<bool>(json_node_get_boolean(node));
+}
+
 std::expected<std::optional<std::string>, std::string> opt_string(
 		JsonObject *params, const char *name) {
 	if (params == nullptr || !json_object_has_member(params, name)) {
@@ -400,6 +411,8 @@ void add_settings(JsonBuilder *builder, Server &server) {
 	add_string("swipes", swipe_name(server.conf.swipes));
 	json_builder_set_member_name(builder, "pinchScale");
 	json_builder_add_boolean_value(builder, server.conf.pinch_scale);
+	json_builder_set_member_name(builder, "invert");
+	json_builder_add_boolean_value(builder, server.conf.invert);
 	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "session");
 	json_builder_begin_object(builder);
@@ -1150,7 +1163,7 @@ std::expected<std::string, std::string> Ipc::m_settings_get(Client &,
 std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 		JsonObject *params) {
 	constexpr std::string_view usage =
-		R"(params: exactly one of action with keys, commands, swipes or pinchScale)";
+		R"(params: exactly one of action with keys, commands, swipes, pinchScale or invert)";
 	if (params == nullptr) {
 		return std::unexpected(std::string{usage});
 	}
@@ -1158,11 +1171,12 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 	bool has_commands = json_object_has_member(params, "commands");
 	bool has_swipes = json_object_has_member(params, "swipes");
 	bool has_pinch = json_object_has_member(params, "pinchScale");
+	bool has_invert = json_object_has_member(params, "invert");
 	bool has_idle = json_object_has_member(params, "lockIdleMinutes");
 	bool has_night = json_object_has_member(params, "nightLight");
 	bool has_temperature = json_object_has_member(params, "nightLightTemperature");
-	if (has_action + has_commands + has_swipes + has_pinch + has_idle + has_night
-			+ has_temperature != 1) {
+	if (has_action + has_commands + has_swipes + has_pinch + has_invert + has_idle
+			+ has_night + has_temperature != 1) {
 		return std::unexpected(std::string{usage});
 	}
 	settings::File file{server_.conf_text};
@@ -1291,22 +1305,23 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 		}
 		edit = file.set_swipes(*preset);
 	} else if (has_pinch) {
-		JsonNode *node = json_object_get_member(params, "pinchScale");
-		if (json_node_get_node_type(node) != JSON_NODE_VALUE
-				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
-			return std::unexpected(std::string{
-				"params: pinchScale must be true or false"});
+		std::expected<bool, std::string> on = req_bool(params, "pinchScale");
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
 		}
-		edit = file.set_pinch_scale(json_node_get_boolean(node));
+		edit = file.set_pinch_scale(*on);
+	} else if (has_invert) {
+		std::expected<bool, std::string> on = req_bool(params, "invert");
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
+		}
+		edit = file.set_invert(*on);
 	} else if (has_night) {
-		JsonNode *node = json_object_get_member(params, "nightLight");
-		if (json_node_get_node_type(node) != JSON_NODE_VALUE
-				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
-			return std::unexpected(std::string{
-				"params: nightLight must be true or false"});
+		std::expected<bool, std::string> on = req_bool(params, "nightLight");
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
 		}
-		edit = file.set_session("night-light",
-			json_node_get_boolean(node) ? "on" : "off");
+		edit = file.set_session("night-light", *on ? "on" : "off");
 	} else {
 		const char *name = has_idle ? "lockIdleMinutes" : "nightLightTemperature";
 		JsonNode *node = json_object_get_member(params, name);

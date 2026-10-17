@@ -206,6 +206,12 @@ void Gestures::swipe_update(uint32_t time, double dx, double dy) {
 	if (state_output(state_) == nullptr) {
 		return;
 	}
+	// Inverted scrolling turns every compositor gesture around with it; a
+	// forwarded one above keeps what libinput sent (gestures.md).
+	if (options_.invert) {
+		dx = -dx;
+		dy = -dy;
+	}
 	double dt = static_cast<double>(time) - static_cast<double>(last_time_);
 
 	// A pending gesture accumulates travel until there is enough to

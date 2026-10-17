@@ -174,6 +174,7 @@ GestureOptions gesture_options(const settings::Resolved &conf) {
 		break;
 	}
 	options.pinch_scale = conf.pinch_scale;
+	options.invert = conf.invert;
 	return options;
 }
 
@@ -675,6 +676,7 @@ void Server::load_conf(bool first) {
 	conf_errors = std::move(parsed.errors);
 	bindings.apply(conf);
 	gestures.set_options(gesture_options(conf));
+	input.settings_changed();
 	lock.settings_changed();
 	night_light.settings_changed();
 	if (!conf_errors.empty()) {
