@@ -94,7 +94,7 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
 |---|---|
 | Tabs | Each desktop has a tab: its name, its scale when not 100 %, the Tile switch (lit while tiling is on) and Abandon |
 | Shelf | Minimized windows along the bottom, above the toolbar when it is on the bottom edge ([../shell/toolbar.md](../shell/toolbar.md)); clicking one restores it and goes there ([../windows/window-management.md](../windows/window-management.md)) |
-| Help line | Along the bottom, above a bottom toolbar, naming the gestures of the preset in force; under off, the keys |
+| Help line | Along the bottom, above a bottom toolbar, naming the gestures of the preset in force; under off, only the pointer and key hints |
 | Hints | Transient messages for completed actions (e.g. "Tiling on for Desktop 2", "Desktop 2 at 80 %") |
 | Previews | While a pinch is in tiling or combine range, what release will do (e.g. "Release to combine Desktop 2 into Desktop 3"); backing out of range clears it |
 
