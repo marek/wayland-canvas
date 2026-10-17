@@ -57,10 +57,12 @@ Nothing.
 | Where | How |
 |---|---|
 | omp in this repo | The `answer` tool (`.omp/extensions/pinned-answers.ts`) pins the question and its answer above the input. The pin stays while work goes on, until the user closes it: `/dismiss` or Alt+X closes all, `/dismiss 2` closes the second. The pin is the answer; the reply does not repeat it. |
+| Vanilla pi in this repo | The same `answer` tool, ported to pi's extension API (TypeBox instead of zod, no subagent or `session_switch`/`session_branch` events), at `.pi/extensions/pinned-answers.ts`. Same pin, same `/dismiss` and Alt+X behaviour. |
 | Other harnesses | The answer opens the reply. When work carries on in the same turn, the turn's final message ends with the answer again, so it is the last thing on screen. |
 
 A follow-up question gets its own pin. What the user says about an
 answer ("then switch to Y") is an instruction like any other.
 
-The extension repeats this rule to the model with every prompt in omp;
-`tools/hooks/reinforce-collaboration-rules.sh` does so in Claude Code.
+The extension repeats this rule to the model with every prompt in omp
+and in vanilla pi; `tools/hooks/reinforce-collaboration-rules.sh` does
+so in Claude Code.

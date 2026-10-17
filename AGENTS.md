@@ -223,7 +223,7 @@ Skills live in `docs/skills/<name>/SKILL.md`;
 | `robust-architecture` | Deciding where a piece of state lives and who derives from it. |
 | `fresh-deploy` | Before deleting code, a constant or a feature, or writing a compatibility path. |
 | `canvas-autopilot` | Working through the open plans without stopping, when the user asks for that. |
-| `answering-questions` | Any question from the user (progress, why something was or was not done): answered first and in a few lines, nothing changed because of it; in omp the `answer` tool from `.omp/extensions/pinned-answers.ts` pins it above the input until dismissed. |
+| `answering-questions` | Any question from the user (progress, why something was or was not done): answered first and in a few lines, nothing changed because of it; the `answer` tool pins it above the input until dismissed (`.omp/extensions/pinned-answers.ts` in omp, `.pi/extensions/pinned-answers.ts` in vanilla pi). |
 
 A skill tells you how to execute; `docs/intents/` tells you what the
 result must satisfy. Read both before a non-trivial change.
