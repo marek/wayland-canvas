@@ -126,10 +126,13 @@ touched.
 - [x] Settings: the app bar's edge and its on/off switch, on the Toolbar
       page beside the toolbar's edge — what two surfaces must agree on is
       the shell config's own, not one plugin's.
-- [ ] Scenario: two foot windows on two desktops — the app bar lists
-      both, a click on each lands the view on its desktop, and a window
-      on no desktop lands centred.
-- [ ] Scenario: the app bar off shows nothing; on the toolbar's edge
+- [x] Scenario: the bar suite — the app bar lists every open app, and a
+      click lands the view on that window, focused.
+- [ ] Scenario, owed: two desktops at once, and a window on no desktop
+      landing on a centred view.
+- [ ] Shell: the app's icon from its desktop entry, in place of the
+      letter the entry draws now.
+- [x] Scenario: the app bar off shows nothing; on the toolbar's edge
       both show with the apps last.
 - [ ] `tools/check.sh` green, the plans index and the intents index
       current.
