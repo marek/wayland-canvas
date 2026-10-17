@@ -373,6 +373,12 @@ if foot_prog.found() and grim_prog.found()
 	)
 	if qs_prog.found() and dbus_daemon_prog.found() and bar_standins.returncode() == 0
 		scenarios += ['bar']
+		# The session scenario needs the same private world: the shell's
+		# notification server, locker and polkit agent may only ever run on
+		# buses of the run's own.
+		if find_program('notify-send', required: false).found()
+			scenarios += ['session']
+		endif
 		scenario_env.set('CANVAS_BAR_STANDIN_PY', bar_standins.stdout().strip().split('\n')[-1])
 		scenario_env.set(
 			'CANVAS_BAR_STANDINS',

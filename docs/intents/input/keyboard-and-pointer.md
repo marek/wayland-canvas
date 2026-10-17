@@ -64,6 +64,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Super+Shift+3 / 4 / 5 | `shot-screen` / `capture-pick` / `capture-toolbar` | Whole-screen shot / the capture picker / the capture toolbar ([../apps/capture.md](../apps/capture.md)); with Ctrl added, the `-copy` action of each copies the shot |
 | Print / Shift+Print / Alt+Print | `capture-pick` / `shot-screen` / `record-stop` | The picker / whole-screen shot / stop a recording, else the toolbar on its recording choices; Ctrl added, the `-copy` actions ([../apps/capture.md](../apps/capture.md)) |
 | Super+L | `lock` | Lock the screen ([../shell/lock.md](../shell/lock.md)) |
+| Super+N / Super+Shift+N | `notifications-dismiss` / `notifications-dismiss-all` | Take the newest popup, or every popup, off the screen ([../shell/notifications.md](../shell/notifications.md)) |
 | Super+Shift+E, Ctrl+Alt+Backspace | `quit` | Quit the compositor |
 | Ctrl+Alt+F1..F12 | — | Switch to that VT; fixed |
 | In the overview | `[overview]`: `hop-left` … `hop-down`, `go`, `back`, `abandon`, `tiling`, `combine`, `new-desktop`, `zoom-reset`, `zoom-in`, `zoom-out`, `leave` | Arrows hop, Return go, Esc back, Delete/BackSpace abandon, `t` switch tiling, `m` combine, `n` new desktop, `0` the target desktop back to 100 %, `+`/`−` zoom, Super+Tab / Super+W leave ([../canvas/overview.md](../canvas/overview.md)) |

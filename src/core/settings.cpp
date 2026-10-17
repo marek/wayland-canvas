@@ -254,6 +254,10 @@ const std::vector<ActionDef> &registry() {
 		add(Scope::global, "Capture", "record-stop-copy",
 			"Stop the recording, to the clipboard", {"Ctrl+Alt+Print"});
 		add(Scope::global, "Session", "lock", "Lock the screen", {"Super+L"});
+		add(Scope::global, "Session", "notifications-dismiss",
+			"Dismiss the newest notification", {"Super+N"});
+		add(Scope::global, "Session", "notifications-dismiss-all",
+			"Dismiss every notification", {"Super+Shift+N"});
 		add(Scope::global, "Session", "quit", "Quit wayland-canvas",
 			{"Super+Shift+E", "Ctrl+Alt+BackSpace"});
 		add(Scope::overview, "In the overview", "hop-left", "Hop left", {"Left"});

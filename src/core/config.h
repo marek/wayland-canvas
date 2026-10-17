@@ -223,6 +223,11 @@ inline constexpr uint32_t lock_fill = 0x000000ff;
 // The shell action a lock trigger runs: the locker plugin draws the lock
 // and unlocks through the protocol.
 inline constexpr const char *lock_action = "canvas.lock/lock";
+// The shell actions the notification shortcuts run.
+inline constexpr const char *notification_dismiss_action =
+	"canvas.notifications/dismiss";
+inline constexpr const char *notification_dismiss_all_action =
+	"canvas.notifications/dismiss-all";
 // How long a sleep is held back for the lock to be drawn; past it the
 // machine sleeps anyway, locked or not.
 inline constexpr int lock_sleep_wait_ms = 5000;

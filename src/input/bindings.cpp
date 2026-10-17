@@ -226,6 +226,12 @@ void act_lock(Server &server, Output *, KeyArg) {
 	server.lock.request("the lock shortcut");
 }
 
+// A shortcut whose work belongs to a shell plugin: the compositor only
+// runs the named action, as `action.run` does.
+void act_shell(Server &server, Output *, KeyArg arg) {
+	server.ipc.run_action(std::get<const char *>(arg), "{}");
+}
+
 void act_vt(Server &server, Output *, KeyArg arg) {
 	if (server.session != nullptr) {
 		wlr_session_change_vt(server.session,
@@ -406,6 +412,10 @@ constexpr std::array runners = {
 	Runner{settings::Scope::global, "record-stop", act_record_stop, 0},
 	Runner{settings::Scope::global, "record-stop-copy", act_record_stop, 1},
 	Runner{settings::Scope::global, "lock", act_lock, 0},
+	Runner{settings::Scope::global, "notifications-dismiss", act_shell,
+		config::notification_dismiss_action},
+	Runner{settings::Scope::global, "notifications-dismiss-all", act_shell,
+		config::notification_dismiss_all_action},
 	Runner{settings::Scope::global, "quit", act_quit, 0},
 	Runner{settings::Scope::overview, "hop-left", act_ov_hop, Dir{-1, 0}},
 	Runner{settings::Scope::overview, "hop-right", act_ov_hop, Dir{1, 0}},

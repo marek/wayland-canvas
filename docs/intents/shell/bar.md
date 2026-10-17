@@ -58,7 +58,7 @@ sit in 27 px slots.
 |---|---|
 | Left | logo button |
 | Center | clock, weather |
-| Right | tray, agents, bluetooth, network, audio, brightness, power, theme |
+| Right | tray, agents, bluetooth, network, audio, brightness, notifications, power, theme |
 
 Any widget can be left out of the bar: the shell config's `bar.hidden`
 ([plugins.md](plugins.md)), which the settings window's Bar page writes
