@@ -42,6 +42,7 @@ namespace {
 std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
+long long free_window_id = 0; // the window moved onto free canvas, for its jump
 bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
@@ -1565,10 +1566,46 @@ int run_step() {
 			"window.focus brought the view back to the window and focused it");
 		check(client_code("window-focus-bad") != 0,
 			"window.focus with an unknown id answers an error");
+		// A window on no desktop: moved far out onto free canvas, with a
+		// second desktop beside the first so the jump has a choice to make
+		// (docs/intents/shell/app-bar.md).
+		if (view != nullptr && output != nullptr) {
+			server->canvas.desktops.create(wlr_box{4 * output->width, 0,
+				output->width, output->height});
+			view->move(40000, 40000); // clear of every desktop
+			Camera cam = output->camera.current();
+			cam.cx = 0;
+			cam.cy = 0;
+			output->camera.jump(cam);
+			free_window_id = static_cast<long long>(view->session_id);
+		}
+		run_client("window.focus",
+			std::format(R"({{"window":{}}})", free_window_id), "window-free");
+		return 500;
+	}
+	case 77: { // the view centred on the window, no desktop involved
+		Output *output = server->output_under_cursor();
+		View *view = foot_window();
+		if ((!client_done("window-free") || output == nullptr
+				|| output->camera.panning() || output->camera.zooming())
+				&& retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		wlr_box frame = view != nullptr ? view->frame_box() : wlr_box{};
+		Camera cam = output != nullptr ? output->camera.current() : Camera{};
+		double off_x = cam.cx - (frame.x + frame.width / 2.0);
+		double off_y = cam.cy - (frame.y + frame.height / 2.0);
+		check(view != nullptr && server->canvas.desktop_of(*view) == nullptr,
+			"the window sits on no desktop");
+		check(std::fabs(off_x) <= 1 && std::fabs(off_y) <= 1
+				&& std::fabs(cam.zoom - 1) < 1e-9,
+			std::format("window.focus centred the view on a window with no"
+				" desktop (off by {:.0f},{:.0f} at zoom {:.2f})",
+				off_x, off_y, cam.zoom));
 		finished = true; // the quit is the run's end
 		run_client("quit", "", "quit");
 		return 300;
-
 	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
