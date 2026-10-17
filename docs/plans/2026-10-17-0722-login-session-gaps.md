@@ -129,9 +129,9 @@ These decisions close three open boxes of
 
 ## Session services
 
-- [ ] Intent: the login session's services: what a login starts (`graphical-session.target`, XDG autostart) and when, how they stop (session end, crash), units that need Hyprland, another graphical session of the same user, TTY, nested and headless runs
-- [ ] Compositor and package: the session target unit shipped, started by a login after the environment hand-over, stopped when the session ends and when the compositor crashes
-- [ ] Proof: the start, stop and crash rules, without touching the user's own systemd manager (how is the intent's call)
+- [x] Intent: the login session's services: what a login starts (`graphical-session.target`, XDG autostart) and when, how they stop (session end, crash), units that need Hyprland, another graphical session of the same user, TTY, nested and headless runs
+- [x] Compositor and package: the session target unit shipped, started by a login after the environment hand-over, stopped when the session ends; a crash is cleaned up by the next login, which stops the target before starting it
+- [x] Proof: the start, stop and crash rules as a unit test over the pure rules (`session-services`), and the lock scenario proving a headless run runs no systemctl at all through a stub first on its PATH
 
 ## Verification
 

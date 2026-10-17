@@ -476,7 +476,14 @@ int run_step() {
 		reap_locker();
 		return 300;
 	}
-	case 22: {
+	case 22: { // a headless run is no login: it starts no session services
+		std::string calls = read_file(shot_dir + "/systemctl.log");
+		check(calls.empty(), std::format(
+			"no systemctl ran in a headless run ({})",
+			calls.empty() ? "none" : calls.substr(0, calls.find('\n'))));
+		return 300;
+	}
+	case 23: {
 		finished = true;
 		wl_display_terminate(server->display);
 		return -1;
@@ -524,6 +531,23 @@ int main() {
 	shot_dir = std::format("{}/scenarios/lock", root);
 	mkdir_p(shot_dir);
 	setenv("XDG_CONFIG_HOME", std::format("{}/xdg-config", shot_dir).c_str(), 1);
+	// A stub systemctl first on PATH: a run that is not a login must
+	// start no session services, and the machine's own user manager must
+	// never be spoken to from a test.
+	std::string stub_bin = shot_dir + "/bin";
+	mkdir_p(stub_bin);
+	{
+		std::string path = stub_bin + "/systemctl";
+		FILE *f = std::fopen(path.c_str(), "w");
+		if (f != nullptr) {
+			std::fprintf(f, "#!/usr/bin/env bash\nprintf '%%s\\n' \"$*\" >> '%s/systemctl.log'\n",
+				shot_dir.c_str());
+			std::fclose(f);
+			chmod(path.c_str(), 0755);
+		}
+	}
+	setenv("PATH", std::format("{}:{}", stub_bin,
+		std::getenv("PATH") != nullptr ? std::getenv("PATH") : "").c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();

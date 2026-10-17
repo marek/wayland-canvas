@@ -47,6 +47,7 @@ their values.
 | [glossary.md](glossary.md) | Term disambiguation |
 | [workspace/repos.md](workspace/repos.md) | The single repo, identity, pushing, what is committed, the wlroots subproject |
 | [workspace/build-and-run.md](workspace/build-and-run.md) | Build deps, meson, running: TTY, nested, options, scale |
+| [workspace/session-services.md](workspace/session-services.md) | What a graphical login starts besides the compositor, and when it stops |
 | [workspace/packaging.md](workspace/packaging.md) | The two package formats, the session file, the default-session rules per display manager, the change journal, install and uninstall guarantees |
 | [canvas/infinite-canvas.md](canvas/infinite-canvas.md) | The plane, per-output cameras, 1:1 vs zoomed, the pixel grid, panning and hops, free areas, the grid |
 | [canvas/desktops.md](canvas/desktops.md) | What a desktop is, membership, frames never move windows, ids, create, abandon, combine, tiling slices |

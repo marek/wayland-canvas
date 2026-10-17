@@ -18,6 +18,7 @@
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "platform/session_bus.h"
+#include "platform/session_services.h"
 #include "core/server.h"
 #include "windows/view.h"
 
@@ -233,10 +234,14 @@ session_bus::Handed systemd_handed() {
 // screen-sharing portal and its wlroots backend first among them — when
 // the bus is this run's to take (docs/intents/platform/protocols.md). A
 // login returns the values it replaced, for the hand-back on exit.
-std::optional<session_bus::Handed> hand_over_session_bus(bool login) {
+session_bus::Owner bus_owner(bool login) {
 	const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
 	const char *runtime = getenv("XDG_RUNTIME_DIR");
-	switch (session_bus::owner(address ? address : "", runtime ? runtime : "", login)) {
+	return session_bus::owner(address ? address : "", runtime ? runtime : "", login);
+}
+
+std::optional<session_bus::Handed> hand_over_session_bus(bool login) {
+	switch (bus_owner(login)) {
 	case session_bus::Owner::none:
 	case session_bus::Owner::host:
 		return std::nullopt;
@@ -410,6 +415,11 @@ Server::~Server() {
 	if (conf_inotify_fd_ >= 0) {
 		close(conf_inotify_fd_);
 		conf_inotify_fd_ = -1;
+	}
+	if (manages_services_) {
+		// The session ends: its services go with it. A crash runs nothing
+		// here, and the next login stops what it left behind.
+		spawn(session_services::stop_command().c_str());
 	}
 	if (hand_over_.has_value()) {
 		hand_back_session_bus(*hand_over_);
@@ -607,6 +617,13 @@ bool Server::start() {
 	}
 	// A login watches its logind session: lock-session and sleep lock it.
 	logind.init(session != nullptr);
+	// ...and brings the session's own services up, once its environment is
+	// where the user manager can see it
+	// (docs/intents/workspace/session-services.md).
+	if (session_services::manages(bus_owner(session != nullptr))) {
+		manages_services_ = true;
+		spawn(session_services::start_command().c_str());
+	}
 	wlr_log(WLR_INFO, "Running wayland-canvas on WAYLAND_DISPLAY=%s", socket);
 	if (options.start_bar) {
 		start_bar();

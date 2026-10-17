@@ -127,6 +127,7 @@ theme_prefs_lib = static_library(
 session_bus_lib = static_library(
 	'canvas-session-bus',
 	'src/platform/session_bus.cpp',
+	'src/platform/session_services.cpp',
 	include_directories: src_inc,
 )
 
@@ -238,6 +239,17 @@ install_data(
 	install_dir: get_option('sysconfdir') / 'xdg' / 'xdg-desktop-portal-wlr',
 )
 # The lock screen's PAM service: the locker checks the password through it.
+# The session's own systemd target: a login starts it, so
+# graphical-session.target and XDG autostart come up with the compositor.
+systemd = dependency('systemd', required: false)
+systemd_user_dir = get_option('prefix') / 'lib/systemd/user'
+if systemd.found()
+	systemd_user_dir = systemd.get_variable(pkgconfig: 'systemduserunitdir')
+endif
+install_data(
+	'packaging/systemd/wayland-canvas-session.target',
+	install_dir: systemd_user_dir,
+)
 install_data(
 	'packaging/pam.d/wayland-canvas',
 	install_dir: get_option('sysconfdir') / 'pam.d',
@@ -320,6 +332,17 @@ test(
 		include_directories: src_inc,
 		link_with: settings_lib,
 		dependencies: [xkbcommon],
+	),
+	suite: 'unit',
+)
+
+test(
+	'session-services',
+	executable(
+		'test-session-services',
+		'tests/test_session_services.cpp',
+		include_directories: src_inc,
+		link_with: session_bus_lib,
 	),
 	suite: 'unit',
 )

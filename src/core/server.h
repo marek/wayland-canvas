@@ -173,4 +173,6 @@ private:
 	Listener new_surface_, request_activate_, new_inhibitor_;
 	// A login's hand-over of the portal, handed back on exit.
 	std::optional<session_bus::HandOver> hand_over_;
+	// Whether this run started the session's services and so stops them.
+	bool manages_services_ = false;
 };
