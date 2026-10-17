@@ -136,6 +136,20 @@ std::size_t agents_base_runs = 0;
 int usage_requests_base = 0; // the stand-in's log lines before the reopen
 LayerSurface *agents_bar_before_reload = nullptr;
 std::string scratch_home;
+int shots_before = 0; // screenshots on disk before the chord under test
+
+// The screenshots this run has saved: the compositor writes them under the
+// scratch HOME's Pictures/Screenshots (src/apps/capture_ui.cpp).
+int screenshots_taken() {
+	std::error_code ec;
+	int n = 0;
+	for (auto it = std::filesystem::directory_iterator(
+			scratch_home + "/Pictures/Screenshots", ec);
+			!ec && it != std::filesystem::directory_iterator(); ++it) {
+		n++;
+	}
+	return n;
+}
 wlr_box agents_box{}; // the panel's card on screen
 // ---- the settings phase's state ----
 
@@ -8679,6 +8693,80 @@ int run_step() {
 		retries = 0;
 		check(landed, "a click on the left-edge app bar took the view to the "
 			"window");
+		// A screenshot with a panel open: the chord is the compositor's
+		// whoever holds the keyboard (docs/intents/apps/capture.md).
+		click(clock_x, bar_h() / 2.0);
+		return 600;
+	}
+	case 546: { // the clock panel open, then Super+Shift+3
+		if (panel_layers() == 0 && retries++ < 40) {
+			return -200;
+		}
+		retries = 0;
+		check(panel_layers() > 0, "a bar panel is open for the screenshot");
+		shots_before = screenshots_taken();
+		chord(KEY_3, std::array<uint32_t, 2>{KEY_LEFTMETA, KEY_LEFTSHIFT});
+		return 900;
+	}
+	case 547: { // the shot landed all the same
+		int now = screenshots_taken();
+		if (now <= shots_before && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(now > shots_before, std::format("Super+Shift+3 took a screenshot "
+			"with a panel open ({} files, was {})", now, shots_before));
+		shots_before = now;
+		// The region picker with a panel open: the drag belongs to the
+		// picker, not to the surface under the pointer.
+		if (panel_layers() == 0) {
+			click(clock_x, bar_h() / 2.0); // the panel again
+		}
+		return 600;
+	}
+	case 548: { // the panel open: Super+Shift+4, then a region dragged over it
+		if (panel_layers() == 0 && retries++ < 40) {
+			if (retries % 10 == 5) {
+				click(clock_x, bar_h() / 2.0); // a click may have toggled it shut
+			}
+			return -200;
+		}
+		retries = 0;
+		check(panel_layers() > 0, "a bar panel is open for the region pick");
+		chord(KEY_4, std::array<uint32_t, 2>{KEY_LEFTMETA, KEY_LEFTSHIFT});
+		return 500;
+	}
+	case 549: { // the picker owns the pointer: a drag across the panel's area
+		check(server->capture_ui.owns_keyboard(),
+			"Super+Shift+4 opened the picker with the panel open");
+		park(clock_x - 60, bar_h() + 40);
+		t += 8;
+		{
+			wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t,
+				.button = BTN_LEFT, .state = WL_POINTER_BUTTON_STATE_PRESSED};
+			wl_signal_emit_mutable(&ptr.events.button, &b);
+			wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+		}
+		for (int i = 1; i <= 6; i++) {
+			park(clock_x - 60 + i * 20, bar_h() + 40 + i * 15);
+		}
+		t += 8;
+		{
+			wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t,
+				.button = BTN_LEFT, .state = WL_POINTER_BUTTON_STATE_RELEASED};
+			wl_signal_emit_mutable(&ptr.events.button, &b);
+			wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+		}
+		return 900;
+	}
+	case 550: { // the region landed as a file
+		int now = screenshots_taken();
+		if (now <= shots_before && retries++ < 40) {
+			return -300;
+		}
+		retries = 0;
+		check(now > shots_before, std::format("a region pick with a panel open "
+			"saved its shot ({} files, was {})", now, shots_before));
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item
