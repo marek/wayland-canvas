@@ -436,12 +436,13 @@ void edit_back_to_defaults() {
 	std::string before = "[shortcuts]\nlauncher = Super+K\n";
 	settings::File file{before};
 	auto edit = file.set_action(settings::Scope::global, "launcher", {});
-	check(edit.has_value() && edit->text == "[shortcuts]\n",
-		"a null keys list deletes the entry's line");
+	check(edit.has_value()
+			&& edit->text == "[shortcuts]\nlauncher = Super+Space\n",
+		"a null keys list writes the action's defaults into its line");
 	settings::File reloaded{edit->text};
 	check(keys_of(reloaded.resolved(), settings::Scope::global, "launcher")
 			== std::vector<std::string>{"Super+Space"},
-		"the deleted line puts the action back on its defaults");
+		"the written defaults resolve as the defaults");
 }
 
 void edit_errors() {

@@ -141,10 +141,10 @@ public:
 	const Resolved &resolved() const { return resolved_; }
 	const std::string &text() const { return text_; }
 
-	// Sets one action's keys: `keys` nullopt puts it back on its defaults
-	// (its line goes), a value replaces its line or is appended at the end of
-	// its section (an empty list writes `none`). Chords another action or
-	// command of the scope also holds move: their lines are rewritten too.
+	// Sets one action's keys: a value replaces its line or is appended at
+	// the end of its section (an empty list writes `none`); `keys` nullopt
+	// resets it, its defaults written into its line. Chords another action
+	// or command of the scope also holds move: their lines are rewritten too.
 	std::expected<Edit, std::string> set_action(Scope scope, std::string_view action,
 		const std::optional<std::vector<Chord>> &keys);
 

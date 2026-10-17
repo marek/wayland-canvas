@@ -813,28 +813,28 @@ void File::take_from_commands(const std::vector<Chord> &chords,
 
 std::expected<Edit, std::string> File::set_action(Scope scope,
 		std::string_view action, const std::optional<std::vector<Chord>> &keys) {
-	if (find_action(action, scope) == nullptr) {
+	const ActionDef *def = find_action(action, scope);
+	if (def == nullptr) {
 		return std::unexpected(std::format("unknown action '{}'", action));
 	}
-	if (!keys.has_value()) {
-		// Its defaults: the line goes.
-		std::vector<int> lines = entry_lines(section_name(scope), action);
-		for (std::size_t k = lines.size(); k > 0; k--) {
-			lines_.erase(lines_.begin() + lines[k - 1]);
-		}
-		rejoin();
-		return Edit{text_, {}};
-	}
-	for (std::size_t i = 0; i < keys->size(); i++) {
-		for (std::size_t j = i + 1; j < keys->size(); j++) {
-			if ((*keys)[i] == (*keys)[j]) {
-				return std::unexpected(
-					std::format("chord '{}' given twice", chord_text((*keys)[i])));
+	// What the line gets: the given keys, or the action's defaults (`keys`
+	// null is the reset: its defaults written into its line).
+	std::vector<Chord> write;
+	if (keys.has_value()) {
+		for (std::size_t i = 0; i < keys->size(); i++) {
+			for (std::size_t j = i + 1; j < keys->size(); j++) {
+				if ((*keys)[i] == (*keys)[j]) {
+					return std::unexpected(std::format("chord '{}' given twice",
+						chord_text((*keys)[i])));
+				}
 			}
 		}
+		write = *keys;
+	} else {
+		write = def->defaults;
 	}
 	std::string value;
-	for (Chord chord : *keys) {
+	for (Chord chord : write) {
 		if (!value.empty()) {
 			value += ", ";
 		}
@@ -850,8 +850,8 @@ std::expected<Edit, std::string> File::set_action(Scope scope,
 		write_line(lines.front(), action, value, false);
 	}
 	std::vector<Moved> moved;
-	take_from_actions(*keys, scope, action, moved);
-	take_from_commands(*keys, moved);
+	take_from_actions(write, scope, action, moved);
+	take_from_commands(write, moved);
 	rejoin();
 	return Edit{text_, std::move(moved)};
 }
