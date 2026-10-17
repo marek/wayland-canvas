@@ -137,5 +137,5 @@ touched.
       letter the entry draws now.
 - [x] Scenario: the app bar off shows nothing; on the toolbar's edge
       both show with the apps last.
-- [ ] `tools/check.sh` green, the plans index and the intents index
-      current.
+- [x] `tools/check.sh` green (unit, packaging, scenarios), the plans
+      index and the intents index current.
