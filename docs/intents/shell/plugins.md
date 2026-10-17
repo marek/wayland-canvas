@@ -133,6 +133,7 @@ switches, tabs, choice rows, key chips, text and fields, all coloured from
 | `canvas.toolbar` | The overview toolbar surface, hosting every toolbar button |
 | `canvas.notes` | Sticky notes: a toolbar button with a colour menu, and the notes |
 | `canvas.settings` | The settings window: the gear toolbar button and its panel ([settings.md](settings.md)) |
+| `canvas.lock` | The lock screen: the locker over every output and the `lock` action every trigger runs ([lock.md](lock.md)) |
 
 ## Error states, corner cases
 

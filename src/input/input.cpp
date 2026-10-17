@@ -25,6 +25,7 @@ constexpr uint32_t binding_mods = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
 
 void notify_activity(Server &server) {
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
+	server.lock.notice_activity();
 }
 
 bool box_contains(const wlr_box &box, double x, double y) {
@@ -386,6 +387,22 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	int nsyms = xkb_state_key_get_syms(wlr->xkb_state, keycode, &syms);
 	uint32_t all_mods = wlr_keyboard_get_modifiers(wlr);
 	uint32_t mods = all_mods & binding_mods;
+	if (server.lock.locked()) {
+		// Only the locker and VT switching; no canvas shortcut, no tap.
+		super_tap_ = false;
+		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+			for (int i = 0; i < nsyms; i++) {
+				if (server.bindings.handle_locked(syms[i], mods,
+						server.output_under_cursor())) {
+					return;
+				}
+			}
+		}
+		wlr_seat_set_keyboard(seat, wlr);
+		wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode,
+			event->state);
+		return;
+	}
 	std::span<const xkb_keysym_t> sym_list(syms, static_cast<std::size_t>(nsyms));
 	bool logo = is_logo_key(sym_list);
 
@@ -649,8 +666,32 @@ void Input::forget(const View &view) {
 
 // ---- pointer motion ----
 
+// While locked the pointer belongs to the locker's surface for the output
+// it is over, and to nothing else.
+bool Input::locked_pointer_focus(uint32_t time) {
+	Server &server = server_;
+	if (!server.lock.locked()) {
+		return false;
+	}
+	Output *output = server.output_at(server.cursor->x, server.cursor->y);
+	wlr_surface *surface = output != nullptr ? server.lock.surface_for(*output)
+		: nullptr;
+	if (surface == nullptr) {
+		wlr_seat_pointer_notify_clear_focus(server.seat);
+		return true;
+	}
+	double sx = server.cursor->x - output->lx, sy = server.cursor->y - output->ly;
+	wlr_seat_pointer_notify_enter(server.seat, surface, sx, sy);
+	wlr_seat_pointer_notify_motion(server.seat, time, sx, sy);
+	return true;
+}
+
 void Input::process_cursor_motion(uint32_t time) {
 	Server &server = server_;
+	if (locked_pointer_focus(time)) {
+		set_cursor_image("default");
+		return;
+	}
 	if (grab.active()) {
 		grab.motion();
 		return;
@@ -780,6 +821,14 @@ void Input::forward_press(uint32_t time, uint32_t button) {
 void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	Server &server = server_;
 	super_tap_ = false;
+	if (server.lock.locked()) {
+		if (server.seat->pointer_state.focused_surface != nullptr) {
+			pressed_buttons_ |= 1u << (button & 31);
+			wlr_seat_pointer_notify_button(server.seat, time, button,
+				WL_POINTER_BUTTON_STATE_PRESSED);
+		}
+		return;
+	}
 	if (grab.active()) {
 		return; // extra buttons during a compositor grab are swallowed
 	}
@@ -883,6 +932,15 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 }
 
 void Input::cursor_button_release(uint32_t time, uint32_t button) {
+	if (server_.lock.locked()) {
+		uint32_t bit = 1u << (button & 31);
+		if (pressed_buttons_ & bit) {
+			pressed_buttons_ &= ~bit;
+			wlr_seat_pointer_notify_button(server_.seat, time, button,
+				WL_POINTER_BUTTON_STATE_RELEASED);
+		}
+		return;
+	}
 	if (!grab.active()) {
 		uint32_t bit = 1u << (button & 31);
 		if (pressed_buttons_ & bit) {
@@ -938,6 +996,14 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	Server &server = server_;
 	notify_activity(server);
 	super_tap_ = false;
+	if (server.lock.locked()) {
+		if (server.seat->pointer_state.focused_surface != nullptr) {
+			wlr_seat_pointer_notify_axis(server.seat, event->time_msec,
+				event->orientation, event->delta, event->delta_discrete,
+				event->source, event->relative_direction);
+		}
+		return;
+	}
 	if (grab.active()) {
 		return;
 	}
@@ -1000,8 +1066,8 @@ void Input::handle_cursor_frame() {
 void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	notify_activity(server_);
 	super_tap_ = false;
-	if (server_.capture_ui.owns_keyboard()) {
-		return; // the capture UI owns the pointer
+	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
+		return; // the capture UI or the lock owns the pointer
 	}
 	server_.gestures.swipe_begin(event->time_msec, event->fingers);
 }
@@ -1019,8 +1085,8 @@ void Input::handle_swipe_end(wlr_pointer_swipe_end_event *event) {
 void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 	notify_activity(server_);
 	super_tap_ = false;
-	if (server_.capture_ui.owns_keyboard()) {
-		return; // the capture UI owns the pointer
+	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
+		return; // the capture UI or the lock owns the pointer
 	}
 	server_.gestures.pinch_begin(event->time_msec, event->fingers);
 }

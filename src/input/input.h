@@ -128,6 +128,9 @@ private:
 
 	// Pointer motion and buttons.
 	void process_cursor_motion(uint32_t time);
+	// True while the session is locked: the pointer went to the locker's
+	// surface for the output it is over, or to nothing.
+	bool locked_pointer_focus(uint32_t time);
 	void forward_press(uint32_t time, uint32_t button);
 	void cursor_button_press(uint32_t time, uint32_t button);
 	void cursor_button_release(uint32_t time, uint32_t button);

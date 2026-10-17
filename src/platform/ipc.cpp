@@ -401,6 +401,15 @@ void add_settings(JsonBuilder *builder, Server &server) {
 	json_builder_set_member_name(builder, "pinchScale");
 	json_builder_add_boolean_value(builder, server.conf.pinch_scale);
 	json_builder_end_object(builder);
+	json_builder_set_member_name(builder, "session");
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "lockIdleMinutes");
+	json_builder_add_int_value(builder, server.conf.lock_idle_minutes);
+	json_builder_set_member_name(builder, "nightLight");
+	json_builder_add_boolean_value(builder, server.conf.night_light);
+	json_builder_set_member_name(builder, "nightLightTemperature");
+	json_builder_add_int_value(builder, server.conf.night_light_k);
+	json_builder_end_object(builder);
 }
 
 // ------------------------------------------------------------ the client
@@ -1149,7 +1158,11 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 	bool has_commands = json_object_has_member(params, "commands");
 	bool has_swipes = json_object_has_member(params, "swipes");
 	bool has_pinch = json_object_has_member(params, "pinchScale");
-	if (has_action + has_commands + has_swipes + has_pinch != 1) {
+	bool has_idle = json_object_has_member(params, "lockIdleMinutes");
+	bool has_night = json_object_has_member(params, "nightLight");
+	bool has_temperature = json_object_has_member(params, "nightLightTemperature");
+	if (has_action + has_commands + has_swipes + has_pinch + has_idle + has_night
+			+ has_temperature != 1) {
 		return std::unexpected(std::string{usage});
 	}
 	settings::File file{server_.conf_text};
@@ -1277,7 +1290,7 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 				" \"four-finger-hops\" or \"off\", not '{}'", *(*swipes)));
 		}
 		edit = file.set_swipes(*preset);
-	} else {
+	} else if (has_pinch) {
 		JsonNode *node = json_object_get_member(params, "pinchScale");
 		if (json_node_get_node_type(node) != JSON_NODE_VALUE
 				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
@@ -1285,6 +1298,40 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 				"params: pinchScale must be true or false"});
 		}
 		edit = file.set_pinch_scale(json_node_get_boolean(node));
+	} else if (has_night) {
+		JsonNode *node = json_object_get_member(params, "nightLight");
+		if (json_node_get_node_type(node) != JSON_NODE_VALUE
+				|| json_node_get_value_type(node) != G_TYPE_BOOLEAN) {
+			return std::unexpected(std::string{
+				"params: nightLight must be true or false"});
+		}
+		edit = file.set_session("night-light",
+			json_node_get_boolean(node) ? "on" : "off");
+	} else {
+		const char *name = has_idle ? "lockIdleMinutes" : "nightLightTemperature";
+		JsonNode *node = json_object_get_member(params, name);
+		if (json_node_get_node_type(node) != JSON_NODE_VALUE
+				|| json_node_get_value_type(node) != G_TYPE_INT64) {
+			return std::unexpected(std::format("params: {} must be a number", name));
+		}
+		int value = static_cast<int>(json_node_get_int(node));
+		if (has_idle) {
+			// 0 is the user's "never"; the file writes it as `off`.
+			if (value < 0) {
+				return std::unexpected(std::string{
+					"params: lockIdleMinutes must be 0 (never) or more"});
+			}
+			edit = file.set_session("lock-idle",
+				value == 0 ? std::string{"off"} : std::to_string(value));
+		} else {
+			if (value < settings::night_light_min_k
+					|| value > settings::night_light_max_k) {
+				return std::unexpected(std::format(
+					"params: nightLightTemperature must be {} to {} K",
+					settings::night_light_min_k, settings::night_light_max_k));
+			}
+			edit = file.set_session("night-light-temperature", std::to_string(value));
+		}
 	}
 	if (!edit.has_value()) {
 		return std::unexpected(edit.error());
@@ -1487,6 +1534,10 @@ void Ipc::emit_item_activated(const Item &item, const Output &output) {
 		json_builder_add_double_value(builder, item.height * zoom);
 		json_builder_end_object(builder);
 	}));
+}
+
+void Ipc::run_action(std::string_view name, std::string_view args_json) {
+	emit_action(name, args_json);
 }
 
 void Ipc::emit_action(std::string_view name, std::string_view args_json) {

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <format>
@@ -125,6 +126,29 @@ bool types_no_character(xkb_keysym_t key) {
 	return false;
 }
 
+// `off` is no idle lock at all, written as 0 minutes.
+std::optional<int> parse_minutes(std::string_view value) {
+	if (value == "off") {
+		return 0;
+	}
+	int out = 0;
+	auto [end, err] = std::from_chars(value.data(), value.data() + value.size(), out);
+	if (err != std::errc{} || end != value.data() + value.size() || out < 1) {
+		return std::nullopt;
+	}
+	return out;
+}
+
+std::optional<int> parse_temperature(std::string_view value) {
+	int out = 0;
+	auto [end, err] = std::from_chars(value.data(), value.data() + value.size(), out);
+	if (err != std::errc{} || end != value.data() + value.size()
+			|| out < night_light_min_k || out > night_light_max_k) {
+		return std::nullopt;
+	}
+	return out;
+}
+
 std::optional<SwipePreset> parse_swipes(std::string_view value) {
 	if (value == "three-finger-hops") {
 		return SwipePreset::three_finger_hops;
@@ -229,6 +253,7 @@ const std::vector<ActionDef> &registry() {
 			{"Alt+Print"});
 		add(Scope::global, "Capture", "record-stop-copy",
 			"Stop the recording, to the clipboard", {"Ctrl+Alt+Print"});
+		add(Scope::global, "Session", "lock", "Lock the screen", {"Super+L"});
 		add(Scope::global, "Session", "quit", "Quit wayland-canvas",
 			{"Super+Shift+E", "Ctrl+Alt+BackSpace"});
 		add(Scope::overview, "In the overview", "hop-left", "Hop left", {"Left"});
@@ -434,7 +459,7 @@ std::string_view line_value(std::string_view line) {
 
 Parsed parse(std::string_view text) {
 	Parsed out;
-	enum class Section { none, shortcuts, overview, commands, gestures, unknown };
+	enum class Section { none, shortcuts, overview, commands, gestures, session, unknown };
 	Section section = Section::none;
 	int line_no = 0;
 	for (std::string_view line : split(text, '\n')) {
@@ -456,6 +481,8 @@ Parsed parse(std::string_view text) {
 				section = Section::commands;
 			} else if (name == "gestures") {
 				section = Section::gestures;
+			} else if (name == "session") {
+				section = Section::session;
 			} else {
 				out.errors.push_back({.line = line_no,
 					.text = std::format("unknown section '{}'", name)});
@@ -516,6 +543,37 @@ Parsed parse(std::string_view text) {
 						.text = "pinch-scale must be on or off"});
 				} else {
 					out.gestures.push_back({.line = line_no, .name = std::string{name},
+						.value = std::string{value}});
+				}
+			} else {
+				out.errors.push_back({.line = line_no,
+					.text = std::format("unknown setting '{}'", name)});
+			}
+			break;
+		case Section::session:
+			if (name == "lock-idle") {
+				if (!parse_minutes(value).has_value()) {
+					out.errors.push_back({.line = line_no, .text =
+						"lock-idle must be minutes (1 or more) or off"});
+				} else {
+					out.session.push_back({.line = line_no, .name = std::string{name},
+						.value = std::string{value}});
+				}
+			} else if (name == "night-light") {
+				if (value != "on" && value != "off") {
+					out.errors.push_back({.line = line_no,
+						.text = "night-light must be on or off"});
+				} else {
+					out.session.push_back({.line = line_no, .name = std::string{name},
+						.value = std::string{value}});
+				}
+			} else if (name == "night-light-temperature") {
+				if (!parse_temperature(value).has_value()) {
+					out.errors.push_back({.line = line_no, .text = std::format(
+						"night-light-temperature must be {} to {} K",
+						night_light_min_k, night_light_max_k)});
+				} else {
+					out.session.push_back({.line = line_no, .name = std::string{name},
 						.value = std::string{value}});
 				}
 			} else {
@@ -586,6 +644,19 @@ Resolved resolve(const Parsed &parsed) {
 			out.commands.push_back({.chord = cmd.chords.front(), .command = cmd.value});
 		}
 	}
+	bool idle_set = false, night_set = false, temp_set = false;
+	for (const Entry &entry : parsed.session) {
+		if (entry.name == "lock-idle" && !idle_set) {
+			out.lock_idle_minutes = *parse_minutes(entry.value);
+			idle_set = true;
+		} else if (entry.name == "night-light" && !night_set) {
+			out.night_light = entry.value == "on";
+			night_set = true;
+		} else if (entry.name == "night-light-temperature" && !temp_set) {
+			out.night_light_k = *parse_temperature(entry.value);
+			temp_set = true;
+		}
+	}
 	bool swipes_set = false, pinch_set = false;
 	for (const Entry &entry : parsed.gestures) {
 		if (entry.name == "swipes" && !swipes_set) {
@@ -644,6 +715,14 @@ std::string template_text() {
 		"swipes = three-finger-hops\n"
 		"# pinch-scale = on | off\n"
 		"pinch-scale = on\n";
+	out += std::format("\n[session]\n"
+		"# lock-idle = minutes of idleness before the screen locks, or off\n"
+		"lock-idle = {}\n"
+		"# night-light = on | off, its temperature {} to {} K\n"
+		"night-light = off\n"
+		"night-light-temperature = {}\n",
+		default_lock_idle_minutes, night_light_min_k, night_light_max_k,
+		default_night_light_k);
 	return out;
 }
 
@@ -903,6 +982,21 @@ std::expected<Edit, std::string> File::set_swipes(SwipePreset preset) {
 			lines_.erase(lines_.begin() + lines[k - 1]);
 		}
 		write_line(lines.front(), "swipes", value, false);
+	}
+	rejoin();
+	return Edit{text_, {}};
+}
+
+std::expected<Edit, std::string> File::set_session(std::string_view name,
+		std::string_view value) {
+	std::vector<int> lines = entry_lines("session", name);
+	if (lines.empty()) {
+		append_entry("session", name, std::string{value});
+	} else {
+		for (std::size_t k = lines.size(); k > 1; k--) {
+			lines_.erase(lines_.begin() + lines[k - 1]);
+		}
+		write_line(lines.front(), name, std::string{value}, false);
 	}
 	rejoin();
 	return Edit{text_, {}};

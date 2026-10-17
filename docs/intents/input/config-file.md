@@ -39,7 +39,7 @@ the same file, so the two never disagree.
 | Subject | Rule |
 |---|---|
 | Place | `$XDG_CONFIG_HOME/wayland-canvas/canvas.conf` (default `~/.config/wayland-canvas/canvas.conf`) |
-| First run | Missing at start, it is written, its directory created: a header saying how the file works, then every section with every action at its defaults in the order of the bindings table, a comment naming each group, an empty `[commands]` with a commented example, and `[gestures]` at its defaults with a comment per choice. A file that exists is never rewritten whole |
+| First run | Missing at start, it is written, its directory created: a header saying how the file works, then every section with every action at its defaults in the order of the bindings table, a comment naming each group, an empty `[commands]` with a commented example, `[gestures]` at its defaults with a comment per choice, and `[session]` likewise. A file that exists is never rewritten whole |
 | Reload | Saving it — written in place or renamed over, as editors do — applies it to the running session; deleting it puts every default back |
 | Syntax | `[section]` headers, `name = value` lines, whole-line `#` comments, blank lines; a `#` inside a value is part of the value |
 
@@ -51,6 +51,7 @@ the same file, so the two never disagree.
 | `[overview]` | `<action> = <chords>` | That action's keys while the overview is open ([../canvas/overview.md](../canvas/overview.md)) |
 | `[commands]` | `<chord> = <command>` | The chord runs the command through `/bin/sh`, as the terminal shortcut runs its own: started from the overview, its windows open in the overview's target |
 | `[gestures]` | `swipes = three-finger-hops`, `four-finger-hops` or `off`; `pinch-scale = on` or `off` | The gesture choices ([gestures.md](gestures.md)) |
+| `[session]` | `lock-idle = <minutes>` or `off`; `night-light = on` or `off`; `night-light-temperature = <kelvin>` | How long the session may idle before it locks ([../shell/lock.md](../shell/lock.md)) and the night light ([../render/night-light.md](../render/night-light.md)) |
 
 ### Chords
 

@@ -215,4 +215,15 @@ inline constexpr const char *capture_recorder = "ffmpeg"; // encodes the frames
 inline constexpr int capture_recorder_fps = 60; // frames piped per second
 inline constexpr int capture_recorder_poll_ms = 200; // the reaper's poll
 inline constexpr int capture_recorder_stop_ms = 2000; // teardown wait
+
+// The lock screen (ext-session-lock-v1). The fill is what an output shows
+// while no locker surface covers it: locked with nothing drawn yet, or a
+// locker that died.
+inline constexpr uint32_t lock_fill = 0x000000ff;
+// The shell action a lock trigger runs: the locker plugin draws the lock
+// and unlocks through the protocol.
+inline constexpr const char *lock_action = "canvas.lock/lock";
+// How long a sleep is held back for the lock to be drawn; past it the
+// machine sleeps anyway, locked or not.
+inline constexpr int lock_sleep_wait_ms = 5000;
 } // namespace config

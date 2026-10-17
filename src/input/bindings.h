@@ -25,6 +25,9 @@ public:
 	// run: the capture chords first, then VT switching, the global table
 	// and the [commands] chords.
 	bool handle(xkb_keysym_t sym, uint32_t mods, Output *output);
+	// The only chords a locked session answers: VT switching, so the way
+	// out of a stuck session stays ([docs/intents/shell/lock.md]).
+	bool handle_locked(xkb_keysym_t sym, uint32_t mods, Output *output);
 	// True when sym with mods is a capture chord (shots, recordings, the
 	// toolbar), and its action has run.
 	bool handle_capture(xkb_keysym_t sym, uint32_t mods, Output *output);

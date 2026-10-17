@@ -1,0 +1,25 @@
+{
+	"id": "canvas.lock",
+	"name": "Lock screen",
+	"version": "1.0.0",
+	"apiVersion": 1,
+	"description": "The lock screen: every output covered, the password checked through PAM",
+	"settings": {
+		"pamService": "wayland-canvas",
+		"pamConfigDirectory": ""
+	},
+	"contributes": {
+		"surfaces": [
+			{
+				"id": "lock",
+				"entry": "Lock.qml"
+			}
+		],
+		"actions": [
+			{
+				"id": "lock",
+				"entry": "LockAction.qml"
+			}
+		]
+	}
+}

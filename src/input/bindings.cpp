@@ -222,6 +222,10 @@ void act_quit(Server &server, Output *, KeyArg) {
 	wl_display_terminate(server.display);
 }
 
+void act_lock(Server &server, Output *, KeyArg) {
+	server.lock.request("the lock shortcut");
+}
+
 void act_vt(Server &server, Output *, KeyArg arg) {
 	if (server.session != nullptr) {
 		wlr_session_change_vt(server.session,
@@ -401,6 +405,7 @@ constexpr std::array runners = {
 		act_capture_toolbar, 1},
 	Runner{settings::Scope::global, "record-stop", act_record_stop, 0},
 	Runner{settings::Scope::global, "record-stop-copy", act_record_stop, 1},
+	Runner{settings::Scope::global, "lock", act_lock, 0},
 	Runner{settings::Scope::global, "quit", act_quit, 0},
 	Runner{settings::Scope::overview, "hop-left", act_ov_hop, Dir{-1, 0}},
 	Runner{settings::Scope::overview, "hop-right", act_ov_hop, Dir{1, 0}},
@@ -542,6 +547,19 @@ bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 	}
 	if (const Bind *bind = find(sym, mods, commands_)) {
 		return run(*bind, output);
+	}
+	return false;
+}
+
+bool Bindings::handle_locked(xkb_keysym_t sym, uint32_t mods, Output *output) {
+	sym = xkb_keysym_to_lower(sym);
+	// Only the way out of a stuck session; every other chord belongs to the
+	// locker while the session is locked.
+	for (const VtBind &vt : vt_keys) {
+		if (vt.keysym == sym && vt.mods == mods) {
+			act_vt(server_, output, vt.vt);
+			return true;
+		}
 	}
 	return false;
 }

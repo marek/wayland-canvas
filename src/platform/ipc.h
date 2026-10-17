@@ -55,6 +55,9 @@ public:
 	void answer_capture(std::optional<settings::Chord> chord);
 	// A recording started (with its file) or stopped (empty path).
 	void emit_recording(bool active, const std::string &path);
+	// Runs a shell action from inside the compositor (a lock trigger): the
+	// same `action` event `action.run` pushes.
+	void run_action(std::string_view name, std::string_view args_json);
 
 private:
 	struct Client {

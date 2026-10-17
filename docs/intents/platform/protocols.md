@@ -27,7 +27,8 @@ without a policy is not added.
 | viewporter, fractional-scale | client-side scaling to the output scale ([../render/hidpi.md](../render/hidpi.md)) |
 | presentation-time | per-frame presentation feedback ([../render/rendering.md](../render/rendering.md)) |
 | single-pixel-buffer | solid-colour buffers |
-| idle-notify, idle-inhibit | idle notification and inhibition |
+| idle-notify, idle-inhibit | idle notification and inhibition; an inhibitor also stands down the idle lock ([../shell/lock.md](../shell/lock.md)) |
+| ext-session-lock-v1 | locking the session: one locker at a time, the lock outliving its client ([../shell/lock.md](../shell/lock.md)) |
 | virtual-keyboard | virtual keyboards; the scenarios type with wtype |
 
 ## Screen sharing
