@@ -7,7 +7,7 @@ import "."
 PanelCard {
 	id: root
 
-	panelWidth: 300
+	panelWidth: 310
 	panelName: "history"
 
 	PanelRow {
