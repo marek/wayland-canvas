@@ -358,13 +358,30 @@ Item {
 			readonly property var box: root.entryBox(root.indexOfKey(root.hoveredKey))
 
 			visible: box != null && root.flyoutKey === ""
-			x: box == null ? 0 : root.edge === "right" ? box.x - gap - width
-				: root.edge === "left" ? box.x + box.width + gap
-				: box.x + box.width / 2 - width / 2
-			y: box == null ? 0 : root.edge === "top" ? box.y + box.height + gap
-				: root.edge === "bottom" ? box.y - gap - height
-				: box.y + box.height / 2 - height / 2
-			width: labelText.implicitWidth + 2 * pad
+			x: {
+				if (box == null) {
+					return 0
+				}
+				var want = root.edge === "right" ? box.x - gap - width
+					: root.edge === "left" ? box.x + box.width + gap
+					: box.x + box.width / 2 - width / 2
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
+					root.modelData.width - width - UiTheme.edgeMargin)))
+			}
+			y: {
+				if (box == null) {
+					return 0
+				}
+				var want = root.edge === "top" ? box.y + box.height + gap
+					: root.edge === "bottom" ? box.y - gap - height
+					: box.y + box.height / 2 - height / 2
+				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
+					root.modelData.height - height - UiTheme.edgeMargin)))
+			}
+			// The chip never grows past the screen: its text is elided to
+			// what is left beside the strip.
+			width: Math.min(labelText.implicitWidth + 2 * pad,
+				root.modelData.width - root.entrySize - 2 * UiTheme.edgeMargin - gap)
 			height: labelText.implicitHeight + 2 * pad
 			radius: 4
 			color: UiTheme.background
@@ -372,6 +389,9 @@ Item {
 			PanelText {
 				id: labelText
 				anchors.centerIn: parent
+				width: parent.width - 2 * parent.pad
+				elide: Text.ElideRight
+				horizontalAlignment: Text.AlignHCenter
 				text: {
 					var app = root.appFor(root.hoveredKey)
 					return app != null ? app.name : ""
@@ -425,6 +445,9 @@ Item {
 					PanelRow {
 						required property var modelData
 
+						// Nothing is parked on the right of these rows: the
+						// title may use the card's full width, elided in it.
+						reserve: 8
 						label: modelData.title !== "" ? modelData.title
 							: (modelData.appId !== "" ? modelData.appId : "A window")
 						marked: modelData.focused === true

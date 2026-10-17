@@ -22,8 +22,11 @@ Item {
 	}
 
 	Row {
+		id: line
 		anchors.left: parent.left
 		anchors.leftMargin: 8
+		anchors.right: parent.right
+		anchors.rightMargin: 8
 		anchors.verticalCenter: parent.verticalCenter
 		spacing: 8
 
@@ -51,7 +54,11 @@ Item {
 				? root.entry.color : "transparent"
 		}
 
+		// Bounded by what the row leaves after the glyph or swatch: a long
+		// label is cut with an ellipsis, never drawn past the card.
 		PanelText {
+			width: line.width - x
+			elide: Text.ElideRight
 			text: root.entry != null && root.entry.label !== undefined
 				? root.entry.label : ""
 		}

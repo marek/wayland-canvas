@@ -13,7 +13,9 @@ import "."
 PanelCard {
 	id: root
 
-	panelWidth: 360
+	// Wide enough for its tabs' names on one row: six shares of 78 px hold
+	// the longest of them ("Shortcuts") without eliding.
+	panelWidth: 488
 	panelName: "settings"
 
 	// ---- the settings object: asked once, kept current by the event ----
