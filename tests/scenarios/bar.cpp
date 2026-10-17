@@ -2997,7 +2997,7 @@ bool shot_landed(const char *name) {
 // kit's fixed panel metrics. Keep in sync with the panel and
 // UiTheme.qml — the phase aims its clicks by these numbers and
 // cross-checks each against the screenshot's bands before clicking.
-constexpr int settings_panel = 360;
+constexpr int settings_panel = 488;
 constexpr int settings_pad = 10;     // the kit's panelPadding
 constexpr int settings_gap = 6;      // the kit's panelSpacing
 constexpr int settings_header = 18;  // a section header
@@ -3012,7 +3012,14 @@ constexpr int settings_switch_w = 38; // PanelSwitch's width
 // declares settings (docs/intents/shell/plugins.md): canvas.notifications is
 // the built-in one that does.
 constexpr int settings_tabs = 6;
-constexpr int settings_tab_w = (settings_panel - 2 * settings_pad) / settings_tabs;
+// The kit lays the tabs in one row of equal shares (PanelTabs.qml); the
+// card is wide enough that no label has to elide.
+constexpr int settings_tab_cols = settings_tabs;
+constexpr int settings_tab_w = (settings_panel - 2 * settings_pad) / settings_tab_cols;
+constexpr int settings_tabs_h = settings_row;
+
+// Tab `i`'s centre, from the card's top-left: its column of its row.
+std::pair<double, double> settings_tab_point(int i, int card_y);
 
 // One Bar-tab section's height: its header, its rows (a detailed row is
 // the taller), and the gaps between them.
@@ -3024,7 +3031,7 @@ int settings_section_height(int plain, int detailed) {
 // The settings card's height with `column` of tab content in it: the
 // padding, the tabs, the content, the separator and the footer.
 int settings_card_height(int column) {
-	return 2 * settings_pad + settings_row + 3 * settings_gap + column
+	return 2 * settings_pad + settings_tabs_h + 3 * settings_gap + column
 		+ settings_sep + settings_footer;
 }
 
@@ -3125,17 +3132,25 @@ constexpr uint32_t track_dark = 0x3a3b45ff;    // UiTheme.track over the panel: 
 constexpr uint32_t chip_dark = 0x272833ff;     // UiTheme.fill over the panel: a key chip
 constexpr uint32_t chip_hover_dark = 0x383943ff; // the same chip on its row's hover fill
 
+// Tab `i`'s centre in output coordinates: equal shares, at most four to a
+// row, spread over as many rows as that takes (PanelTabs.qml).
+std::pair<double, double> settings_tab_point(int i, int card_y) {
+	int column = i % settings_tab_cols;
+	int row = i / settings_tab_cols;
+	return {settings_card_x + settings_pad + settings_tab_w * (column + 0.5),
+		card_y + settings_pad + row * settings_row + settings_row / 2.0};
+}
+
 // The tab row's chosen tab, read off the shot: the one tab whose fill is
 // the accent's tint while every other tab shows the panel's own colour.
 // -1 when the row does not show exactly one chosen tab.
 int settings_chosen_tab(cairo_surface_t *s, int card_y) {
 	int chosen = -1;
 	for (int i = 0; i < settings_tabs; i++) {
-		// The chip's own fill above the label: with five tabs the labels
-		// nearly fill their cells, so the row is read where no glyph is.
-		int x = settings_card_x + settings_pad + settings_tab_w * i
-			+ settings_tab_w / 2;
-		int y = card_y + settings_pad + 4;
+		// The tint is read above the label, where no glyph is.
+		auto [cx, cy] = settings_tab_point(i, card_y);
+		int x = int(cx);
+		int y = int(cy) - settings_row / 2 + 4;
 		bool tint = pixel_is(s, x, y, selected_dark);
 		bool plain = pixel_is(s, x, y, shell_bg_dark);
 		if (tint == plain || (tint && chosen >= 0)) {
@@ -3151,12 +3166,12 @@ int settings_chosen_tab(cairo_surface_t *s, int card_y) {
 // The tab labels as lit runs of the tab row: one per tab, each centred in
 // its share of the row.
 bool settings_tab_labels_centred(cairo_surface_t *s, int card_y) {
-	// Read one tab's cell at a time: with five tabs in the card's width the
-	// labels nearly touch, and a row read whole would run two into one.
+	// One cell at a time: a row read whole would run two labels into one.
 	for (int i = 0; i < settings_tabs; i++) {
+		auto [cx, cy] = settings_tab_point(i, card_y);
 		std::vector<Run> runs = bar_runs(s,
-			{settings_card_x + settings_pad + settings_tab_w * i,
-				card_y + settings_pad, settings_tab_w, settings_row});
+			{int(cx - settings_tab_w / 2.0), int(cy - settings_row / 2.0),
+				settings_tab_w, settings_row});
 		if (runs.empty()) {
 			return false;
 		}
@@ -3166,6 +3181,40 @@ bool settings_tab_labels_centred(cairo_surface_t *s, int card_y) {
 		}
 	}
 	return true;
+}
+
+// Every tab's label inside its own share, with a pixel of air each side: a
+// label that outgrew its cell would run into its neighbour's, and a long
+// name or one tab more must elide instead.
+bool settings_tab_labels_within_cells(cairo_surface_t *s, int card_y) {
+	for (int i = 0; i < settings_tabs; i++) {
+		auto [cx, cy] = settings_tab_point(i, card_y);
+		std::vector<Run> runs = bar_runs(s,
+			{int(cx - settings_tab_w / 2.0), int(cy - settings_row / 2.0),
+				settings_tab_w, settings_row});
+		if (runs.empty()) {
+			return false;
+		}
+		if (runs.front().x0 < 1 || runs.back().x1 > settings_tab_w - 1) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Nothing drawn in the band of `width` px just outside `box`'s right edge:
+// what a component draws stays inside it, so a long title is elided rather
+// than run past the card (the same read works for a strip or a chip).
+bool nothing_right_of(cairo_surface_t *s, const wlr_box &box, int width) {
+	if (s == nullptr) {
+		return false;
+	}
+	int x = box.x + box.width + 1;
+	int span = std::min(width, screen_w - x);
+	if (span <= 0) {
+		return true;
+	}
+	return bar_runs(s, {x, box.y, span, box.height}).empty();
 }
 
 // A PanelSwitch whose row is centred on `y`: on, its track is the accent
@@ -3191,7 +3240,7 @@ std::vector<double> settings_bar_rows(int card_y) {
 		sections[2].push_back(settings_row);
 	}
 	std::vector<double> centres;
-	int y = card_y + settings_pad + settings_row + settings_gap;
+	int y = card_y + settings_pad + settings_tabs_h + settings_gap;
 	for (const std::vector<int> &rows : sections) {
 		y += settings_header + settings_gap;
 		for (int height : rows) {
@@ -3263,8 +3312,8 @@ bool settings_prompt_shown(const char *name) {
 // The Shortcuts list on the tall card, scrolled to its end: its bottom
 // edge, where the last row sits. The list is as tall as the output
 // leaves room for (SettingsPanel.qml's listMaxHeight).
-constexpr int settings_list_bottom = 8 + settings_pad + settings_row + settings_gap
-	+ screen_h - 2 * 8 - 2 * settings_pad - settings_row - 3 * settings_gap
+constexpr int settings_list_bottom = 8 + settings_pad + settings_tabs_h + settings_gap
+	+ screen_h - 2 * 8 - 2 * settings_pad - settings_tabs_h - 3 * settings_gap
 	- settings_footer - 1;
 constexpr double settings_last_row_y = settings_list_bottom - settings_row / 2.0;
 
@@ -3874,7 +3923,7 @@ ToolbarCard settings_toolbar_card(const char *shot_name) {
 	settings_card_x = x;
 	ToolbarCard card;
 	card.card_y = y;
-	card.first_top = y + settings_pad + settings_row + settings_gap
+	card.first_top = y + settings_pad + settings_tabs_h + settings_gap
 		+ settings_header + settings_gap;
 	cairo_surface_t *s = load_png(shot_name);
 	if (s != nullptr) {
@@ -7339,8 +7388,10 @@ int run_step() {
 		check(chosen == 0, "the Shortcuts tab is the one chosen when the panel "
 			"opens");
 		// The Bar tab is the row's fourth share.
-		click(settings_card_x + settings_pad + settings_tab_w * 4.5,
-			8 + settings_pad + settings_row / 2.0);
+		{
+			auto [tx, ty] = settings_tab_point(4, 8); // the Bar tab
+			click(tx, ty);
+		}
 		return 400;
 	}
 	case 406: // the Bar tab, drawn: every widget by section
@@ -7505,8 +7556,10 @@ int run_step() {
 		// The card still wears the Bar tab's shape, so its tabs row sits
 		// where that card puts it; the shorter shape only re-centres the
 		// card once the click lands.
-		click(settings_card_x + settings_pad + settings_tab_w * 3.5,
-			settings_card_y + settings_pad + settings_row / 2.0);
+		{
+			auto [tx, ty] = settings_tab_point(3, settings_card_y); // Toolbar
+			click(tx, ty);
+		}
 		return 700;
 	}
 	case 414: // the card redraws short: four edge choices
@@ -7516,7 +7569,7 @@ int run_step() {
 		cairo_surface_t *s = load_png("settings-toolbar-tab");
 		int card_y = settings_card_top(
 			settings_card_height(settings_toolbar_column()), settings_gear_y);
-		int first_top = card_y + settings_pad + settings_row + settings_gap
+		int first_top = card_y + settings_pad + settings_tabs_h + settings_gap
 			+ settings_header + settings_gap;
 		// Labels only: the dots would light a row by themselves.
 		std::vector<Band> rows = bands_in(s,
@@ -7637,8 +7690,10 @@ int run_step() {
 		check(settings_shell_kept(), "choosing the toolbar's edge three times "
 			"wrote shell.json and reloaded nothing");
 		// The card keeps the Toolbar tab's shape until the click lands.
-		click(settings_card_x + settings_pad + settings_tab_w * 0.5,
-			card.card_y + settings_pad + settings_row / 2.0);
+		{
+			auto [tx, ty] = settings_tab_point(0, card.card_y); // Shortcuts
+			click(tx, ty);
+		}
 		return 700;
 	}
 	case 420: { // the Shortcuts tab drawn; the tall card clamps at the top
@@ -7649,7 +7704,7 @@ int run_step() {
 		cairo_surface_t *s = load_png("settings-shortcuts-tab");
 		// The tall card clamps at the top; the terminal row is the second
 		// of the Apps group, under its header and the launcher row.
-		int terminal_y = 8 + settings_pad + settings_row + settings_gap
+		int terminal_y = 8 + settings_pad + settings_tabs_h + settings_gap
 			+ settings_header + settings_gap + settings_action + settings_gap
 			+ settings_row / 2;
 		int terminal_top = terminal_y - 20;
@@ -7724,8 +7779,10 @@ int run_step() {
 			chip, settings_chip_before));
 		// The card is the tall Shortcuts shape: the tabs at its top; the
 		// click shrinks it to the presets, so the next step waits first.
-		click(settings_card_x + settings_pad + settings_tab_w * 1.5,
-			8 + settings_pad + settings_row / 2.0);
+		{
+			auto [tx, ty] = settings_tab_point(1, 8); // Gestures
+			click(tx, ty);
+		}
 		return 700;
 	}
 	case 425: // the card redraws to the presets and the switch
@@ -7736,7 +7793,7 @@ int run_step() {
 		int column = settings_gestures_column();
 		int card_y = settings_card_top(settings_card_height(column),
 			settings_gear_y);
-		int first_top = card_y + settings_pad + settings_row + settings_gap
+		int first_top = card_y + settings_pad + settings_tabs_h + settings_gap
 			+ settings_header + settings_gap;
 		// The pinch row: under the second header, a detailed row.
 		double pinch_y = first_top + 3 * (settings_choice + settings_gap)
@@ -7865,8 +7922,8 @@ int run_step() {
 		}
 		retries = 0;
 		if (chosen != 0) {
-			click(settings_card_x + settings_pad + settings_tab_w * 0.5,
-				card_y + settings_pad + settings_row / 2.0);
+			auto [tx, ty] = settings_tab_point(0, card_y); // Shortcuts
+			click(tx, ty);
 		}
 		return 700;
 	}
@@ -8464,8 +8521,10 @@ int run_step() {
 		retries = 0;
 		check(panel_layer("settings") != nullptr,
 			"the gear opened the settings panel for the Plugins page");
-		click(settings_card_x + settings_pad + settings_tab_w * 5.5,
-			8 + settings_pad + settings_row / 2.0);
+		{
+			auto [tx, ty] = settings_tab_point(5, 8); // Plugins
+			click(tx, ty);
+		}
 		return 700;
 	}
 	case 531: // the page redraws: the declared rows
@@ -8475,7 +8534,7 @@ int run_step() {
 		cairo_surface_t *s = load_png("settings-plugins-tab");
 		int column = settings_plugins_column();
 		int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
-		int first_top = card_y + settings_pad + settings_row + settings_gap
+		int first_top = card_y + settings_pad + settings_tabs_h + settings_gap
 			+ settings_header + settings_gap;
 		// The second row of the Popups group: the urgent-popups switch.
 		double switch_y = first_top + settings_choice + settings_gap
@@ -8497,6 +8556,15 @@ int run_step() {
 		}
 		retries = 0;
 		check(chosen == 5, "the Plugins tab is the one chosen");
+		{
+			cairo_surface_t *shot_s = load_png("settings-plugins-tab");
+			bool inside = settings_tab_labels_within_cells(shot_s, card_y);
+			if (shot_s != nullptr) {
+				cairo_surface_destroy(shot_s);
+			}
+			check(inside, std::format("every tab label stays inside its own "
+				"share of the row ({} tabs)", settings_tabs));
+		}
 		check(labelled, "the notification plugin's declared switch has its row");
 		check(on, "the switch shows the declared default, on");
 		click(settings_card_x + settings_panel - settings_pad - 8
@@ -8578,11 +8646,29 @@ int run_step() {
 		retries = 0;
 		check(flyout != nullptr,
 			"the left-edge entry unfolded its windows beside it");
+		shot("app-bar-flyout");
+		return 700;
+	}
+	case 544: { // nothing of the rows is drawn past the card, then the row
 		auto [x, y] = app_bar_flyout_row(app_bar_entry, app_bar_target);
+		wlr_box card{int(x - 120), app_bar_entry.y, 240,
+			std::min(settings_row, screen_h - app_bar_entry.y)};
+		cairo_surface_t *s = load_png("app-bar-flyout");
+		bool inside = nothing_right_of(s, card, 80);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		if (!inside && retries++ < 10) {
+			shot("app-bar-flyout");
+			return -700;
+		}
+		retries = 0;
+		check(inside, "a window's title is elided inside the card: nothing of "
+			"it is drawn past its right edge");
 		click(x, y);
 		return 900;
 	}
-	case 544: { // the click took the view to that window
+	case 545: { // the click took the view to that window
 		Output *output = server->outputs.front().get();
 		bool landed = !output->overview.active() && !output->camera.panning()
 			&& !output->camera.zooming() && app_bar_target != nullptr

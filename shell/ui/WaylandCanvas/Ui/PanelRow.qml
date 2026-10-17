@@ -15,6 +15,10 @@ Item {
 	property bool marked: false // the label in the attention colour
 	property bool selected: false // the accent-tinted fill of the chosen row
 	property bool clickable: true
+	// What the row keeps clear on its right for a control the caller parks
+	// there (a switch, a right-edge label): the text is elided before it, so
+	// nothing a row draws can run past it or out of the row.
+	property int reserve: 52
 	signal clicked()
 
 	width: parent ? parent.width : 0
@@ -38,12 +42,16 @@ Item {
 	}
 
 	Row {
+		id: line
 		anchors.left: parent.left
 		anchors.leftMargin: 8
+		anchors.right: parent.right
+		anchors.rightMargin: root.reserve
 		anchors.verticalCenter: parent.verticalCenter
 		spacing: 8
 
 		Text {
+			id: glyphText
 			visible: root.glyph !== ""
 			text: root.glyph
 			color: root.marked ? UiTheme.attention : UiTheme.text
@@ -54,10 +62,15 @@ Item {
 			renderType: Text.NativeRendering
 		}
 
+		// Bounded by what the glyph and the reserve leave: both lines are
+		// elided inside it, never drawn past the row.
 		Column {
+			width: line.width - (glyphText.visible ? glyphText.width + line.spacing : 0)
 			spacing: 0
 
 			PanelText {
+				width: parent.width
+				elide: Text.ElideRight
 				text: root.label
 				color: !root.enabled
 					? UiTheme.muted
@@ -65,6 +78,8 @@ Item {
 			}
 
 			PanelText {
+				width: parent.width
+				elide: Text.ElideRight
 				visible: root.detail !== ""
 				dim: true
 				text: root.detail
