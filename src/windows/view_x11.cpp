@@ -141,6 +141,9 @@ View *View::from_x11_surface(wlr_surface *surface) {
 // ---- the X11 window's own events ----
 
 void View::handle_x11_associate() {
+	// A menu or a tooltip is placed by its own client, beside the window
+	// it belongs to, and is neither decorated nor listed.
+	override_redirect = x11->override_redirect;
 	// The window now has a surface: from here it behaves as any view does.
 	map_.connect<&View::handle_map>(x11->surface->events.map, this);
 	unmap_.connect<&View::handle_unmap>(x11->surface->events.unmap, this);
@@ -154,7 +157,23 @@ void View::handle_x11_dissociate() {
 	commit_.disconnect();
 }
 
+// Where an override-redirect window asked to be: X11 places it itself, in
+// the same space the compositor configures its windows in, so the request
+// is the canvas position.
+void View::x11_place_override_redirect() {
+	x = x11->x;
+	y = x11->y;
+}
+
 void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
+	if (override_redirect) {
+		wlr_xwayland_surface_configure(x11, event->x, event->y, event->width,
+			event->height);
+		x = event->x;
+		y = event->y;
+		damage();
+		return;
+	}
 	// A window the compositor is not placing itself gets the size it asks
 	// for, where the canvas has put it.
 	if (maximized || fullscreen || tiled) {
