@@ -27,37 +27,49 @@
 						"label": "Yellow",
 						"color": "#ffd866",
 						"action": "create",
-						"args": {"color": "#ffd866"}
+						"args": {
+							"color": "#ffd866"
+						}
 					},
 					{
 						"label": "Green",
 						"color": "#a6e3a1",
 						"action": "create",
-						"args": {"color": "#a6e3a1"}
+						"args": {
+							"color": "#a6e3a1"
+						}
 					},
 					{
 						"label": "Blue",
 						"color": "#7dcfff",
 						"action": "create",
-						"args": {"color": "#7dcfff"}
+						"args": {
+							"color": "#7dcfff"
+						}
 					},
 					{
 						"label": "Pink",
 						"color": "#f4b8e4",
 						"action": "create",
-						"args": {"color": "#f4b8e4"}
+						"args": {
+							"color": "#f4b8e4"
+						}
 					},
 					{
 						"label": "Purple",
 						"color": "#caa9f7",
 						"action": "create",
-						"args": {"color": "#caa9f7"}
+						"args": {
+							"color": "#caa9f7"
+						}
 					},
 					{
 						"label": "Orange",
 						"color": "#ff9e64",
 						"action": "create",
-						"args": {"color": "#ff9e64"}
+						"args": {
+							"color": "#ff9e64"
+						}
 					}
 				]
 			}
@@ -70,9 +82,8 @@
 		],
 		"surfaces": [
 			{
-				"id": "editor",
-				"entry": "NoteEditor.qml",
-				"perOutput": true
+				"id": "notes",
+				"entry": "Notes.qml"
 			}
 		]
 	}

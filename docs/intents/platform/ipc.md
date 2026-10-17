@@ -118,7 +118,7 @@ settings of [../input/config-file.md](../input/config-file.md):
 
 | Part | Each entry |
 |---|---|
-| `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `overview` (true while the output shows the overview) |
+| `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `view` (the canvas rectangle the output looks at: `x`, `y`, `width`, `height` in canvas px), `overview` (true while the output shows the overview) |
 | `desktops` | `id`, `number`, `x`, `y`, `width`, `height` (canvas px) |
 | `windows` | `id` (the session id), `appId`, `title`, `desktop` (its desktop's id, or null on free canvas), `minimized`, `focused`, in the order the windows opened. Where a window is on the canvas is the compositor's to act on, not a client's to read ([../shell/app-bar.md](../shell/app-bar.md)) |
 | `items` | as last set, with the place the user dragged it to |

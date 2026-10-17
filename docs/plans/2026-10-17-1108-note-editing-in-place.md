@@ -28,10 +28,12 @@ frame from outside.
 
 ## Tasks
 
-- [ ] Reproduce headlessly: a note opened for editing, then a zoom and a pan, with the screenshots showing the duplicate card and the drift
-- [ ] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
-- [ ] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom
-- [ ] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay
+- [ ] Prove it headlessly: a note typed in, then a zoom and a pan, with one card throughout and the text where it was
+- [x] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
+- [x] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom (`surface.place`, `surface.unplace`, and each output's canvas rectangle in the state)
+- [x] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay — a note is now one surface, written in where it is, with no editor over it and no canvas item behind it
+- [ ] The bar scenario's notes phase is written for the old model (canvas items and an editor surface) and fails until it is rewritten for the surface model: the note surface by its name, typing straight into it, the strip's dots and ×, the storage, and one card through a zoom and a pan
+- [ ] Intent: notes.md's cross-links and `platform/ipc.md`'s "one user" line still point at canvas items as the notes' mechanism
 - [ ] Intent: notes.md states that editing happens on the note itself, and what a camera move does while a note is open
-- [ ] Implement it, with the bar scenario's notes phase extended to zoom and pan while the editor is open
+
 - [ ] On screen, nested: open a note, zoom in and out, pan, change desktop scale — one card throughout (the user)

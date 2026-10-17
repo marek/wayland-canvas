@@ -254,6 +254,20 @@ void add_output(JsonBuilder *builder, const Output &output) {
 	json_builder_add_int_value(builder, output.height);
 	json_builder_set_member_name(builder, "scale");
 	json_builder_add_double_value(builder, output.wlr->scale);
+	// What the output is looking at, in canvas pixels: a plugin placing
+	// something on the plane puts it where the user is looking.
+	Rect view = output.viewport();
+	json_builder_set_member_name(builder, "view");
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "x");
+	json_builder_add_double_value(builder, view.x);
+	json_builder_set_member_name(builder, "y");
+	json_builder_add_double_value(builder, view.y);
+	json_builder_set_member_name(builder, "width");
+	json_builder_add_double_value(builder, view.w);
+	json_builder_set_member_name(builder, "height");
+	json_builder_add_double_value(builder, view.h);
+	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "overview");
 	json_builder_add_boolean_value(builder, output.overview.active());
 	json_builder_end_object(builder);

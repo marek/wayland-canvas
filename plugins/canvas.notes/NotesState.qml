@@ -2,16 +2,18 @@ pragma Singleton
 
 import QtQuick
 
-// The notes the plugin owns, shared by the create action and every editor
-// surface: the model (id -> {color, text, x, y, width, height}), the
-// plugin's storage, and the compositor calls that keep the drawn cards in
-// step. Every change — created, typed, recoloured, moved, deleted — is
-// written to storage as it happens; at start every stored note is set
-// again with its place, so a shell restart neither loses nor doubles one.
+// The notes the plugin owns: the model (id -> {color, text, x, y, width,
+// height}) and the plugin's storage. Each note is drawn by a surface of
+// the plugin's own, placed on the plane by the compositor
+// (docs/intents/shell/notes.md), so nothing here draws or asks the
+// compositor to draw. Every change — created, typed, recoloured, moved,
+// deleted — is written to storage as it happens, and the stored notes
+// come back as surfaces when the shell starts.
 Item {
 	id: root
 
 	property var notes: ({})
+	property var ids: []
 	property int nextId: 1
 
 	property var storage: null
@@ -77,26 +79,27 @@ Item {
 				nextId = saved.nextId
 			}
 		}
-		// Every stored note goes back to the compositor with its place:
-		// setting a known id updates it, so nothing doubles.
-		for (var id in notes) {
-			var note = notes[id]
-			compositor.call("item.set", {
-				id: id,
-				color: note.color,
-				text: note.text,
-				width: note.width,
-				height: note.height,
-				x: note.x,
-				y: note.y,
-			})
-		}
+		refresh()
 	}
 
 	function save() {
 		if (storage !== null) {
 			storage.write(storageName, {notes: notes, nextId: nextId})
 		}
+	}
+
+	// The surfaces follow this list; it is re-made whenever a note is
+	// added or removed, because a push into the array it holds would tell
+	// no one.
+	function refresh() {
+		var next = []
+		for (var id in notes) {
+			next.push(id)
+		}
+		ids = next
+		// A changed note is a changed map: re-assign so the surfaces bound
+		// to it redraw.
+		notes = notes
 	}
 
 	// create {color}: a new note of that colour, centred on what the
@@ -115,77 +118,64 @@ Item {
 		}
 		var id = "canvas.notes/" + nextId
 		nextId++
-		compositor.call("item.set", {
-			id: id,
-			color: color,
-			text: "",
-			width: size,
-			height: size,
-		}, function(result, error) {
-			if (result == null) {
-				console.warn("[canvas.notes] could not place a new note: " + error)
-				return // nowhere to place it: no note
+		// Where the user is looking: the compositor reports each output's
+		// canvas rectangle, and a new note goes in the middle of it.
+		compositor.call("state", undefined, function(state, error) {
+			var view = null
+			if (state != null && state.outputs != null) {
+				for (var i = 0; i < state.outputs.length; i++) {
+					if (state.outputs[i].view != null) {
+						view = state.outputs[i].view
+						break
+					}
+				}
 			}
+			var x = view != null ? Math.round(view.x + view.width / 2 - size / 2) : 0
+			var y = view != null ? Math.round(view.y + view.height / 2 - size / 2) : 0
 			notes[id] = {
 				color: color,
 				text: "",
-				x: result.x,
-				y: result.y,
-				width: result.width,
-				height: result.height,
+				x: x,
+				y: y,
+				width: size,
+				height: size,
 			}
 			save()
-			compositor.call("item.activate", {id: id})
+			refresh()
 		})
 	}
 
-	// Typed text while an editor is open: kept at once. The drawn card
-	// needs no update while the editor covers it.
+	// What is typed into a note: kept as it is typed.
 	function typed(id, text) {
 		var note = notes[id]
-		if (note == null) {
+		if (note == null || note.text === text) {
 			return
 		}
 		note.text = text
 		save()
 	}
 
-	// The text of a closing editor: kept, or the note deleted when it never
-	// got any.
-	function setText(id, text) {
-		var note = notes[id]
-		if (note == null) {
-			return
-		}
-		if (text.trim() === "") {
-			remove(id)
-			return
-		}
-		note.text = text
-		save()
-		compositor.call("item.set", {id: id, text: text})
-	}
-
-	// A colour dot in the editor.
-	function recolor(id, color) {
+	// A colour dot on a note's strip.
+	function recolour(id, color) {
 		var note = notes[id]
 		if (note == null) {
 			return
 		}
 		note.color = color
 		save()
-		compositor.call("item.set", {id: id, color: color})
+		refresh()
 	}
 
-	// The user dropped a dragged note.
+	// A note dragged by its strip, or placed again after a drag.
 	function moved(id, x, y) {
 		var note = notes[id]
 		if (note == null) {
 			return
 		}
-		note.x = x
-		note.y = y
+		note.x = Math.round(x)
+		note.y = Math.round(y)
 		save()
+		refresh()
 	}
 
 	function remove(id) {
@@ -194,15 +184,7 @@ Item {
 		}
 		delete notes[id]
 		save()
-		compositor.call("item.remove", {id: id})
+		refresh()
 	}
 
-	Connections {
-		target: root.compositor
-		function onEvent(name, params) {
-			if (name === "item.moved") {
-				root.moved(params.id, params.x, params.y)
-			}
-		}
-	}
 }
