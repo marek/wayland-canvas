@@ -69,7 +69,7 @@ request; responses come in request order.
 | `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
 | `capture.stop` | — | `true`; an error (`not recording`) with nothing running |
 | `settings.get` | — | The settings (below) |
-| `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); `swipes` (a preset); `pinchScale` (a boolean); `lockIdleMinutes` (0 for never); `nightLight` (a boolean); `nightLightTemperature` (kelvin) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action or preset, a chord that does not parse or is not allowed there, the file unwritable |
+| `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); `swipes` (a preset); `pinchScale` (a boolean); `invert` (a boolean); `lockIdleMinutes` (0 for never); `nightLight` (a boolean); `nightLightTemperature` (kelvin) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action or preset, a chord that does not parse or is not allowed there, the file unwritable |
 | `shortcut.capture` | `scope`: `global` (the default) or `overview` | `{"keys": "Super+Shift+K"}` once the user presses a chord, `{"keys": null}` when cancelled |
 | `shortcut.cancel` | — | `true`; a capture under way answers `{"keys": null}` |
 
@@ -107,7 +107,7 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `errors` | Each ignored line: `{"line", "text"}` |
 | `shortcuts` | Every action, in the bindings table's order, the overview's last: `scope`, `action` (its name), `label`, `group`, `keys` and `defaults` (chords as the file writes them) |
 | `commands` | `{"keys", "command"}` each |
-| `gestures` | `swipes` (the preset), `pinchScale` |
+| `gestures` | `swipes` (the preset), `pinchScale`, `invert` (the scroll and swipe direction, [../input/gestures.md](../input/gestures.md)) |
 | `session` | `lockIdleMinutes` (0 for never), `nightLight`, `nightLightTemperature` |
 
 

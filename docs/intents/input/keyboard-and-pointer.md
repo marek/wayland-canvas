@@ -115,7 +115,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 |---|---|
 | Tap to click | On: one finger is a left click, two a right click, three a middle click |
 | Pressing the pad | Two fingers pressed anywhere are a right click, three a middle click (libinput's clickfinger method, as the other desktop sets it); off, the pad's bottom-right corner is the right button |
-| Natural scrolling | On |
+| Natural scrolling | On, unless `[gestures] invert = on` turns the direction of every pointer and touchpad device around ([gestures.md](gestures.md)) |
 | Disable touchpad while typing | On |
 
 ## Error states, corner cases

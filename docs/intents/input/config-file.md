@@ -50,7 +50,7 @@ the same file, so the two never disagree.
 | `[shortcuts]` | `<action> = <chords>` | That action's keys everywhere but in the overview ([keyboard-and-pointer.md](keyboard-and-pointer.md)) |
 | `[overview]` | `<action> = <chords>` | That action's keys while the overview is open ([../canvas/overview.md](../canvas/overview.md)) |
 | `[commands]` | `<chord> = <command>` | The chord runs the command through `/bin/sh`, as the terminal shortcut runs its own: started from the overview, its windows open in the overview's target |
-| `[gestures]` | `swipes = three-finger-hops`, `four-finger-hops` or `off`; `pinch-scale = on` or `off` | The gesture choices ([gestures.md](gestures.md)) |
+| `[gestures]` | `swipes = three-finger-hops`, `four-finger-hops` or `off`; `pinch-scale = on` or `off`; `invert = on` or `off` | The gesture choices and the scroll and swipe direction ([gestures.md](gestures.md)) |
 | `[session]` | `lock-idle = <minutes>` or `off`; `night-light = on` or `off`; `night-light-temperature = <kelvin>` | How long the session may idle before it locks ([../shell/lock.md](../shell/lock.md)) and the night light ([../render/night-light.md](../render/night-light.md)) |
 
 ### Chords

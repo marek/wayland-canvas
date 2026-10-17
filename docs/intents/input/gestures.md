@@ -15,8 +15,8 @@ the canvas: a 3-finger swipe hops to the nearest desktop in its
 direction — in the normal view only ever onto a desktop, in the
 zoomed-out one onto a free spot too — and a 4-finger swipe up opens the
 zoomed-out canvas. The user picks the preset that assigns the finger
-counts, or turns them off, and whether Super + a 2-finger pinch scales a
-desktop. Only 2-finger gestures and finger counts the compositor does not
+counts, or turns them off, whether Super + a 2-finger pinch scales a
+desktop, and which way the pointer, the scroll and the swipes point. Only 2-finger gestures and finger counts the compositor does not
 bind are forwarded to clients.
 
 ## Presets
@@ -31,6 +31,11 @@ bind are forwarded to clients.
 |---|---|---|
 | On (the default) | `on` | Scales a desktop, as the table says |
 | Off | `off` | A plain 2-finger pinch: the client's in the normal view, the overview's zoom around the cursor in the overview |
+
+| Direction | `invert =` | Scrolling and swiping |
+|---|---|---|
+| As it is (the default) | `off` | Natural scrolling: the content follows the fingers, and a swipe hops the way the fingers point |
+| Inverted | `on` | Both reverse together — a scroll moves the view the way the fingers move, and a swipe hops away from them. One direction for the session: every pointer and touchpad device, what clients are scrolled by, the canvas pan and the hops |
 
 A change applies from the next gesture; one in progress keeps going.
 Finger counts below are the default preset's.
@@ -56,7 +61,9 @@ Finger counts below are the default preset's.
 Rules that hold across the table:
 
 - **Hops go where the fingers point.** A 3-finger swipe to the left
-  hops to the desktop on the left, in either mode.
+  hops to the desktop on the left, in either mode — unless `invert` is
+  on, when every direction in the table reverses with the scroll
+  direction.
 - **Follow the fingers.** A gesture that drives a zoom transition moves
   the camera along the zoom path continuously; nothing jumps.
 - **Commit or spring back.** Release past a threshold of progress — or

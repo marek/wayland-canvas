@@ -8,7 +8,8 @@
 ## Requirement
 
 A gear button in the overview toolbar opens the settings: every keyboard
-shortcut, set by pressing it; the swipe preset and the pinch switch; the
+shortcut, set by pressing it; the swipe preset, the pinch switch and the
+scroll direction; the
 toolbar's edge; which bar widgets show. A change applies at once and is
 written to the file that holds it, and a hand edit of that file shows in the
 window while it is open.
@@ -39,7 +40,7 @@ window while it is open.
 |---|---|---|
 | Shortcuts | The file's errors first, if any. Then every action by group in the bindings table's order, the overview's last: its label and its keys, or None. A click records new keys; reset puts the defaults back; clear leaves it without keys. Then the commands: each one's keys, recorded the same way, and its command line; add and remove | `canvas.conf`: `[shortcuts]`, `[overview]`, `[commands]` |
 | Session | The minutes of idleness before the screen locks, or never ([lock.md](lock.md)); the night light's switch and temperature ([../render/night-light.md](../render/night-light.md)) | `canvas.conf`: `[session]` |
-| Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)" | `canvas.conf`: `[gestures]` |
+| Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)"; the switch "Invert scrolling and swipes", which turns the direction of the pointer, the touchpad and the hops around together ([../input/gestures.md](../input/gestures.md)) | `canvas.conf`: `[gestures]` |
 | Toolbar | The edge: right, left, top or bottom | `shell.json`: `toolbar.position` |
 | Bar | Every bar widget by section, in bar order, with a switch; a widget that hides itself without a source says when it shows | `shell.json`: `bar.hidden` |
 
