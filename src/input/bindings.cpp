@@ -479,10 +479,8 @@ void Bindings::apply(const settings::Resolved &resolved) {
 			terminal_ = index;
 		}
 		for (const settings::Chord &chord : resolved.keys[i]) {
-			// The tap (`key` 0) runs from handle_tap, never as a chord.
-			if (chord.key == 0) {
-				continue;
-			}
+			// `key` 0 is the Super tap: handle_tap runs it, find never
+			// matches it.
 			if (def.group == "Capture") {
 				add(capture_, chord, index, -1);
 			} else if (def.scope == settings::Scope::global) {
@@ -525,6 +523,7 @@ bool Bindings::run(const Bind &bind, Output *output) {
 	}
 	return false;
 }
+
 
 bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 	if (handle_capture(sym, mods, output)) {

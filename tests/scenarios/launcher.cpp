@@ -38,6 +38,7 @@ const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
 std::string shot_dir;
 std::string xdg_dir;
 std::string marker_path;
+std::string canvas_conf; // this run's scratch canvas.conf (written on start)
 bool harness_ignores_sigpipe = false; // as this process was started; see main()
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -86,12 +87,29 @@ std::optional<Marker> read_marker() {
 	bool read = std::fgets(first, sizeof first, f) != nullptr
 		&& std::fgets(second, sizeof second, f) != nullptr;
 	std::fclose(f);
-	if (!read || std::strncmp(first, "SigIgn:", 7) != 0 || std::strchr(second, '\n') == nullptr) {
+	if (!read || std::strncmp(first, "SigIgn:", 7) != 0
+			|| std::strchr(second, '\n') == nullptr) {
 		return std::nullopt;
 	}
 	std::string desktop = second;
 	desktop.pop_back();
 	return Marker{std::strtoull(first + 7, nullptr, 16), desktop};
+}
+
+// A whole file's text, or nullopt when it is missing.
+std::optional<std::string> read_file(const std::string &path) {
+	FILE *f = std::fopen(path.c_str(), "rb");
+	if (f == nullptr) {
+		return std::nullopt;
+	}
+	std::string text;
+	char chunk[4096];
+	std::size_t n = 0;
+	while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
+		text.append(chunk, n);
+	}
+	std::fclose(f);
+	return text;
 }
 
 void shot(const char *name) {
@@ -160,8 +178,21 @@ int run_step() {
 		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
 		return 300;
 	case 1:
+		// The first run wrote canvas.conf with every default.
+		if (std::optional<std::string> text = read_file(canvas_conf)) {
+			check(*text == settings::template_text(),
+				"the first run wrote canvas.conf with every default");
+		} else {
+			check(false, "canvas.conf was written on the first run");
+		}
+		// A lone Super tap runs nothing by default; Super+Space opens.
 		tap(KEY_LEFTMETA);
-		check(server->launcher.is_open(), "tapping the Windows key opened the launcher");
+		check(!server->launcher.is_open(),
+			"a lone Super tap runs nothing by default");
+		key(KEY_LEFTMETA, true);
+		tap(KEY_SPACE);
+		key(KEY_LEFTMETA, false);
+		check(server->launcher.is_open(), "Super+Space opened the launcher");
 		shot("open");
 		return 500;
 	case 2: {
@@ -189,21 +220,33 @@ int run_step() {
 		key(KEY_LEFTMETA, false);
 		check(!server->launcher.is_open(), "Super+T did not open the launcher on release");
 		return 100;
-	case 6:
-		tap(KEY_LEFTMETA);
+	case 6: // its own chord closes the open launcher; Escape does too
+		key(KEY_LEFTMETA, true);
+		tap(KEY_SPACE);
+		key(KEY_LEFTMETA, false);
+		check(server->launcher.is_open(), "Super+Space opened it");
+		key(KEY_LEFTMETA, true);
+		tap(KEY_SPACE);
+		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(), "its own chord closed it");
+		key(KEY_LEFTMETA, true);
+		tap(KEY_SPACE);
+		key(KEY_LEFTMETA, false);
+		check(server->launcher.is_open(), "Super+Space opened it again");
 		tap(KEY_ESC);
 		check(!server->launcher.is_open(), "Escape closed it");
 		key(KEY_LEFTMETA, true);
 		tap(KEY_SPACE);
 		key(KEY_LEFTMETA, false);
-		check(server->launcher.is_open(), "Super+Space opened it");
 		type("zzqqx");
 		shot("no-match");
 		return 500;
 	case 7:
 		click(20, 20);
 		check(!server->launcher.is_open(), "a click outside closed it");
-		tap(KEY_LEFTMETA);
+		key(KEY_LEFTMETA, true);
+		tap(KEY_SPACE);
+		key(KEY_LEFTMETA, false);
 		type("fo");
 		return 300;
 	case 8: {
@@ -222,7 +265,9 @@ int run_step() {
 		check(mapped() == views_before + 1, "clicked app mapped a window");
 		return 300;
 	case 10: // the custom desktop entry from $XDG_DATA_HOME: find it by name
-		tap(KEY_LEFTMETA);
+		key(KEY_LEFTMETA, true);
+		tap(KEY_SPACE);
+		key(KEY_LEFTMETA, false);
 		check(server->launcher.is_open(), "launcher reopened for the custom entry");
 		type("zydeco");
 		shot("custom-entry");
@@ -318,10 +363,16 @@ int main() {
 	shot_dir = std::format("{}/scenarios/launcher", root);
 	xdg_dir = std::format("{}/scenarios/launcher/xdg", root);
 	marker_path = std::format("{}/scenarios/launcher/custom-marker", root);
+	canvas_conf = std::format("{}/scenarios/launcher/xdg-config"
+		"/wayland-canvas/canvas.conf", root);
 	mkdir_p(shot_dir);
 	install_custom_entry();
 	// Before the server starts: the launcher scans $XDG_DATA_HOME/applications first.
 	setenv("XDG_DATA_HOME", xdg_dir.c_str(), 1);
+	// Before the server starts: canvas.conf lives in this run's scratch,
+	// never in the user's real ~/.config.
+	setenv("XDG_CONFIG_HOME",
+		std::format("{}/scenarios/launcher/xdg-config", root).c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();

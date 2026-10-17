@@ -1235,14 +1235,16 @@ int run_step() {
 	case 82: {
 		check(o->overview.active() && !o->overview.target().desktop.has_value(),
 			"the overview's target moved to a free spot below B");
-		// Launch an app from the overview: a Super tap opens the launcher.
+		// Launch an app from the overview: Super+Space opens the launcher.
 		key(KEY_LEFTMETA, true);
+		key(KEY_SPACE, true);
+		key(KEY_SPACE, false);
 		key(KEY_LEFTMETA, false);
 		tap_keys({KEY_F, KEY_O, KEY_O, KEY_T});
 		return 300;
 	}
 	case 83:
-		check(server->launcher.is_open(), "a Super tap opened the launcher over the overview");
+		check(server->launcher.is_open(), "Super+Space opened the launcher over the overview");
 		remember_views();
 		key(KEY_ENTER, true);
 		key(KEY_ENTER, false);
@@ -1265,6 +1267,8 @@ int run_step() {
 	}
 	case 85: // an app that takes a second to appear, launched from the overview
 		key(KEY_LEFTMETA, true);
+		key(KEY_SPACE, true);
+		key(KEY_SPACE, false);
 		key(KEY_LEFTMETA, false);
 		tap_keys({KEY_T, KEY_A, KEY_R, KEY_D, KEY_Y});
 		return 300;
@@ -1321,6 +1325,8 @@ int run_step() {
 		check(!o->overview.target().desktop.has_value(),
 			"the overview's target moved to the free spot below B again");
 		key(KEY_LEFTMETA, true);
+		key(KEY_SPACE, true);
+		key(KEY_SPACE, false);
 		key(KEY_LEFTMETA, false);
 		tap_keys({KEY_B, KEY_E, KEY_L, KEY_A, KEY_T, KEY_E, KEY_D});
 		return 300;
@@ -1676,6 +1682,10 @@ int main() {
 	install_late_entries(xdg_dir);
 	// Before the server starts: the launcher scans $XDG_DATA_HOME/applications first.
 	setenv("XDG_DATA_HOME", xdg_dir.c_str(), 1);
+	// Before the server starts: canvas.conf lives in this run's scratch,
+	// never in the user's real ~/.config.
+	setenv("XDG_CONFIG_HOME",
+		std::format("{}/scenarios/gestures/xdg-config", root).c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();
