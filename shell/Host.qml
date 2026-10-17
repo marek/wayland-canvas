@@ -685,6 +685,10 @@ Item {
 	// and a rename on every settings change, which the shell never reads.
 	// A watcher on the dir cannot tell which entry changed, so it would
 	// reload the shell, and close the settings window, on each of them.
+	// The file's own watcher follows shell.json through everything an
+	// editor or a hand does to it — saved over by rename any number of
+	// times, deleted, created again — as the bar scenario's config
+	// watcher steps prove.
 	Process {
 		id: watchLister
 		stdout: StdioCollector {

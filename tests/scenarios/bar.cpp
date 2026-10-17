@@ -3294,6 +3294,76 @@ int mapped_views_of(std::string_view app_id) {
 	return n;
 }
 
+// ---- the config file watcher: how the shell hears about shell.json ----
+
+double watch_edge = 0; // the left section's ink edge as the last read of it found it
+
+// The scratch shell.json as it stands with the hello plugin switched on
+// or off, every other byte kept: the edit the watcher steps save.
+std::string with_hello(bool on) {
+	std::string text = read_file(shell_config);
+	std::string from = on ? "\"enabled\": false" : "\"enabled\": true";
+	std::string to = on ? "\"enabled\": true" : "\"enabled\": false";
+	std::size_t at = text.find(from);
+	if (at != std::string::npos) {
+		text.replace(at, from.size(), to);
+	}
+	return text;
+}
+
+// The left section's ink edge on a fresh shot of `name`; false while the
+// shot is still landing. 0 in `edge` means the bar could not be read (no
+// bar mapped, or a reload between its surfaces).
+bool watch_read(const char *name, bool light, double &edge) {
+	if (!shot_landed(name)) {
+		return false;
+	}
+	LayerSurface *bar = bar_layer();
+	cairo_surface_t *s = load_png(name);
+	edge = bar != nullptr && s != nullptr ? bar_ink_edge(s, bar->geo, light) : 0;
+	if (s != nullptr) {
+		cairo_surface_destroy(s);
+	}
+	return true;
+}
+
+// Remembers the bar surface that is up now, so the next edit's reload is
+// told by it being replaced.
+void watch_remember_bar() {
+	LayerSurface *bar = bar_layer();
+	settings_bar_at_hide = bar;
+	settings_bar_id = bar != nullptr
+		? wl_resource_get_id(bar->wlr->surface->resource) : 0;
+}
+
+// Settles one save of shell.json. The hello plugin's label sits past the
+// logo while the plugin is on, so the left section's edge moves right
+// when an edit turns it on and left when one turns it off; the shell can
+// only show that by reloading, and a reload replaces the bar's surface.
+// False while undecided (the caller waits and comes back); true once the
+// verdict is recorded.
+bool watch_settle(const char *name, bool wider, bool light,
+	std::string_view what) {
+	double edge = 0;
+	if (!watch_read(name, light, edge)) {
+		return false;
+	}
+	bool moved = edge > 0 && (wider ? edge >= watch_edge + widen_px
+					: edge <= watch_edge - widen_px);
+	if (!moved && retries++ < 60) { // a reload recompiles every plugin: in flight under load
+		return false;
+	}
+	retries = 0;
+	check(moved, std::format("{} applied: the hello label {} the left "
+		"section's edge ({} px, was {})", what, wider ? "pushed" : "released",
+		edge, watch_edge));
+	check(!settings_shell_kept(), std::format("{} reloaded the shell (the "
+		"bar is a new surface)", what));
+	watch_edge = edge;
+	watch_remember_bar();
+	return true;
+}
+
 
 
 int run_step() {
@@ -4419,13 +4489,124 @@ int run_step() {
 	case 95: { // and the machine's own setting is what it was
 		if (scheme_start.empty()) {
 			std::println("PASS (unchecked: no session bus to read it)");
-			step = 110; // on to the notes either way: they still run
+			step = 96; // on to the config file's watcher either way
 			return -100; // without the advance: every other step moves on alone
 		}
 		std::string scheme_end = real_color_scheme();
 		check(scheme_end == scheme_start, std::format("the machine's "
 			"color-scheme is untouched (still {})", scheme_start));
-		step = 110; // on to the notes: the sticky-notes plugin end to end
+		step = 96; // on to the config file's watcher
+		return -100; // without the advance: every other step moves on alone
+	}
+	// ---- the config file's watcher: every way shell.json can change ----
+	// A step range of its own, after the adoption's one rename-over. The
+	// shell reloads on an edit of shell.json however the file got there:
+	// saved over twice by rename (the way an editor saves, the inode
+	// changing each time), deleted and created again by hand, and saved
+	// over after the host wrote it itself. The proof of each is the hello
+	// plugin's label coming or going on the bar, on a new bar surface;
+	// the canvas.conf rewrites that must not reload are the settings
+	// phase's to prove.
+	case 96: { // the baseline: hello off, the first save switches it on
+		double edge = 0;
+		if (!watch_read("watch-base", false, edge)) {
+			return -300;
+		}
+		if (edge <= 0 && retries++ < 20) {
+			return -300;
+		}
+		retries = 0;
+		check(edge > 0, std::format("the bar is readable before the config "
+			"edits (the left section's edge at {} px)", edge));
+		watch_edge = edge;
+		watch_remember_bar();
+		replace_file(shell_config, with_hello(true));
+		return 600;
+	}
+	case 97: { // the first rename-over reloaded; the second one switches it off
+		if (!watch_settle("watch-rename-1", true, false,
+				"the first save of shell.json by rename-over")) {
+			return -400;
+		}
+		replace_file(shell_config, with_hello(false));
+		return 600;
+	}
+	case 98: { // the second rename-over reloaded too; now the file is deleted
+		if (!watch_settle("watch-rename-2", false, false,
+				"the second save of shell.json by rename-over")) {
+			return -400;
+		}
+		std::error_code ec;
+		std::filesystem::remove(shell_config, ec);
+		check(!ec && !std::filesystem::exists(shell_config),
+			"shell.json is deleted");
+		return 600;
+	}
+	case 99: { // the deletion reloaded, on the defaults; it is created by hand
+		if (!watch_settle("watch-deleted", true, false,
+				"deleting shell.json")) {
+			return -400;
+		}
+		check(!std::filesystem::exists(shell_config), "the reloaded shell "
+			"wrote nothing back: shell.json is still missing");
+		write_file(shell_config, plugin_config); // hello off again
+		return 600;
+	}
+	case 100: { // the creation reloaded; the shell writes the file itself next
+		if (!watch_settle("watch-created", false, false,
+				"creating shell.json by hand")) {
+			return -400;
+		}
+		click(theme_x, 13); // the switch: dark -> light, a host write
+		return 500;
+	}
+	case 101: { // the host's own write landed
+		bool written = read_file(shell_config).find("\"mode\": \"light\"")
+			!= std::string::npos;
+		if (!written && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "the switch wrote theme.mode: light into the created "
+			"shell.json");
+		return 700; // long enough for a reload to show if the write caused one
+	}
+	case 102: { // it reloaded nothing; a rename-over after it still reloads
+		check(settings_shell_kept(), "the host's own write of shell.json "
+			"reloaded nothing");
+		replace_file(shell_config, with_hello(true));
+		return 600;
+	}
+	case 103: { // the save after the host's write reloaded; back to dark
+		if (!watch_settle("watch-after-write", true, true,
+				"a rename-over after the host's own write")) {
+			return -400;
+		}
+		click(theme_x, 13); // light -> dark, a host write again
+		return 500;
+	}
+	case 104: {
+		bool written = read_file(shell_config).find("\"mode\": \"dark\"")
+			!= std::string::npos;
+		if (!written && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "the switch wrote theme.mode: dark back");
+		return 700;
+	}
+	case 105: { // nothing reloaded; the last save puts the file as it was
+		check(settings_shell_kept(), "the host's second write of shell.json "
+			"reloaded nothing");
+		replace_file(shell_config, with_hello(false));
+		return 600;
+	}
+	case 106: { // the last reload; on to the notes
+		if (!watch_settle("watch-last", false, false,
+				"the rename-over after the host's second write")) {
+			return -400;
+		}
+		step = 110;
 		return -100; // without the advance: every other step moves on alone
 	}
 	// ---- the notes: the sticky-notes plugin end to end ----

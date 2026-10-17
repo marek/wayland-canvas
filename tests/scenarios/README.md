@@ -284,6 +284,22 @@ own the machine's Wayland display namespace and GPU.
   (today `prefer-dark`). The write itself is proven by the unit test
   `theme-prefs` against that same private backend.
 
+  Then the shell's watcher on its config file, every way `shell.json` can
+  change. The bar's left section ends at the logo while the scratch
+  `canvas.hello` plugin is off; switching it on in the file puts its
+  label past the logo, so the section's ink edge on a fresh screenshot
+  and the bar being a new layer surface prove the shell reloaded and
+  applied the edit. The file is saved over twice by rename (a sibling
+  written and renamed over it, the inode replaced each time, the way an
+  editor saves), deleted (the shell reloads on the defaults and writes
+  nothing back, so the file stays missing) and created again by hand;
+  then the theme switch makes the host write the file itself, which must
+  reload nothing, and a rename-over after that write must still reload,
+  twice around. The shell watches only the file, never its directory:
+  the compositor rewrites `canvas.conf` beside it on every settings
+  change, and that must not reload the shell (the settings phase proves
+  it).
+
   Last, the `canvas.notes` plugin end to end, driven
   only through the public socket: `msg action.run canvas.notes/create`
   puts a `canvas.notes/...` item in the state, and the plugin's editor
