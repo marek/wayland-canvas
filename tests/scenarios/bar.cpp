@@ -876,6 +876,35 @@ bool start_tool_standins() {
 	return true;
 }
 
+// What this machine's own Wi-Fi is called, asked of the real nmcli in a
+// child of its own with the run's private bus undone: the names stay in
+// memory for the one check that the panel never reached the real
+// NetworkManager, and are written nowhere. Empty when the machine has no
+// Wi-Fi or no nmcli.
+std::string machine_wifi(const char *field) {
+	std::string out = shot_dir + "/machine-wifi.txt";
+	std::string cmd = std::format(
+		"env -u DBUS_SYSTEM_BUS_ADDRESS -u DBUS_SESSION_BUS_ADDRESS "
+		"nmcli -t -f {} device status 2>/dev/null | "
+		"awk -F: '$2 == \"wifi\" {{ print $NF }}' | head -1 > '{}'",
+		field, out);
+	std::system(cmd.c_str());
+	std::string value = read_file(out);
+	unlink(out.c_str());
+	while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
+		value.pop_back();
+	}
+	return value;
+}
+
+std::string machine_wifi_device() {
+	return machine_wifi("DEVICE,TYPE");
+}
+
+std::string machine_wifi_ssid() {
+	return machine_wifi("CONNECTION,TYPE");
+}
+
 // The network panel's tool log, one line a call: what the panel asked of
 // the fixture world's tools, and the proof it asked nothing of the real
 // one.
@@ -6183,10 +6212,13 @@ int run_step() {
 		retries = 0;
 		check(gone, "Forget removed the known network from the settings");
 		std::string log = standin_log();
-		// The machine's own interface and SSID: had the panel reached the
-		// real NetworkManager, either would be all over this log.
-		check(log.find("wlp0s20f3") == std::string::npos
-				&& log.find("Acme") == std::string::npos,
+		// The machine's own interface and the SSID it is on, read here and
+		// never written down: had the panel reached the real
+		// NetworkManager, either would be all over this log.
+		std::string real_device = machine_wifi_device();
+		std::string real_ssid = machine_wifi_ssid();
+		check((real_device.empty() || log.find(real_device) == std::string::npos)
+				&& (real_ssid.empty() || log.find(real_ssid) == std::string::npos),
 			"the panel's tools were only ever asked about the fixture world: "
 			"no real interface or SSID in any call");
 		shot("wifi-final");

@@ -90,26 +90,6 @@ void write_file(const std::string &path, std::string_view text) {
 	std::fclose(f);
 }
 
-std::string read_file(const std::string &path) {
-	FILE *f = std::fopen(path.c_str(), "r");
-	if (f == nullptr) {
-		return "";
-	}
-	std::string out;
-	char buf[256];
-	std::size_t n;
-	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
-		out.append(buf, n);
-	}
-	std::fclose(f);
-	return out;
-}
-
-bool file_exists(const std::string &path) {
-	struct stat st{};
-	return stat(path.c_str(), &st) == 0;
-}
-
 // ---------------------------------------------------------- children
 
 struct Spawned {
@@ -345,12 +325,6 @@ void notify(std::string_view args) {
 	spawn(std::format("notify-send {} >/dev/null 2>&1", args).c_str());
 }
 
-std::string busctl_names() {
-	std::string out = shot_dir + "/names.txt";
-	spawn(std::format("busctl --address='{}' --user list --no-pager > {} 2>&1",
-		private_session.address, out).c_str());
-	return out;
-}
 
 // ------------------------------------------------------------- steps
 
