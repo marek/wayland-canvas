@@ -37,9 +37,9 @@ The contract is in [input/config-file.md](../intents/input/config-file.md),
 
 - [x] The settings library: actions with names, labels, groups and defaults; chords parsed and written; `canvas.conf` parsed with an error per bad line; the first-run file; one entry rewritten in place, comments kept
 - [x] `canvas.conf` read at start (written when missing), re-read when saved; every shortcut, capture chord, overview key and the Super tap comes from it; `[commands]` chords run their commands
-- [ ] `settings.get`, `settings.set`, `shortcut.capture` and `shortcut.cancel` on the control socket, and the `settings` event; a chord being recorded runs nothing and reaches no client (`shortcut.cancel` unexercised: check under way)
+- [x] `settings.get`, `settings.set`, `shortcut.capture` and `shortcut.cancel` on the control socket, and the `settings` event; a chord being recorded runs nothing and reaches no client
 - [x] Super+Space opens the launcher, from the overview too; a lone Super tap only when the file gives it to an action
-- [ ] The shell started from the build tree finds the build's helpers, so the agents widget shows there (the shell's PATH: check under way)
+- [x] The shell started from the build tree finds the build's helpers, so the agents widget shows there
 
 ## Gestures
 
@@ -47,7 +47,7 @@ The contract is in [input/config-file.md](../intents/input/config-file.md),
 
 ## Shell
 
-- [ ] The settings plugin: the gear button in the toolbar and the settings panel — Shortcuts (record, reset, clear, commands), Gestures (preset, pinch switch), Toolbar (edge), Bar (a switch per widget) (reset, clear and commands from the panel unexercised: checks under way)
+- [x] The settings plugin: the gear button in the toolbar and the settings panel — Shortcuts (record, reset, clear, commands), Gestures (preset, pinch switch), Toolbar (edge), Bar (a switch per widget)
 - [x] The bar leaves out the widgets `bar.hidden` names; the api the panel needs to write `shell.json` and list the widgets
 - [x] The toolbar on any edge (`toolbar.position`), a row at the top and bottom, flyouts and panels opening toward the screen's centre; in the overview the shelf and help line sit above a bottom toolbar
 
@@ -58,5 +58,5 @@ The contract is in [input/config-file.md](../intents/input/config-file.md),
 - [x] Scenarios: each swipe preset and the pinch switch
 - [x] Scenarios: from the gear, recording a shortcut, choosing a preset, hiding the agents widget, moving the toolbar
 - [x] Scenarios: the toolbar on each edge, its flyout toward the centre, the shelf above a bottom toolbar
-- [ ] README and `-h`; warning-free build, every suite green
+- [x] README and `-h`; warning-free build, every suite green
 - [ ] On screen: the settings window, recording shortcuts, the presets on the touchpad, the toolbar on each edge (the user)
