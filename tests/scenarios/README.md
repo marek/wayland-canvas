@@ -49,6 +49,17 @@ own the machine's Wayland display namespace and GPU.
   screen being looked at; and a late launch starting maximized filling the
   free spot it was launched for. The late launches are scratch desktop
   entries in a scratch `$XDG_DATA_HOME`.
+  Last, the `[gestures]` options set in-process through
+  `server->gestures.set_options`: the four-finger-hops preset (a 4-finger
+  swipe hopping in both modes, a 3-finger swipe up opening the overview and
+  one down going in, a 3-finger sideways swipe abandoning a desktop, a
+  4-finger pinch previewing tile and combine), `off` (3- and 4-finger swipes
+  forwarded to the client in the normal view with the camera and the overview
+  state untouched; nothing at all in the overview, a pinch included),
+  pinch-scale off (a Super + 2-finger pinch scaling no desktop: forwarded in
+  the normal view, zooming the overview camera in the overview), the help
+  line naming each preset's gestures by its text (keys only under `off`),
+  and the defaults restored at the end, a 3-finger hop working again.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

@@ -26,11 +26,13 @@ public:
 	struct Idle {};
 	struct Ignored {};
 	struct Forwarded { bool pinch = false; }; // belongs to the client under the pointer
-	struct Pending { Output *output; uint32_t fingers; bool pinch; double ax, ay; };
+	// The options the gesture began with: one in progress keeps them.
+	struct Pending { Output *output; uint32_t fingers; bool pinch; double ax, ay;
+		GestureOptions options; };
 	struct ZoomOut { Output *output; Camera near, far; double ay, progress, vy; };
 	struct ZoomIn { Output *output; Camera near, far; double ay, progress, vy; };
 	struct ZoomFurther { Output *output; double start_zoom, ay, vy; };
-	// A 3-finger swipe in either mode: one hop past the travel threshold.
+	// A hop-finger swipe in either mode: one hop past the travel threshold.
 	struct Hop { Output *output; double ax, ay; bool done; };
 	struct Abandon { Output *output; DesktopId desktop; double offset; };
 	struct Pinch { Output *output; std::optional<DesktopId> desktop, merge_from; double scale; bool hinted; };
