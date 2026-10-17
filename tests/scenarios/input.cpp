@@ -52,6 +52,7 @@ std::string shot_dir;
 
 std::string canvas_conf; // this run's scratch canvas.conf
 pid_t raw_pid = -1;      // a forked raw socket client, reaped by a later step
+pid_t cancel_pid = -1;   // the second forked client of a step that needs two
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -341,11 +342,12 @@ pid_t fork_ipc_client(const std::string &to_send, const char *out,
 	_exit(0);
 }
 
-// Reaps the forked client of an earlier step, if it has exited.
-void reap_client() {
-	if (raw_pid > 0) {
-		waitpid(raw_pid, nullptr, WNOHANG);
-		raw_pid = -1;
+// Reaps a forked client of an earlier step (the last one by default), if it
+// has exited.
+void reap_client(pid_t &pid = raw_pid) {
+	if (pid > 0) {
+		waitpid(pid, nullptr, WNOHANG);
+		pid = -1;
 	}
 }
 
@@ -1240,6 +1242,86 @@ int run_step() {
 		key(KEY_LEFTMETA, false);
 		check(!server->launcher.is_open(), "and closed it again");
 		shot("tap-launcher");
+		return 300;
+	}
+	case 81: { // shortcut.cancel: a capture pending on one connection
+		reap_client();
+		// The terminal the chord spawns after the cancel recreates the
+		// marker: a fresh one makes "it ran" observable.
+		unlink((shot_dir + "/terminal-marker").c_str());
+		raw_pid = fork_ipc_client(
+			"{\"id\":9,\"method\":\"shortcut.capture\"}\n",
+			"cancel-pending.out", 12);
+		return 1000;
+	}
+	case 82: { // still unanswered; the cancel comes from a second connection
+		std::string pending = read_file(shot_dir + "/cancel-pending.out")
+			.value_or("");
+		check(pending.empty(),
+			"a shortcut.capture stays unanswered until it is finished or cancelled");
+		cancel_pid = fork_ipc_client(
+			"{\"id\":10,\"method\":\"shortcut.cancel\"}\n",
+			"cancel-answer.out", 3);
+		return 1000;
+	}
+	case 83: {
+		std::string pending = read_file(shot_dir + "/cancel-pending.out")
+			.value_or("");
+		std::string answer = read_file(shot_dir + "/cancel-answer.out")
+			.value_or("");
+		if ((pending.empty() || answer.empty()) && retries++ < 100) {
+			return -100;
+		}
+		check(pending.find("{\"id\":9,\"result\":{\"keys\":null}}") != std::string::npos,
+			"the pending capture was answered {\"keys\": null}");
+		check(answer.find("{\"id\":10,\"result\":true}") != std::string::npos,
+			"shortcut.cancel answered true");
+		reap_client();
+		reap_client(cancel_pid);
+		// The capture is over: the chord the file binds runs its action.
+		key(KEY_LEFTMETA, true);
+		key(KEY_K, true);
+		key(KEY_K, false);
+		key(KEY_LEFTMETA, false);
+		return 300;
+	}
+	case 84: {
+		if (!file_exists(shot_dir + "/terminal-marker") && retries++ < 100) {
+			return -100;
+		}
+		check(file_exists(shot_dir + "/terminal-marker"),
+			"after the cancel, a bound chord ran its action (Super+K opened the terminal)");
+		return 300;
+	}
+	case 85: {
+		std::string typed = read_file(shot_dir + "/terminal-marker")
+			.value_or("");
+		if (typed.find('z') == std::string::npos && retries++ < 100) {
+			// As for the first plain key: the terminal may still be taking
+			// the focus, and its line discipline holds the key until Enter.
+			key(KEY_Z, true);
+			key(KEY_Z, false);
+			key(KEY_ENTER, true);
+			key(KEY_ENTER, false);
+			return -100;
+		}
+		check(typed.find('z') != std::string::npos,
+			"after the cancel, a plain key reached the focused client");
+		// With nothing to cancel the method is still just true.
+		cancel_pid = fork_ipc_client(
+			"{\"id\":11,\"method\":\"shortcut.cancel\"}\n",
+			"cancel-idle.out", 3);
+		return 1000;
+	}
+	case 86: {
+		std::string idle = read_file(shot_dir + "/cancel-idle.out")
+			.value_or("");
+		if (idle.empty() && retries++ < 100) {
+			return -100;
+		}
+		check(idle.find("{\"id\":11,\"result\":true}") != std::string::npos,
+			"shortcut.cancel with no capture under way answered true");
+		reap_client(cancel_pid);
 		return 300;
 	}
 	default:

@@ -95,8 +95,11 @@ own the machine's Wayland display namespace and GPU.
   `shortcut.capture` over the socket through a forked raw client — the
   recorded chord reported and run by nothing (the terminal it would spawn
   never appears), the same chord unrecorded spawning it, a plain key
-  reaching its client, and the Super tap given to the launcher through the
-  socket opening and closing it.
+  reaching its client, `shortcut.cancel` from a second connection
+  answering the pending capture `{"keys": null}` and itself `true` (also
+  with no capture under way) after which a bound chord runs its action
+  and a plain key reaches the focused client, and the Super tap given to
+  the launcher through the socket opening and closing it.
 - **`launcher.cpp`** — the app launcher: Super+Space opens it — the first
   run having written canvas.conf with every default into the run's own
   scratch `$XDG_CONFIG_HOME` (never the user's), and a lone Super tap
@@ -187,8 +190,12 @@ own the machine's Wayland display namespace and GPU.
   stand-in is logged under the run's scratch (`curl-standin.log`,
   `tool-standin.log`) so a run can show it never
   reached the network or the machine's own NetworkManager. The scenario proves the
-  bar's own process runs with exactly those bus addresses (read from
-  `/proc/<pid>/environ`). Then, with the real bar client (qs) started by the
+  bar's own process runs with exactly those bus addresses and with the
+  compositor's own executable directory first on its `PATH` (both read
+  from `/proc/<pid>/environ`); looked up by name along that `PATH`,
+  `wayland-canvas-agent-usage` — the agents widget's collector — is the
+  build's copy, which the scenario's own `PATH` does not hold. Then, with
+  the real bar client (qs) started by the
   compositor on those buses: every indicator is clicked with the fake pointer
   and its panel must map as a layer surface of the bar client (panels are
   told apart by their layer namespace, `wayland-canvas-panel-<name>`), hold
@@ -408,6 +415,16 @@ own the machine's Wayland display namespace and GPU.
   `swipes = four-finger-hops` in the file and only that dot lit. With the
   panel closed on Escape the new chord opens a foot window (`TERMINAL` is
   pinned to `foot` for the run) while the one it replaced opens nothing.
+  The panel is opened again on the Shortcuts tab and the App launcher row
+  (which carries no note) is clicked: its third line, "Press the new keys
+  — Esc cancels", is read off the screenshot. Escape is the capture's
+  own cancel: the line goes and the panel stays open. The row is clicked
+  to record again and the gear's second click closes the panel: closing
+  while recording cancels the recording, so the keys are free at once —
+  Super+T opens a foot window (`TERMINAL` pointed at a script that
+  writes what it is typed into a marker file), Escape leaves the
+  overview, and a plain key typed into that window reaches its client
+  while `terminal` is still `Super+T` in `canvas.conf`.
   One earlier step, the adopt phase's hand edit of `shell.json`, is saved
   the way an editor does, renamed over the file: the shell must still
   reload on it, though it no longer watches the config directory (the

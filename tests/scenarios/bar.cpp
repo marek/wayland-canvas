@@ -149,6 +149,7 @@ int settings_terminal_y = 0; // the Terminal row's label line, on the Shortcuts 
 int settings_chip_before = 0; // its chord chip's width before the recording
 int settings_first_top = 0; // the Gestures tab's first preset row
 bool settings_esc_sent = false; // the Escape that closes the panel went out
+std::string keys_marker;    // what a plain key typed into the keys terminal lands in
 
 
 // ---- isolation: private buses and the stand-in services on them ----
@@ -1057,6 +1058,28 @@ std::string proc_env_value(pid_t pid, const char *key) {
 		}
 		if (blob.compare(start, prefix.size(), prefix) == 0) {
 			return blob.substr(start + prefix.size(), end - start - prefix.size());
+		}
+		start = end + 1;
+	}
+	return {};
+}
+
+// The first executable regular file called `name` along a PATH value, as
+// a shell resolves a command by name; "" when none.
+std::string path_lookup(std::string_view path, const std::string &name) {
+	std::size_t start = 0;
+	while (start <= path.size()) {
+		std::size_t end = path.find(':', start);
+		std::string_view entry = path.substr(start,
+			end == std::string_view::npos ? std::string_view::npos : end - start);
+		std::string candidate = std::format("{}/{}", entry.empty() ? "." : entry, name);
+		struct stat st{};
+		if (stat(candidate.c_str(), &st) == 0 && S_ISREG(st.st_mode)
+				&& access(candidate.c_str(), X_OK) == 0) {
+			return candidate;
+		}
+		if (end == std::string_view::npos) {
+			break;
 		}
 		start = end + 1;
 	}
@@ -3118,6 +3141,27 @@ bool holds_chord(std::string_view action, const settings::Chord &chord) {
 // dots, so a band scan sees the text and not the controls.
 constexpr int settings_label_w = settings_panel - 2 * settings_pad - 48;
 
+// The App launcher row's label line, the row above Terminal: it carries no
+// note, so its third line is the recording prompt and nothing else.
+int settings_launcher_y() {
+	return settings_terminal_y - settings_action - settings_gap;
+}
+
+// True when a shot shows the App launcher row's third line, under its
+// chords: where the row says it is recording.
+bool settings_prompt_shown(const char *name) {
+	cairo_surface_t *s = load_png(name);
+	double top = settings_launcher_y();
+	double note_y = top + 1.5 * settings_row + settings_detail / 2.0;
+	std::vector<Band> lines = s != nullptr ? bands_in(s,
+		{settings_card_x + 8, int(top) - 20, settings_label_w,
+			3 * settings_row}) : std::vector<Band>{};
+	auto note = settings_band_at(lines, note_y);
+	bool shown = note != lines.end() && std::abs(note->centre() - note_y) <= 8;
+	cairo_surface_destroy(s);
+	return shown;
+}
+
 // How many of `count` stacked choice rows carry a text band where the
 // card lays them.
 int settings_choices_labelled(const std::vector<Band> &rows, int first_top,
@@ -3695,6 +3739,28 @@ int run_step() {
 			"DBUS_SESSION_BUS_ADDRESS={}", bar_pid, sys, ses);
 		check(sys == private_system.address && ses == private_session.address,
 			"the bar's bus addresses are the private pair (from /proc/environ)");
+		// The shell is started with the compositor's own directory first on
+		// its PATH: the scenario runs the compositor in-process, so that is
+		// this executable's directory, and its helpers sit in it.
+		std::string shell_path = proc_env_value(bar_pid, "PATH");
+		std::error_code self_error;
+		std::string self_dir = std::filesystem::read_symlink("/proc/self/exe",
+			self_error).parent_path().string();
+		std::println("note: the bar (pid {}) runs with PATH={}", bar_pid, shell_path);
+		check(!self_error && !self_dir.empty() && shell_path.starts_with(self_dir + ":"),
+			std::format("the shell's PATH starts with the compositor's own directory "
+				"({})", self_dir));
+		// The agents widget runs its collector by name: the first match on
+		// that PATH is the build's copy, the one the scenario runs itself.
+		// The scenario's own PATH holds no such directory, so only the
+		// compositor's prefix can supply it.
+		std::string resolved = path_lookup(shell_path, "wayland-canvas-agent-usage");
+		const char *built = std::getenv("WAYLAND_CANVAS_AGENT_USAGE");
+		std::error_code same_error;
+		check(!resolved.empty() && built != nullptr
+				&& std::filesystem::equivalent(resolved, built, same_error),
+			std::format("wayland-canvas-agent-usage, run by name from the shell's "
+				"PATH, is the build's ({})", resolved));
 		// The weather fetch is answered at once by the curl stand-in, so
 		// the widget is up quickly; a short wait still lets the bar lay
 		// its widgets out before the positions are read.
@@ -7309,10 +7375,10 @@ int run_step() {
 		click(settings_card_x + 30, terminal_y);
 		return 400;
 	}
-	case 423: // the capture takes every key: the chord pressed is recorded
+	case 422: // the capture takes every key: the chord pressed is recorded
 		chord(KEY_T, KEY_LEFTMETA); // Super+T, the terminal's new chord
 		return 400;
-	case 424: { // canvas.conf gains the line, the moved chord is taken
+	case 423: { // canvas.conf gains the line, the moved chord is taken
 		std::string keys = conf_value("terminal");
 		// Tiling held Super+T by default, with no line of its own to
 		// rewrite: the running session says whether it lost it.
@@ -7335,7 +7401,7 @@ int run_step() {
 		shot("settings-shortcuts-set");
 		return 700;
 	}
-	case 425: { // the chip shrank; then the Gestures tab: presets and the pinch switch
+	case 424: { // the chip shrank; then the Gestures tab: presets and the pinch switch
 		cairo_surface_t *s = load_png("settings-shortcuts-set");
 		int chip = s != nullptr ? settings_chip_width(s,
 			settings_terminal_y + settings_row - 7) : 0;
@@ -7360,10 +7426,10 @@ int run_step() {
 			8 + settings_pad + settings_row / 2.0);
 		return 700;
 	}
-	case 426: // the card redraws to the presets and the switch
+	case 425: // the card redraws to the presets and the switch
 		shot("settings-gestures-tab");
 		return 700;
-	case 427: { // the choices drawn; Four-finger hops is clicked
+	case 426: { // the choices drawn; Four-finger hops is clicked
 		cairo_surface_t *s = load_png("settings-gestures-tab");
 		int column = 2 * settings_header + 3 * settings_choice + settings_choice
 			+ 5 * settings_gap;
@@ -7404,7 +7470,7 @@ int run_step() {
 			+ settings_gap + settings_choice / 2.0);
 		return 400;
 	}
-	case 428: { // canvas.conf says which preset
+	case 427: { // canvas.conf says which preset
 		std::string swipes = conf_value("swipes");
 		if (swipes != "four-finger-hops" && retries++ < 30) {
 			return -300;
@@ -7415,7 +7481,7 @@ int run_step() {
 		shot("settings-gestures-set");
 		return 700;
 	}
-	case 429: { // the choice drawn, the panel up; Escape closes it; the recorded chord runs
+	case 428: { // the choice drawn, the panel up; Escape closes it; the recorded chord runs
 		if (!settings_esc_sent) {
 			cairo_surface_t *s = load_png("settings-gestures-set");
 			unsigned dots = s != nullptr ? settings_dots(s, settings_first_top, 3) : 0;
@@ -7443,7 +7509,7 @@ int run_step() {
 		chord(KEY_T, KEY_LEFTMETA); // the terminal's new chord, in the overview
 		return 400;
 	}
-	case 430: { // a terminal opens: the recorded chord works
+	case 429: { // a terminal opens: the recorded chord works
 		bool opened = mapped_views() == views_before + 1
 			&& mapped_views_of("foot") == terminals_before + 1;
 		if (!opened && retries++ < 100) {
@@ -7454,10 +7520,177 @@ int run_step() {
 		chord(KEY_ENTER, KEY_LEFTMETA); // the chord it replaced
 		return 1500; // a foot window needs a moment: the wait must outlast one
 	}
-	case 431: { // and the replaced chord opens nothing
+	case 430: { // and the replaced chord opens nothing
 		check(mapped_views() == views_before + 1
 				&& mapped_views_of("foot") == terminals_before + 1,
 			"the chord the recording replaced opens nothing");
+		step = 460; // the rows the first visit did not use: their own steps
+		return -400; // without the advance
+	}
+	case 460: { // the panel again, to record a chord and close it mid-recording
+		check(toolbar_layer() != nullptr && panel_layers() == 0,
+			"the overview still shows its toolbar, with no panel open");
+		click(strip_left + toolbar_button / 2.0, settings_gear_y);
+		return 400;
+	}
+	case 461: { // the panel is back, on the tab it was left on
+		if (panel_layer("settings") == nullptr && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layer("settings") != nullptr,
+			"the gear opened the settings panel a second time");
+		shot("settings-again");
+		return 700;
+	}
+	case 462: { // the Gestures tab, as it was left: the Shortcuts tab is clicked
+		int column = 2 * settings_header + 3 * settings_choice + settings_choice
+			+ 5 * settings_gap;
+		int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
+		cairo_surface_t *s = load_png("settings-again");
+		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
+		cairo_surface_destroy(s);
+		if (chosen < 0 && retries++ < 10) {
+			shot("settings-again");
+			return -700;
+		}
+		retries = 0;
+		if (chosen != 0) {
+			click(settings_card_x + settings_pad + settings_tab_w * 0.5,
+				card_y + settings_pad + settings_row / 2.0);
+		}
+		return 700;
+	}
+	case 463: // the tall Shortcuts card redraws
+		shot("settings-shortcuts-again");
+		return 700;
+	case 464: { // the App launcher row, which has no note: a click makes it record
+		cairo_surface_t *s = load_png("settings-shortcuts-again");
+		int chosen = s != nullptr ? settings_chosen_tab(s, 8) : -1;
+		std::vector<Band> rows = s != nullptr ? bands_in(s,
+			{settings_card_x + 8, settings_launcher_y() - 20, settings_panel - 16, 40})
+			: std::vector<Band>{};
+		cairo_surface_destroy(s);
+		auto launcher = settings_band_at(rows, settings_launcher_y());
+		bool listed = launcher != rows.end()
+			&& std::abs(launcher->centre() - settings_launcher_y()) <= 12;
+		if ((chosen != 0 || !listed) && retries++ < 10) {
+			shot("settings-shortcuts-again");
+			return -700;
+		}
+		retries = 0;
+		check(chosen == 0 && listed, "the Shortcuts tab is up again with the "
+			"App launcher row at its place");
+		click(settings_card_x + 30, settings_launcher_y());
+		return 400;
+	}
+	case 465:
+		shot("settings-recording");
+		return 700;
+	case 466: { // the row says it records; Escape is the capture's own cancel
+		bool shown = settings_prompt_shown("settings-recording");
+		if (!shown && retries++ < 5) {
+			shot("settings-recording");
+			return -700;
+		}
+		retries = 0;
+		check(shown, "the App launcher row says it records (the prompt line under its chords)");
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 467:
+		shot("settings-escaped");
+		return 700;
+	case 468: { // the capture took the Escape: the prompt is gone, the panel stays
+		bool shown = settings_prompt_shown("settings-escaped");
+		if (shown && retries++ < 5) {
+			shot("settings-escaped");
+			return -700;
+		}
+		retries = 0;
+		check(!shown, "Escape alone cancelled the recording: the prompt is gone");
+		check(panel_layer("settings") != nullptr,
+			"and the panel stayed open: the capture, not the panel, took the Escape");
+		click(settings_card_x + 30, settings_launcher_y());
+		return 400;
+	}
+	case 469:
+		shot("settings-recording-again");
+		return 700;
+	case 470: { // recording again; the gear's second click closes the panel
+		bool shown = settings_prompt_shown("settings-recording-again");
+		if (!shown && retries++ < 5) {
+			shot("settings-recording-again");
+			return -700;
+		}
+		retries = 0;
+		check(shown, "the App launcher row records a second time");
+		click(strip_left + toolbar_button / 2.0, settings_gear_y);
+		return 400;
+	}
+	case 471: { // closed while recording: nothing may hold the keys now
+		if (panel_layers() > 0 && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0,
+			"the gear's second click closed the panel while a row was recording");
+		// The terminal this chord opens writes what it is typed into a
+		// marker, so a plain key reaching it is observable.
+		keys_marker = shot_dir + "/keys-marker";
+		unlink(keys_marker.c_str());
+		std::string script = shot_dir + "/keys-terminal.sh";
+		write_file(script, std::format(
+			"#!/bin/sh\nexec foot -T keys sh -c 'cat > {}'\n", keys_marker));
+		chmod(script.c_str(), 0755);
+		setenv("TERMINAL", script.c_str(), 1);
+		views_before = mapped_views();
+		terminals_before = mapped_views_of("foot");
+		// The first key after the close: a recording left alive would take it.
+		chord(KEY_T, KEY_LEFTMETA);
+		return 400;
+	}
+	case 472: { // the chord ran its action again
+		bool opened = mapped_views() == views_before + 1
+			&& mapped_views_of("foot") == terminals_before + 1;
+		if (!opened && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(opened, "after the close, the chord ran its action again "
+			"(Super+T opened one new foot window)");
+		tap(KEY_ESC); // out of the overview
+		return 400;
+	}
+	case 473: { // out of the overview, the new window focused for the next key
+		View *keys = titled("keys");
+		bool ready = overview_settled(false) && toolbar_layer() == nullptr
+			&& keys != nullptr && server->focused_view == keys;
+		if (!ready && retries++ < 150) {
+			if (retries == 12 && keys != nullptr && server->focused_view != keys) {
+				wlr_box f = keys->frame_box();
+				click(f.x + f.width / 2.0, f.y + f.height / 2.0);
+			}
+			return -400;
+		}
+		retries = 0;
+		check(overview_settled(false), "Escape left the overview: no recording swallowed it");
+		check(keys != nullptr && server->focused_view == keys,
+			"the terminal the chord opened is the focused client");
+		tap(KEY_Q); // one plain key, then Enter for the terminal's line discipline
+		tap(KEY_ENTER);
+		return 600;
+	}
+	case 474: { // the plain key reached the client, and nothing recorded it
+		std::string typed = read_file(keys_marker);
+		if (typed.find('q') == std::string::npos && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(typed.find('q') != std::string::npos,
+			"after the close, a plain key reached the focused client");
+		check(conf_value("terminal") == "Super+T",
+			"and no recording took it: terminal is still Super+T in canvas.conf");
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item
@@ -7859,12 +8092,13 @@ int main() {
 
 	// The agents panel's own world, on this run's scratch: a HOME the
 	// collector reads instead of this machine's (any real CLAUDE_CONFIG_DIR
-	// or CODEX_HOME would point it back at the machine, so both go), the
-	// built collector and a fake codex app-server first on the PATH the
-	// bar inherits, and the usage endpoint pointed at this run's own
-	// loopback stand-in. The fixtures themselves land only in the agents
-	// phase — until then the panel's world is empty and its widget hidden,
-	// which is the phase's first check.
+	// or CODEX_HOME would point it back at the machine, so both go), a
+	// fake codex app-server first on the PATH the bar inherits (the built
+	// collector is found through the compositor's own directory, which the
+	// shell starts with first on its PATH), and the usage endpoint pointed
+	// at this run's own loopback stand-in. The fixtures themselves land
+	// only in the agents phase — until then the panel's world is empty and
+	// its widget hidden, which is the phase's first check.
 	scratch_home = shot_dir + "/home";
 	mkdir_p(scratch_home);
 	// A run that died inside the agents phase leaves its fixture world
@@ -7917,11 +8151,9 @@ int main() {
 		"    else:\n"
 		"        reply({'id': req['id'], 'result': {}})\n");
 	chmod((tool_bin + "/codex").c_str(), 0755);
-	const char *usage_bin = std::getenv("WAYLAND_CANVAS_AGENT_USAGE");
-	if (usage_bin != nullptr && *usage_bin != '\0') {
-		std::string dir = std::filesystem::path(usage_bin).parent_path();
+	{
 		const char *path = std::getenv("PATH");
-		setenv("PATH", std::format("{}:{}:{}", tool_bin, dir,
+		setenv("PATH", std::format("{}:{}", tool_bin,
 			path != nullptr ? path : "").c_str(), 1);
 	}
 	write_usage_payload("37.0", "68.4");
