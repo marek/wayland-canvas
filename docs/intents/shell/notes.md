@@ -20,16 +20,18 @@ were put across restarts.
   part in window management (placement, tiling, desktop membership,
   minimise), and it is drawn above windows so it is never hidden behind
   what it labels.
-- **The notes plugin owns the notes; the compositor draws them**, through
-  the canvas items of the control socket. The plugin keeps text, colour and
-  place, and puts every note back when the shell starts.
-- **Editing happens over the note**: the editor opens exactly where the
-  note is on screen and has the keyboard at once, so editing feels in
-  place.
-- **One event opens the editor**: the compositor's `item.activated` —
-  whether a double-click or the create action's `item.activate` caused it
-  — carries the output and the note's box on it, so the editor always
-  opens exactly at the note, in the normal view and the overview alike.
+- **The plugin draws its notes; the compositor only places them.** A note
+  is one surface of the plugin's own, placed on the plane
+  ([../platform/ipc.md](../platform/ipc.md)): the same surface whether it
+  is being written in or not, so there is never a second card to drift
+  away from the first. The compositor carries no note-shaped code, and the
+  plugin can be changed or replaced without rebuilding it.
+- **There is no editing mode.** A note is always editable where it is: a
+  click puts the caret in it, as a click in a window does; the colour, the
+  font and the size are chosen on the note's own strip.
+- **The plane does the motion.** Panning, zooming and a desktop's scale
+  move and size the note because they move and size everything on the
+  plane; the plugin sets a note's canvas rectangle and nothing else.
 
 ## Behavior
 
@@ -40,10 +42,10 @@ were put across restarts.
 | Colours | Yellow, green, blue, pink, purple and orange; the values are the plugin's settings |
 | Size | 220 × 220 canvas px, a plugin setting |
 | Look | A card of the note's colour, a darker strip along the top, the text in dark ink |
-| Edit | Double-click the note: the editor opens over it with the cursor at the end of the text; Escape or a click outside closes it, keeping the text |
-| Recolour | In the editor, colour dots on the strip, ordered as the manifest orders the colours — the toolbar menu's order — because the settings map arrives alphabetised; a colour the menu leaves out follows after |
+| Edit | Click the note and type: it is the note itself that takes the keys, at any zoom. Escape or a click elsewhere gives the keyboard back |
+| Recolour | Colour dots on the note's strip, ordered as the manifest orders the colours — the toolbar menu's order — because the settings map arrives alphabetised; a colour the menu leaves out follows after |
 | Move | Drag the note, in the normal view or the overview |
-| Delete | In the editor, the × at the right of the strip; a note closed with no text is deleted too |
+| Delete | The × at the right of the note's strip; a note left empty when the keyboard goes is deleted too |
 | Kept | Every change is saved to the plugin's storage at once; the notes come back where they were when the shell starts |
 
 ## Error states, corner cases
@@ -52,10 +54,10 @@ were put across restarts.
   note is drawn.
 - The shell restarts: notes stay on the canvas meanwhile and are re-sent
   from storage, so none is lost or doubled.
-- A note dragged while its editor is open: the editor closes first, keeping
-  the text.
-- A note not on any output's screen cannot be activated: `item.activate`
-  answers an error and no editor opens.
+- A note dragged while the caret is in it: the text stays as it was; the
+  note moves with the pointer and is placed again when it is dropped.
+- A note off every output's screen is drawn when the canvas brings it
+  back; nothing of it is lost meanwhile.
 
 ## Cross-links
 

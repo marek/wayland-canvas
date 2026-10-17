@@ -64,6 +64,8 @@ request; responses come in request order.
 | `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (a seat session) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
 | `item.set` | `id`; `color` (`#rrggbb`); `text`; `width`, `height` (canvas px); `x`, `y` (canvas, the top-left) | The item as placed: `{"id", "x", "y", "width", "height"}` |
 | `item.remove` | `id` | `true`; an error for an unknown id |
+| `surface.place` | `surface` (the layer surface's name); `x`, `y`, `width`, `height` (canvas px) | `true`: that surface is drawn on the plane at the rectangle, pans and zooms with it, and takes input there (above). An error names an unknown surface or a rectangle with no area |
+| `surface.unplace` | `surface` | `true`; the surface goes back to being a screen-space layer surface |
 | `window.focus` | `window` (a session id from the window list) | `true`: the window is focused and the view moves to it — to its desktop at that desktop's scale, else to a view centred on the window; a screen in the overview leaves it as a shelf click does, and a minimized window is restored first ([../windows/window-management.md](../windows/window-management.md)). An error for an unknown id |
 | `item.activate` | `id` | `true`; the compositor reports the item exactly as a double-click does — the `item.activated` event with its output and output-local box — so a plugin can open an editor over an item it just placed. An error for an unknown id, or when the item is on no output's screen |
 | `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
@@ -137,6 +139,26 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `capture.recording` | `active`, `path` | A recording started (the file it writes) or stopped |
 | `settings` | The settings, as `settings.get` returns them | The effective settings change: the file saved by hand or deleted, or a `settings.set` |
 
+### Surfaces on the canvas
+
+A plugin that wants something of its own on the plane draws it in a
+surface of its own and asks the compositor where to put it: not a place on
+a screen, but a rectangle in canvas coordinates. From then on the surface
+is part of the plane — it pans, zooms and scales with everything else,
+shows in the overview, and is hit-tested where it is drawn — and the
+plugin draws every pixel of it, its text, its caret and its selection
+included. The compositor adds no drawing of its own and knows nothing
+about what the plugin put there.
+
+| Subject | Rule |
+|---|---|
+| Asking | the plugin opens a layer surface named `wayland-canvas-canvas-<plugin id>/<surface id>` and calls `surface.place` with that name and a canvas rectangle |
+| Drawing | the surface is drawn above windows in canvas space, at the size the rectangle names; the client is told the size in logical pixels and renders at the output's scale |
+| Input | clicks, scrolls and drags inside it go to the surface, in the normal view and the overview alike; the keyboard follows the same rule as any shell surface asking for it on demand ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
+| Moving | the plugin moves it by placing it again; a drag the plugin does not claim pans the canvas, as the empty plane does |
+| Going | the surface unmapping or the plugin's `surface.unplace` takes it off the plane |
+| Never | a canvas surface takes no part in window management: no placement, no tiling, no desktop membership, no minimise |
+
 ### Canvas items
 
 An item is drawn above windows in canvas space, so it pans and zooms with
@@ -146,6 +168,10 @@ drag that starts on an item, in the normal view or the overview, moves it
 and ends with `item.moved`; a double-click reports `item.activated`. Items
 never take part in window management (placement, tiling, desktop
 membership).
+
+Items are the compositor drawing on a plugin's behalf, which is why
+nothing new is built on them: a plugin that needs more than a coloured
+card with text uses a canvas surface and draws it itself.
 
 ### The `msg` client
 
