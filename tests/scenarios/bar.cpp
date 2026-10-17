@@ -150,6 +150,8 @@ int settings_chip_before = 0; // its chord chip's width before the recording
 int settings_first_top = 0; // the Gestures tab's first preset row
 bool settings_esc_sent = false; // the Escape that closes the panel went out
 std::string keys_marker;    // what a plain key typed into the keys terminal lands in
+std::string command_marker; // the file the Commands row's command touches
+std::string settings_last_png; // the last list shot, to tell when a scroll has stopped
 
 
 // ---- isolation: private buses and the stand-in services on them ----
@@ -1194,6 +1196,24 @@ void park(double x, double y) {
 		.y = y / double(screen_h)};
 	wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
 	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+// Wheel clicks over (x, y): positive scrolls the content down, negative
+// up. A physical wheel, not touchpad fingers: the shell's flickable moves
+// by the discrete steps without a begin/end phase.
+void scroll(double x, double y, int clicks) {
+	park(x, y);
+	int sign = clicks < 0 ? -1 : 1;
+	for (int i = 0; i < std::abs(clicks); i++) {
+		t += 8;
+		wlr_pointer_axis_event ev = {.pointer = &ptr, .time_msec = t,
+			.source = WL_POINTER_AXIS_SOURCE_WHEEL,
+			.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+			.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+			.delta = 15.0 * sign, .delta_discrete = 120 * sign};
+		wl_signal_emit_mutable(&ptr.events.axis, &ev);
+		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	}
 }
 
 // Two clicks close together in device time: the compositor's double-click.
@@ -3161,6 +3181,26 @@ bool settings_prompt_shown(const char *name) {
 	cairo_surface_destroy(s);
 	return shown;
 }
+
+// The Shortcuts list on the tall card, scrolled to its end: its bottom
+// edge, where the last row sits. The list is as tall as the output
+// leaves room for (SettingsPanel.qml's listMaxHeight).
+constexpr int settings_list_bottom = 8 + settings_pad + settings_row + settings_gap
+	+ screen_h - 2 * 8 - 2 * settings_pad - settings_row - 3 * settings_gap
+	- settings_footer - 1;
+constexpr double settings_last_row_y = settings_list_bottom - settings_row / 2.0;
+
+// Whether the shot is byte for byte the one this was last called with:
+// the list stopped moving. The first call after a clear says no.
+bool settings_png_repeats(const char *name) {
+	std::string now = read_file(std::format("{}/{}.png", shot_dir, name));
+	bool same = !now.empty() && now == settings_last_png;
+	settings_last_png = std::move(now);
+	return same;
+}
+
+// The command row above the Add row once the list is scrolled to its end.
+constexpr double settings_command_y = settings_last_row_y - settings_row - settings_gap;
 
 // How many of `count` stacked choice rows carry a text band where the
 // card lays them.
@@ -7611,8 +7651,233 @@ int run_step() {
 		check(!shown, "Escape alone cancelled the recording: the prompt is gone");
 		check(panel_layer("settings") != nullptr,
 			"and the panel stayed open: the capture, not the panel, took the Escape");
-		click(settings_card_x + 30, settings_launcher_y());
+		step = 480; // the Reset, Clear and Commands rows: their own steps
+		return -400; // without the advance
 		return 400;
+	}
+	case 480: { // Reset on the changed Terminal row
+		click(settings_card_x + settings_panel - 80, settings_terminal_y);
+		return 400;
+	}
+	case 481: { // canvas.conf holds the defaults again; the default chord works
+		std::string keys = conf_value("terminal");
+		if (keys != "Super+Return" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(keys == "Super+Return", std::format("Reset put the Terminal row's "
+			"defaults back into canvas.conf (terminal = \"{}\")", keys));
+		check(holds_chord("terminal", {settings::mod_logo, XKB_KEY_Return}),
+			"the running session has Super+Return on Terminal again");
+		views_before = mapped_views();
+		terminals_before = mapped_views_of("foot");
+		chord(KEY_ENTER, KEY_LEFTMETA);
+		return 1500; // a foot window needs a moment: the wait must outlast one
+	}
+	case 482: { // the default chord opened a terminal; Clear on the row
+		check(mapped_views() == views_before + 1
+				&& mapped_views_of("foot") == terminals_before + 1,
+			"the default chord works (Super+Return opened one new foot window)");
+		click(settings_card_x + settings_panel - 36, settings_terminal_y);
+		return 400;
+	}
+	case 483: { // canvas.conf says none; the old chord does nothing
+		std::string keys = conf_value("terminal");
+		if (keys != "none" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(keys == "none", std::format("Clear wrote terminal = none into "
+			"canvas.conf (\"{}\")", keys));
+		check(!holds_chord("terminal", {settings::mod_logo, XKB_KEY_Return}),
+			"the running session left Terminal without its chord");
+		views_before = mapped_views();
+		terminals_before = mapped_views_of("foot");
+		chord(KEY_ENTER, KEY_LEFTMETA);
+		return 1500;
+	}
+	case 484: { // the old chord opened nothing; Reset, alone on the row now, puts it back
+		check(mapped_views() == views_before
+				&& mapped_views_of("foot") == terminals_before,
+			"the cleared action's old chord opens nothing");
+		click(settings_card_x + settings_panel - 36, settings_terminal_y);
+		return 400;
+	}
+	case 485: { // restored; the list scrolls to its end, to the Commands section
+		std::string keys = conf_value("terminal");
+		if (keys != "Super+Return" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(keys == "Super+Return", std::format("Reset after Clear put terminal "
+			"= Super+Return back (\"{}\")", keys));
+		// The command the new row will run: a script on the PATH the
+		// compositor's commands inherit, touching a marker the scenario sees.
+		command_marker = shot_dir + "/command-marker";
+		unlink(command_marker.c_str());
+		std::string script = shot_dir + "/tool-bin/markcmd";
+		write_file(script, std::format("#!/bin/sh\ntouch '{}'\n", command_marker));
+		chmod(script.c_str(), 0755);
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 150);
+		shot("settings-commands-end");
+		return 700;
+	}
+	case 486: { // at the list's end the Add row is last: clicked
+		// At its end when one more wheel burst moved nothing: two shots alike.
+		bool settled = settings_png_repeats("settings-commands-end");
+		if (!settled && retries++ < 8) {
+			scroll(settings_card_x + 100, 400, 150);
+			shot("settings-commands-end");
+			return -700;
+		}
+		retries = 0;
+		cairo_surface_t *s = load_png("settings-commands-end");
+		std::vector<Band> rows = s != nullptr ? bands_in(s,
+			{settings_card_x + 8, settings_list_bottom - 3 * settings_row,
+				settings_label_w, 3 * settings_row}) : std::vector<Band>{};
+		cairo_surface_destroy(s);
+		auto add = settings_band_at(rows, settings_last_row_y);
+		bool listed = add != rows.end()
+			&& std::abs(add->centre() - settings_last_row_y) <= 12;
+		check(settled && listed, "scrolled to its end (a further wheel burst moved "
+			"nothing), the Shortcuts list shows the Add a command row at its bottom");
+		click(settings_card_x + 60, settings_last_row_y);
+		return 400;
+	}
+	case 487: // the draft row stands above the Add row: the list to its end again
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 40);
+		shot("settings-draft");
+		return 700;
+	case 488: { // the draft row's chord chip is clicked
+		bool settled = settings_png_repeats("settings-draft");
+		if (!settled && retries++ < 8) {
+			shot("settings-draft");
+			return -700;
+		}
+		retries = 0;
+		cairo_surface_t *s = load_png("settings-draft");
+		// Along a line under the chip's text, which would end the run.
+		int chip = s != nullptr
+			? settings_chip_width(s, int(settings_command_y) + 7) : 0;
+		cairo_surface_destroy(s);
+		check(settled && chip >= 20, std::format("the Add row opened a draft "
+			"command row above itself, with a chord chip ({} px wide)", chip));
+		click(settings_card_x + settings_pad + 8 + 12, settings_command_y);
+		return 400;
+	}
+	case 489: // the capture takes every key: the chord pressed is recorded
+		chord(KEY_Y, KEY_LEFTMETA);
+		return 400;
+	case 490: { // the chord is in canvas.conf; the list to its end again
+		std::string text = read_file(canvas_conf);
+		if (text.find("Super+Y") == std::string::npos && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(text.find("Super+Y") != std::string::npos,
+			"recording Super+Y on the draft wrote its [commands] line");
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 40);
+		shot("settings-recorded");
+		return 700;
+	}
+	case 491: { // the command field of the row is clicked
+		bool settled = settings_png_repeats("settings-recorded");
+		if (!settled && retries++ < 8) {
+			shot("settings-recorded");
+			return -700;
+		}
+		retries = 0;
+		check(settled, "the list stopped moving after the recording");
+		click(settings_card_x + 180, settings_command_y);
+		return 500;
+	}
+	case 492: { // the field has the keyboard: the command line is typed
+		LayerSurface *panel = panel_layer("settings");
+		check(panel != nullptr
+				&& server->seat->keyboard_state.focused_surface == panel->wlr->surface,
+			"the settings panel holds the keyboard for the command field");
+		type("markcmd");
+		shot("settings-command-typed");
+		return 500;
+	}
+	case 493: // Enter saves the line
+		tap(KEY_ENTER);
+		return 400;
+	case 494: { // canvas.conf holds the command; its chord runs it
+		std::string command = conf_value("Super+Y");
+		if (command != "markcmd" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(command == "markcmd", std::format("typing the command line wrote "
+			"Super+Y = markcmd into [commands] (\"{}\")", command));
+		check(!std::filesystem::exists(command_marker),
+			"the command had not run before its chord was pressed");
+		chord(KEY_Y, KEY_LEFTMETA);
+		return 400;
+	}
+	case 495: { // the marker is there; the list to its end again, for Remove
+		if (!std::filesystem::exists(command_marker) && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(std::filesystem::exists(command_marker),
+			"the new command's chord ran it (its marker file appeared)");
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, 40);
+		shot("settings-saved");
+		return 700;
+	}
+	case 496: { // Remove on the row
+		bool settled = settings_png_repeats("settings-saved");
+		if (!settled && retries++ < 8) {
+			shot("settings-saved");
+			return -700;
+		}
+		retries = 0;
+		check(settled, "the list stopped moving after the save");
+		click(settings_card_x + settings_panel - 40, settings_command_y);
+		return 400;
+	}
+	case 497: { // Remove took the line out
+		std::string text = read_file(canvas_conf);
+		if (text.find("Super+Y") != std::string::npos && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(text.find("Super+Y") == std::string::npos,
+			"Remove took the command's line out of canvas.conf");
+		check(server->conf.commands.empty(),
+			"the running session has no command left");
+		settings_last_png.clear();
+		scroll(settings_card_x + 100, 400, -150);
+		shot("settings-top-again");
+		return 700;
+	}
+	case 498: { // the list back at its top: the App launcher row is clicked to record
+		bool settled = settings_png_repeats("settings-top-again");
+		if (!settled && retries++ < 8) {
+			scroll(settings_card_x + 100, 400, -150);
+			shot("settings-top-again");
+			return -700;
+		}
+		retries = 0;
+		cairo_surface_t *s = load_png("settings-top-again");
+		std::vector<Band> rows = s != nullptr ? bands_in(s,
+			{settings_card_x + 8, settings_launcher_y() - 20, settings_label_w, 40})
+			: std::vector<Band>{};
+		cairo_surface_destroy(s);
+		auto launcher = settings_band_at(rows, settings_launcher_y());
+		bool listed = launcher != rows.end()
+			&& std::abs(launcher->centre() - settings_launcher_y()) <= 12;
+		check(settled && listed, "scrolled back to its top (a further wheel burst "
+			"moved nothing), the list shows the App launcher row");
+		click(settings_card_x + 30, settings_launcher_y());
+		step = 469; // the tail: recording again, then the close
+		return -400; // without the advance
 	}
 	case 469:
 		shot("settings-recording-again");
@@ -7647,7 +7912,7 @@ int run_step() {
 		views_before = mapped_views();
 		terminals_before = mapped_views_of("foot");
 		// The first key after the close: a recording left alive would take it.
-		chord(KEY_T, KEY_LEFTMETA);
+		chord(KEY_ENTER, KEY_LEFTMETA);
 		return 400;
 	}
 	case 472: { // the chord ran its action again
@@ -7658,7 +7923,7 @@ int run_step() {
 		}
 		retries = 0;
 		check(opened, "after the close, the chord ran its action again "
-			"(Super+T opened one new foot window)");
+			"(Super+Return opened one new foot window)");
 		tap(KEY_ESC); // out of the overview
 		return 400;
 	}
@@ -7689,8 +7954,8 @@ int run_step() {
 		retries = 0;
 		check(typed.find('q') != std::string::npos,
 			"after the close, a plain key reached the focused client");
-		check(conf_value("terminal") == "Super+T",
-			"and no recording took it: terminal is still Super+T in canvas.conf");
+		check(conf_value("terminal") == "Super+Return",
+			"and no recording took it: terminal is still Super+Return in canvas.conf");
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item

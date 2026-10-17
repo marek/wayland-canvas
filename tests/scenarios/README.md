@@ -418,13 +418,26 @@ own the machine's Wayland display namespace and GPU.
   The panel is opened again on the Shortcuts tab and the App launcher row
   (which carries no note) is clicked: its third line, "Press the new keys
   — Esc cancels", is read off the screenshot. Escape is the capture's
-  own cancel: the line goes and the panel stays open. The row is clicked
-  to record again and the gear's second click closes the panel: closing
-  while recording cancels the recording, so the keys are free at once —
-  Super+T opens a foot window (`TERMINAL` pointed at a script that
-  writes what it is typed into a marker file), Escape leaves the
+  own cancel: the line goes and the panel stays open. Then the Terminal
+  row, now off its default: Reset writes `terminal = Super+Return` back
+  into `canvas.conf`, the running session holds the chord again and it
+  opens a foot window; Clear writes `terminal = none`, the session
+  holds no chord and Super+Return opens nothing; Reset, now alone on the
+  row, restores the default once more. The list is wheeled to its end
+  (two shots alike mean it stopped) and the Add a command row clicked: a
+  draft row with a chord chip stands above it. The chip is clicked and
+  Super+Y recorded (a `[commands]` line appears), the row's field is
+  clicked and `markcmd` typed (a script on the run's tool PATH touching a
+  marker file), and Enter writes `Super+Y = markcmd`; the marker is
+  absent until Super+Y is pressed, then present. Remove takes the line
+  out of the file and the command out of the running session. The list
+  is wheeled back to its top and the App launcher row clicked to record
+  again; the gear's second click closes the panel while it records.
+  Closing while recording cancels the recording, so the keys are free at
+  once — Super+Return opens a foot window (`TERMINAL` pointed at a script
+  that writes what it is typed into a marker file), Escape leaves the
   overview, and a plain key typed into that window reaches its client
-  while `terminal` is still `Super+T` in `canvas.conf`.
+  while `terminal` is still `Super+Return` in `canvas.conf`.
   One earlier step, the adopt phase's hand edit of `shell.json`, is saved
   the way an editor does, renamed over the file: the shell must still
   reload on it, though it no longer watches the config directory (the
