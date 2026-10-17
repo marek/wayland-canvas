@@ -513,6 +513,51 @@ void fill_item(ItemEntry &entry, JsonObject *object) {
 	}
 }
 
+// One entry of a `msg state` result's windows array, by its id: what the app
+// bar draws (docs/intents/shell/app-bar.md).
+struct WindowEntry {
+	std::string app_id, title;
+	bool has_desktop = false, minimized = false, focused = false;
+};
+
+std::optional<WindowEntry> parse_state_window(const std::string &text,
+		long long want_id) {
+	JsonParser *parser = json_parser_new();
+	std::optional<WindowEntry> out;
+	if (json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		JsonNode *root = json_parser_get_root(parser);
+		JsonObject *object = root != nullptr
+				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
+			? json_node_get_object(root) : nullptr;
+		JsonNode *windows = object != nullptr
+				&& json_object_has_member(object, "windows")
+			? json_object_get_member(object, "windows") : nullptr;
+		if (windows != nullptr && json_node_get_node_type(windows) == JSON_NODE_ARRAY) {
+			JsonArray *array = json_node_get_array(windows);
+			for (guint i = 0; i < json_array_get_length(array); i++) {
+				JsonObject *entry = json_array_get_object_element(array, i);
+				if (entry == nullptr || member_int(entry, "id") != want_id) {
+					continue;
+				}
+				JsonNode *desktop = json_object_has_member(entry, "desktop")
+					? json_object_get_member(entry, "desktop") : nullptr;
+				out = WindowEntry{
+					.app_id = member_string(entry, "appId"),
+					.title = member_string(entry, "title"),
+					.has_desktop = desktop != nullptr
+						&& json_node_get_node_type(desktop) != JSON_NODE_NULL,
+					.minimized = json_object_get_boolean_member(entry, "minimized") != FALSE,
+					.focused = json_object_get_boolean_member(entry, "focused") != FALSE,
+				};
+				break;
+			}
+		}
+	}
+	g_object_unref(parser);
+	return out;
+}
+
 // A `msg item.set` result parsed as one item entry.
 std::optional<ItemEntry> parse_item_result(const std::string &text) {
 	JsonParser *parser = json_parser_new();
@@ -1474,9 +1519,56 @@ int run_step() {
 			return -100;
 		}
 		check(exited, "the item-events subscriber ended with the SIGINT");
+		retries = 0;
+		run_client("state", "", "state-windows");
+		return 300;
+	}
+	case 75: { // the state lists the open window, and a jump goes to it
+		if (!client_done("state-windows") && retries++ < 50) {
+			return -100;
+		}
+		retries = 0;
+		View *view = foot_window();
+		auto id = static_cast<long long>(view != nullptr ? view->session_id : 0);
+		std::optional<WindowEntry> entry =
+			parse_state_window(client_out("state-windows"), id);
+		check(entry.has_value() && entry->app_id == "foot" && !entry->minimized,
+			std::format("the state lists the open foot window (app id '{}')",
+				entry.has_value() ? entry->app_id : "none"));
+		// Away from the window, then back to it through window.focus.
+		Output *output = server->output_under_cursor();
+		if (output != nullptr && view != nullptr) {
+			Camera cam = output->camera.current();
+			cam.cx += 4 * output->width;
+			output->camera.jump(cam);
+			check(!view->frame_rect().intersects(output->viewport()),
+				"the view was moved off the window before the jump");
+		}
+		run_client("window.focus", std::format(R"({{"window":{}}})", id),
+			"window-focus");
+		run_client("window.focus", R"({"window":99999})", "window-focus-bad");
+		return 400;
+	}
+	case 76: { // the camera came back to the window; the unknown id errored
+		Output *output = server->output_under_cursor();
+		View *view = foot_window();
+		if ((!client_done("window-focus") || !client_done("window-focus-bad")
+				|| output == nullptr || output->camera.panning()
+				|| output->camera.zooming()) && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(client_code("window-focus") == 0 && view != nullptr
+				&& output != nullptr
+				&& view->frame_rect().intersects(output->viewport())
+				&& server->focused_view == view,
+			"window.focus brought the view back to the window and focused it");
+		check(client_code("window-focus-bad") != 0,
+			"window.focus with an unknown id answers an error");
 		finished = true; // the quit is the run's end
 		run_client("quit", "", "quit");
 		return 300;
+
 	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);

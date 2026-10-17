@@ -383,6 +383,7 @@ void View::move(int new_x, int new_y) {
 	y = new_y;
 	damage();
 	server.visibility_dirty = true;
+	server.windows_dirty = true;
 }
 
 void View::close() {
@@ -416,6 +417,7 @@ void View::set_minimized(bool want) {
 	}
 	damage();
 	server.visibility_dirty = true;
+	server.windows_dirty = true;
 	server.canvas.settle(*this);
 }
 
@@ -772,6 +774,7 @@ void View::handle_map() {
 	}
 	launched_for.reset();
 	server.visibility_dirty = true;
+	server.windows_dirty = true;
 	damage();
 }
 
@@ -797,6 +800,7 @@ void View::handle_unmap() {
 	deco.hover = DecoPart::none;
 	deco.pressed = DecoPart::none;
 	server.visibility_dirty = true;
+	server.windows_dirty = true;
 	damage();
 }
 
@@ -854,6 +858,7 @@ void View::handle_destroy() {
 	}
 	std::erase(server.views, this);
 	destroy_foreign();
+	server.windows_dirty = true;
 	destroy_owned(server.toplevels, this);
 }
 
@@ -912,6 +917,7 @@ void View::handle_set_title() {
 			.title = wlr->title, .app_id = wlr->app_id};
 		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
+	server.windows_dirty = true;
 	damage();
 }
 
@@ -924,6 +930,7 @@ void View::handle_set_app_id() {
 			.title = wlr->title, .app_id = wlr->app_id};
 		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
+	server.windows_dirty = true;
 	damage();
 }
 
@@ -1005,6 +1012,7 @@ View *Server::last_minimized_view() {
 void Server::focus_view(View *view) {
 	View *prev = focused_view;
 	if (prev != view) {
+		windows_dirty = true;
 		if (prev != nullptr) {
 			wlr_xdg_toplevel_set_activated(prev->wlr, false);
 			if (prev->foreign_) {

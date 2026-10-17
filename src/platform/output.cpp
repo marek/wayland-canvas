@@ -390,6 +390,10 @@ void Output::handle_frame() {
 	if (server.visibility_dirty) {
 		server.update_visibility();
 	}
+	if (server.windows_dirty) {
+		server.windows_dirty = false;
+		server.ipc.emit_windows();
+	}
 	if (server.pointer_focus_stale) {
 		server.pointer_focus_stale = false;
 		server.input.rebase_cursor();

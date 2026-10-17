@@ -290,6 +290,42 @@ void add_desktops_array(JsonBuilder *builder, Server &server) {
 	}
 	json_builder_end_array(builder);
 }
+// The open windows, in the order they opened: what the app bar draws
+// (docs/intents/shell/app-bar.md).
+void add_windows_array(JsonBuilder *builder, Server &server) {
+	json_builder_set_member_name(builder, "windows");
+	json_builder_begin_array(builder);
+	// toplevels is creation order; views is the stacking order.
+	for (const std::unique_ptr<View> &owned : server.toplevels) {
+		View *view = owned.get();
+		if (!view->mapped) {
+			continue; // nothing to go to before it maps
+		}
+		const Desktop *desktop = server.canvas.desktop_of(*view);
+		json_builder_begin_object(builder);
+		json_builder_set_member_name(builder, "id");
+		json_builder_add_int_value(builder, static_cast<gint64>(view->session_id));
+		json_builder_set_member_name(builder, "appId");
+		json_builder_add_string_value(builder, view->wlr->app_id != nullptr
+			? view->wlr->app_id : "");
+		json_builder_set_member_name(builder, "title");
+		json_builder_add_string_value(builder, view->wlr->title != nullptr
+			? view->wlr->title : "");
+		json_builder_set_member_name(builder, "desktop");
+		if (desktop != nullptr) {
+			json_builder_add_int_value(builder, static_cast<int>(desktop->id()));
+		} else {
+			json_builder_add_null_value(builder);
+		}
+		json_builder_set_member_name(builder, "minimized");
+		json_builder_add_boolean_value(builder, view->minimized);
+		json_builder_set_member_name(builder, "focused");
+		json_builder_add_boolean_value(builder, server.focused_view == view);
+		json_builder_end_object(builder);
+	}
+	json_builder_end_array(builder);
+}
+
 void add_item(JsonBuilder *builder, const Item &item) {
 	std::string id = item.id; // NUL-terminated for the C API
 	std::string color = color_text(item.color);
@@ -827,6 +863,7 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"item.set"}, &Ipc::m_item_set},
 		std::pair{std::string_view{"item.remove"}, &Ipc::m_item_remove},
 		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
+		std::pair{std::string_view{"window.focus"}, &Ipc::m_window_focus},
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
 		std::pair{std::string_view{"capture.stop"}, &Ipc::m_capture_stop},
 		std::pair{std::string_view{"settings.get"}, &Ipc::m_settings_get},
@@ -845,6 +882,7 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 	return object_text([&](JsonBuilder *builder) {
 		add_outputs_array(builder, server_);
 		add_desktops_array(builder, server_);
+		add_windows_array(builder, server_);
 		add_items_array(builder, server_);
 		json_builder_set_member_name(builder, "theme");
 		std::string mode = std::string{theme_name(server_.theme.mode())};
@@ -1073,6 +1111,28 @@ std::expected<std::string, std::string> Ipc::m_item_remove(Client &, JsonObject 
 		return std::unexpected(std::format("unknown item id '{}'", **id));
 	}
 	return std::string{"true"};
+}
+
+// Goes to a window by its session id: the same restore path a shelf click
+// takes (docs/intents/windows/window-management.md).
+std::expected<std::string, std::string> Ipc::m_window_focus(Client &,
+		JsonObject *params) {
+	std::expected<std::optional<long long>, std::string> id =
+		opt_int(params, "window");
+	if (!id.has_value()) {
+		return std::unexpected(id.error());
+	}
+	if (!id->has_value()) {
+		return std::unexpected(std::string{"params: window must be a number"});
+	}
+	auto wanted = static_cast<uint64_t>(**id);
+	for (const std::unique_ptr<View> &view : server_.toplevels) {
+		if (view->session_id == wanted && view->mapped) {
+			view->activate();
+			return std::string{"true"};
+		}
+	}
+	return std::unexpected(std::format("unknown window id '{}'", wanted));
 }
 
 std::expected<std::string, std::string> Ipc::m_item_activate(Client &,
@@ -1486,9 +1546,26 @@ void Ipc::emit_outputs() {
 }
 
 void Ipc::emit_desktops() {
+	// A desktop created, moved, combined or abandoned changes which desktop
+	// the windows report.
+	server_.windows_dirty = true;
 	push_event("desktops", object_text([&](JsonBuilder *builder) {
 		add_desktops_array(builder, server_);
 	}));
+}
+
+void Ipc::emit_windows() {
+	// The list is rebuilt from state that changes far more often than it
+	// reads differently (a drag damages per frame): an unchanged list is no
+	// event at all.
+	std::string params = object_text([&](JsonBuilder *builder) {
+		add_windows_array(builder, server_);
+	});
+	if (params == last_windows_) {
+		return;
+	}
+	last_windows_ = params;
+	push_event("windows", params);
 }
 
 void Ipc::emit_theme() {
