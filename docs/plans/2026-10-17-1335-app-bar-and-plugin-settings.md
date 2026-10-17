@@ -133,8 +133,12 @@ touched.
       click lands the view on that window, focused.
 - [ ] Scenario, owed: two desktops at once, and a window on no desktop
       landing on a centred view.
-- [ ] Shell: the app's icon from its desktop entry, in place of the
-      letter the entry draws now.
+- [x] Shell: the app's icon and name from its desktop entry, the first
+      letter standing in where it names none (the icon itself is owed on
+      screen — the suite's scratch data home holds no desktop entries).
+- [x] Shell: an app's windows unfold beside its entry, a row each, the
+      focused one marked; the hover label fixed (entries are keyed, not
+      compared by identity) and both proven on the default left edge.
 - [x] Scenario: the app bar off shows nothing; on the toolbar's edge
       both show with the apps last.
 - [x] `tools/check.sh` green (unit, packaging, scenarios), the plans
