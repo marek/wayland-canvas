@@ -119,6 +119,9 @@ struct NoteEntry {
 
 NoteEntry note; // the note under test
 int note_retries = 0; // the notes phase's retry counter
+// The window the app bar's clicked entry stands for, kept between the
+// click and the check that the view landed on it.
+View *app_bar_target = nullptr;
 double note_button_y = 0; // the note button's band centre, on the strip
 wlr_box note_flyout{}; // its menu's card: left of the strip, centred on it
 LayerSurface *bar_before_reload = nullptr;
@@ -3528,10 +3531,11 @@ constexpr int shelf_bottom_gap = 12 + 28 + 16;
 // (order 4) below. Keep in sync with the plugins' manifests.
 constexpr int notes_index = 3;
 
-// Writes the scratch shell.json with the toolbar's edge named, keeping
-// everything else it holds: an edit the host sees, so the shell
-// reloads with it.
-bool set_toolbar_position(const char *edge) {
+// Writes one key of one section into the scratch shell.json, keeping
+// everything else it holds: an edit the host sees, so the shell reloads
+// with it. `edge` names a string value; `on` a boolean one.
+bool set_shell_config(const char *section, const char *key,
+		const char *edge, const bool *on = nullptr) {
 	JsonParser *parser = json_parser_new();
 	std::string text = read_file(shell_config);
 	bool ok = !text.empty()
@@ -3541,14 +3545,18 @@ bool set_toolbar_position(const char *edge) {
 			== JSON_NODE_OBJECT;
 	if (ok) {
 		JsonObject *config = json_node_get_object(json_parser_get_root(parser));
-		JsonNode *toolbar = json_object_get_member(config, "toolbar");
-		if (toolbar == nullptr
-				|| json_node_get_node_type(toolbar) != JSON_NODE_OBJECT) {
-			json_object_set_object_member(config, "toolbar", json_object_new());
+		JsonNode *held = json_object_get_member(config, section);
+		if (held == nullptr
+				|| json_node_get_node_type(held) != JSON_NODE_OBJECT) {
+			json_object_set_object_member(config, section, json_object_new());
 		}
-		json_object_set_string_member(
-			json_node_get_object(json_object_get_member(config, "toolbar")),
-			"position", edge);
+		JsonObject *object = json_node_get_object(
+			json_object_get_member(config, section));
+		if (on != nullptr) {
+			json_object_set_boolean_member(object, key, *on);
+		} else {
+			json_object_set_string_member(object, key, edge);
+		}
 		JsonGenerator *generator = json_generator_new();
 		json_generator_set_root(generator, json_parser_get_root(parser));
 		gchar *out = json_generator_to_data(generator, nullptr);
@@ -3558,6 +3566,18 @@ bool set_toolbar_position(const char *edge) {
 	}
 	g_object_unref(parser);
 	return ok;
+}
+
+bool set_toolbar_position(const char *edge) {
+	return set_shell_config("toolbar", "position", edge);
+}
+
+bool set_app_bar_position(const char *edge) {
+	return set_shell_config("appbar", "position", edge);
+}
+
+bool set_app_bar_enabled(bool on) {
+	return set_shell_config("appbar", "enabled", nullptr, &on);
 }
 
 // The toolbar.position the scratch shell.json names now.
@@ -8211,6 +8231,89 @@ int run_step() {
 			"after the close, a plain key reached the focused client");
 		check(conf_value("terminal") == "Super+Return",
 			"and no recording took it: terminal is still Super+Return in canvas.conf");
+		// The app bar's own phase: both strips on the right edge, so they
+		// make one (docs/intents/shell/app-bar.md).
+		check(set_toolbar_position("right") && set_app_bar_position("right"),
+			"the toolbar and the app bar put on one edge in shell.json");
+		step = 520; // the app bar's own steps
+		return -900; // the reload the edits trigger takes its time
+	}
+	case 520: // into the overview, where both strips live
+		chord(KEY_TAB, KEY_LEFTMETA);
+		return 600;
+	case 521: { // one strip: the buttons, the separator's gap, the apps last
+		LayerSurface *toolbar = toolbar_layer();
+		LayerSurface *apps = app_bar_layer();
+		bool ready = overview_settled(true) && toolbar != nullptr && apps != nullptr
+			&& toolbar_on_edge("right");
+		if (!ready && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		check(toolbar != nullptr && apps != nullptr,
+			"both strips mapped on the shared edge");
+		check(app_strip.x == strip.x,
+			std::format("the apps sit in the same column as the buttons"
+				" ({} and {})", app_strip.x, strip.x));
+		check(app_strip.y == strip.y + strip.height + strip_separator,
+			std::format("the apps come last, a separator's gap after the"
+				" buttons ({} after {}+{})", app_strip.y, strip.y, strip.height));
+		check(toolbar_centred(strip), "the pair is centred along the edge as one");
+		shot("app-bar-shared-edge");
+		return 500;
+	}
+	case 522: { // a click on an app's entry goes to its window
+		LayerSurface *apps = app_bar_layer();
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		app_bar_target = nullptr;
+		for (const std::unique_ptr<View> &view : server->toplevels) {
+			if (view->mapped) {
+				app_bar_target = view.get(); // the first app's entry, the topmost row
+				break;
+			}
+		}
+		check(apps != nullptr && app_bar_target != nullptr,
+			"an app bar entry to click, and the window it stands for");
+		if (apps != nullptr) {
+			click(app_strip.x + toolbar_button / 2.0,
+				app_strip.y + toolbar_button / 2.0);
+		}
+		return 900;
+	}
+	case 523: { // the overview left, the view on that window, focused
+		Output *output = server->outputs.front().get();
+		bool landed = !output->overview.active() && !output->camera.panning()
+			&& !output->camera.zooming() && app_bar_target != nullptr
+			&& app_bar_target->frame_rect().intersects(output->viewport());
+		if (!landed && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		check(landed, "clicking an app left the overview and put its window "
+			"on the screen");
+		check(server->focused_view == app_bar_target,
+			"and focused it");
+		check(set_app_bar_enabled(false), "appbar.enabled: false written");
+		return 900;
+	}
+	case 524: // back to the overview, with the app bar switched off
+		chord(KEY_TAB, KEY_LEFTMETA);
+		return 600;
+	case 525: { // the toolbar alone, centred again, and no app bar at all
+		LayerSurface *toolbar = toolbar_layer();
+		bool ready = overview_settled(true) && toolbar != nullptr
+			&& app_bar_layer() == nullptr;
+		if (!ready && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		check(app_bar_layer() == nullptr,
+			"switched off, the app bar shows on no screen");
+		check(toolbar != nullptr && toolbar_centred(strip),
+			"the toolbar is centred on its own again");
 		return 100; // done: the summary prints and the run ends
 	}
 	case 300: { // the themed window focused, for the shelf's item
