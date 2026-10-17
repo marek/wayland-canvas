@@ -24,14 +24,14 @@ Item {
 	// The plugins that loaded, in discovery order: {id, dir, manifest, api}.
 	property var plugins: []
 
-// Everything the plugins contributed, for the surfaces that host them:
-// barWidgets: {name, section, order, panel, component, api} — `panel`
-//   is the global name of the panel a left click opens, "" for none;
-//   a widget the config's bar.hidden names is left out of this list and
-//   still listed by api.shell.barWidgets, flagged;
-// toolbarButtons: {name, icon, label, action, args, panel, menu, order} —
-//   `action`, `panel` and every menu entry's action are global names.
-property var registry: ({barWidgets: [], toolbarButtons: []})
+	// Everything the plugins contributed, for the surfaces that host them:
+	// barWidgets: {name, section, order, panel, component, api} — `panel`
+	//   is the global name of the panel a left click opens, "" for none;
+	//   a widget the config's bar.hidden names is left out of this list and
+	//   still listed by api.shell.barWidgets, flagged;
+	// toolbarButtons: {name, icon, label, action, args, panel, menu, order} —
+	//   `action`, `panel` and every menu entry's action are global names.
+	property var registry: ({barWidgets: [], toolbarButtons: []})
 
 	// The screens, so per-output surfaces can follow them coming and going.
 	property var screens: Quickshell.screens
@@ -305,15 +305,15 @@ property var registry: ({barWidgets: [], toolbarButtons: []})
 				id: id,
 				dir: candidate.dir,
 				manifest: manifest,
-			api: {
-				plugin: pluginApi,
-				storage: storage,
-				panels: panels,
-				actions: actions,
-				theme: theme,
-				compositor: compositor,
-				shell: host,
-			},
+				api: {
+					plugin: pluginApi,
+					storage: storage,
+					panels: panels,
+					actions: actions,
+					theme: theme,
+					compositor: compositor,
+					shell: host,
+				},
 			})
 		}
 		// Each plugin's storage directory appears when its api does.
@@ -439,15 +439,15 @@ property var registry: ({barWidgets: [], toolbarButtons: []})
 					problem = "bar widget " + e.id + " has no valid section"
 					break
 				}
-			pluginWidgets.push({
-				name: plugin.id + "/" + e.id,
-				pluginName: plugin.manifest.name || plugin.id,
-				section: e.section,
-				order: e.order || 0,
-				panel: e.panel ? plugin.id + "/" + e.panel : "",
-				component: piece,
-				api: plugin.api,
-			})
+				pluginWidgets.push({
+					name: plugin.id + "/" + e.id,
+					pluginName: plugin.manifest.name || plugin.id,
+					section: e.section,
+					order: e.order || 0,
+					panel: e.panel ? plugin.id + "/" + e.panel : "",
+					component: piece,
+					api: plugin.api,
+				})
 			} else if (kind === "panels") {
 				var instance = piece.createObject(host)
 				if (instance == null) {
@@ -495,65 +495,65 @@ property var registry: ({barWidgets: [], toolbarButtons: []})
 	start()
 	}
 
-// Every contribution that loaded, before the config orders and filters
-// them: the registry is derived from these, so it can be re-derived when
-// the config changes without compiling or registering anything again.
-property var allWidgets: []
-property var allButtons: []
+	// Every contribution that loaded, before the config orders and filters
+	// them: the registry is derived from these, so it can be re-derived when
+	// the config changes without compiling or registering anything again.
+	property var allWidgets: []
+	property var allButtons: []
 
-// Rebuilds the registry (and the shell api's bar-widget list) from the
-// contributions and the config as it stands. A reload ends in
-// buildRegistry; the host's own config writes — which never reload —
-// end here, so what they change reaches every live binding.
-function rebuildRegistry() {
-	var ordered = orderedWidgets(allWidgets)
-	barWidgets = ordered
-	registry = {
-		barWidgets: ordered.filter(function(w) { return !w.hidden }),
-		toolbarButtons: orderedButtons(allButtons),
+	// Rebuilds the registry (and the shell api's bar-widget list) from the
+	// contributions and the config as it stands. A reload ends in
+	// buildRegistry; the host's own config writes — which never reload —
+	// end here, so what they change reaches every live binding.
+	function rebuildRegistry() {
+		var ordered = orderedWidgets(allWidgets)
+		barWidgets = ordered
+		registry = {
+			barWidgets: ordered.filter(function(w) { return !w.hidden }),
+			toolbarButtons: orderedButtons(allButtons),
+		}
 	}
-}
 
-// One section's widgets: those the config's bar.layout lists, in the
-// listed order, then the rest in their declared order. Each entry is a
-// copy of the contribution carrying its hidden flag, so the bar can
-// leave hidden widgets out and the settings panel can list them marked.
-function widgetEntry(widget) {
-	var entry = {}
-	for (var key in widget) {
-		entry[key] = widget[key]
+	// One section's widgets: those the config's bar.layout lists, in the
+	// listed order, then the rest in their declared order. Each entry is a
+	// copy of the contribution carrying its hidden flag, so the bar can
+	// leave hidden widgets out and the settings panel can list them marked.
+	function widgetEntry(widget) {
+		var entry = {}
+		for (var key in widget) {
+			entry[key] = widget[key]
+		}
+		entry.hidden = barHidden(widget.name)
+		return entry
 	}
-	entry.hidden = barHidden(widget.name)
-	return entry
-}
 
-function orderedWidgets(all) {
-	var out = []
-	var sections = ["left", "center", "right"]
-	for (var s = 0; s < sections.length; s++) {
-		var section = all.filter(function(w) { return w.section === sections[s] })
-		var layout = config.bar && config.bar.layout ? config.bar.layout[sections[s]] : null
-		var rest = section.slice()
-		if (layout != null) {
-			for (var i = 0; i < layout.length; i++) {
-				for (var j = 0; j < rest.length; j++) {
-					if (rest[j].name === layout[i]) {
-						out.push(widgetEntry(rest[j]))
-						rest.splice(j, 1)
-						break
+	function orderedWidgets(all) {
+		var out = []
+		var sections = ["left", "center", "right"]
+		for (var s = 0; s < sections.length; s++) {
+			var section = all.filter(function(w) { return w.section === sections[s] })
+			var layout = config.bar && config.bar.layout ? config.bar.layout[sections[s]] : null
+			var rest = section.slice()
+			if (layout != null) {
+				for (var i = 0; i < layout.length; i++) {
+					for (var j = 0; j < rest.length; j++) {
+						if (rest[j].name === layout[i]) {
+							out.push(widgetEntry(rest[j]))
+							rest.splice(j, 1)
+							break
+						}
 					}
 				}
 			}
+			rest.sort(function(a, b) {
+				return a.order - b.order || (a.name < b.name ? -1 : 1)
+			})
+			for (var r = 0; r < rest.length; r++) {
+				out.push(widgetEntry(rest[r]))
+			}
 		}
-		rest.sort(function(a, b) {
-			return a.order - b.order || (a.name < b.name ? -1 : 1)
-		})
-		for (var r = 0; r < rest.length; r++) {
-			out.push(widgetEntry(rest[r]))
-		}
+		return out
 	}
-	return out
-}
 
 	// The toolbar buttons: those the config's toolbar.order lists, in the
 	// listed order, then the rest in their declared order.
@@ -638,8 +638,8 @@ function orderedWidgets(all) {
 	// reports edits to it (a directory's watcher stays quiet on those),
 	// pointed at a directory it reports entries appearing or going (a
 	// plugin folder dropped in, a file added, an editor's rename-over).
-	// Every path under every plugin root, under the shell's own dir and
-	// under the config's dir gets one.
+	// Every path under every plugin root and under the shell's own dir
+	// gets one.
 
 	// One change is seen as several inotify events, and a file written
 	// in place is seen mid-write: reloading waits out a short settle
@@ -678,9 +678,13 @@ function orderedWidgets(all) {
 	}
 
 	// One process, once, when the shell comes up: every path worth
-	// watching under the plugin roots, the shell's dir and the config's
-	// dir (the config file itself has its own watcher above, which tells
-	// the host's writes from edits).
+	// watching under the plugin roots and the shell's dir. The config's
+	// dir is not among them: shell.json has its own watcher above, which
+	// tells the host's writes from edits, and the dir's other entry is
+	// canvas.conf — the compositor's file, rewritten through a temp file
+	// and a rename on every settings change, which the shell never reads.
+	// A watcher on the dir cannot tell which entry changed, so it would
+	// reload the shell, and close the settings window, on each of them.
 	Process {
 		id: watchLister
 		stdout: StdioCollector {
@@ -690,7 +694,7 @@ function orderedWidgets(all) {
 	}
 
 	function installWatchers() {
-		var dirs = [builtinDir, userDir, Quickshell.shellPath(""), configDir]
+		var dirs = [builtinDir, userDir, Quickshell.shellPath("")]
 			.concat(config.pluginPaths || [])
 		var script = []
 		for (var i = 0; i < dirs.length; i++) {

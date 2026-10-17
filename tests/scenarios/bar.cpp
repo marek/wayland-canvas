@@ -137,12 +137,18 @@ wlr_box agents_box{}; // the panel's card on screen
 
 std::string canvas_conf; // the scratch canvas.conf the compositor owns
 LayerSurface *settings_bar_before_reload = nullptr;
-LayerSurface *settings_bar_at_hide = nullptr; // the hide must not reload the shell
+LayerSurface *settings_bar_at_hide = nullptr; // the bar the panel opened under: no write may reload it
+uint32_t settings_bar_id = 0; // its surface's resource id, against an address reused
 std::size_t settings_base_runs = 0; // the bar's runs before the agents widget
 double settings_gear_y = 0; // the gear button's band centre, on its edge
 int settings_card_x = 0, settings_card_y = 0; // the card on the Bar tab
 double settings_agents_switch_y = 0; // the agents row's switch, the same tab
 int views_before = 0; // the views on the canvas before the chord check
+int terminals_before = 0; // the foot windows among them
+int settings_terminal_y = 0; // the Terminal row's label line, on the Shortcuts tab
+int settings_chip_before = 0; // its chord chip's width before the recording
+int settings_first_top = 0; // the Gestures tab's first preset row
+bool settings_esc_sent = false; // the Escape that closes the panel went out
 
 
 // ---- isolation: private buses and the stand-in services on them ----
@@ -279,6 +285,17 @@ void write_file(const std::string &path, std::string_view text) {
 	}
 	std::fwrite(text.data(), 1, text.size(), f);
 	std::fclose(f);
+}
+
+// Replaces a file the way an editor's atomic save does: the new bytes in
+// a sibling, renamed over the old name. The old inode goes away.
+void replace_file(const std::string &path, std::string_view text) {
+	std::string sibling = path + ".saving";
+	write_file(sibling, text);
+	if (rename(sibling.c_str(), path.c_str()) != 0) {
+		std::fprintf(stderr, "cannot rename %s: %s\n", sibling.c_str(),
+			std::strerror(errno));
+	}
 }
 
 
@@ -2928,6 +2945,12 @@ int settings_bar_column() {
 		+ 2 * settings_gap;
 }
 
+// The Toolbar tab's column of content: one header and the four edge
+// choices, each a two-line choice row.
+int settings_toolbar_column() {
+	return settings_header + 4 * settings_choice + 4 * settings_gap;
+}
+
 // Where PanelCard puts the card: level with the gear button, clamped
 // inside the output, one margin beside the strip on whichever edge the
 // toolbar sits.
@@ -2982,6 +3005,158 @@ std::vector<Band>::const_iterator settings_band_at(const std::vector<Band> &band
 	return best;
 }
 
+// What the panel's own fills look like on a screenshot (dark theme).
+constexpr uint32_t selected_dark = 0x2f3954ff; // UiTheme.selected over the panel: the accent at 22 %
+constexpr uint32_t track_dark = 0x3a3b45ff;    // UiTheme.track over the panel: a switch that is off
+constexpr uint32_t chip_dark = 0x272833ff;     // UiTheme.fill over the panel: a key chip
+constexpr uint32_t chip_hover_dark = 0x383943ff; // the same chip on its row's hover fill
+
+// The tab row's chosen tab, read off the shot: the one tab whose fill is
+// the accent's tint while every other tab shows the panel's own colour.
+// -1 when the row does not show exactly one chosen tab.
+int settings_chosen_tab(cairo_surface_t *s, int card_y) {
+	int chosen = -1;
+	for (int i = 0; i < 4; i++) {
+		// Six pixels into the tab, left of its centred label.
+		int x = settings_card_x + settings_pad + settings_tab_w * i + 6;
+		int y = card_y + settings_pad + settings_row / 2;
+		bool tint = pixel_is(s, x, y, selected_dark);
+		bool plain = pixel_is(s, x, y, shell_bg_dark);
+		if (tint == plain || (tint && chosen >= 0)) {
+			return -1;
+		}
+		if (tint) {
+			chosen = i;
+		}
+	}
+	return chosen;
+}
+
+// The tab labels as lit runs of the tab row: four of them, each centred
+// in its share of the row.
+bool settings_tab_labels_centred(cairo_surface_t *s, int card_y) {
+	std::vector<Run> runs = bar_runs(s, {settings_card_x + settings_pad,
+		card_y + settings_pad, settings_panel - 2 * settings_pad, settings_row});
+	if (runs.size() != 4) {
+		return false;
+	}
+	for (std::size_t i = 0; i < runs.size(); i++) {
+		if (std::abs(runs[i].centre() - settings_tab_w * (i + 0.5)) > 6) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// A PanelSwitch whose row is centred on `y`: on, its track is the accent
+// at the end the knob left; off, the track's grey at that end.
+bool settings_switch_is(cairo_surface_t *s, double y, bool on) {
+	double centre = settings_card_x + settings_pad + settings_panel
+		- 2 * settings_pad - 8 - settings_switch_w / 2.0;
+	return on ? pixel_is(s, int(centre - 10), int(y), accent_dark)
+		: pixel_is(s, int(centre + 10), int(y), track_dark);
+}
+
+// The Bar tab's widget rows from the card's top: each row's centre, top
+// to bottom, in the bar's own section order.
+std::vector<double> settings_bar_rows(int card_y) {
+	int backlight = has_sysfs_class("backlight") ? 1 : 0;
+	std::vector<std::vector<int>> sections = {
+		{settings_row},                                   // Left: the logo
+		{settings_row, settings_row},                     // Center: clock, weather
+		{settings_row, settings_choice},                  // Right: tray, agents
+	};
+	for (int i = 0; i < 6 + backlight; i++) {
+		sections[2].push_back(settings_row);              // bluetooth to theme
+	}
+	std::vector<double> centres;
+	int y = card_y + settings_pad + settings_row + settings_gap;
+	for (const std::vector<int> &rows : sections) {
+		y += settings_header + settings_gap;
+		for (int height : rows) {
+			centres.push_back(y + height / 2.0);
+			y += height + settings_gap;
+		}
+	}
+	return centres;
+}
+
+// Which of `count` exclusive choice rows show their dot: bit i is the
+// i-th row's, the accent at the dot's place on the row's right.
+unsigned settings_dots(cairo_surface_t *s, int first_top, int count) {
+	int dot_x = settings_card_x + settings_pad + settings_panel
+		- 2 * settings_pad - 8 - 4;
+	unsigned lit = 0;
+	for (int i = 0; i < count; i++) {
+		int y = first_top + i * (settings_choice + settings_gap) + settings_choice / 2;
+		if (pixel_is(s, dot_x, y, accent_dark)) {
+			lit |= 1u << i;
+		}
+	}
+	return lit;
+}
+
+// True when the running session's resolved keys for the global `action`
+// hold `chord`: what the compositor applied, not what a file says.
+bool holds_chord(std::string_view action, const settings::Chord &chord) {
+	const std::vector<settings::ActionDef> &registry = settings::registry();
+	for (std::size_t i = 0; i < registry.size(); i++) {
+		if (registry[i].scope != settings::Scope::global
+				|| registry[i].name != action) {
+			continue;
+		}
+		for (settings::Chord held : server->conf.keys[i]) {
+			if (held == chord) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// The label columns of a settings row: everything left of the switches and
+// dots, so a band scan sees the text and not the controls.
+constexpr int settings_label_w = settings_panel - 2 * settings_pad - 48;
+
+// How many of `count` stacked choice rows carry a text band where the
+// card lays them.
+int settings_choices_labelled(const std::vector<Band> &rows, int first_top,
+	int count) {
+	int n = 0;
+	for (int i = 0; i < count; i++) {
+		double y = first_top + i * (settings_choice + settings_gap)
+			+ settings_choice / 2.0;
+		auto band = settings_band_at(rows, y);
+		n += band != rows.end() && std::abs(band->centre() - y) <= 12;
+	}
+	return n;
+}
+
+// The width of the key chip that starts at the row's left edge, measured
+// along line `y` from four pixels in: the run of chip-fill pixels. The
+// pointer rests on the row it just clicked, so the fill may be the
+// hovered one; the run is of whichever the first pixel is.
+int settings_chip_width(cairo_surface_t *s, int y) {
+	int x = settings_card_x + settings_pad + 8 + 4;
+	uint32_t fill = pixel_is(s, x, y, chip_dark) ? chip_dark
+		: pixel_is(s, x, y, chip_hover_dark) ? chip_hover_dark : 0;
+	int n = 0;
+	while (fill != 0 && x + n < screen_w && pixel_is(s, x + n, y, fill)) {
+		n++;
+	}
+	return n == 0 ? 0 : n + 4;
+}
+
+// True while the bar surface the panel opened under is still the bar: a
+// reload would have replaced it, so neither its address nor its resource
+// id would both come back.
+bool settings_shell_kept() {
+	LayerSurface *bar = bar_layer();
+	return bar != nullptr && settings_bar_at_hide != nullptr
+		&& bar == settings_bar_at_hide
+		&& wl_resource_get_id(bar->wlr->surface->resource) == settings_bar_id;
+}
+
 // canvas.conf's value on `name`'s line, "" when the file gives it none:
 // whitespace around the = is free, so both sides are trimmed.
 std::string conf_value(const std::string &name) {
@@ -3015,13 +3190,26 @@ std::string conf_value(const std::string &name) {
 	return "";
 }
 
-// How many times `text` occurs in canvas.conf.
+// How many lines of canvas.conf carry `text` as their whole value — a
+// chord counting must not find "Super+T" inside "Super+Tab".
 int conf_count(const std::string &text) {
 	std::string raw = read_file(canvas_conf);
 	int n = 0;
-	for (std::size_t at = raw.find(text); at != std::string::npos;
-			at = raw.find(text, at + text.size())) {
-		n++;
+	std::size_t start = 0;
+	while (start < raw.size()) {
+		std::size_t end = raw.find('\n', start);
+		std::string line = raw.substr(start,
+			(end == std::string::npos ? raw.size() : end) - start);
+		std::size_t equals = line.find('=');
+		if (equals != std::string::npos) {
+			std::size_t first = line.find_first_not_of(" \t", equals + 1);
+			std::size_t last = line.find_last_not_of(" \t\r");
+			if (first != std::string::npos
+					&& line.substr(first, last - first + 1) == text) {
+				n++;
+			}
+		}
+		start = end == std::string::npos ? raw.size() : end + 1;
 	}
 	return n;
 }
@@ -3089,6 +3277,17 @@ int mapped_views() {
 	int n = 0;
 	for (View *v : server->views) {
 		if (v->mapped) {
+			n++;
+		}
+	}
+	return n;
+}
+
+// The mapped views of one app id: the terminal action's foot windows.
+int mapped_views_of(std::string_view app_id) {
+	int n = 0;
+	for (View *v : server->views) {
+		if (v->mapped && v->wlr->app_id != nullptr && app_id == v->wlr->app_id) {
 			n++;
 		}
 	}
@@ -4134,13 +4333,13 @@ int run_step() {
 	case 87: // the bar before the reload, for the before/after comparison
 		shot("adopt-prereload");
 		return 700;
-	case 88: { // an edit the shell reloads on: the user plugin disabled again
+	case 88: { // an edit the shell reloads on, saved the way an editor does: renamed over
 		std::string cfg = read_file(shell_config);
 		std::size_t at = cfg.find("\"enabled\": true");
 		if (at != std::string::npos) {
 			cfg.replace(at, 15, "\"enabled\": false");
 		}
-		write_file(shell_config, cfg);
+		replace_file(shell_config, cfg);
 		return 500;
 	}
 	case 89: // the shell reloads; the shot of it comes first
@@ -6264,6 +6463,10 @@ int run_step() {
 			check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
 				"the settings panel belongs to the shell client");
 		}
+		// The bar this panel opened under: nothing the phase does may reload it.
+		settings_bar_at_hide = bar_layer();
+		settings_bar_id = settings_bar_at_hide != nullptr
+			? wl_resource_get_id(settings_bar_at_hide->wlr->surface->resource) : 0;
 		shot("settings-panel");
 		return 700;
 	}
@@ -6272,14 +6475,18 @@ int run_step() {
 		settings_card_x = settings_card_left(false);
 		// The Shortcuts list is taller than the output, so the card sits
 		// clamped at the top margin.
-		std::vector<Band> tabs = bands_in(s,
-			{settings_card_x + 8, 8 + settings_pad, settings_panel - 16, settings_row});
+		bool tabs_ok = s != nullptr && settings_tab_labels_centred(s, 8);
+		int chosen = s != nullptr ? settings_chosen_tab(s, 8) : -1;
 		cairo_surface_destroy(s);
-		if (tabs.empty() && retries++ < 10) {
+		if ((!tabs_ok || chosen != 0) && retries++ < 10) {
 			shot("settings-panel");
 			return -700;
 		}
-		check(!tabs.empty(), "the settings card shows, its tab row on top");
+		retries = 0;
+		check(tabs_ok, "the settings card shows tall, its four tabs clamped "
+			"at the top margin");
+		check(chosen == 0, "the Shortcuts tab is the one chosen when the panel "
+			"opens");
 		// The Bar tab is the row's fourth share.
 		click(settings_card_x + settings_pad + settings_tab_w * 3.5,
 			8 + settings_pad + settings_row / 2.0);
@@ -6293,103 +6500,149 @@ int run_step() {
 		int column = settings_bar_column();
 		settings_card_y = settings_card_top(settings_card_height(column),
 			settings_gear_y);
+		std::vector<double> widgets = settings_bar_rows(settings_card_y);
+		// Labels only: the switches would light a row by themselves.
 		std::vector<Band> rows = bands_in(s,
-			{settings_card_x + 8, settings_card_y, settings_panel - 16,
+			{settings_card_x + 8, settings_card_y, settings_label_w,
 				settings_card_height(column)});
+		int chosen = s != nullptr ? settings_chosen_tab(s, settings_card_y) : -1;
+		int labelled = 0, on = 0;
+		for (double y : widgets) {
+			auto band = settings_band_at(rows, y);
+			labelled += band != rows.end() && std::abs(band->centre() - y) <= 12;
+			on += s != nullptr && settings_switch_is(s, y, true);
+		}
+		// The agents row: second of the Right section, the one detailed
+		// row: its label line sits above the row's centre and its detail
+		// line below, two bands where a plain row has one.
+		settings_agents_switch_y = widgets[4];
+		bool label_line = false, detail_line = false;
+		for (const Band &band : rows) {
+			double d = band.centre() - settings_agents_switch_y;
+			label_line = label_line || (d < -2 && d > -18);
+			detail_line = detail_line || (d > 2 && d < 18);
+		}
+		bool detailed = label_line && detail_line;
+		int marked = s != nullptr ? colour_count(s, {settings_card_x + 8,
+			int(settings_agents_switch_y) - 18, settings_label_w, 36},
+			attention_dark) : 0;
 		cairo_surface_destroy(s);
-		if (rows.size() < 11 && retries++ < 10) {
+		int expected = int(widgets.size());
+		if ((chosen != 3 || labelled != expected || on != expected || !detailed
+				|| marked >= 10) && retries++ < 10) {
 			shot("settings-bar-tab");
 			return -700;
 		}
 		retries = 0;
-		check(rows.size() >= 11, std::format("the Bar tab lists every widget "
-			"by section ({} rows)", rows.size()));
-		// The agents row: second of the Right section, the one detailed row.
-		int agents_top = settings_card_y + settings_pad + settings_row
-			+ settings_gap + settings_section_height(1, 0) + settings_gap
-			+ settings_section_height(2, 0) + settings_gap + settings_header
-			+ settings_gap + settings_row + settings_gap;
-		settings_agents_switch_y = agents_top + settings_choice / 2.0;
-		settings_bar_at_hide = bar_layer();
-		auto agents = settings_band_at(rows, settings_agents_switch_y);
-		check(agents != rows.end()
-				&& std::abs(agents->centre() - settings_agents_switch_y) <= 12,
-			"the agents row sits where the panel lays it (its detail names "
-			"when it shows)");
-		click(settings_card_x + settings_panel - settings_pad
-			- settings_switch_w / 2.0, settings_agents_switch_y);
+		check(chosen == 3, "the Bar tab is the one chosen");
+		check(labelled == expected, std::format("the Bar tab lists every widget "
+			"by section, a label on each row ({} of {})", labelled, expected));
+		check(on == expected, std::format("every widget's switch is on while "
+			"none is hidden ({} of {})", on, expected));
+		check(detailed && marked < 10, "the agents row sits where the panel "
+			"lays it, its detail line naming when it shows, its label in the "
+			"normal colour");
+		click(settings_card_x + settings_pad
+			+ settings_panel - 2 * settings_pad - 8 - settings_switch_w / 2.0,
+			settings_agents_switch_y);
 		return 400;
 	}
 	case 408: { // the write: bar.hidden into shell.json
 		std::vector<std::string> hidden = shell_bar_hidden();
-		bool named = false;
-		for (const std::string &name : hidden) {
-			named = named || name == "canvas.agents/agents";
-		}
-		if (!named && retries++ < 30) {
+		bool only_agents = hidden.size() == 1 && hidden[0] == "canvas.agents/agents";
+		if (!only_agents && retries++ < 30) {
 			return -300;
 		}
-		check(named, "hiding the agents widget wrote bar.hidden into "
-			"shell.json");
-		return shot_landed("settings-bar-hidden") ? 500 : -100;
+		check(only_agents, "hiding the agents widget wrote it, and only it, "
+			"into bar.hidden in shell.json");
+		shot("settings-bar-hidden");
+		return 500;
 	}
 	case 409: { // the bar's pixels lose the widget, with no reload
 		cairo_surface_t *s = load_png("settings-bar-hidden");
 		LayerSurface *bar = bar_layer();
 		std::vector<Run> runs = s != nullptr && bar != nullptr
 			? bar_runs(s, bar->geo) : std::vector<Run>{};
+		// The agents row's switch is off, every other still on, and the
+		// hidden widget's label is marked in the attention colour.
+		std::vector<double> widgets = settings_bar_rows(settings_card_y);
+		bool agents_off = s != nullptr
+			&& settings_switch_is(s, settings_agents_switch_y, false);
+		int others_on = 0;
+		for (double y : widgets) {
+			others_on += y != settings_agents_switch_y && s != nullptr
+				&& settings_switch_is(s, y, true);
+		}
+		int marked = s != nullptr ? colour_count(s, {settings_card_x + 8,
+			int(settings_agents_switch_y) - 18, settings_label_w, 36},
+			attention_dark) : 0;
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
-		if (runs.size() != settings_base_runs && retries++ < 30) {
+		if ((runs.size() != settings_base_runs || !agents_off
+				|| others_on != int(widgets.size()) - 1 || marked < 10)
+				&& retries++ < 30) {
 			shot("settings-bar-hidden");
 			return -700;
 		}
 		check(runs.size() == settings_base_runs,
 			std::format("the bar lost the agents widget without a reload "
 				"({} runs, was {})", runs.size(), settings_base_runs + 1));
-		bool covered = false;
-		for (const Run &run : runs) {
-			covered = covered || (agents_x >= run.x0 && agents_x <= run.x1);
-		}
-		check(!covered, "the place the agents widget sat is empty");
-		check(bar_layer() != nullptr && settings_bar_at_hide != nullptr
-				&& bar_layer() == settings_bar_at_hide,
+		check(agents_off && others_on == int(widgets.size()) - 1,
+			std::format("the agents switch shows off and the other {} stay on",
+				widgets.size() - 1));
+		check(marked >= 10, std::format("the hidden widget's label is marked "
+			"in the attention colour ({} pixels)", marked));
+		// The right section is anchored at its edge, so the neighbours
+		// slide into the vacated place at once: which widget covers that
+		// x now says nothing. The run count and the same bar surface
+		// above are the proof that the hide took and nothing reloaded.
+		check(settings_shell_kept(),
 			"the same bar surface lost it: the shell was not reloaded");
 		return 500;
 	}
 	case 410: { // the switch again: the widget comes back
-		click(settings_card_x + settings_panel - settings_pad
-			- settings_switch_w / 2.0, settings_agents_switch_y);
+		click(settings_card_x + settings_pad
+			+ settings_panel - 2 * settings_pad - 8 - settings_switch_w / 2.0,
+			settings_agents_switch_y);
 		return 400;
 	}
 	case 411: { // bar.hidden empty again, the run back
 		std::vector<std::string> hidden = shell_bar_hidden();
-		bool named = false;
-		for (const std::string &name : hidden) {
-			named = named || name == "canvas.agents/agents";
-		}
-		if (named && retries++ < 30) {
+		if (!hidden.empty() && retries++ < 30) {
 			return -300;
 		}
-		check(!named, "showing the widget emptied bar.hidden in shell.json");
-		return shot_landed("settings-bar-shown") ? 500 : -100;
+		check(hidden.empty(), "showing the widget emptied bar.hidden in shell.json");
+		shot("settings-bar-shown");
+		return 500;
 	}
 	case 412: { // the bar regains the run, still with no reload
 		cairo_surface_t *s = load_png("settings-bar-shown");
 		LayerSurface *bar = bar_layer();
 		std::vector<Run> runs = s != nullptr && bar != nullptr
 			? bar_runs(s, bar->geo) : std::vector<Run>{};
+		std::vector<double> widgets = settings_bar_rows(settings_card_y);
+		int on = 0;
+		for (double y : widgets) {
+			on += s != nullptr && settings_switch_is(s, y, true);
+		}
+		int marked = s != nullptr ? colour_count(s, {settings_card_x + 8,
+			int(settings_agents_switch_y) - 18, settings_label_w, 36},
+			attention_dark) : 0;
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
-		if (runs.size() != settings_base_runs + 1 && retries++ < 30) {
+		if ((runs.size() != settings_base_runs + 1 || on != int(widgets.size())
+				|| marked >= 10) && retries++ < 30) {
 			shot("settings-bar-shown");
 			return -700;
 		}
 		check(runs.size() == settings_base_runs + 1,
 			std::format("the bar regained the agents widget ({} runs)",
 				runs.size()));
+		check(on == int(widgets.size()), std::format("every widget's switch "
+			"is on again ({} of {})", on, widgets.size()));
+		check(marked < 10, "the agents row's label is back to the normal colour");
 		bool covered = false;
 		for (const Run &run : runs) {
 			covered = covered || (agents_x >= run.x0 && agents_x <= run.x1);
@@ -6398,122 +6651,111 @@ int run_step() {
 		return 500;
 	}
 	case 413: { // the Toolbar tab: the edge choices
-		// The card is still the Bar tab's shape: the tabs sit at its top.
+		// The card still wears the Bar tab's shape, so its tabs row sits
+		// where that card puts it; the shorter shape only re-centres the
+		// card once the click lands.
 		click(settings_card_x + settings_pad + settings_tab_w * 2.5,
 			settings_card_y + settings_pad + settings_row / 2.0);
-		return 400;
+		return 700;
 	}
-	case 414: { // the card redraws short: four edges; Left is chosen
+	case 414: // the card redraws short: four edge choices
+		shot("settings-toolbar-tab");
+		return 700;
+	case 415: { // four edges listed; the second one, Left, is chosen
 		cairo_surface_t *s = load_png("settings-toolbar-tab");
-		int column = settings_header + 4 * settings_row + 4 * settings_gap;
-		int card_y = settings_card_top(settings_card_height(column),
-			settings_gear_y);
+		int card_y = settings_card_top(
+			settings_card_height(settings_toolbar_column()), settings_gear_y);
+		int first_top = card_y + settings_pad + settings_row + settings_gap
+			+ settings_header + settings_gap;
+		// Labels only: the dots would light a row by themselves.
 		std::vector<Band> rows = bands_in(s,
-			{settings_card_x + 8, card_y, settings_panel - 16,
-				settings_card_height(column)});
+			{settings_card_x + 8, card_y, settings_label_w,
+				settings_card_height(settings_toolbar_column())});
+		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
+		unsigned dots = s != nullptr ? settings_dots(s, first_top, 4) : 0;
 		cairo_surface_destroy(s);
-		if (rows.size() < 4 && retries++ < 10) {
+		int labelled = settings_choices_labelled(rows, first_top, 4);
+		if ((chosen != 2 || labelled != 4 || dots != 1u) && retries++ < 10) {
 			shot("settings-toolbar-tab");
 			return -700;
 		}
 		retries = 0;
-		check(rows.size() >= 4, "the Toolbar tab lists the four edges");
-		// The second choice, Left: the first row's top is a header and a
-		// gap below the tabs.
-		int first_top = card_y + settings_pad + settings_row + settings_gap
-			+ settings_header + settings_gap;
-		click(settings_card_x + 100, first_top + settings_row
+		check(chosen == 2, "the Toolbar tab is the one chosen");
+		check(labelled == 4, std::format("the Toolbar tab lists the four "
+			"edges, a label on each ({} of 4)", labelled));
+		check(dots == 1u, "Right, the default edge, is the only one chosen "
+			"before any click");
+		// The second choice, Left: the first choice's top is a header and
+		// a gap below the tabs.
+		click(settings_card_x + 100, first_top + settings_choice
 			+ settings_gap + settings_choice / 2.0);
 		return 400;
 	}
-	case 415: { // the write: toolbar.position into shell.json
+	case 416: { // the write: toolbar.position into shell.json
 		std::string position = shell_toolbar_position();
 		if (position != "left" && retries++ < 30) {
 			return -300;
 		}
 		check(position == "left",
 			"choosing Left wrote toolbar.position into shell.json");
-		return shot_landed("settings-toolbar-left") ? 500 : -100;
+		shot("settings-toolbar-left");
+		return 500;
 	}
-	case 416: { // the toolbar followed the edge live; the gear moved with it
+	case 417: { // Left is the chosen edge now; Right puts it back
 		cairo_surface_t *s = load_png("settings-toolbar-left");
-		std::vector<Band> buttons = settings_strip_bands(s, toolbar_margin);
+		int card_y = settings_card_top(
+			settings_card_height(settings_toolbar_column()), settings_gear_y);
+		int first_top = card_y + settings_pad + settings_row + settings_gap
+			+ settings_header + settings_gap;
+		unsigned dots = s != nullptr ? settings_dots(s, first_top, 4) : 0;
 		cairo_surface_destroy(s);
-		if (buttons.size() < 5 && retries++ < 10) {
+		if (dots != 2u && retries++ < 10) {
 			shot("settings-toolbar-left");
 			return -700;
 		}
-		check(buttons.size() >= 5, "the toolbar's strip of buttons now sits "
-			"on the left edge (it moved live, no reload)");
-		if (buttons.size() >= 5) {
-			settings_gear_y = buttons[4].centre();
-		}
-		tap(KEY_ESC); // the panel holds the keyboard; Escape closes it
+		retries = 0;
+		check(dots == 2u, "choosing Left lit its dot and only its dot: the "
+			"choice shows as the selected edge");
+		// The strip's own move to the edge is the toolbar's feature, not
+		// the panel's; this phase checks the write and the choice only.
+		click(settings_card_x + 100, first_top + settings_choice / 2.0);
 		return 400;
 	}
-	case 417: { // closed; the gear at the new edge reopens the panel
-		if (panel_layers() > 0 && retries++ < 20) {
-			return -100;
-		}
-		retries = 0;
-		check(panel_layers() == 0, "the settings panel closed on Escape");
-		click(toolbar_margin + toolbar_button / 2.0, settings_gear_y);
-		return 400;
-	}
-	case 418: { // the panel maps again, beside the left-edge strip
-		LayerSurface *panel = panel_layer("settings");
-		if (panel == nullptr && retries++ < 40) {
-			return -100;
-		}
-		retries = 0;
-		check(panel != nullptr, "the gear at the left edge reopened the "
-			"settings panel");
-		shot("settings-panel-left");
-		return 700;
-	}
-	case 419: { // the card on the toolbar's inner side; Right puts it back
-		cairo_surface_t *s = load_png("settings-panel-left");
-		int column = settings_header + 4 * settings_row + 4 * settings_gap;
-		int card_x = settings_card_left(true);
-		int card_y = settings_card_top(settings_card_height(column),
-			settings_gear_y);
-		std::vector<Band> rows = bands_in(s,
-			{card_x + 8, card_y, settings_panel - 16,
-				settings_card_height(column)});
-		cairo_surface_destroy(s);
-		if (rows.size() < 4 && retries++ < 10) {
-			shot("settings-panel-left");
-			return -700;
-		}
-		retries = 0;
-		check(rows.size() >= 4, "the panel re-anchored to the left edge's "
-			"strip (its four edge choices beside it)");
-		int first_top = card_y + settings_pad + settings_row + settings_gap
-			+ settings_header + settings_gap;
-		click(card_x + 100, first_top + settings_row / 2.0);
-		return 400;
-	}
-	case 420: { // the write: toolbar.position back to right
+	case 418: { // the write: toolbar.position back to right
 		std::string position = shell_toolbar_position();
 		if (position != "right" && retries++ < 30) {
 			return -300;
 		}
 		check(position == "right",
 			"choosing Right wrote toolbar.position back");
-		return shot_landed("settings-toolbar-right") ? 500 : -100;
+		shot("settings-toolbar-right");
+		return 500;
 	}
-	case 421: { // the strip is back on the right; on to the Shortcuts tab
+	case 419: { // Right is the chosen edge again; on to the Shortcuts tab
 		cairo_surface_t *s = load_png("settings-toolbar-right");
-		std::vector<Band> buttons = settings_strip_bands(s, strip_left);
+		int card_y = settings_card_top(
+			settings_card_height(settings_toolbar_column()), settings_gear_y);
+		int first_top = card_y + settings_pad + settings_row + settings_gap
+			+ settings_header + settings_gap;
+		unsigned dots = s != nullptr ? settings_dots(s, first_top, 4) : 0;
 		cairo_surface_destroy(s);
-		check(buttons.size() >= 5, "the toolbar is back on the right edge");
-		// The card is the Toolbar tab's shape, on the right placement.
-		int column = settings_header + 4 * settings_row + 4 * settings_gap;
-		int card_y = settings_card_top(settings_card_height(column),
-			settings_gear_y);
+		if (dots != 1u && retries++ < 10) {
+			shot("settings-toolbar-right");
+			return -700;
+		}
+		retries = 0;
+		check(dots == 1u, "Right is the only edge chosen again");
+		check(settings_shell_kept(), "choosing the toolbar's edge twice "
+			"wrote shell.json and reloaded nothing");
+		// The card keeps the Toolbar tab's shape until the click lands.
 		click(settings_card_x + settings_pad + settings_tab_w * 0.5,
 			card_y + settings_pad + settings_row / 2.0);
-		return 400;
+		return 700;
+	}
+	case 420: { // the Shortcuts tab drawn; the tall card clamps at the top
+		shot("settings-shortcuts-tab");
+		step = 422; // the toolbar's own move waits for its feature's merge
+		return -100;
 	}
 	case 422: { // the Shortcuts tab: groups in registry order, chips as keys
 		cairo_surface_t *s = load_png("settings-shortcuts-tab");
@@ -6525,15 +6767,25 @@ int run_step() {
 		int terminal_top = terminal_y - 20;
 		std::vector<Band> rows = bands_in(s,
 			{settings_card_x + 8, terminal_top, settings_panel - 16, 40});
+		int chosen = s != nullptr ? settings_chosen_tab(s, 8) : -1;
+		// The Terminal row's chords line: its chip, from the row's left edge.
+		settings_terminal_y = terminal_y;
+		int chip = s != nullptr
+			? settings_chip_width(s, terminal_y + settings_row - 7) : 0;
 		cairo_surface_destroy(s);
 		auto terminal = settings_band_at(rows, terminal_y);
-		if (terminal == rows.end() && retries++ < 10) {
+		bool listed = terminal != rows.end()
+			&& std::abs(terminal->centre() - terminal_y) <= 12;
+		if ((!listed || chosen != 0 || chip < 20) && retries++ < 10) {
 			shot("settings-shortcuts-tab");
 			return -700;
 		}
-		check(terminal != rows.end()
-				&& std::abs(terminal->centre() - terminal_y) <= 12,
-			"the Shortcuts tab lists the actions (the Apps group's rows)");
+		retries = 0;
+		check(chosen == 0, "the Shortcuts tab is the one chosen");
+		check(listed, "the Shortcuts tab lists the actions (the Apps group's rows)");
+		check(chip >= 20, std::format("the Terminal row's chord is drawn as a "
+			"key chip ({} px wide)", chip));
+		settings_chip_before = chip;
 		click(settings_card_x + 30, terminal_y);
 		return 400;
 	}
@@ -6542,48 +6794,97 @@ int run_step() {
 		return 400;
 	case 424: { // canvas.conf gains the line, the moved chord is taken
 		std::string keys = conf_value("terminal");
-		if (keys != "Super+T" && retries++ < 30) {
+		// Tiling held Super+T by default, with no line of its own to
+		// rewrite: the running session says whether it lost it.
+		bool taken = holds_chord("terminal", {settings::mod_logo, XKB_KEY_t})
+			&& !holds_chord("tiling", {settings::mod_logo, XKB_KEY_t});
+		if ((keys != "Super+T" || !taken) && retries++ < 30) {
 			return -300;
 		}
 		check(keys == "Super+T",
 			"recording Super+T wrote terminal = Super+T into canvas.conf");
 		check(conf_count("Super+T") == 1,
-			std::format("the chord was taken from Tiling ({} Super+T in the "
-				"file)", conf_count("Super+T")));
+			std::format("no other line of canvas.conf holds Super+T ({} "
+				"Super+T in the file)", conf_count("Super+T")));
+		check(taken, "the running session moved Super+T from Tiling to "
+			"Terminal");
 		check(panel_layer("settings") != nullptr, "the panel kept open "
 			"through the recording");
+		check(settings_shell_kept(), "the recording rewrote canvas.conf and "
+			"the shell was not reloaded");
 		shot("settings-shortcuts-set");
 		return 700;
 	}
-	case 425: { // the Gestures tab: three presets and the pinch switch
-		// The card is the tall Shortcuts shape again: the tabs at its top.
+	case 425: { // the chip shrank; then the Gestures tab: presets and the pinch switch
+		cairo_surface_t *s = load_png("settings-shortcuts-set");
+		int chip = s != nullptr ? settings_chip_width(s,
+			settings_terminal_y + settings_row - 7) : 0;
+		// The row's third line, under its chords: where the chord came from.
+		double note_y = settings_terminal_y + 1.5 * settings_row
+			+ settings_detail / 2.0;
+		std::vector<Band> lines = s != nullptr ? bands_in(s,
+			{settings_card_x + 8, settings_terminal_y - 20, settings_label_w,
+				3 * settings_row}) : std::vector<Band>{};
+		auto note = settings_band_at(lines, note_y);
+		bool noted = note != lines.end()
+			&& std::abs(note->centre() - note_y) <= 8;
+		cairo_surface_destroy(s);
+		check(noted, "the Terminal row grew a line under its chord: where "
+			"Super+T was taken from");
+		check(chip > 0 && chip < settings_chip_before, std::format("the "
+			"Terminal row's chip shows the shorter Super+T ({} px, was {})",
+			chip, settings_chip_before));
+		// The card is the tall Shortcuts shape: the tabs at its top; the
+		// click shrinks it to the presets, so the next step waits first.
 		click(settings_card_x + settings_pad + settings_tab_w * 1.5,
 			8 + settings_pad + settings_row / 2.0);
-		return 400;
+		return 700;
 	}
-	case 426: { // the choices drawn; Four-finger hops is chosen
+	case 426: // the card redraws to the presets and the switch
+		shot("settings-gestures-tab");
+		return 700;
+	case 427: { // the choices drawn; Four-finger hops is clicked
 		cairo_surface_t *s = load_png("settings-gestures-tab");
 		int column = 2 * settings_header + 3 * settings_choice + settings_choice
 			+ 5 * settings_gap;
 		int card_y = settings_card_top(settings_card_height(column),
 			settings_gear_y);
-		std::vector<Band> rows = bands_in(s,
-			{settings_card_x + 8, card_y, settings_panel - 16,
-				settings_card_height(column)});
-		cairo_surface_destroy(s);
 		int first_top = card_y + settings_pad + settings_row + settings_gap
 			+ settings_header + settings_gap;
-		auto first = settings_band_at(rows, first_top + settings_choice / 2.0);
-		if (first == rows.end() && retries++ < 10) {
+		// The pinch row: under the second header, a detailed row.
+		double pinch_y = first_top + 3 * (settings_choice + settings_gap)
+			+ settings_header + settings_gap + settings_choice / 2.0;
+		// Labels only: the dots and the switch would light a row by themselves.
+		std::vector<Band> rows = bands_in(s,
+			{settings_card_x + 8, card_y, settings_label_w,
+				settings_card_height(column)});
+		int chosen = s != nullptr ? settings_chosen_tab(s, card_y) : -1;
+		unsigned dots = s != nullptr ? settings_dots(s, first_top, 3) : 0;
+		bool pinch_on = s != nullptr && settings_switch_is(s, pinch_y, true);
+		cairo_surface_destroy(s);
+		int labelled = settings_choices_labelled(rows, first_top, 3);
+		auto pinch = settings_band_at(rows, pinch_y);
+		bool pinch_labelled = pinch != rows.end()
+			&& std::abs(pinch->centre() - pinch_y) <= 12;
+		if ((chosen != 1 || labelled != 3 || !pinch_labelled || dots != 1u
+				|| !pinch_on) && retries++ < 10) {
 			shot("settings-gestures-tab");
 			return -700;
 		}
-		check(first != rows.end(), "the Gestures tab lists the three presets");
+		retries = 0;
+		check(chosen == 1, "the Gestures tab is the one chosen");
+		check(labelled == 3 && pinch_labelled, std::format("the Gestures tab "
+			"lists the three presets and the pinch row, a label on each "
+			"({} of 3 presets)", labelled));
+		check(dots == 1u, "Three-finger hops, the default, is the only "
+			"preset chosen before any click");
+		check(pinch_on, "the pinch switch shows on, its default");
+		settings_first_top = first_top;
 		click(settings_card_x + 100, first_top + settings_choice
 			+ settings_gap + settings_choice / 2.0);
 		return 400;
 	}
-	case 427: { // canvas.conf says which preset; the panel closes
+	case 428: { // canvas.conf says which preset
 		std::string swipes = conf_value("swipes");
 		if (swipes != "four-finger-hops" && retries++ < 30) {
 			return -300;
@@ -6592,31 +6893,50 @@ int run_step() {
 			"choosing Four-finger hops wrote swipes = four-finger-hops "
 			"into canvas.conf");
 		shot("settings-gestures-set");
-		tap(KEY_ESC);
-		return 400;
+		return 700;
 	}
-	case 428: { // closed; the recorded chord runs where the old one did
+	case 429: { // the choice drawn, the panel up; Escape closes it; the recorded chord runs
+		if (!settings_esc_sent) {
+			cairo_surface_t *s = load_png("settings-gestures-set");
+			unsigned dots = s != nullptr ? settings_dots(s, settings_first_top, 3) : 0;
+			cairo_surface_destroy(s);
+			if (dots != 2u && retries++ < 5) {
+				shot("settings-gestures-set");
+				return -700;
+			}
+			retries = 0;
+			check(dots == 2u, "Four-finger hops is the only preset drawn chosen");
+			check(panel_layer("settings") != nullptr && settings_shell_kept(),
+				"the compositor's canvas.conf write left the panel open and "
+				"the shell unreloaded");
+			settings_esc_sent = true;
+			tap(KEY_ESC);
+			return -400;
+		}
 		if (panel_layers() > 0 && retries++ < 20) {
 			return -100;
 		}
 		retries = 0;
 		check(panel_layers() == 0, "the settings panel closed on Escape");
 		views_before = mapped_views();
+		terminals_before = mapped_views_of("foot");
 		chord(KEY_T, KEY_LEFTMETA); // the terminal's new chord, in the overview
 		return 400;
 	}
-	case 429: { // a terminal opens: the recorded chord works
-		if (mapped_views() != views_before + 1 && retries++ < 100) {
+	case 430: { // a terminal opens: the recorded chord works
+		bool opened = mapped_views() == views_before + 1
+			&& mapped_views_of("foot") == terminals_before + 1;
+		if (!opened && retries++ < 100) {
 			return -100;
 		}
 		retries = 0;
-		check(mapped_views() == views_before + 1,
-			"the recorded chord opened the terminal");
+		check(opened, "the recorded chord opened the terminal (one new foot window)");
 		chord(KEY_ENTER, KEY_LEFTMETA); // the chord it replaced
-		return 600;
+		return 1500; // a foot window needs a moment: the wait must outlast one
 	}
-	case 430: { // and the replaced chord opens nothing
-		check(mapped_views() == views_before + 1,
+	case 431: { // and the replaced chord opens nothing
+		check(mapped_views() == views_before + 1
+				&& mapped_views_of("foot") == terminals_before + 1,
 			"the chord the recording replaced opens nothing");
 		return 100; // done: the summary prints and the run ends
 	}
@@ -6679,6 +6999,9 @@ int main() {
 		}
 	}
 	setenv("GSETTINGS_BACKEND", "keyfile", 1);
+	// The terminal action runs `exec ${TERMINAL:-foot}`: pinned to foot, the
+	// settings phase's terminal check never depends on the user's own pick.
+	setenv("TERMINAL", "foot", 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	// Isolation first: the bar may only ever start on the private buses

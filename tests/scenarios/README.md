@@ -343,21 +343,37 @@ own the machine's Wayland display namespace and GPU.
   Clicking it maps the settings panel as a `wayland-canvas-panel-settings`
   layer surface of the shell client; its tab row and every row the phase
   clicks are aimed from the panel's fixed metrics and cross-checked
-  against the screenshot's bands first. The Bar tab's switch on the
-  agents row writes `bar.hidden` into the scratch `shell.json` and the
-  bar loses the widget's run with no reload (the same bar surface), then
-  shows it again with the switch's second click. The Toolbar tab chooses
-  Left: `toolbar.position` lands in the config, the strip of five
-  buttons moves to the left edge live, and the panel re-anchors there —
-  reopened through the gear at the new edge, Right puts it back. The
+  against the screenshot first: each tab is read as chosen from its
+  accent-tint fill (exactly one), each row from a label band where the
+  card lays it, each switch from the track's colour at the end its knob
+  has left, each exclusive choice from its dot. The bar the panel opened
+  under is remembered (address and resource id) and no write of the
+  phase may replace it: the shell never reloads on a settings write. The
+  Bar tab's switch on the agents row writes exactly that widget into
+  `bar.hidden` in the scratch `shell.json`; the bar loses the widget's
+  run with no reload, the row's switch shows off, every other stays on
+  and the hidden label turns attention-red; the switch's second click
+  empties the list and undoes all of it. The Toolbar tab shows Right
+  chosen by default, chooses Left (`toolbar.position` lands in the
+  config and only Left's dot is lit) and puts Right back (the strip's own
+  move to the edge is the toolbar's feature, proved with it). The
   Shortcuts tab records a chord by pressing it (the fake keyboard's
-  Super+T on the terminal row): `canvas.conf` gains
-  `terminal = Super+T`, the chord is taken from Tiling (it appears once
-  in the file), and with the panel closed the new chord opens a terminal
-  while the one it replaced opens nothing. The Gestures tab chooses
-  Four-finger hops: `swipes = four-finger-hops` in the file. Screenshots
-  of the panel, its four tabs and both file-writing steps land in
-  `tmp/scenarios/bar/` as `settings-*.png`.
+  Super+T on the terminal row, whose key chip shrinks from Super+Return
+  to Super+T): `canvas.conf` gains `terminal = Super+T`, no other line
+  holds it, the running session's resolved keys give it to Terminal and
+  take it from Tiling (which held it by default, so has no line to
+  rewrite), and the panel stays open with the shell unreloaded while the
+  compositor rewrites the file. The Gestures tab shows Three-finger hops
+  chosen and the pinch switch on, then chooses Four-finger hops:
+  `swipes = four-finger-hops` in the file and only that dot lit. With the
+  panel closed on Escape the new chord opens a foot window (`TERMINAL` is
+  pinned to `foot` for the run) while the one it replaced opens nothing.
+  One earlier step, the adopt phase's hand edit of `shell.json`, is saved
+  the way an editor does, renamed over the file: the shell must still
+  reload on it, though it no longer watches the config directory (the
+  compositor rewrites `canvas.conf` there on every settings change).
+  Screenshots of the panel, its four tabs and both file-writing steps land
+  in `tmp/scenarios/bar/` as `settings-*.png`.
 
 ## What they need
 

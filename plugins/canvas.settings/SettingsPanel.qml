@@ -121,10 +121,10 @@ PanelCard {
 		for (var i = 0; i < shortcuts.length; i++) {
 			if (shortcuts[i].scope === moved.scope
 					&& shortcuts[i].action === moved.action) {
-				return shortcuts[i].label + "'s"
+				return shortcuts[i].label
 			}
 		}
-		return "a command's (" + (moved.command || "") + ")"
+		return "the command " + (moved.command || "")
 	}
 
 	function setKeys(scope, action, keys) {
@@ -142,7 +142,7 @@ PanelCard {
 				var moved = result != null ? result.moved : null
 				for (var i = 0; moved != null && i < moved.length; i++) {
 					movedText += (movedText === "" ? "" : "  ")
-						+ (moved[i].keys || []).join(", ") + " was "
+						+ (moved[i].keys || []).join(", ") + " taken from "
 						+ movedFrom(moved[i])
 				}
 			})
@@ -498,7 +498,7 @@ PanelCard {
 
 			ChoiceRow {
 				label: "Three-finger hops"
-				description: "3 fingers hop desktops and pinch in the overview; 4 open it and go in"
+				description: "3 fingers hop, 4 open the overview"
 				chosen: root.settings && root.settings.gestures
 					&& root.settings.gestures.swipes === "three-finger-hops"
 				note: root.faultRow != null && root.faultRow.what === "swipes"
@@ -508,7 +508,7 @@ PanelCard {
 
 			ChoiceRow {
 				label: "Four-finger hops"
-				description: "4 fingers hop desktops and pinch in the overview; 3 open it and go in"
+				description: "4 fingers hop, 3 open the overview"
 				chosen: root.settings && root.settings.gestures
 					&& root.settings.gestures.swipes === "four-finger-hops"
 				note: root.faultRow != null && root.faultRow.what === "swipes"
@@ -518,7 +518,7 @@ PanelCard {
 
 			ChoiceRow {
 				label: "Off"
-				description: "No 3- or 4-finger compositor gesture; keys and pointer unchanged"
+				description: "No 3- or 4-finger compositor gesture"
 				chosen: root.settings && root.settings.gestures
 					&& root.settings.gestures.swipes === "off"
 				note: root.faultRow != null && root.faultRow.what === "swipes"
@@ -561,28 +561,28 @@ PanelCard {
 
 			ChoiceRow {
 				label: "Right"
-				description: "A column on the right edge, flyouts and panels to its left"
+				description: "A column on the right edge"
 				chosen: root.toolbarPosition === "right"
 				onPicked: root.setEdge("right")
 			}
 
 			ChoiceRow {
 				label: "Left"
-				description: "A column on the left edge, flyouts and panels to its right"
+				description: "A column on the left edge"
 				chosen: root.toolbarPosition === "left"
 				onPicked: root.setEdge("left")
 			}
 
 			ChoiceRow {
 				label: "Top"
-				description: "A row under the bar, flyouts and panels below it"
+				description: "A row under the bar"
 				chosen: root.toolbarPosition === "top"
 				onPicked: root.setEdge("top")
 			}
 
 			ChoiceRow {
 				label: "Bottom"
-				description: "A row above the bottom edge, flyouts and panels above it"
+				description: "A row above the bottom edge"
 				chosen: root.toolbarPosition === "bottom"
 				onPicked: root.setEdge("bottom")
 			}
@@ -622,7 +622,7 @@ PanelCard {
 							required property var modelData
 							label: modelData.pluginName
 							detail: modelData.name === "canvas.agents/agents"
-								? "Shows while an AI tool has usage to show" : ""
+								? "Shows while an AI tool has usage" : ""
 							marked: modelData.hidden
 							clickable: false
 

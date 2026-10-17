@@ -32,24 +32,34 @@ Item {
 		color: UiTheme.hover
 	}
 
+	// The text stops short of the dot's place on the right, so a long
+	// line is cut with an ellipsis inside the row, never drawn past the
+	// card's edge.
 	Column {
 		anchors.left: parent.left
 		anchors.leftMargin: 8
 		anchors.verticalCenter: parent.verticalCenter
+		width: parent.width - 8 - 24
 		spacing: 0
 
 		PanelText {
+			width: parent.width
+			elide: Text.ElideRight
 			text: root.label
 			color: root.chosen ? UiTheme.accent : UiTheme.text
 		}
 
 		PanelText {
+			width: parent.width
+			elide: Text.ElideRight
 			visible: root.note !== ""
 			text: root.note
 			color: UiTheme.attention
 		}
 
 		PanelText {
+			width: parent.width
+			elide: Text.ElideRight
 			visible: root.note === "" && root.description !== ""
 			dim: true
 			text: root.description
