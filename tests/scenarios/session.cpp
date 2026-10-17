@@ -489,11 +489,109 @@ int run_step() {
 			" >/dev/null 2>&1", std::getenv("WAYLAND_CANVAS_BIN")).c_str());
 		return 800;
 	}
-	case 15: { // the lock plugin: the shortcut locks the session
-		chord(KEY_L, SUPER);
+	case 15: { // an action button on a popup reaches the sender
+		spawn(std::format("notify-send -a Tests -A go=Open 'With an action' "
+			"'click it' > '{}/action.txt' 2>/dev/null", shot_dir).c_str());
 		return 1500;
 	}
 	case 16: {
+		if (layer_named("wayland-canvas-notifications") == nullptr
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-notifications") != nullptr,
+			"a notification with an action shows its popup");
+		shot("action-popup");
+		return 300;
+	}
+	case 17: {
+		// The action button sits at the bottom left of the card, inside
+		// the column the plugin lays out: the card is 340 wide against the
+		// output's right edge, below the bar.
+		click(screen_w - 340 - 8 + 10 + 40, 26 + 8 + 86);
+		return 1500;
+	}
+	case 18: {
+		std::string chosen = read_text(shot_dir + "/action.txt");
+		if (chosen.find("go") == std::string::npos && retries < 20) {
+			// The card's height follows its text: walk down its left edge
+			// until the button is hit.
+			click(screen_w - 340 - 8 + 10 + 40, 26 + 8 + 70 + 6 * retries);
+			retries++;
+			return -600;
+		}
+		check(chosen.find("go") != std::string::npos, std::format(
+			"clicking the action reached the sender ('{}')", chosen));
+		return 500;
+	}
+	case 19: { // expiry: a normal popup goes by itself, a critical one stays
+		spawn("notify-send -a Tests -t 1000 'Short' 'goes by itself'");
+		return 600;
+	}
+	case 20: {
+		check(layer_named("wayland-canvas-notifications") != nullptr,
+			"the short notification is on screen");
+		return 2500; // past its own timeout
+	}
+	case 21: {
+		if (layer_named("wayland-canvas-notifications") != nullptr
+				&& retries++ < 40) {
+			return -300;
+		}
+		check(layer_named("wayland-canvas-notifications") == nullptr,
+			"a notification with a timeout leaves the screen by itself");
+		spawn("notify-send -a Tests -u critical 'Critical' 'waits for the user'");
+		return 1200;
+	}
+	case 22: {
+		if (layer_named("wayland-canvas-notifications") == nullptr
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-notifications") != nullptr,
+			"a critical notification shows");
+		return 4000; // longer than any normal popup's life
+	}
+	case 23: {
+		check(layer_named("wayland-canvas-notifications") != nullptr,
+			"a critical notification stays until it is dismissed");
+		chord(KEY_N, SUPER_SHIFT);
+		return 800;
+	}
+	case 24: { // the bus name is the session's one notification server
+		check(layer_named("wayland-canvas-notifications") == nullptr,
+			"and the dismiss-all key takes it off the screen");
+		spawn(std::format(
+			"busctl --address='{}' --user call org.freedesktop.DBus "
+			"/org/freedesktop/DBus org.freedesktop.DBus RequestName su "
+			"org.freedesktop.Notifications 4 > '{}/name.txt' 2>&1",
+			private_session.address, shot_dir).c_str());
+		return 1200;
+	}
+	case 25: {
+		std::string answer = read_text(shot_dir + "/name.txt");
+		// 1 is "you are the owner now", 3 "someone else holds it".
+		check(answer.find("u 3") != std::string::npos, std::format(
+			"a second notification daemon does not take the name from the "
+			"shell ('{}')", answer));
+		spawn("notify-send -a Tests 'Still ours' 'the shell is the server'");
+		return 1500;
+	}
+	case 26: {
+		if (layer_named("wayland-canvas-notifications") == nullptr
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(layer_named("wayland-canvas-notifications") != nullptr,
+			"and it keeps serving the session's notifications");
+		chord(KEY_N, SUPER_SHIFT);
+		return 800;
+	}
+	case 27: { // the lock plugin: the shortcut locks the session
+		chord(KEY_L, SUPER);
+		return 1500;
+	}
+	case 28: {
 		if (!server->lock.locked() && retries++ < 100) {
 			return -100;
 		}
@@ -501,7 +599,7 @@ int run_step() {
 		shot("locked");
 		return 300;
 	}
-	case 17: { // a wrong password keeps it locked
+	case 29: { // a wrong password keeps it locked
 		long ink = ink_in("locked", {screen_w / 2 - 200, screen_h / 2 - 120, 400, 240});
 		check(ink > 1000, std::format("the locker drew its card ({} px of ink)", ink));
 		type_text("wrong-password");
@@ -509,28 +607,28 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 2500;
 	}
-	case 18: {
+	case 30: {
 		check(server->lock.locked(), "a wrong password leaves the session locked");
 		type_text(password);
 		key(KEY_ENTER, true);
 		key(KEY_ENTER, false);
 		return 2500;
 	}
-	case 19: {
+	case 31: {
 		if (server->lock.locked() && retries++ < 100) {
 			return -100;
 		}
 		check(!server->lock.locked(), "the right password unlocked the session");
 		return 300;
 	}
-	case 20: { // the password dialog, on the plugin's stand-in flow: the
+	case 32: { // the password dialog, on the plugin's stand-in flow: the
 		// machine's own polkitd is never registered with.
 		run_action("canvas.polkit/test-dialog",
 			"{\"message\":\"Install a package\",\"user\":\"tester\","
 			"\"password\":\"canvas-scratch-password\"}");
 		return 1200;
 	}
-	case 21: {
+	case 33: {
 		if (layer_named("wayland-canvas-polkit") == nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -542,7 +640,7 @@ int run_step() {
 		shot("polkit");
 		return 300;
 	}
-	case 22: { // what it says, then a wrong password
+	case 34: { // what it says, then a wrong password
 		long ink = ink_in("polkit", {screen_w / 2 - 190, screen_h / 2 - 90, 380, 180});
 		check(ink > 2000, std::format("the dialog shows the action and its field "
 			"({} px of ink)", ink));
@@ -551,7 +649,7 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 1200;
 	}
-	case 23: {
+	case 35: {
 		check(layer_named("wayland-canvas-polkit") != nullptr,
 			"a wrong password leaves the dialog open");
 		check(flow_log().find("refused") != std::string::npos,
@@ -561,7 +659,7 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 1200;
 	}
-	case 24: {
+	case 36: {
 		if (layer_named("wayland-canvas-polkit") != nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -574,7 +672,7 @@ int run_step() {
 			"{\"message\":\"Something else\",\"password\":\"never typed\"}");
 		return 1200;
 	}
-	case 25: {
+	case 37: {
 		if (layer_named("wayland-canvas-polkit") == nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -584,7 +682,7 @@ int run_step() {
 		key(KEY_ESC, false);
 		return 1200;
 	}
-	case 26: {
+	case 38: {
 		if (layer_named("wayland-canvas-polkit") != nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -594,7 +692,7 @@ int run_step() {
 			"polkit was told the request was cancelled");
 		return 300;
 	}
-	case 27: {
+	case 39: {
 		finished = true;
 		wl_display_terminate(server->display);
 		return -1;
