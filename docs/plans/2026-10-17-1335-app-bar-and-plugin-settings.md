@@ -80,13 +80,16 @@ touched.
       [shell/plugins.md](../intents/shell/plugins.md), and
       [shell/settings.md](../intents/shell/settings.md) states how the
       window builds a page from it and what it writes.
-- [ ] Shell: the settings window renders a page per plugin that
-      declares settings, from the schema alone, writing through
-      `api.plugin.setSetting`; a key with no metadata is left out.
-- [ ] The toolbar's edge and the bar's hidden widgets keep their pages
+- [x] Shell: the settings window renders the declarations from the
+      schema alone, writing through `api.plugin.setSetting`; a key with no
+      metadata is left out. One Plugins tab holds every plugin's groups —
+      a tab per plugin would grow the row past the card's width.
+- [x] The toolbar's edge and the bar's hidden widgets keep their pages
       and their meaning while the new mechanism lands beside them.
-- [ ] Scenario: a plugin's declared switch and choice appear in
-      settings, and a change lands in `shell.json`.
+- [x] Scenario: canvas.notifications' declared switch shows its row and
+      its default, and the click lands in `shell.json` under
+      `plugins.canvas.notifications.settings`. (A declared choice and a
+      number are drawn by the same row component, unchecked on screen.)
 
 ### Windows the shell can see and go to
 
