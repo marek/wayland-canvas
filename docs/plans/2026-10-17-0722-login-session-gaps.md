@@ -113,6 +113,7 @@ These decisions close three open boxes of
 
 ## X11 apps
 
+- [ ] Not started in this run: X11 windows. `View` is built on `wlr_xdg_toplevel` throughout (its geometry, its configures, its close, its title), so X11 windows as views is a dual-shell change across view, decoration, input, render and capture, and it was the one section too large to finish beside the rest. Nothing of it has landed: the wlroots subproject is still built with `xwayland=disabled`.
 - [ ] Intent: X11 windows: started on demand, `DISPLAY` handed over and back with `WAYLAND_DISPLAY`, windows as views (title bars, desktops, overview, states, close), override-redirect menus and tooltips, focus and activation, the clipboard both ways, scale 1 on hi-dpi, a machine without Xwayland
 - [ ] Build and package: wlroots with Xwayland; Arch `optdepends` xorg-xwayland, Debian `Recommends` xwayland
 - [ ] Compositor: X11 windows as views: map, title bars, move and resize, maximize, minimize and fullscreen requests, close through `WM_DELETE_WINDOW`, override-redirect windows placed beside their parent in canvas space, focus, the clipboard both ways
