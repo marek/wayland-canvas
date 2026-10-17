@@ -120,6 +120,8 @@ Item {
 			state = Object.assign({}, state, {outputs: params.outputs || []})
 		} else if (name === "desktops") {
 			state = Object.assign({}, state, {desktops: params.desktops || []})
+		} else if (name === "windows") {
+			state = Object.assign({}, state, {windows: params.windows || []})
 		} else if (name === "theme") {
 			state = Object.assign({}, state, {theme: params.mode})
 		} else if (name === "item.moved") {

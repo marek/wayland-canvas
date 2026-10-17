@@ -179,6 +179,10 @@ constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
 constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
+constexpr const char *app_bar_namespace = "wayland-canvas-app-bar";
+// The gap the shared strip leaves between the toolbar's buttons and the
+// apps, the separator drawn in it (shell/ui/WaylandCanvas/Ui/StripLayout.qml).
+constexpr int strip_separator = 9;
 
 // The shell's own colours the theme phase samples (the UI kit's palette;
 // the compositor's half comes from config.h's palettes). Keep in sync with
@@ -3626,12 +3630,68 @@ bool toolbar_on_edge(const char *edge) {
 	return geo.y + geo.height == screen_h - toolbar_margin;
 }
 
-// The strip is centred along its edge, from the placed box.
-bool toolbar_centred(const wlr_box &geo) {
-	if (geo.width == toolbar_button) {
-		return geo.y + geo.height / 2 == screen_h / 2;
+// The app bar surface, shown with the overview on the edge its config
+// names (the left by default): one entry per open app
+// (docs/intents/shell/app-bar.md).
+LayerSurface *app_bar_layer() {
+	return named_layer(app_bar_namespace);
+}
+
+// The app bar's own strip, from its placed surface: like the toolbar's, the
+// surface is the strip plus the pocket it slides into.
+wlr_box app_bar_strip_box(const wlr_box &geo) {
+	return toolbar_strip_box(geo);
+}
+
+// How many apps the compositor has open: the app bar draws one entry each,
+// grouped by app id (a window without one stands alone).
+int apps_open() {
+	std::vector<std::string> seen;
+	for (const std::unique_ptr<View> &view : server->toplevels) {
+		if (!view->mapped) {
+			continue;
+		}
+		std::string key = view->wlr->app_id != nullptr && *view->wlr->app_id != '\0'
+			? std::string{view->wlr->app_id}
+			: std::format("window:{}", view->session_id);
+		if (std::ranges::find(seen, key) == seen.end()) {
+			seen.push_back(key);
+		}
 	}
-	return geo.x + geo.width / 2 == screen_w / 2;
+	return static_cast<int>(seen.size());
+}
+
+// The app bar's length along the edge it shares with the toolbar, 0 when it
+// is on another edge or absent: the two are centred as one strip, so the
+// toolbar's own centring is only its share of it.
+int shared_apps_length(const wlr_box &toolbar) {
+	LayerSurface *apps = app_bar_layer();
+	if (apps == nullptr) {
+		return 0;
+	}
+	wlr_box strip = app_bar_strip_box(apps->geo);
+	bool column = toolbar.width == toolbar_button;
+	if (column != (strip.width == toolbar_button)) {
+		return 0; // one is a column, the other a row: different edges
+	}
+	if (column ? strip.x != toolbar.x : strip.y != toolbar.y) {
+		return 0; // the same orientation on opposite edges
+	}
+	return column ? strip.height : strip.width;
+}
+
+// The strip is centred along its edge, from the placed box: the pair is,
+// where the app bar shares the edge — the toolbar first, then the gap and
+// the apps.
+bool toolbar_centred(const wlr_box &geo) {
+	bool column = geo.width == toolbar_button;
+	int apps = shared_apps_length(geo);
+	int length = column ? geo.height : geo.width;
+	if (apps > 0) {
+		length += strip_separator + apps;
+	}
+	return column ? geo.y + length / 2 == screen_h / 2
+		: geo.x + length / 2 == screen_w / 2;
 }
 
 // Where the settings card's top-left corner belongs for the toolbar as
@@ -8193,6 +8253,21 @@ int run_step() {
 		check(toolbar != nullptr && strip.height / toolbar_button >= 4,
 			std::format("the strip holds its buttons ({} squares)",
 				toolbar != nullptr ? strip.height / toolbar_button : 0));
+		// The app bar: its default left edge, opposite the toolbar's, one
+		// entry per open app (docs/intents/shell/app-bar.md).
+		LayerSurface *apps = app_bar_layer();
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		check(apps != nullptr && app_strip.x == toolbar_margin
+				&& app_strip.width == toolbar_button,
+			std::format("the app bar mapped 8 px from the left edge, its default"
+				" (strip {},{} {}x{})", app_strip.x, app_strip.y,
+				app_strip.width, app_strip.height));
+		check(apps != nullptr && app_strip.height / toolbar_button == apps_open(),
+			std::format("the app bar holds one entry per open app ({} of {})",
+				apps != nullptr ? app_strip.height / toolbar_button : 0, apps_open()));
+		check(apps != nullptr
+				&& app_strip.y + app_strip.height / 2 == screen_h / 2,
+			"the app bar's strip is centred along its own edge");
 		check(set_toolbar_position("left"),
 			"toolbar.position: left written to the scratch shell.json");
 		return 800; // the reload the edit triggers takes its time

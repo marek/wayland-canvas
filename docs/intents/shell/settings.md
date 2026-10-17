@@ -39,15 +39,16 @@ window while it is open.
 | Opening | The gear button in the overview toolbar ([toolbar.md](toolbar.md)); the window is a panel beside it, through the common trigger |
 | Closing | As any panel: a click outside, Escape, a second click of the gear, leaving the overview. Closing while a shortcut is being recorded cancels the recording |
 | Pages | Tabs: Shortcuts, Gestures, Session, Toolbar, Bar, then one per plugin that declares settings with labels, by plugin name; a footer names the two files |
+| Where a setting lives | What two surfaces must agree on — the edges the overview's strips take — is the shell config's own (`toolbar.position`, `appbar.*`) and sits on the Toolbar page; what one plugin alone reads is that plugin's, declared in its manifest and rendered from it |
 
 | Page | Holds | Writes |
 |---|---|---|
 | Shortcuts | The file's errors first, if any. Then every action by group in the bindings table's order, the overview's last: its label and its keys, or None. A click records new keys; reset puts the defaults back; clear leaves it without keys. Then the commands: each one's keys, recorded the same way, and its command line; add and remove | `canvas.conf`: `[shortcuts]`, `[overview]`, `[commands]` |
 | Session | The minutes of idleness before the screen locks, or never ([lock.md](lock.md)); the night light's switch and temperature ([../render/night-light.md](../render/night-light.md)) | `canvas.conf`: `[session]` |
 | Gestures | The three swipe presets, a line each saying what it does; the switch "Pinch to scale a desktop (Super + 2 fingers)"; the switch "Invert scrolling and swipes", which turns the direction of the pointer, the touchpad and the hops around together ([../input/gestures.md](../input/gestures.md)) | `canvas.conf`: `[gestures]` |
-| Toolbar | The edge: right, left, top or bottom | `shell.json`: `toolbar.position` |
+| Toolbar | The toolbar's edge: right, left, top or bottom; then the app bar's switch and its own edge, left by default ([app-bar.md](app-bar.md)) | `shell.json`: `toolbar.position`, `appbar.enabled`, `appbar.position` |
 | Bar | Every bar widget by section, in bar order, with a switch; a widget that hides itself without a source says when it shows | `shell.json`: `bar.hidden` |
-| A plugin's own | Its declared settings, by group in declaration order: a switch, a choice, a number or a text field per entry, with its label and description ([plugins.md](plugins.md)). The app bar's edge and its on/off switch are such a page | `shell.json`: `plugins.<id>.settings` |
+| A plugin's own | Its declared settings, by group in declaration order: a switch, a choice, a number or a text field per entry, with its label and description ([plugins.md](plugins.md)) | `shell.json`: `plugins.<id>.settings` |
 
 ### Recording a shortcut
 
