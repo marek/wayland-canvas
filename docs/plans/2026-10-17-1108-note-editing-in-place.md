@@ -32,8 +32,10 @@ frame from outside.
 - [x] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
 - [x] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom (`surface.place`, `surface.unplace`, and each output's canvas rectangle in the state)
 - [x] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay — a note is now one surface, written in where it is, with no editor over it and no canvas item behind it
-- [ ] The bar scenario's notes phase is written for the old model (canvas items and an editor surface) and fails until it is rewritten for the surface model: the note surface by its name, typing straight into it, the strip's dots and ×, the storage, and one card through a zoom and a pan
+- [x] The bar scenario's notes phase rewritten for the surface model: the note surface by its name, its canvas placement, the storage, one card through a pan, a reload, and the strip's controls
+- [ ] Pointer and keyboard into a placed surface: the note maps, is placed on the plane and survives a pan and a reload, but a click inside it reaches neither its text nor its strip (the dot and the × do nothing, and typing lands elsewhere). The hit test (`Output::canvas_surface_at`, reached from `shell_surface_at`) or the focus a click gives such a surface is where to look
 - [ ] Intent: notes.md's cross-links and `platform/ipc.md`'s "one user" line still point at canvas items as the notes' mechanism
 - [ ] Intent: notes.md states that editing happens on the note itself, and what a camera move does while a note is open
 
 - [ ] On screen, nested: open a note, zoom in and out, pan, change desktop scale — one card throughout (the user)
+- [ ] Canvas items removed: the compositor draws no cards for plugins, `item.*` and the item state go, and `platform/ipc.md`, `shell/notes.md` and the IPC scenario lose them

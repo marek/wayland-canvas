@@ -128,7 +128,7 @@ These decisions close three open boxes of
 - [x] Compositor: the filter on every output that has a gamma ramp, kept in `canvas.conf`; wlr gamma-control; the IPC methods
 - [x] Shell: the switch and the temperature in the brightness panel and the settings window; the toggle action in the bindings table
 - [x] Scenario: the settings, the temperature's multipliers, the toggle key and the gamma-control client, headless — where no output has a ramp to warm
-- [ ] (the user to decide) The in-frame fallback cannot be built as settled: the GLES2 renderer applies no colour transform to an output's pass (`features.output_color_transform` is false), and an overlay drawn at an alpha lightens the frame as much as it warms it, so a nested or headless run shows no night light. The ways out are the Vulkan renderer, which does apply one, or leaving it to the real backend only
+- [x] Settled: the night light needs an output with a gamma ramp of its own; a nested or headless run shows none, and the renderer is left as it is
 - [ ] On screen, TTY: the night light warms the display and a grim shot of it stays in true colours (the user)
 
 ## Session services

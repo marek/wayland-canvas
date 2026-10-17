@@ -35,16 +35,32 @@ PanelWindow {
 	implicitWidth: note !== undefined ? note.width : 1
 	implicitHeight: note !== undefined ? note.height : 1
 
+	// The compositor can only place a surface it knows, and it learns of
+	// one when the client creates it: the ask is repeated until it lands.
+	property bool placed: false
+
 	function place() {
 		if (note === undefined || api === null) {
 			return
 		}
 		api.canvas.place(surfaceName, {
 			x: note.x, y: note.y, width: note.width, height: note.height
+		}, function(result, error) {
+			placed = result === true
 		})
 	}
 
-	Component.onCompleted: Qt.callLater(place)
+	Timer {
+		interval: 150
+		repeat: true
+		running: !root.placed && root.note !== undefined
+		onTriggered: root.place()
+	}
+
+	Component.onCompleted: {
+		Qt.callLater(place)
+		Qt.callLater(function() { text.forceActiveFocus() })
+	}
 	onNoteChanged: Qt.callLater(place)
 
 	Rectangle {
@@ -121,6 +137,8 @@ PanelWindow {
 
 		TextArea {
 			id: text
+			focus: true
+			activeFocusOnPress: true
 			anchors.fill: parent
 			anchors.topMargin: strip.height + 4
 			anchors.margins: 8
@@ -133,6 +151,17 @@ PanelWindow {
 			font.pixelSize: UiTheme.fontBody
 			text: root.note !== undefined ? root.note.text : ""
 			onTextChanged: Notes.typed(root.noteId, text)
+
+			// A click in the card puts the caret in it, as a click in a
+			// window does.
+			MouseArea {
+				anchors.fill: parent
+				acceptedButtons: Qt.LeftButton
+				onClicked: function(mouse) {
+					text.forceActiveFocus()
+					mouse.accepted = false
+				}
+			}
 		}
 	}
 }
