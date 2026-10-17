@@ -8,18 +8,20 @@
 
 ## Requirement
 
-Any installed app opens from the keyboard: tap the Windows logo key
-and start typing. The launcher is Windows 11 in style — a centred dark
-panel with a search field and the app list.
+Any installed app opens from the keyboard: Super+Space and start typing.
+The launcher is Windows 11 in style — a centred dark panel with a search
+field and the app list.
 
 ## Behavior
 
 Opening:
 
-The launcher opens on a lone tap of the logo key and on Super+Space.
-What counts as a lone tap — and that the key never opens it while it
-is acting as a modifier, including nested inside Hyprland — is the
-logo-key rule owned by
+The launcher opens on Super+Space by default — the `launcher` keys of
+[../input/config-file.md](../input/config-file.md), which may hold a lone
+tap of the logo key — and from the bar's logo button; in the overview its
+keys work too. Its own keys close it again. What counts as a lone tap — and
+that the key never fires one while acting as a modifier, including nested
+inside Hyprland — is the logo-key rule owned by
 [../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md).
 
 The list holds the installed apps — every application entry that
@@ -59,10 +61,10 @@ closed before the window appeared.
 
 ## Design considerations
 
-- **The logo key is both the modifier and the menu key.** The tap
-  rule keeps the two uses apart
-  ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md));
-  the launcher is what a lone tap opens.
+- **Super+Space by default, not the tap**: the chord the user's other
+  desktop opens apps with. The tap stays a key the user can give the
+  launcher, and the tap rule keeps it apart from Super as a modifier
+  ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)).
 - **The ranking reads like the user types:** a name prefix is what
   almost every search is, so it outranks everything; the command is
   the last thing anyone remembers, so it ranks last.

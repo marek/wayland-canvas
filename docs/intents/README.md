@@ -31,10 +31,10 @@ their values.
 | `intents/*.md` | What the project is and the words it uses |
 | [workspace/](workspace/) | The repo, building and running |
 | [canvas/](canvas/) | The plane, the desktops, the overview |
-| [input/](input/) | Touchpad gestures, keyboard and pointer |
+| [input/](input/) | Touchpad gestures, keyboard and pointer, the config file |
 | [windows/](windows/) | Title bars and window management |
 | [apps/](apps/) | Applications: the launcher, the desktop entries it finds them by, and the capture UI |
-| [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, sticky notes, light and dark |
+| [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, sticky notes, light and dark, the settings window |
 | [render/](render/) | The renderer, frame policy, hi-dpi |
 | [platform/](platform/) | wlroots, protocols, outputs, the C++ standard, the control IPC |
 | [bugs/](bugs/) | Bug case studies — the one place history is told |
@@ -51,8 +51,9 @@ their values.
 | [canvas/infinite-canvas.md](canvas/infinite-canvas.md) | The plane, per-output cameras, 1:1 vs zoomed, the pixel grid, panning and hops, free areas, the grid |
 | [canvas/desktops.md](canvas/desktops.md) | What a desktop is, membership, frames never move windows, ids, create, abandon, combine, tiling slices |
 | [canvas/overview.md](canvas/overview.md) | Entering and leaving, fit, the target model, hop semantics, the overview UI: tabs, help line, shelf, hints, pointer and key actions |
-| [input/gestures.md](input/gestures.md) | The touchpad gesture table (normal vs overview), finger counts, hops going where the fingers point, follow-the-fingers transitions, commit/spring-back, forwarding to clients, sloppy pinches treated as swipes |
-| [input/keyboard-and-pointer.md](input/keyboard-and-pointer.md) | Bindings table, Super tap, why every canvas shortcut includes Super, pointer focus, drags, scroll, touchpad settings, nested-mode notes |
+| [input/gestures.md](input/gestures.md) | The touchpad gesture table (normal vs overview), the swipe presets and the pinch switch, finger counts, hops going where the fingers point, follow-the-fingers transitions, commit/spring-back, forwarding to clients, sloppy pinches treated as swipes |
+| [input/keyboard-and-pointer.md](input/keyboard-and-pointer.md) | Bindings table (every action's name and default keys), Super tap, why every default canvas shortcut includes Super, pointer focus, drags, scroll, touchpad settings, nested-mode notes |
+| [input/config-file.md](input/config-file.md) | `canvas.conf`: place, first run, sections, chords, resolution against the defaults, reload, errors, edits |
 | [windows/title-bars.md](windows/title-bars.md) | Server-side title bars ("menu bars"): the Windows 11 look, buttons, states, negotiation policy, resize zones |
 | [windows/window-management.md](windows/window-management.md) | Placement, focus, stacking, maximize area, fullscreen, minimize/restore paths, the tiling contract, resize anchoring, close |
 | [apps/launcher.md](apps/launcher.md) | Opening, layout, search ranking, keys, pointer, launching, Terminal=true |
@@ -60,7 +61,8 @@ their values.
 | [apps/desktop-entries.md](apps/desktop-entries.md) | The standard XDG entry as the way to add items, precedence, overrides, TryExec, Exec quoting, icon theme lookup order |
 | [shell/bar.md](shell/bar.md) | The top bar: look, sections, widgets, click actions, panels, autostart |
 | [shell/plugins.md](shell/plugins.md) | What a plugin is, where plugins are found, the config, the common trigger, the API, the UI kit, the built-in plugins |
-| [shell/toolbar.md](shell/toolbar.md) | The overview toolbar: place, when it shows, buttons, actions, panels and submenus |
+| [shell/toolbar.md](shell/toolbar.md) | The overview toolbar: its edge, when it shows, buttons, actions, panels and submenus |
+| [shell/settings.md](shell/settings.md) | The settings window: the gear, its pages, recording a shortcut, what each page writes |
 | [shell/notes.md](shell/notes.md) | Sticky notes: creating from the toolbar, colours, look, editing, moving, deleting, keeping |
 | [shell/theme.md](shell/theme.md) | The light/dark switch, the two palettes, what follows the mode, keeping it |
 | [render/rendering.md](render/rendering.md) | The own renderer and why, repaint policy, frame callbacks, presentation, enter/leave policy, needs_frame |
@@ -83,6 +85,9 @@ their values.
 - **Changing gestures or the canvas**: canvas/infinite-canvas →
   canvas/desktops → canvas/overview → input/gestures →
   input/keyboard-and-pointer.
+- **Changing shortcuts, gestures or the settings window**:
+  input/config-file → input/keyboard-and-pointer → input/gestures →
+  shell/settings → shell/toolbar.
 - **Changing windows or title bars**: windows/title-bars →
   windows/window-management → render/rendering.
 - **Changing the launcher**: apps/launcher → apps/desktop-entries.
