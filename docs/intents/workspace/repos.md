@@ -36,6 +36,7 @@ user asking for that push at that moment.
 | `build/`, `.venv/` | No (ignored) |
 | Scratch files | No — `tmp/` at the repo root, ignored; never `/tmp` and never a literal path in a tool (the `scratch-space` skill) |
 | `flake.nix`, `flake.lock` (Nix build and dev shell) | Yes |
+| `.github/workflows/` — the tag-triggered package build ([packaging.md](packaging.md#release-builds)) | Yes |
 
 ### Licence
 

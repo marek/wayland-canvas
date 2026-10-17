@@ -19,20 +19,20 @@ A C++26 compiler — LLVM's clang, selected by
    (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat,
    xkbcommon, pixman, libdisplay-info, hwdata); cairo and pango
    (decorations, launcher); librsvg and glib (icons); json-glib
-   (the control socket). Optional: `qs` (Quickshell) for the autostarted
+   (the control socket); sqlite3 (the usage store the bar reads). Optional: `qs` (Quickshell) for the autostarted
    top bar ([../shell/bar.md](../shell/bar.md)).
 
 ### Build
 
 | Subject | Rule |
 |---|---|
-| Commands | `meson setup build --native-file toolchain/llvm.ini`, `ninja -C build`; `meson.build` stops with that command when another compiler is configured |
+| Commands | `tools/build.sh` is the one command a clean checkout needs: it configures through the native file (re-configuring a build dir left by another compiler), falls back to the repo's `.venv` for meson and ninja, and compiles. By hand it is `meson setup build --native-file toolchain/llvm.ini` and `ninja -C build`; `meson.build` stops with that command when another compiler is configured |
 | Compiler | `toolchain/llvm.ini` selects clang for the compositor and the wlroots subproject: `-std=c++26 -fno-exceptions -fno-rtti -Wall -Wextra -Wpedantic`; libstdc++ here, libc++ where installed; the system linker (`lld` once installed, set in the native file) |
 | venv fallback | when the system has no meson and ninja, they are pip-installed into a `.venv` at the repo root (git-ignored) and run from there |
 | wlroots | the system `wlroots-0.20` when installed; otherwise meson fetches wlroots 0.20.2 per `subprojects/wlroots.wrap` into `subprojects/wlroots/` (ignored) and links it statically with only what this compositor needs — the GLES2 renderer, the DRM and libinput backends, session on, Xwayland and libliftoff off ([../platform/wlroots.md](../platform/wlroots.md)) |
 | Protocol header | the layer-shell protocol header is generated at build time from `protocols/wlr-layer-shell-unstable-v1.xml` |
 | Unit tests | `meson test -C build`; the scenario suite and everything at once run through `tools/check.sh`, which configures through the native file and re-creates a build dir that was configured with GCC |
-| Packages | `ninja -C build package-arch` / `package-deb` produce a `.pkg.tar.zst` / `.deb` under `build/packages/` ([packaging.md](packaging.md) owns the formats and the guarantees) |
+| Packages | `tools/package.sh` builds both formats; `ninja -C build packages` / `package-arch` / `package-deb` are the same thing through meson. Artifacts land in `dist/` at the repo root (ignored) ([packaging.md](packaging.md) owns the formats and the guarantees) |
 
 ### Running
 

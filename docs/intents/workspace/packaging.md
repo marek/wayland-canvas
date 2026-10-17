@@ -17,15 +17,42 @@ restored before the session file disappears.
 
 | Subject | Rule |
 |---|---|
-| Contents | the `wayland-canvas` binary, `wayland-canvas-session` in `bin`, `wayland-canvas.desktop` in `share/wayland-sessions`, `wayland-canvas-portals.conf` in `share/xdg-desktop-portal`, the top bar's Quickshell config in `share/wayland-canvas/shell`, the licence (`/usr/share/licenses` on Arch, `/usr/share/doc/wayland-canvas/copyright` on Debian) |
-| Build targets | `ninja -C build package-arch`, `ninja -C build package-deb`; artifacts under `build/packages/` |
+| Contents | the `wayland-canvas` binary, `wayland-canvas-agent-usage` and `wayland-canvas-session` in `bin`, `wayland-canvas.desktop` in `share/wayland-sessions`, `wayland-canvas-portals.conf` in `share/xdg-desktop-portal`, the top bar's Quickshell config in `share/wayland-canvas/shell` and its plugins in `share/wayland-canvas/plugins`, the licence (`/usr/share/licenses` on Arch, `/usr/share/doc/wayland-canvas/copyright` on Debian) |
+| Build commands | `tools/package.sh` builds both formats, `--arch` / `--deb` one of them; `ninja -C build packages`, `package-arch`, `package-deb` call the same scripts. Artifacts land in `dist/` at the repo root, whoever built them |
 | Arch build | `makepkg` over a tarball of the local source tree (the wlroots subproject included, `.git` stripped), built by the same meson native file as a normal build, installed with `--skip-subprojects=wlroots` because wlroots is linked in statically |
+| Runtime dependencies | every installed binary decides them, not just the compositor: the Arch `depends` names sqlite because the agent-usage helper links it, and `dpkg-shlibdeps` is run over each ELF under `usr/bin` |
 | Debian build | inside a rootless Debian root filesystem downloaded from the official image registry, cached under `tmp/dl/`, entered with user namespaces (`unshare --map-root-user --map-auto`); build dependencies installed there by apt; `Depends` computed by `dpkg-shlibdeps` from the built binary |
 | Debian release | the one whose toolchain builds the C++26 library features the compositor needs (`std::function_ref`, `std::inplace_vector`, `std::print`); the in-root build probes exactly those three features before compiling, so an unsuitable `--dist` override fails early |
 | Prompts | never from the packages themselves: pacman forbids prompts in install scripts, and the Debian maintainer scripts stay non-interactive. `tools/install.sh` is the one flow that asks, for both formats |
 | Removal hooks | Arch `pre_remove` and Debian `prerm` run `wayland-canvas-session restore`; Debian `postrm purge` removes `/var/lib/wayland-canvas` |
+| Tag builds | a `v<version>` tag — or a manual run — builds both formats on GitHub Actions and drafts a release from them (below) |
 | Top bar runtime | optional: quickshell is `optdepends` on Arch and `Recommends` on Debian (in sid) — the compositor starts the bar when `qs` is on PATH (`-B` turns it off), and the package is complete without it ([../shell/bar.md](../shell/bar.md)) |
 | Screen sharing runtime | optional: xdg-desktop-portal-wlr is `optdepends` on Arch and `Recommends` on Debian — apps share screens through it ([../platform/protocols.md](../platform/protocols.md#screen-sharing)), and the package is complete without it |
+
+## Release builds
+
+A pushed tag named `v<version>` builds the release: one job per format,
+each in its distribution's own container (`archlinux:base-devel`,
+`debian:sid`), calling the same `packaging/` scripts the local flow calls.
+The container *is* the environment `tools/package-arch.sh` and
+`tools/package-deb.sh` reproduce on a contributor's machine, so neither
+makepkg's source tarball nor the rootless root filesystem is rebuilt there:
+`tools/package.sh --here` skips both: makepkg runs in place as the image's
+`nobody` (it refuses to run as root, and no account is ever created), and
+`packaging/debian/build-deb.sh` runs in the container itself.
+`--here` needs root for apt and says so when it does not have it.
+
+| Subject | Rule |
+|---|---|
+| Trigger | a pushed `v*` tag, or a manual run from the Actions tab; nothing on a push to a branch |
+| Tag and version agree | `tools/ci-check-tag.sh` fails the run before anything is built when the tag is not `v` plus the `meson.build` version |
+| wlroots | `tools/fetch-wlroots.sh` checks the wrap's revision out before the source tarball is made, so the package build itself needs no network for it |
+| Artifacts | the two packages only — `.pkg.tar.zst` and `.deb`, collected from `dist/`. No source archive: the packages are the release |
+| Release | a tag drafts a GitHub release carrying both packages; publishing it stays a human step |
+
+There is no CI beyond this: correctness is proven by `tools/check.sh` run
+locally ([build-and-run.md](build-and-run.md)), and the workflow exists to
+build and publish artifacts, not to gate commits.
 
 ## The session file
 

@@ -12,7 +12,8 @@ with makepkg) and for Debian/Ubuntu (`.deb`, built inside a rootless Debian
 root filesystem):
 
 ```sh
-ninja -C build package-arch   # or package-deb; artifacts in build/packages/
+tools/package.sh              # both formats, artifacts in dist/ (--arch, --deb
+                              # build just one; ninja -C build packages too)
 tools/install.sh              # builds the package for your distro, installs it
                               # with the system package manager, and asks
                               # whether to make wayland-canvas the default
@@ -26,18 +27,25 @@ for byte. SDDM (autologin and the remembered last session), GDM
 changes nothing and says how to start the compositor. Removing the package
 directly (`pacman -R`, `apt remove`) restores the default as well.
 
+Pushing a `v<version>` tag builds both packages on GitHub Actions — the same
+`tools/package.sh` run inside an `archlinux` and a `debian:sid` container —
+and drafts a release from them.
+
 ## Build
 
 Needs clang (LLVM) — the compositor is C++26 and the wlroots subproject builds
 with it too — meson ≥ 1.3, ninja, and the wlroots 0.20 dependencies
 (wayland, wayland-protocols, libdrm, gbm/EGL/GLES2, libinput, libseat, xkbcommon,
-pixman, libdisplay-info, hwdata) plus cairo, pango, librsvg and glib.
+pixman, libdisplay-info, hwdata) plus cairo, pango, librsvg, glib, json-glib and
+sqlite3.
 
 ```sh
-meson setup build --native-file toolchain/llvm.ini
-ninja -C build
+tools/build.sh             # configures with toolchain/llvm.ini, then compiles
 tools/check.sh             # builds, then the unit and headless scenario suites
 ```
+
+By hand that is `meson setup build --native-file toolchain/llvm.ini` and
+`ninja -C build`.
 
 `meson.build` stops with that same setup command if a build dir is configured
 with another compiler.
@@ -296,7 +304,7 @@ beside it.
 | `shell/` | The Quickshell shell: the plugin host and the `WaylandCanvas.Ui` kit its plugins draw with |
 | `plugins/` | The built-in plugins (`canvas.bar`, the indicators with their panels, the `canvas.theme` light/dark switch, …) the host loads beside the shell |
 | `tests/` | Unit tests and headless scenario sources (`tests/scenarios/`) |
-| `tools/` | `check.sh` (build + test), `check-plans.sh`, hooks |
+| `tools/` | `build.sh` (build), `check.sh` (build + test), `package.sh` (both packages), `install.sh`, `check-plans.sh`, hooks |
 | `scripts/` | `agent-setup.sh` (links skills, roles and hooks into `.claude/`) |
 | `protocols/` | Protocol XML used beyond wlroots' set |
 | `docs/intents/` | Normative design specs (the intent corpus) |
