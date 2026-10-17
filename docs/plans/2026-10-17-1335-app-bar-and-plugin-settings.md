@@ -75,7 +75,7 @@ touched.
 
 ### Settings a plugin registers
 
-- [ ] Intent: the manifest's `settings` declaration gains per-key
+- [x] Intent: the manifest's `settings` declaration gains per-key
       metadata (type, label, description, group, choices, range) in
       [shell/plugins.md](../intents/shell/plugins.md), and
       [shell/settings.md](../intents/shell/settings.md) states how the
@@ -90,7 +90,7 @@ touched.
 
 ### Windows the shell can see and go to
 
-- [ ] Intent: the open windows in the state and their event, and the
+- [x] Intent: the open windows in the state and their event, and the
       method that goes to one, in
       [platform/ipc.md](../intents/platform/ipc.md); the go-to-a-window
       path in
@@ -108,7 +108,7 @@ touched.
 
 ### The app bar
 
-- [ ] Intent: `docs/intents/shell/app-bar.md` — the surface, its
+- [x] Intent: `docs/intents/shell/app-bar.md` — the surface, its
       edges, the shared edge and separator, the entries and their
       order, what a click does, and the off switch; cross-linked from
       [shell/toolbar.md](../intents/shell/toolbar.md),
