@@ -47,6 +47,7 @@ uint32_t t = 90000;
 pid_t grim_pid = -1;
 std::string shot_dir;
 std::string xdg;
+std::string bus_dir; // the private buses' sockets, kept short (see below)
 std::string pam_dir; // the scratch PAM service directory
 std::string marker_dir; // what the notification actions write into
 wlr_pointer ptr{};
@@ -147,7 +148,10 @@ void reap(pid_t pid) {
 // A dbus-daemon of the run's own: everything on it is allowed, it exists
 // for this run only, and no machine service is reachable through it.
 bool start_private_bus(PrivateBus &bus, const char *type, const char *name) {
-	std::string dir = shot_dir + "/bus";
+	// A unix socket path is capped near 108 bytes, which a scenario folder
+	// under a worktree already spends: the buses live in the shortest
+	// scratch path there is.
+	std::string dir = bus_dir;
 	mkdir_p(dir);
 	std::string socket = std::format("{}/{}", dir, name);
 	std::string conf = socket + ".conf";
@@ -400,19 +404,29 @@ int run_step() {
 		return 300;
 	}
 	case 9: { // the history kept them: the bell's panel lists them
-		click(screen_w - 150, 13); // somewhere along the bar's right section
-		return 800;
+		// Which slot of the bar's right section the bell took depends on
+		// what this machine's own widgets (battery, bluetooth) offer, so
+		// the strip is walked from the right until the history panel is
+		// the one that opens. A panel another widget opens is closed again
+		// before the next try, and the theme switch's own slot is left
+		// alone.
+		if (layer_named("wayland-canvas-panel-history") != nullptr) {
+			return 300;
+		}
+		if (retries > 28) {
+			check(false, "the bell was not found along the bar");
+			return 300;
+		}
+		if (layer_named("wayland-canvas-panel-history") == nullptr) {
+			key(KEY_ESC, true);
+			key(KEY_ESC, false);
+		}
+		click(screen_w - 40 - 9 * retries, 13);
+		retries++;
+		return -1000;
 	}
 	case 10: {
-		// The bell's exact place is read from the shell's own surfaces: the
-		// panel is what proves the click found it, so a miss is retried
-		// along the strip rather than assumed.
 		const LayerSurface *panel = layer_named("wayland-canvas-panel-history");
-		if (panel == nullptr && retries < 12) {
-			click(screen_w - 150 + 14 * (retries % 12), 13);
-			retries++;
-			return -400;
-		}
 		check(panel != nullptr, "the bell opens the history panel");
 		shot("history");
 		return 300;
@@ -526,6 +540,7 @@ int main() {
 	const char *env = std::getenv("CANVAS_TMP");
 	std::string root = env && *env ? env : "tmp";
 	shot_dir = std::format("{}/scenarios/session", root);
+	bus_dir = std::format("{}/sb", root);
 	std::error_code ec;
 	std::filesystem::remove_all(shot_dir, ec);
 	mkdir_p(shot_dir);
@@ -537,8 +552,8 @@ int main() {
 	// Isolation first: without both private buses nothing of the shell may
 	// start, so the machine's notification server and polkit agent are
 	// never reached.
-	if (!start_private_bus(private_system, "system", "system")
-			|| !start_private_bus(private_session, "session", "session")) {
+	if (!start_private_bus(private_system, "system", "y")
+			|| !start_private_bus(private_session, "session", "n")) {
 		std::println("FAILED: the private buses did not start; the shell did not run");
 		stop_isolation();
 		return 2;

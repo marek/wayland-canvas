@@ -4,14 +4,15 @@ import "."
 
 // The bell: a plain bell while nothing waits, a ringing one with the
 // history's count beside it, a struck-through one while popups are
-// silenced. A click opens the history panel the manifest names.
+// silenced. A click opens the history panel the manifest names, so the
+// bar's own `api` and `panel` must reach BarButton untouched.
 BarButton {
-	property var api: null
+	readonly property int waiting: Notifications.history.length
 
 	Component.onCompleted: Notifications.init(api)
 
-	icon: true
+	// A count needs room the fixed icon slot does not have.
+	icon: waiting === 0 || Notifications.silent
 	text: Notifications.silent ? "\u{f009b}"
-		: (Notifications.history.length > 0
-			? "\u{f009a} " + Notifications.history.length : "\u{f009a}")
+		: (waiting > 0 ? "\u{f009a} " + waiting : "\u{f009a}")
 }
