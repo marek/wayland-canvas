@@ -110,14 +110,17 @@ Every component a plugin contributes receives `api`:
 | `api.actions` | `run(<action name>, args)` |
 | `api.theme` | `mode` (`light` or `dark`), `colors` for that mode, `setMode(mode)` ([theme.md](theme.md)) |
 | `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops, canvas items), `call(method, params, callback)` with its result or error, and its events ([../platform/ipc.md](../platform/ipc.md)) |
+| `api.shell` | The shell config, live: `config`, `configPath`; every bar widget, hidden ones flagged (`barWidgets`: name, plugin name, section, order, hidden), `barHidden(name)`, `setBarHidden(name, hidden)`; `toolbarPosition`, `setToolbarPosition(edge)`. The host writes `shell.json` and applies the change at once, without a reload ([settings.md](settings.md)) |
 
 A surface component is also handed the registry of everything loaded — the
 ordered bar widgets and toolbar buttons with their components — because a
-surface (the bar, the toolbar) hosts other plugins' contributions.
+surface (the bar, the toolbar) hosts other plugins' contributions; the bar
+follows `api.shell.barWidgets`, so a widget hidden or shown applies at once.
 
 Plugins draw with the shell's UI kit, a QML module they import as
 `WaylandCanvas.Ui`: the bar button, the panel card and its rows, sliders,
-switches, text and fields, all coloured from `api.theme`.
+switches, tabs, choice rows, key chips, text and fields, all coloured from
+`api.theme`.
 
 ### Built-in plugins
 
