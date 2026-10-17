@@ -117,6 +117,17 @@ public:
 	ImageCapture image_capture;
 	CaptureUi capture_ui;
 
+	// canvas.conf (core/settings.h): the file, its text as last read, the
+	// resolved settings, and the lines it ignored. `load_conf` applies them
+	// to the bindings and the gestures; `write_conf` writes a new text
+	// atomically and applies it at once.
+	std::string conf_path;
+	std::string conf_text;
+	settings::Resolved conf;
+	std::vector<settings::Error> conf_errors;
+	void load_conf(bool first);
+	bool write_conf(const std::string &text);
+
 private:
 	// output.cpp
 	void init_outputs();
@@ -146,6 +157,11 @@ private:
 	static int handle_terminate_signal(int signal, void *data);
 	void start_bar();
 	void handle_new_inhibitor(wlr_idle_inhibitor_v1 *inhibitor);
+	// A change of canvas.conf: read the inotify events of its directory,
+	// re-read the file when it was saved or deleted.
+	static int handle_conf_change(int fd, uint32_t mask, void *data);
+	int conf_inotify_fd_ = -1;
+	EventSourcePtr conf_inotify_source_;
 	std::vector<std::unique_ptr<SurfaceTracker>> trackers_;
 	std::vector<std::unique_ptr<Inhibitor>> inhibitors_;
 	Listener new_surface_, request_activate_, new_inhibitor_;
