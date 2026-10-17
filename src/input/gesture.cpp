@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -25,6 +26,24 @@ bool super_held(Server &server) {
 		&& (wlr_keyboard_get_modifiers(keyboard) & WLR_MODIFIER_LOGO) != 0;
 }
 
+// The finger counts a preset binds: `hop` hops in either mode, `overview`
+// opens the overview and steers it. The `off` preset binds none.
+struct FingerCounts {
+	uint32_t hop = 0, overview = 0;
+};
+
+FingerCounts fingers_of(const GestureOptions &options) {
+	switch (options.swipes) {
+	case SwipePreset::three_finger_hops:
+		return {.hop = 3, .overview = 4};
+	case SwipePreset::four_finger_hops:
+		return {.hop = 4, .overview = 3};
+	case SwipePreset::off:
+		return {};
+	}
+	return {};
+}
+
 // The output a gesture state acts on, or null for the states without one.
 Output *state_output(const Gestures::State &state) {
 	return std::visit(overloaded{
@@ -45,6 +64,14 @@ Output *state_output(const Gestures::State &state) {
 
 Gestures::Gestures(Server &server)
 	: server_(server) {
+}
+
+void Gestures::set_options(const GestureOptions &options) {
+	options_ = options;
+}
+
+const GestureOptions &Gestures::options() const {
+	return options_;
 }
 
 std::optional<DesktopId> Gestures::desktop_under(Output &out) {
@@ -107,26 +134,29 @@ void Gestures::decide(Pending &pending) {
 	double ax = pending.ax, ay = pending.ay;
 	bool vertical = std::fabs(ay) > std::fabs(ax);
 
-	// A 3-finger swipe hops in either mode.
-	if (fingers == 3) {
+	// The preset the gesture began with decides what the fingers mean.
+	FingerCounts counts = fingers_of(pending.options);
+
+	// The hop fingers hop in either mode.
+	if (fingers == counts.hop) {
 		state_ = Hop{o, ax, ay, false};
 		return;
 	}
-	// The rest is 4 fingers: in the normal view only a swipe up, the zoom
-	// out into the overview.
+	// The rest is the overview fingers: in the normal view only a swipe
+	// up, the zoom out into the overview.
 	bool overview = o->overview.active();
-	if (!overview && fingers == 4 && vertical && ay < 0) {
+	if (!overview && fingers == counts.overview && vertical && ay < 0) {
 		Camera far = o->overview.prepare();
 		state_ = ZoomOut{o, o->overview.home(), far, ay, 0, 0};
 		return;
 	}
-	if (!overview || fingers != 4) {
+	if (!overview || fingers != counts.overview) {
 		state_ = Ignored{};
 		return;
 	}
 
-	// Overview, 4 fingers: down zooms into the target, up zooms further
-	// out, sideways abandons a desktop.
+	// Overview, the overview fingers: down zooms into the target, up zooms
+	// further out, sideways abandons a desktop.
 	if (vertical && ay > 0) {
 		Camera near = o->overview.target_camera();
 		state_ = ZoomIn{o, near, o->camera.current(), ay, 0, 0};
@@ -152,8 +182,10 @@ void Gestures::swipe_begin(uint32_t time, uint32_t fingers) {
 		return;
 	}
 	last_time_ = time;
-	if (fingers == 3 || fingers == 4) {
-		state_ = Pending{out, fingers, false, 0, 0};
+	// The options a gesture begins with are the ones it keeps.
+	FingerCounts counts = fingers_of(options_);
+	if (fingers == counts.hop || fingers == counts.overview) {
+		state_ = Pending{out, fingers, false, 0, 0, options_};
 		return;
 	}
 	if (out->interactive()) {
@@ -320,7 +352,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 	}
 	last_time_ = time;
 
-	if (fingers == 2 && super_held(server_)) {
+	if (fingers == 2 && super_held(server_) && options_.pinch_scale) {
 		// Super decides a 2-finger pinch at its start: it scales a
 		// desktop and never reaches a client. A free view — and, in the
 		// overview, a free-spot target — is pinned as a desktop first.
@@ -360,32 +392,40 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 	}
 
 	if (out->overview.active()) {
-		switch (fingers) {
-		case 2:
+		if (fingers == 2) {
 			state_ = OverviewZoom{out, 1};
 			return;
-		case 3:
+		}
+		FingerCounts counts = fingers_of(options_);
+		if (counts.hop == 0) {
+			// No preset: the compositor owns every gesture and binds none.
+			state_ = Ignored{};
+			return;
+		}
+		if (fingers == counts.hop) {
 			// A null target is allowed: tile then acts on the target box.
 			state_ = Pinch{out, desktop_under(*out), std::nullopt, 1, false};
 			return;
-		default:
-			if (fingers >= 4) {
-				// Travel drives the 4-finger swipe logic.
-				state_ = Pending{out, fingers, true, 0, 0};
-			} else {
-				state_ = Ignored{};
-			}
+		}
+		if (fingers == counts.overview
+				|| fingers > std::max(counts.hop, counts.overview)) {
+			// Travel drives the overview-finger swipe logic.
+			state_ = Pending{out, fingers, true, 0, 0, options_};
 			return;
 		}
-	}
-
-	// Normal mode: sloppy 3/4-finger swipes arrive as pinches; treat the
-	// travel as a swipe so they still hop / open the overview.
-	if (fingers >= 3) {
-		state_ = Pending{out, fingers, true, 0, 0};
+		state_ = Ignored{};
 		return;
 	}
-	if (fingers == 2 && out->interactive()) {
+
+	// Normal mode: a sloppy bound-finger swipe arrives as a pinch; treat
+	// the travel as a swipe so it still hops / opens the overview. With no
+	// preset the pinch is the client's, like a 2-finger one.
+	FingerCounts counts = fingers_of(options_);
+	if (fingers >= 3 && counts.hop != 0) {
+		state_ = Pending{out, fingers, true, 0, 0, options_};
+		return;
+	}
+	if (fingers >= 2 && out->interactive()) {
 		state_ = Forwarded{true};
 		wlr_pointer_gestures_v1_send_pinch_begin(server_.pointer_gestures,
 			server_.seat, time, fingers);

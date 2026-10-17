@@ -594,26 +594,25 @@ void draw_shelf(const RenderCtx &ctx) {
 
 // ----------------------------------------------------- help line/hint
 
-constexpr char help_text[] =
-	"3 fingers: jump to desktop  ·  4 down: go there  ·  4 sideways: abandon  ·  "
-	"3-finger pinch out / in: tile / combine  ·  drag frames over windows  ·  "
-	"right-click: new desktop  ·  Esc: back";
-
 HelpSlot &help_texture(const RenderCtx &ctx) {
+	const GestureOptions &options = ctx.output->server.gestures.options();
 	for (HelpSlot &slot : ctx.help_cache) {
-		if (slot.texture != nullptr && slot.scale == ctx.scale) {
+		if (slot.texture != nullptr && slot.scale == ctx.scale
+				&& slot.preset == options.swipes) {
 			return slot;
 		}
 	}
 	HelpSlot &slot = ctx.help_cache[(*ctx.help_clock)++ % ctx.help_cache.size()];
 	slot.texture.reset();
-	TextTexture t = draw_text(ctx.output->server.renderer, help_text, config::ui_font,
+	TextTexture t = draw_text(ctx.output->server.renderer,
+		overview_help_text(options), config::ui_font,
 		ctx.output->server.theme.colors().panel_text,
 		ctx.output->server.theme.colors().panel, ctx.scale, 10, 5);
 	slot.texture = std::move(t.texture);
 	slot.w = t.width;
 	slot.h = t.height;
 	slot.scale = ctx.scale;
+	slot.preset = options.swipes;
 	return slot;
 }
 
@@ -735,6 +734,24 @@ void send_surface_feedback(const RenderCtx &ctx) {
 }
 
 } // namespace
+
+// The overview's help line, one variant per swipe preset: the preset's
+// gestures and the pointer and key hints, or only those under `off`.
+const char *overview_help_text(const GestureOptions &options) {
+	switch (options.swipes) {
+	case SwipePreset::three_finger_hops:
+		return "3 fingers: jump to desktop  ·  4 down: go there  ·  "
+			"4 sideways: abandon  ·  3-finger pinch out / in: tile / combine  ·  "
+			"drag frames over windows  ·  right-click: new desktop  ·  Esc: back";
+	case SwipePreset::four_finger_hops:
+		return "4 fingers: jump to desktop  ·  3 down: go there  ·  "
+			"3 sideways: abandon  ·  4-finger pinch out / in: tile / combine  ·  "
+			"drag frames over windows  ·  right-click: new desktop  ·  Esc: back";
+	case SwipePreset::off:
+		return "drag frames over windows  ·  right-click: new desktop  ·  Esc: back";
+	}
+	return "";
+}
 
 // ------------------------------------------------------------- public
 
