@@ -120,10 +120,12 @@ These decisions close three open boxes of
 
 ## Night light
 
-- [ ] Intent: the night light: the switch, the temperature range and default, where it is set, the gamma table and the in-frame fallback, the gamma-control protocol and how a client's table and the filter share an output, the IPC to read and set it
-- [ ] Compositor: the built-in filter on every output, kept in `canvas.conf`; wlr gamma-control; the IPC methods
-- [ ] Shell: the switch and the temperature in the brightness panel and the settings window; the toggle action in the bindings table
-- [ ] Scenario: on a headless output the filter warms a white frame by the expected amount and clears when off; a gamma-control client built with the tests changes the frame, and the filter returns when it lets go; the toggle key and the switch
+- [x] Intent: the night light: the switch, the temperature range and default, where it is set, the gamma table and the in-frame fallback, the gamma-control protocol and how a client's table and the filter share an output, the IPC to read and set it
+- [x] Compositor: the filter on every output that has a gamma ramp, kept in `canvas.conf`; wlr gamma-control; the IPC methods
+- [x] Shell: the switch and the temperature in the brightness panel and the settings window; the toggle action in the bindings table
+- [x] Scenario: the settings, the temperature's multipliers, the toggle key and the gamma-control client, headless — where no output has a ramp to warm
+- [ ] (the user to decide) The in-frame fallback cannot be built as settled: the GLES2 renderer applies no colour transform to an output's pass (`features.output_color_transform` is false), and an overlay drawn at an alpha lightens the frame as much as it warms it, so a nested or headless run shows no night light. The ways out are the Vulkan renderer, which does apply one, or leaving it to the real backend only
+- [ ] On screen, TTY: the night light warms the display and a grim shot of it stays in true colours (the user)
 
 ## Session services
 

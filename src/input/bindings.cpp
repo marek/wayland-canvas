@@ -226,6 +226,17 @@ void act_lock(Server &server, Output *, KeyArg) {
 	server.lock.request("the lock shortcut");
 }
 
+// The night light on or off, written into canvas.conf so the choice holds
+// across a restart and the settings window shows it.
+void act_night_light(Server &server, Output *, KeyArg) {
+	settings::File file{server.conf_text};
+	std::expected<settings::Edit, std::string> edit =
+		file.set_session("night-light", server.conf.night_light ? "off" : "on");
+	if (!edit.has_value() || !server.write_conf(edit->text)) {
+		wlr_log(WLR_ERROR, "the night light could not be written to canvas.conf");
+	}
+}
+
 // A shortcut whose work belongs to a shell plugin: the compositor only
 // runs the named action, as `action.run` does.
 void act_shell(Server &server, Output *, KeyArg arg) {
@@ -412,6 +423,7 @@ constexpr std::array runners = {
 	Runner{settings::Scope::global, "record-stop", act_record_stop, 0},
 	Runner{settings::Scope::global, "record-stop-copy", act_record_stop, 1},
 	Runner{settings::Scope::global, "lock", act_lock, 0},
+	Runner{settings::Scope::global, "night-light", act_night_light, 0},
 	Runner{settings::Scope::global, "notifications-dismiss", act_shell,
 		config::notification_dismiss_action},
 	Runner{settings::Scope::global, "notifications-dismiss-all", act_shell,

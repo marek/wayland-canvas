@@ -402,7 +402,7 @@ Server::Server()
 	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this),
 	image_capture(*this),
-	capture_ui(*this), lock(*this), logind(*this) {
+	capture_ui(*this), lock(*this), night_light(*this), logind(*this) {
 }
 
 Server::~Server() {
@@ -418,6 +418,7 @@ Server::~Server() {
 		wl_display_destroy_clients(display);
 	}
 	ipc.finish();
+	night_light.finish();
 	logind.finish();
 	lock.finish();
 	capture_ui.finish();
@@ -540,6 +541,7 @@ bool Server::init(const Options &options) {
 	input.init();
 	image_capture.init();
 	lock.init();
+	night_light.init();
 	return true;
 }
 
@@ -657,6 +659,7 @@ void Server::load_conf(bool first) {
 	bindings.apply(conf);
 	gestures.set_options(gesture_options(conf));
 	lock.settings_changed();
+	night_light.settings_changed();
 	if (!conf_errors.empty()) {
 		for (const settings::Error &error : conf_errors) {
 			wlr_log(WLR_ERROR, "canvas.conf line %d: %s", error.line,

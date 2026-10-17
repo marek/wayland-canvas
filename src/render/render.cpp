@@ -1130,6 +1130,10 @@ void Painter::render(Output &output) {
 
 	wlr_output_state state;
 	wlr_output_state_init(&state);
+	// The night light rides the output's own gamma ramp where it can hold
+	// it, so a capture stays in true colours; where it cannot, the frame is
+	// rendered through the same transform instead.
+	server_.night_light.apply_to_output(output, state);
 	wlr_render_pass *pass = wlr_output_begin_render_pass(wlr_output, &state, nullptr);
 	if (pass == nullptr) {
 		wlr_output_state_finish(&state);

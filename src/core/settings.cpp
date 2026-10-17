@@ -256,6 +256,8 @@ const std::vector<ActionDef> &registry() {
 		add(Scope::global, "Session", "lock", "Lock the screen", {"Super+L"});
 		add(Scope::global, "Session", "notifications-dismiss",
 			"Dismiss the newest notification", {"Super+N"});
+		add(Scope::global, "Session", "night-light", "Night light on or off",
+			{"Super+Ctrl+N"});
 		add(Scope::global, "Session", "notifications-dismiss-all",
 			"Dismiss every notification", {"Super+Shift+N"});
 		add(Scope::global, "Session", "quit", "Quit wayland-canvas",

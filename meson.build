@@ -86,6 +86,7 @@ client_protocols = []
 foreach xml : [
 	wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
 	wl_protocol_dir / 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml',
+	'protocols/wlr-gamma-control-unstable-v1.xml',
 ]
 	client_protocols += custom_target(
 		xml.underscorify() + '_client_h',
@@ -183,6 +184,7 @@ core_lib = static_library(
 		'src/platform/output.cpp',
 		'src/render/capture.cpp',
 		'src/render/draw.cpp',
+		'src/render/night_light.cpp',
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
 		'src/windows/launches.cpp',
@@ -357,7 +359,18 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [wayland_client],
 	)
 	scenario_env.set('CANVAS_LOCK_CLIENT', lock_client.full_path())
-	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock']
+	# A gamma-control client of the scenarios' own: no wlsunset or
+	# gammastep is needed to prove the protocol.
+	gamma_client = executable(
+		'gamma-client',
+		'tests/clients/gamma-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_GAMMA_CLIENT', gamma_client.full_path())
+	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
+		'nightlight']
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.
 	scenarios += ['sharing']

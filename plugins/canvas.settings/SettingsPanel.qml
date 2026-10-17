@@ -307,6 +307,40 @@ PanelCard {
 	readonly property bool pinchScale: !(settings && settings.gestures)
 		|| settings.gestures.pinchScale !== false
 
+	// ---- the Session tab ----
+
+	// canvas.conf's [session] values, as settings.get reports them.
+	readonly property int lockIdleMinutes: settings && settings.session
+		? settings.session.lockIdleMinutes : 5
+	readonly property bool nightLight: settings && settings.session
+		? settings.session.nightLight === true : false
+	readonly property int nightLightTemperature: settings && settings.session
+		? settings.session.nightLightTemperature : 4000
+
+	// The idle timeouts the page offers, in minutes; 0 is never.
+	readonly property var idleChoices: [1, 5, 10, 30, 0]
+
+	function setSession(what, value) {
+		var params = {}
+		params[what] = value
+		api.compositor.call("settings.set", params, function(result, error) {
+			if (error !== undefined && error !== null && error !== "") {
+				faultRow = {what: what}
+				faultText = String(error)
+				return
+			}
+			faultRow = null
+			assignSettings(result)
+		})
+	}
+
+	function idleLabel(minutes) {
+		if (minutes === 0) {
+			return "Never"
+		}
+		return minutes === 1 ? "After a minute" : "After " + minutes + " minutes"
+	}
+
 	// ---- the Toolbar and Bar tabs, through api.shell ----
 
 	readonly property string toolbarPosition: api != null && api.shell != null
@@ -339,6 +373,7 @@ PanelCard {
 		tabs: [
 			{id: "shortcuts", label: "Shortcuts"},
 			{id: "gestures", label: "Gestures"},
+			{id: "session", label: "Session"},
 			{id: "toolbar", label: "Toolbar"},
 			{id: "bar", label: "Bar"},
 		]
@@ -350,6 +385,7 @@ PanelCard {
 		width: parent.width
 		sourceComponent: root.tab === "shortcuts" ? shortcutsTab
 			: root.tab === "gestures" ? gesturesTab
+			: root.tab === "session" ? sessionTab
 			: root.tab === "toolbar" ? toolbarTab : barTab
 	}
 
@@ -570,6 +606,65 @@ PanelCard {
 					anchors.verticalCenter: parent.verticalCenter
 					checked: root.pinchScale
 					onToggled: root.setGesture("pinchScale", !root.pinchScale)
+				}
+			}
+		}
+	}
+
+	// ---- Session ----
+
+	Component {
+		id: sessionTab
+
+		Column {
+			width: parent.width
+			spacing: UiTheme.panelSpacing
+
+			PanelSectionHeader {
+				text: "Lock the screen"
+			}
+
+			Repeater {
+				model: root.idleChoices
+
+				delegate: ChoiceRow {
+					required property int modelData
+
+					label: root.idleLabel(modelData)
+					description: modelData === 0
+						? "The screen never locks on its own" : "Of no input"
+					chosen: root.lockIdleMinutes === modelData
+					note: root.faultRow != null
+						&& root.faultRow.what === "lockIdleMinutes"
+						? root.faultText : ""
+					onPicked: root.setSession("lockIdleMinutes", modelData)
+				}
+			}
+
+			PanelSectionHeader {
+				text: "Night light"
+			}
+
+			PanelRow {
+				label: "Warm the screen"
+				detail: root.nightLightTemperature + " K"
+				clickable: false
+
+				PanelSwitch {
+					anchors.right: parent.right
+					anchors.rightMargin: 8
+					anchors.verticalCenter: parent.verticalCenter
+					checked: root.nightLight
+					onToggled: root.setSession("nightLight", !root.nightLight)
+				}
+			}
+
+			// 1000 K to 6500 K, warm at the left.
+			PanelSlider {
+				value: (root.nightLightTemperature - 1000) / 5500
+				onMoved: function(v) {
+					root.setSession("nightLightTemperature",
+						Math.round(1000 + v * 5500))
 				}
 			}
 		}

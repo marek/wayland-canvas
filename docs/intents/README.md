@@ -69,6 +69,7 @@ their values.
 | [shell/notes.md](shell/notes.md) | Sticky notes: creating from the toolbar, colours, look, editing, moving, deleting, keeping |
 | [shell/theme.md](shell/theme.md) | The light/dark switch, the two palettes, what follows the mode, keeping it |
 | [render/rendering.md](render/rendering.md) | The own renderer and why, repaint policy, frame callbacks, presentation, enter/leave policy, needs_frame |
+| [render/night-light.md](render/night-light.md) | The night light: the switch and the temperature, the gamma table and the in-frame fallback, the gamma-control protocol |
 | [render/hidpi.md](render/hidpi.md) | Scale choice, crispness, nested 1x |
 | [platform/wlroots.md](platform/wlroots.md) | wlroots as the reference, version, subproject, the listener-balance rule, request_* handlers start the action |
 | [platform/protocols.md](platform/protocols.md) | The supported protocols table: protocol → what it enables / policy |

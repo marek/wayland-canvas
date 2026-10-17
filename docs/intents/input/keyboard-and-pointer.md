@@ -64,6 +64,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Super+Shift+3 / 4 / 5 | `shot-screen` / `capture-pick` / `capture-toolbar` | Whole-screen shot / the capture picker / the capture toolbar ([../apps/capture.md](../apps/capture.md)); with Ctrl added, the `-copy` action of each copies the shot |
 | Print / Shift+Print / Alt+Print | `capture-pick` / `shot-screen` / `record-stop` | The picker / whole-screen shot / stop a recording, else the toolbar on its recording choices; Ctrl added, the `-copy` actions ([../apps/capture.md](../apps/capture.md)) |
 | Super+L | `lock` | Lock the screen ([../shell/lock.md](../shell/lock.md)) |
+| Super+Ctrl+N | `night-light` | The night light on or off ([../render/night-light.md](../render/night-light.md)) |
 | Super+N / Super+Shift+N | `notifications-dismiss` / `notifications-dismiss-all` | Take the newest popup, or every popup, off the screen ([../shell/notifications.md](../shell/notifications.md)) |
 | Super+Shift+E, Ctrl+Alt+Backspace | `quit` | Quit the compositor |
 | Ctrl+Alt+F1..F12 | — | Switch to that VT; fixed |
