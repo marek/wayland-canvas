@@ -63,14 +63,18 @@ Item {
 		return "normal"
 	}
 
-	// How long a popup stays: the sender's own timeout when it set one,
-	// else the setting; a critical notification waits for the user.
-	function lifetime(entry, expireTimeout) {
+	// How long a popup stays, in milliseconds: the sender's own timeout
+	// when it set one, else the setting; a critical notification waits for
+	// the user. A sender's timeout arrives in seconds as a fraction and in
+	// milliseconds as a whole number of them, so a value above a hundred
+	// is read as milliseconds.
+	function lifetime(entry) {
 		if (entry.urgency === "critical" && criticalNeverExpires) {
 			return 0
 		}
-		if (expireTimeout > 0) {
-			return expireTimeout
+		var told = entry.expireTimeout
+		if (told > 0) {
+			return Math.round(told > 100 ? told : told * 1000)
 		}
 		return popupSeconds * 1000
 	}
@@ -90,6 +94,7 @@ Item {
 			image: notification.image,
 			appIcon: notification.appIcon,
 			actions: actions,
+			expireTimeout: notification.expireTimeout,
 			time: Date.now()
 		}
 		live[entry.id] = notification

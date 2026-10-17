@@ -83,8 +83,8 @@ PanelWindow {
 				// A popup of its own age: the sender's timeout, the
 				// setting, or never for a critical one.
 				Timer {
-					interval: Math.max(1, Notifications.lifetime(card.modelData, 0))
-					running: Notifications.lifetime(card.modelData, 0) > 0
+					interval: Math.max(1, Notifications.lifetime(card.modelData))
+					running: Notifications.lifetime(card.modelData) > 0
 					repeat: false
 					onTriggered: Notifications.dismiss(card.modelData.id)
 				}

@@ -103,7 +103,7 @@ These decisions close three open boxes of
 - [x] Intent: notifications: popups (place, stacking, expiry per urgency, actions, icons and images), dismiss and dismiss-all keys, the history and its bar widget, the silence switch, another server already holding the name
 - [x] Shell: the notifications plugin: popups, the history panel, the silence switch; the keys in `canvas.conf` and the settings window
 - [x] Scenarios on a private bus: `notify-send` shows a popup with its text; the keys dismiss one and all; the history lists them; silence holds popups back
-- [ ] Scenario: an action click reaches the sender, a normal popup expires while a critical one stays, and with another server holding the name the shell runs without one
+- [x] Scenario: an action click reaches the sender, a normal popup expires while a critical one stays, and a second notification daemon does not take the bus name from the shell
 
 ## Password dialog
 

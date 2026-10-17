@@ -16,16 +16,22 @@ cursor in its text, the colour dots and the × on its strip — and every
 camera move carries it along with the rest of the canvas. Nothing of the
 editing state is drawn in screen coordinates.
 
-The decision of where the editing surface lives (the canvas item the
-compositor draws, a client surface placed on the canvas, or the overlay
-anchored to the item's canvas box every frame) is open and belongs to the
-owner of [shell/notes.md](../intents/shell/notes.md) and
-[platform/ipc.md](../intents/platform/ipc.md).
+Settled: the editor is a client surface of the plugin's own, placed in
+canvas space by the compositor. The compositor gains one generic
+capability — a surface a plugin asks to be put at a canvas rectangle,
+which then pans, zooms and scales with everything else on the plane — and
+knows nothing about notes. Sticky notes stay a plugin that can be written,
+changed or replaced without rebuilding the compositor, the editing surface
+is the real thing the user clicked rather than a copy laid over it, and
+the motion is the canvas's own rather than a position pushed frame by
+frame from outside.
 
 ## Tasks
 
 - [ ] Reproduce headlessly: a note opened for editing, then a zoom and a pan, with the screenshots showing the duplicate card and the drift
-- [ ] (the user to decide) Where the editing surface lives: an item the compositor draws and types into, a client surface placed in canvas space, or the present overlay re-anchored every frame
+- [ ] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
+- [ ] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom
+- [ ] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay
 - [ ] Intent: notes.md states that editing happens on the note itself, and what a camera move does while a note is open
 - [ ] Implement it, with the bar scenario's notes phase extended to zoom and pan while the editor is open
 - [ ] On screen, nested: open a note, zoom in and out, pan, change desktop scale — one card throughout (the user)
