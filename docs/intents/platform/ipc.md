@@ -142,7 +142,9 @@ about what the plugin put there.
 
 | Subject | Rule |
 |---|---|
-| Asking | the plugin opens a layer surface named `wayland-canvas-canvas-<plugin id>/<surface id>` and calls `surface.place` with that name and a canvas rectangle |
+| Asking | the plugin opens a layer surface named `wayland-canvas-canvas-<plugin id>/<surface id>` — the name is set as the surface is created, since a layer surface keeps the one it was made with — and calls `surface.place` with that name and a canvas rectangle |
+| Before it is placed | a surface with that name is never given a place on a screen: until the plugin says where on the plane it goes it is not drawn at all, so a surface meant for the canvas can never appear centred on the screen instead |
+| Remembered | the compositor keeps the rectangle under the name: a placement asked for before the surface exists, or again after the shell reloads, applies when a surface of that name maps |
 | Drawing | the surface is drawn above windows in canvas space, at the size the rectangle names; the client is told the size in logical pixels and renders at the output's scale |
 | Input | clicks, scrolls and drags inside it go to the surface, in the normal view and the overview alike; the keyboard follows the same rule as any shell surface asking for it on demand ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
 | Moving | the plugin moves it by placing it again; a drag the plugin does not claim pans the canvas, as the empty plane does |

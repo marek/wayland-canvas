@@ -11,7 +11,8 @@ QtObject {
 	property var compositor: null
 
 	// The name a surface must carry for the compositor to find it: its
-	// layer-shell namespace.
+	// layer-shell namespace. A plugin sets it as the surface is created —
+	// a namespace assigned later never reaches the compositor.
 	function surfaceName(pluginId, surfaceId) {
 		return "wayland-canvas-canvas-" + pluginId + "/" + surfaceId
 	}

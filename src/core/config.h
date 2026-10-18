@@ -216,6 +216,11 @@ inline constexpr int capture_recorder_fps = 60; // frames piped per second
 inline constexpr int capture_recorder_poll_ms = 200; // the reaper's poll
 inline constexpr int capture_recorder_stop_ms = 2000; // teardown wait
 
+// A plugin's surface on the plane names itself with this prefix, so the
+// compositor knows it belongs on the canvas before it is told where
+// (docs/intents/platform/ipc.md).
+inline constexpr const char *canvas_surface_prefix = "wayland-canvas-canvas-";
+
 // The lock screen (ext-session-lock-v1). The fill is what an output shows
 // while no locker surface covers it: locked with nothing drawn yet, or a
 // locker that died.
