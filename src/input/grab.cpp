@@ -11,7 +11,6 @@
 #include "platform/output.h"
 #include "core/server.h"
 #include "windows/view.h"
-#include "canvas/items.h"
 
 namespace {
 
@@ -148,18 +147,6 @@ void PointerGrab::begin_overview_press(Output &output, PressTarget target) {
 	};
 }
 
-void PointerGrab::begin_item(Item &item, Output &output) {
-	state_ = ItemDrag{
-		.output = &output,
-		.id = item.id,
-		.cam = output.camera.drawn(),
-		.lx = server_.cursor->x,
-		.ly = server_.cursor->y,
-		.start_x = item.x,
-		.start_y = item.y,
-		.moved = false,
-	};
-}
 
 void PointerGrab::motion() {
 	std::visit(overloaded{
@@ -169,7 +156,6 @@ void PointerGrab::motion() {
 		[this](TitleButton &s) { title_button_motion(s); },
 		[this](OverviewPress &s) { overview_press_motion(s); },
 		[this](DesktopDrag &s) { desktop_drag_motion(s); },
-		[this](ItemDrag &s) { item_drag_motion(s); },
 		[](None &) {},
 	}, state_);
 }
@@ -347,29 +333,12 @@ void PointerGrab::desktop_drag_motion(DesktopDrag &drag) {
 	drag.drop = drop;
 }
 
-void PointerGrab::item_drag_motion(ItemDrag &drag) {
-	Item *item = server_.items.find(drag.id);
-	if (item == nullptr) {
-		return; // removed mid-drag; the release reports nothing either
-	}
-	double dist = std::hypot(server_.cursor->x - drag.lx,
-		server_.cursor->y - drag.ly);
-	if (dist < config::drag_threshold && !drag.moved) {
-		return;
-	}
-	drag.moved = true;
-	double dx = (server_.cursor->x - drag.lx) / drag.cam.zoom;
-	double dy = (server_.cursor->y - drag.ly) / drag.cam.zoom;
-	server_.items.place(*item, static_cast<int>(std::round(drag.start_x + dx)),
-		static_cast<int>(std::round(drag.start_y + dy)));
-}
 
 void PointerGrab::release() {
 	std::visit(overloaded{
 		[this](TitleButton &s) { release_title_button(s); },
 		[this](OverviewPress &s) { overview_click(s); },
 		[this](DesktopDrag &s) { drop_desktop_drag(s); },
-		[this](ItemDrag &s) { release_item_drag(s); },
 		// A user move ends on the board: swap slices with the window under
 		// the drop, take the largest free slice under it, or leave the
 		// board when dropped outside. A resize ends back on its slice.
@@ -444,9 +413,6 @@ void PointerGrab::overview_click(OverviewPress &press) {
 			overview_target_view(server_, *output, *on.view);
 			output->overview.exit();
 		},
-		// Item presses never become overview presses: input.cpp drags
-		// or activates them straight away.
-		[](PressOnItem &) {},
 		[&](PressOnEmpty &) {
 			if (std::optional<CanvasPos> pos =
 					server_.input.cursor_canvas_pos()) {
@@ -467,15 +433,6 @@ void PointerGrab::drop_desktop_drag(DesktopDrag &drag) {
 	}
 }
 
-void PointerGrab::release_item_drag(ItemDrag &drag) {
-	if (!drag.moved) {
-		return;
-	}
-	Item *item = server_.items.find(drag.id);
-	if (item != nullptr) {
-		server_.ipc.emit_item_moved(*item);
-	}
-}
 
 void PointerGrab::cancel() {
 	if (const auto *move = std::get_if<Move>(&state_)) {

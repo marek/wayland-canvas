@@ -12,7 +12,6 @@
 class Output;
 class Server;
 class View;
-struct Item;
 
 // What an overview press landed on, decided when it was pressed.
 struct PressOnEmpty {};
@@ -21,9 +20,8 @@ struct PressOnDesktop { DesktopId desktop; };
 struct PressOnTile { DesktopId desktop; };
 struct PressOnAbandon { DesktopId desktop; };
 struct PressOnShelf { View *view; };
-struct PressOnItem { Item *item; };
 using PressTarget = std::variant<PressOnEmpty, PressOnView, PressOnDesktop,
-	PressOnTile, PressOnAbandon, PressOnShelf, PressOnItem>;
+	PressOnTile, PressOnAbandon, PressOnShelf>;
 
 // The compositor-owned pointer interaction in progress, one state per kind
 // of grab.
@@ -36,9 +34,8 @@ public:
 	struct TitleButton { View *view; Output *output; DecoPart part; };
 	struct OverviewPress { Output *output; Camera cam; double lx, ly; PressTarget target; };
 	struct DesktopDrag { Output *output; DesktopId desktop; Camera cam; double lx, ly; wlr_box start; std::optional<DesktopId> drop; };
-	struct ItemDrag { Output *output; std::string id; Camera cam; double lx, ly; int start_x, start_y; bool moved; };
 	using State = std::variant<None, Move, Resize, Pan, TitleButton, OverviewPress,
-		DesktopDrag, ItemDrag>;
+		DesktopDrag>;
 
 	explicit PointerGrab(Server &server);
 	PointerGrab(const PointerGrab &) = delete;
@@ -51,7 +48,6 @@ public:
 	void begin_pan(Output &output);
 	void begin_title_button(View &view, Output &output, DecoPart part);
 	void begin_overview_press(Output &output, PressTarget target);
-	void begin_item(Item &item, Output &output);
 	void motion();
 	void release(); // a button release: acts (title button, overview click, combine or raise) and ends
 	void cancel();
@@ -67,8 +63,6 @@ private:
 	void title_button_motion(TitleButton &button);
 	void overview_press_motion(OverviewPress &press);
 	void desktop_drag_motion(DesktopDrag &drag);
-	void item_drag_motion(ItemDrag &drag);
-	void release_item_drag(ItemDrag &drag); // emits item.moved when it moved
 	void release_title_button(TitleButton &button);
 	// An overview click that never turned into a drag.
 	void overview_click(OverviewPress &press);

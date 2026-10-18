@@ -11,7 +11,6 @@
 
 class Output;
 class Server;
-struct Item;
 typedef struct _JsonObject JsonObject;
 
 // The compositor's control socket: JSON lines as
@@ -32,8 +31,6 @@ public:
 	// is spawned, so clients inherit $WAYLAND_CANVAS_SOCKET.
 	bool init();
 	void finish(); // drops the socket and every client connection
-
-	// The event entry points, called from where the compositor's state
 	// actually changes. Each serializes its part of the state and pushes one
 	// event line to every subscriber.
 	void emit_overview(const Output &output, bool active);
@@ -43,11 +40,7 @@ public:
 	// focused (docs/intents/shell/app-bar.md).
 	void emit_windows();
 	void emit_theme(); // the mode changed
-	void emit_settings(); // the effective settings changed
-	void emit_item_moved(const Item &item); // the user dropped a dragged item
-	// The user double-clicked an item; `box` is the item on `output` in
-	// output-local logical px.
-	void emit_item_activated(const Item &item, const Output &output);
+	void emit_settings(); // the effective settings changed // the user dropped a dragged item
 	// The user finished (or cancelled) a `capture.pick` request: answers
 	// its client now. `payload` is the result's JSON text, or the plain
 	// error message when `ok` is false. No request pending: a no-op.
@@ -97,13 +90,7 @@ private:
 		JsonObject *params);
 	std::expected<std::string, std::string> m_theme_set(Client &client,
 		JsonObject *params);
-	std::expected<std::string, std::string> m_item_set(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_item_remove(Client &client,
-		JsonObject *params);
 	std::expected<std::string, std::string> m_window_focus(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_item_activate(Client &client,
 		JsonObject *params);
 	std::expected<std::string, std::string> m_action_run(Client &client,
 		JsonObject *params);

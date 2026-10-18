@@ -15,7 +15,6 @@
 class Output;
 class Server;
 class View;
-struct Item;
 struct libinput_device;
 
 struct CanvasPos {
@@ -97,9 +96,6 @@ public:
 	// Title double-click state: the last click and its view.
 	uint32_t last_title_click = 0;
 	View *last_title_view = nullptr;
-	// Item double-click state: the last press and its id.
-	uint32_t last_item_click = 0;
-	std::string last_item_id;
 	const char *cursor_image = nullptr;
 
 	PointerGrab grab;
@@ -164,9 +160,6 @@ private:
 	void cursor_button_release(uint32_t time, uint32_t button);
 	// A press while the output is in the overview.
 	void overview_press(Output &output, uint32_t time, uint32_t button);
-	// A press on a canvas item: a drag begins, a second press within the
-	// double-click interval reports item.activated instead.
-	void item_press(uint32_t time, Item &item, Output &output);
 
 	// Cursor events.
 	void handle_cursor_motion(wlr_pointer_motion_event *event);

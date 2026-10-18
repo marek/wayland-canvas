@@ -406,7 +406,7 @@ struct Server::Inhibitor {
 
 Server::Server()
 	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
-	painter(*this), decorations(*this), canvas(*this), items(*this), ipc(*this),
+	painter(*this), decorations(*this), canvas(*this), ipc(*this),
 	image_capture(*this),
 	capture_ui(*this), lock(*this), night_light(*this), logind(*this) {
 }

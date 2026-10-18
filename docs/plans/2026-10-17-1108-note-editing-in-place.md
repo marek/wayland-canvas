@@ -42,3 +42,4 @@ frame from outside.
   - `src/platform/ipc.cpp`: `item.set`, `item.remove`, `item.activate`, the `items` array in the state, the `item.moved` and `item.activated` events
   - `tests/scenarios/ipc.cpp`: its canvas-items phase, and `tests/scenarios/bar.cpp`'s leftover `NoteEntry`/`state_notes` helpers that read items
   - `docs/intents/platform/ipc.md` (the methods, the state row, the Canvas items section), `docs/intents/shell/notes.md`'s cross-link, and `docs/intents/shell/plugins.md` where items are named
+- [ ] On screen a note hovers at the centre and cannot be used: the sign of a layer surface with no anchors that was never placed, so `surface.place` is failing or arriving before the surface exists in the session (it passes headlessly). Find it from the shell's log line for the failed call and the compositor's answer, then make a note that cannot be placed say so instead of floating

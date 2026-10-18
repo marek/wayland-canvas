@@ -16,7 +16,6 @@
 #include <json-glib/json-glib.h>
 
 #include "canvas/desktop.h"
-#include "canvas/items.h"
 #include "core/config.h"
 #include "core/theme.h"
 #include "core/theme_prefs.h"
@@ -340,36 +339,7 @@ void add_windows_array(JsonBuilder *builder, Server &server) {
 	json_builder_end_array(builder);
 }
 
-void add_item(JsonBuilder *builder, const Item &item) {
-	std::string id = item.id; // NUL-terminated for the C API
-	std::string color = color_text(item.color);
-	std::string text = item.text;
-	json_builder_begin_object(builder);
-	json_builder_set_member_name(builder, "id");
-	json_builder_add_string_value(builder, id.c_str());
-	json_builder_set_member_name(builder, "color");
-	json_builder_add_string_value(builder, color.c_str());
-	json_builder_set_member_name(builder, "text");
-	json_builder_add_string_value(builder, text.c_str());
-	json_builder_set_member_name(builder, "x");
-	json_builder_add_int_value(builder, item.x);
-	json_builder_set_member_name(builder, "y");
-	json_builder_add_int_value(builder, item.y);
-	json_builder_set_member_name(builder, "width");
-	json_builder_add_int_value(builder, item.width);
-	json_builder_set_member_name(builder, "height");
-	json_builder_add_int_value(builder, item.height);
-	json_builder_end_object(builder);
-}
 
-void add_items_array(JsonBuilder *builder, Server &server) {
-	json_builder_set_member_name(builder, "items");
-	json_builder_begin_array(builder);
-	for (const Item &item : server.items.all()) {
-		add_item(builder, item);
-	}
-	json_builder_end_array(builder);
-}
 
 // -------------------------------------------------------- settings as JSON
 
@@ -874,9 +844,6 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"overview.toggle"}, &Ipc::m_overview_toggle},
 		std::pair{std::string_view{"quit"}, &Ipc::m_quit},
 		std::pair{std::string_view{"theme.set"}, &Ipc::m_theme_set},
-		std::pair{std::string_view{"item.set"}, &Ipc::m_item_set},
-		std::pair{std::string_view{"item.remove"}, &Ipc::m_item_remove},
-		std::pair{std::string_view{"item.activate"}, &Ipc::m_item_activate},
 		std::pair{std::string_view{"window.focus"}, &Ipc::m_window_focus},
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
 		std::pair{std::string_view{"surface.place"}, &Ipc::m_surface_place},
@@ -899,7 +866,6 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 		add_outputs_array(builder, server_);
 		add_desktops_array(builder, server_);
 		add_windows_array(builder, server_);
-		add_items_array(builder, server_);
 		json_builder_set_member_name(builder, "theme");
 		std::string mode = std::string{theme_name(server_.theme.mode())};
 		json_builder_add_string_value(builder, mode.c_str());
@@ -1000,134 +966,7 @@ std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *p
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_item_set(Client &, JsonObject *params) {
-	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
-	if (!id.has_value()) {
-		return std::unexpected(id.error());
-	}
-	if (!id->has_value() || (*id)->empty()) {
-		return std::unexpected(std::string{"params: id must be a non-empty string"});
-	}
 
-	std::expected<std::optional<std::string>, std::string> color =
-		opt_string(params, "color");
-	if (!color.has_value()) {
-		return std::unexpected(color.error());
-	}
-	std::optional<uint32_t> color_value;
-	if (color->has_value()) {
-		color_value = parse_color(**color);
-		if (!color_value.has_value()) {
-			return std::unexpected(std::format(
-				"params: color must be #rrggbb, not '{}'", **color));
-		}
-	}
-
-	std::expected<std::optional<std::string>, std::string> text =
-		opt_string(params, "text");
-	if (!text.has_value()) {
-		return std::unexpected(text.error());
-	}
-
-	// A dimension: positive and int-sized, or an error naming it.
-	auto dimension = [](std::string_view name,
-			const std::expected<std::optional<long long>, std::string> &value)
-			-> std::expected<std::optional<int>, std::string> {
-		if (!value.has_value()) {
-			return std::unexpected(value.error());
-		}
-		if (!value->has_value()) {
-			return std::optional<int>{};
-		}
-		if (*value < 1 || *value > std::numeric_limits<int>::max()) {
-			return std::unexpected(std::format("params: {} must be a positive size", name));
-		}
-		return std::optional<int>{static_cast<int>(**value)};
-	};
-	// A canvas coordinate: int-sized, or an error naming it.
-	auto coordinate = [](std::string_view name,
-			const std::expected<std::optional<long long>, std::string> &value)
-			-> std::expected<std::optional<int>, std::string> {
-		if (!value.has_value()) {
-			return std::unexpected(value.error());
-		}
-		if (!value->has_value()) {
-			return std::optional<int>{};
-		}
-		if (*value < std::numeric_limits<int>::min()
-				|| *value > std::numeric_limits<int>::max()) {
-			return std::unexpected(std::format("params: {} is too far out", name));
-		}
-		return std::optional<int>{static_cast<int>(**value)};
-	};
-
-	std::expected<std::optional<long long>, std::string> width = opt_int(params, "width");
-	std::expected<std::optional<long long>, std::string> height =
-		opt_int(params, "height");
-	std::expected<std::optional<long long>, std::string> x = opt_int(params, "x");
-	std::expected<std::optional<long long>, std::string> y = opt_int(params, "y");
-	std::expected<std::optional<int>, std::string> w = dimension("width", width);
-	if (!w.has_value()) {
-		return std::unexpected(w.error());
-	}
-	std::expected<std::optional<int>, std::string> h = dimension("height", height);
-	if (!h.has_value()) {
-		return std::unexpected(h.error());
-	}
-	std::expected<std::optional<int>, std::string> px = coordinate("x", x);
-	if (!px.has_value()) {
-		return std::unexpected(px.error());
-	}
-	std::expected<std::optional<int>, std::string> py = coordinate("y", y);
-	if (!py.has_value()) {
-		return std::unexpected(py.error());
-	}
-
-	if (server_.items.find(**id) == nullptr && (!color_value.has_value()
-			|| !text->has_value() || !w->has_value() || !h->has_value())) {
-		return std::unexpected(std::string{
-			"params: item.set needs color, text, width and height to create an item"});
-	}
-
-	ItemUpdate update{
-		.color = color_value,
-		.text = *text,
-		.width = *w,
-		.height = *h,
-	};
-	Item *item = server_.items.set(**id, update, *px, *py);
-	if (item == nullptr) {
-		return std::unexpected(
-			std::string{"no output under the cursor to place the item"});
-	}
-	std::string id_text = item->id;
-	return object_text([&](JsonBuilder *builder) {
-		json_builder_set_member_name(builder, "id");
-		json_builder_add_string_value(builder, id_text.c_str());
-		json_builder_set_member_name(builder, "x");
-		json_builder_add_int_value(builder, item->x);
-		json_builder_set_member_name(builder, "y");
-		json_builder_add_int_value(builder, item->y);
-		json_builder_set_member_name(builder, "width");
-		json_builder_add_int_value(builder, item->width);
-		json_builder_set_member_name(builder, "height");
-		json_builder_add_int_value(builder, item->height);
-	});
-}
-
-std::expected<std::string, std::string> Ipc::m_item_remove(Client &, JsonObject *params) {
-	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
-	if (!id.has_value()) {
-		return std::unexpected(id.error());
-	}
-	if (!id->has_value() || (*id)->empty()) {
-		return std::unexpected(std::string{"params: id must be a non-empty string"});
-	}
-	if (!server_.items.remove(**id)) {
-		return std::unexpected(std::format("unknown item id '{}'", **id));
-	}
-	return std::string{"true"};
-}
 
 // Goes to a window by its session id: the same restore path a shelf click
 // takes (docs/intents/windows/window-management.md).
@@ -1151,47 +990,6 @@ std::expected<std::string, std::string> Ipc::m_window_focus(Client &,
 	return std::unexpected(std::format("unknown window id '{}'", wanted));
 }
 
-std::expected<std::string, std::string> Ipc::m_item_activate(Client &,
-		JsonObject *params) {
-	std::expected<std::optional<std::string>, std::string> id = opt_string(params, "id");
-	if (!id.has_value()) {
-		return std::unexpected(id.error());
-	}
-	if (!id->has_value() || (*id)->empty()) {
-		return std::unexpected(std::string{"params: id must be a non-empty string"});
-	}
-	Item *item = server_.items.find(**id);
-	if (item == nullptr) {
-		return std::unexpected(std::format("unknown item id '{}'", **id));
-	}
-	// The output the item is activated on: the one under the cursor when
-	// it shows the item — where a just-placed item sits — else the first
-	// output that does.
-	Rect box{
-		.x = static_cast<double>(item->x),
-		.y = static_cast<double>(item->y),
-		.w = static_cast<double>(item->width),
-		.h = static_cast<double>(item->height),
-	};
-	Output *chosen = nullptr;
-	if (Output *under = server_.output_under_cursor();
-			under != nullptr && under->viewport().intersects(box)) {
-		chosen = under;
-	} else {
-		for (const std::unique_ptr<Output> &output : server_.outputs) {
-			if (output->viewport().intersects(box)) {
-				chosen = output.get();
-				break;
-			}
-		}
-	}
-	if (chosen == nullptr) {
-		return std::unexpected(
-			std::format("the item '{}' is on no output's screen", **id));
-	}
-	emit_item_activated(*item, *chosen);
-	return std::string{"true"};
-}
 
 // The layer surface a plugin named, on any output; nullptr when no
 // mapped surface carries that name.
@@ -1677,41 +1475,7 @@ void Ipc::emit_recording(bool active, const std::string &path) {
 	}));
 }
 
-void Ipc::emit_item_moved(const Item &item) {
-	std::string id = item.id;
-	push_event("item.moved", object_text([&](JsonBuilder *builder) {
-		json_builder_set_member_name(builder, "id");
-		json_builder_add_string_value(builder, id.c_str());
-		json_builder_set_member_name(builder, "x");
-		json_builder_add_int_value(builder, item.x);
-		json_builder_set_member_name(builder, "y");
-		json_builder_add_int_value(builder, item.y);
-	}));
-}
 
-void Ipc::emit_item_activated(const Item &item, const Output &output) {
-	std::string id = item.id;
-	std::string name = output.wlr->name;
-	Point top_left = output.canvas_to_local(item.x, item.y);
-	double zoom = output.camera.drawn().zoom;
-	push_event("item.activated", object_text([&](JsonBuilder *builder) {
-		json_builder_set_member_name(builder, "id");
-		json_builder_add_string_value(builder, id.c_str());
-		json_builder_set_member_name(builder, "output");
-		json_builder_add_string_value(builder, name.c_str());
-		json_builder_set_member_name(builder, "box");
-		json_builder_begin_object(builder);
-		json_builder_set_member_name(builder, "x");
-		json_builder_add_double_value(builder, top_left.x);
-		json_builder_set_member_name(builder, "y");
-		json_builder_add_double_value(builder, top_left.y);
-		json_builder_set_member_name(builder, "width");
-		json_builder_add_double_value(builder, item.width * zoom);
-		json_builder_set_member_name(builder, "height");
-		json_builder_add_double_value(builder, item.height * zoom);
-		json_builder_end_object(builder);
-	}));
-}
 
 void Ipc::run_action(std::string_view name, std::string_view args_json) {
 	emit_action(name, args_json);

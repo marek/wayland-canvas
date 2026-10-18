@@ -13,7 +13,6 @@
 #include <string_view>
 #include <vector>
 #include "canvas/desktop.h"
-#include "canvas/items.h"
 #include "input/gesture.h"
 
 class Output;
@@ -96,12 +95,6 @@ struct DesktopLabel {
 	int w = 0, h = 0; // logical px
 };
 
-// A canvas item's card texture, drawn at the scale it was rendered at.
-struct ItemTexture {
-	wlr_texture *texture = nullptr; // null when the card failed to render
-	int w = 0, h = 0; // logical px (canvas px)
-};
-
 // Transient banner at the bottom of every output.
 class Hint {
 public:
@@ -160,7 +153,6 @@ public:
 	// shown at). Re-rendered when its content changed, or once `settled`
 	// when the shown scale changed; a moving camera stretches the cached
 	// card instead of re-rendering every frame.
-	ItemTexture item_texture(const Item &item, float scale, bool settled);
 
 private:
 	static constexpr std::size_t help_slots = 4;
@@ -191,15 +183,5 @@ private:
 	std::vector<LabelSlot> label_cache_; // desktop tab labels, dropped with their desktops
 	unsigned help_clock_ = 0; // round-robin over help_cache_
 
-	// One slot of the item-card cache.
-	struct ItemSlot {
-		std::string id;
-		TexturePtr texture;
-		std::string text;
-		uint32_t color = 0;
-		int w = 0, h = 0;
-		float scale = 0;
-	};
-	std::vector<ItemSlot> item_cache_; // item cards, dropped with their items
 
 };

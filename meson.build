@@ -176,7 +176,6 @@ core_lib = static_library(
 		'src/apps/capture_ui.cpp',
 		'src/canvas/camera.cpp',
 		'src/canvas/canvas.cpp',
-		'src/canvas/items.cpp',
 		'src/canvas/desktop.cpp',
 		'src/canvas/overview.cpp',
 		'src/core/server.cpp',
