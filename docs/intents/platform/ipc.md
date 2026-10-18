@@ -190,8 +190,10 @@ means the user cancelled. That command is the portal's `chooser_cmd`.
 - A connection that ends mid-line is dropped with its partial line.
 - The socket file is removed when the compositor exits.
 - `surface.move` or `surface.resize` asked once the button is up (a quick
-  click): an error, and nothing moves. The surface or its client going
-  mid-drag ends the drag, and nothing is answered.
+  click): an error, and nothing moves. The surface or the pointer's
+  output going mid-drag ends the drag with an error answer; a client that
+  goes mid-drag is answered nothing, and the surface stays where the
+  release left it.
 
 ## Cross-links
 

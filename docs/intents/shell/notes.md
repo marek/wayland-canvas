@@ -83,8 +83,9 @@ a plain-HTML file that can be read and edited outside the shell.
 - A note off every output's screen is drawn when the canvas brings it
   back; nothing of it is lost meanwhile. An output that goes takes none
   of the notes with it.
-- Text pasted with formatting of its own keeps only its bold, italic and
-  underline, in the note's font and size.
+- Text pasted with formatting of its own is kept with only its bold,
+  italic and underline: the note's file holds no other font, size or
+  colour, and the card shows the note's own once the note is read back.
 
 ## Cross-links
 
