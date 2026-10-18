@@ -63,9 +63,11 @@ If `wlroots-0.20` isn't installed system-wide, meson fetches 0.20.2 into
   `-d` debug logging, `-B` start without the shell (bar, toolbar, notes).
 - Control a running compositor: `wayland-canvas msg <method> [<params as JSON>]`
   over `$WAYLAND_CANVAS_SOCKET` (set for every client it spawns): `state`,
-  `subscribe`, `launcher.toggle`, `overview.toggle`, `theme.set`, `item.set`,
-  `item.remove`, `item.activate`, `action.run`, `settings.get`, `settings.set`,
-  `shortcut.capture`, `shortcut.cancel`, `quit`. `wayland-canvas -h`
+  `subscribe`, `launcher.toggle`, `overview.toggle`, `theme.set`,
+  `surface.place`, `surface.unplace`, `surface.move`, `surface.resize`,
+  `window.focus`, `action.run`, `capture.pick`, `capture.stop`,
+  `settings.get`, `settings.set`, `shortcut.capture`, `shortcut.cancel`,
+  `quit`. `wayland-canvas -h`
   lists them; [docs/intents/platform/ipc.md](docs/intents/platform/ipc.md) is
   the protocol.
 
@@ -185,7 +187,10 @@ and your own.
   opens toward the screen's centre. A toolbar on the bottom edge carries the
   overview's shelf and help line above it.
 - **Sticky notes**: the toolbar's Note button and its colour menu put a note on
-  the canvas; type over it, drag it anywhere; notes are kept across restarts.
+  the canvas; type in it where it sits and it grows to hold the text, drag it
+  by its strip, size it by its corner. The strip recolours it, sets bold,
+  italic and underline on the selection and the note's font and size, and its
+  × deletes it; each note is kept as an HTML file of its own.
 - **Light and dark**: the switch flips the shell and everything the compositor
   draws, and the choice is kept. When wayland-canvas is the session itself
   (started from a TTY or a login manager), it also sets the applications'

@@ -1,6 +1,7 @@
 #include "platform/layer.h"
 
 #include <algorithm>
+#include <ranges>
 
 #include "platform/output.h"
 #include "core/config.h"
@@ -99,7 +100,7 @@ void layer_configure(LayerSurface &layer, const wlr_box &full, wlr_box &usable) 
 
 // Takes `layer` out of whichever of its output's vectors holds it.
 std::unique_ptr<LayerSurface> detach(LayerSurface &layer) {
-	for (std::vector<std::unique_ptr<LayerSurface>> &vec : layer.output.layers) {
+	for (std::vector<std::unique_ptr<LayerSurface>> &vec : layer.output->layers) {
 		auto it = std::ranges::find_if(vec,
 			[&layer](const std::unique_ptr<LayerSurface> &p) { return p.get() == &layer; });
 		if (it != vec.end()) {
@@ -111,10 +112,16 @@ std::unique_ptr<LayerSurface> detach(LayerSurface &layer) {
 	return nullptr;
 }
 
+// Off the plane's stacking order, and out of any drag the pointer holds it in.
+void leave_canvas(LayerSurface &layer) {
+	std::erase(layer.server.canvas_stack, &layer);
+	layer.server.input.grab.forget(layer);
+}
+
 } // namespace
 
 LayerSurface::LayerSurface(Server &server, Output &output, wlr_layer_surface_v1 *wlr)
-		: server(server), output(output), wlr(wlr) {
+		: server(server), output(&output), wlr(wlr) {
 	wlr->data = this;
 	map_.connect<&LayerSurface::handle_map>(wlr->surface->events.map, this);
 	unmap_.connect<&LayerSurface::handle_unmap>(wlr->surface->events.unmap, this);
@@ -133,21 +140,20 @@ bool LayerSurface::holds_keyboard_exclusively() const {
 		== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
 }
 
-// A placement the plugin asked for before this surface existed applies as
-// it maps, so the ask can never race the surface.
-void LayerSurface::take_pending_place() {
+void LayerSurface::handle_map() {
+	// A placement asked for before this surface existed applies as it
+	// maps, so the ask can never race the surface.
 	auto found = server.canvas_places.find(name());
 	if (found != server.canvas_places.end()) {
 		canvas_box = found->second;
 	}
-}
-
-void LayerSurface::handle_map() {
-	take_pending_place();
 	mapped = true;
+	if (belongs_on_canvas() || canvas_box.has_value()) {
+		server.canvas_stack.push_back(this); // the newest on top
+	}
 	if (attached_) {
 		// The surface's exclusive zone (if any) takes effect now.
-		output.arrange_layers();
+		output->arrange_layers();
 	}
 	// A surface above the windows that takes keyboard input (a panel, a
 	// launcher) gets the keyboard as it appears, as a new window does,
@@ -166,9 +172,10 @@ void LayerSurface::handle_map() {
 
 void LayerSurface::handle_unmap() {
 	mapped = false;
+	leave_canvas(*this);
 	if (attached_) {
 		// Release the exclusive zone the surface was reserving.
-		output.arrange_layers();
+		output->arrange_layers();
 	}
 	server.refocus_layers();
 }
@@ -186,11 +193,14 @@ void LayerSurface::handle_commit() {
 		// Layer change: move to the vector of the new layer, at its head.
 		std::unique_ptr<LayerSurface> owned = detach(*this);
 		if (owned != nullptr) {
-			output.layers[ls->current.layer].insert(
-				output.layers[ls->current.layer].begin(), std::move(owned));
+			output->layers[ls->current.layer].insert(
+				output->layers[ls->current.layer].begin(), std::move(owned));
 		}
 	}
-	output.arrange_layers();
+	if (server.focused_layer == this && !wants_keyboard()) {
+		server.return_keyboard(); // it stopped asking for the keyboard
+	}
+	output->arrange_layers();
 }
 
 void LayerSurface::handle_destroy() {
@@ -198,6 +208,7 @@ void LayerSurface::handle_destroy() {
 	unmap_.disconnect();
 	commit_.disconnect();
 	destroy_.disconnect();
+	leave_canvas(*this);
 
 	// Off the output's lists before anything below looks at them.
 	std::unique_ptr<LayerSurface> owned = detach(*this);
@@ -206,7 +217,7 @@ void LayerSurface::handle_destroy() {
 		server.focused_layer = nullptr;
 	}
 	if (attached_) {
-		output.arrange_layers();
+		output->arrange_layers();
 	}
 	server.refocus_layers();
 } // `owned` releasing destroys this
@@ -217,6 +228,65 @@ std::string LayerSurface::name() const {
 
 bool LayerSurface::belongs_on_canvas() const {
 	return name().starts_with(config::canvas_surface_prefix);
+}
+
+void LayerSurface::place(wlr_box box) {
+	bool resized = !canvas_box.has_value() || canvas_box->width != box.width
+		|| canvas_box->height != box.height;
+	canvas_box = box;
+	server.canvas_places[name()] = box;
+	// The client is told its new size; one that has not made its first
+	// commit is told by the arrange that commit runs (configure() asserts
+	// before it).
+	if (resized && wlr->initialized) {
+		geo = box;
+		wlr_layer_surface_v1_configure(wlr, static_cast<uint32_t>(box.width),
+			static_cast<uint32_t>(box.height));
+	}
+	if (mapped && std::ranges::find(server.canvas_stack, this) == server.canvas_stack.end()) {
+		server.canvas_stack.push_back(this);
+	}
+	// Where it was and where it is now: both may be on any output.
+	server.damage_all();
+}
+
+void LayerSurface::unplace() {
+	server.input.grab.forget(*this);
+	canvas_box.reset();
+	if (!belongs_on_canvas()) {
+		std::erase(server.canvas_stack, this); // back on its screen
+	}
+	output->arrange_layers();
+	server.damage_all();
+}
+
+void LayerSurface::damage() {
+	if (!canvas_box.has_value()) {
+		output->damage();
+		return;
+	}
+	const wlr_box &box = *canvas_box;
+	// The committed size may run ahead of the rectangle mid-resize.
+	Rect drawn{double(box.x), double(box.y),
+		double(std::max(box.width, wlr->surface->current.width)),
+		double(std::max(box.height, wlr->surface->current.height))};
+	for (const std::unique_ptr<Output> &other : server.outputs) {
+		if (drawn.intersects(other->viewport())) {
+			other->damage();
+		}
+	}
+}
+
+void LayerSurface::rehome(Output &to) {
+	std::unique_ptr<LayerSurface> owned = detach(*this);
+	if (owned == nullptr) {
+		return;
+	}
+	output = &to;
+	wlr->output = to.wlr;
+	std::vector<std::unique_ptr<LayerSurface>> &vec = to.layers[wlr->current.layer];
+	vec.insert(vec.begin(), std::move(owned));
+	to.arrange_layers();
 }
 
 void Output::arrange_layers() {
@@ -232,21 +302,19 @@ void Output::arrange_layers() {
 				if ((pass == 0) != exclusive) {
 					continue;
 				}
-				if (layer->belongs_on_canvas() && !layer->canvas_box.has_value()) {
-					// Not placed yet: the client is left to its own size so
-					// it can map and be found by name, and nothing of it is
-					// drawn until the plugin says where on the plane it goes.
-					layer->geo = wlr_box{};
-					wlr_layer_surface_v1_configure(layer->wlr, 0, 0);
-					continue;
-				}
-				if (layer->canvas_box.has_value()) {
-					// On the plane: the client is sized by the rectangle
-					// the plugin named, not by the output.
-					layer->geo = *layer->canvas_box;
+				if (layer->belongs_on_canvas() || layer->canvas_box.has_value()) {
+					// configure() asserts before the first commit
+					if (!layer->wlr->initialized) {
+						continue;
+					}
+					// Unplaced, the client is left to its own size so it can
+					// map and be found by name, and nothing of it is drawn
+					// until the plugin says where on the plane it goes;
+					// placed, it is sized by that rectangle, not by the output.
+					wlr_box box = layer->canvas_box.value_or(wlr_box{});
+					layer->geo = box;
 					wlr_layer_surface_v1_configure(layer->wlr,
-						static_cast<uint32_t>(layer->canvas_box->width),
-						static_cast<uint32_t>(layer->canvas_box->height));
+						static_cast<uint32_t>(box.width), static_cast<uint32_t>(box.height));
 					continue;
 				}
 				layer_configure(*layer, full, usable);
@@ -259,27 +327,22 @@ void Output::arrange_layers() {
 	server.visibility_dirty = true;
 }
 
-// A surface a plugin put on the plane, under an output-local point: the
-// point is taken to the canvas first, so the hit follows the camera.
+// A surface a plugin put on the plane, under an output-local point, the
+// topmost first: the point is taken to the canvas first, so the hit
+// follows the camera, and every output finds every such surface.
 std::optional<LayerHit> Output::canvas_surface_at(double ox, double oy) const {
 	Point on_plane = local_to_canvas(ox, oy);
-	for (const auto &surfaces : layers) {
-		for (const std::unique_ptr<LayerSurface> &l : surfaces) {
-			if (!l->mapped || !l->canvas_box.has_value()) {
-				continue;
-			}
-			const wlr_box &box = *l->canvas_box;
-			double sx = on_plane.x - box.x, sy = on_plane.y - box.y;
-			if (sx < 0 || sy < 0 || sx >= box.width || sy >= box.height) {
-				continue;
-			}
-			double in_x = 0, in_y = 0;
-			wlr_surface *surface = wlr_surface_surface_at(l->wlr->surface, sx, sy,
-				&in_x, &in_y);
-			if (surface != nullptr) {
-				return LayerHit{.layer = l.get(), .surface = surface,
-					.sx = in_x, .sy = in_y};
-			}
+	for (LayerSurface *l : std::views::reverse(server.canvas_stack)) {
+		if (!l->mapped || !l->canvas_box.has_value()) {
+			continue;
+		}
+		// The surface as it committed: its own size and input region.
+		double in_x = 0, in_y = 0;
+		wlr_surface *surface = wlr_surface_surface_at(l->wlr->surface,
+			on_plane.x - l->canvas_box->x, on_plane.y - l->canvas_box->y,
+			&in_x, &in_y);
+		if (surface != nullptr) {
+			return LayerHit{.layer = l, .surface = surface, .sx = in_x, .sy = in_y};
 		}
 	}
 	return std::nullopt;
@@ -338,13 +401,23 @@ void Server::refocus_layers() {
 		// map or by a click.
 		return;
 	}
+	return_keyboard();
+}
+
+void Server::return_keyboard() {
 	focused_layer = nullptr;
 	View *view = focused_view;
-	if (view != nullptr && view->mapped) {
-		focus_keyboard(view->wlr->base->surface);
-	} else {
-		focus_keyboard(nullptr);
+	focus_keyboard(view != nullptr && view->mapped ? view->surface() : nullptr);
+}
+
+void Server::raise_canvas_surface(LayerSurface &layer) {
+	auto it = std::ranges::find(canvas_stack, &layer);
+	if (it == canvas_stack.end() || std::next(it) == canvas_stack.end()) {
+		return;
 	}
+	canvas_stack.erase(it);
+	canvas_stack.push_back(&layer);
+	layer.damage();
 }
 
 void Server::init_layers() {

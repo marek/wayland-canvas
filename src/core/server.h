@@ -73,6 +73,10 @@ public:
 
 	// layer.cpp
 	void refocus_layers();
+	// The keyboard back from an on-demand shell surface to the focused window.
+	void return_keyboard();
+	// Puts a plugin's surface on the plane above the others.
+	void raise_canvas_surface(LayerSurface &layer);
 
 	wl_display *display = nullptr;
 	wl_event_loop *loop = nullptr;
@@ -127,16 +131,20 @@ public:
 	NightLight night_light;
 	Logind logind;
 
-	// canvas.conf (core/settings.h): the file, its text as last read, the
-	// resolved settings, and the lines it ignored. `load_conf` applies them
-	// to the bindings and the gestures; `write_conf` writes a new text
-	// atomically and applies it at once.
 	// Where a plugin asked for its surfaces to be on the plane, by name
 	// (docs/intents/platform/ipc.md). Kept here, not on the surface, so a
 	// placement asked for before the surface exists — or again after a
 	// shell reload — still lands when it maps.
 	std::map<std::string, wlr_box> canvas_places;
+	// The mapped surfaces that belong on the plane, bottom first: every
+	// output draws and hit-tests them in this order, whichever output each
+	// was made on.
+	std::vector<LayerSurface *> canvas_stack;
 
+	// canvas.conf (core/settings.h): the file, its text as last read, the
+	// resolved settings, and the lines it ignored. `load_conf` applies them
+	// to the bindings and the gestures; `write_conf` writes a new text
+	// atomically and applies it at once.
 	std::string conf_path;
 	std::string conf_text;
 	settings::Resolved conf;

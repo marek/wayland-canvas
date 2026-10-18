@@ -16,7 +16,9 @@ public:
 	LayerSurface &operator=(const LayerSurface &) = delete;
 
 	Server &server;
-	Output &output;
+	// The output it was made for, or the one that took it over when that
+	// output went (a surface on the plane outlives the output it began on).
+	Output *output;
 	wlr_layer_surface_v1 *const wlr;
 	wlr_box geo{}; // output-local logical
 	bool mapped = false;
@@ -32,12 +34,22 @@ public:
 	// canvas it goes, it is not drawn at all — a surface meant for the
 	// plane must never end up centred on the screen instead.
 	bool belongs_on_canvas() const;
-	// Applies a placement the plugin asked for before this surface mapped.
-	void take_pending_place();
+	// Puts it at `box` on the plane, remembered under its name; the
+	// client is told a new size, and every output showing it repaints.
+	void place(wlr_box box);
+	// Back to an ordinary layer surface on its screen; one whose name says
+	// it belongs on the plane is drawn nowhere until placed again.
+	void unplace();
+	// Repaints the outputs that show it: on the plane, every output whose
+	// view holds it; on a screen, its own.
+	void damage();
 
 	// Keyboard interactivity, as the client last committed it.
 	bool wants_keyboard() const;
 	bool holds_keyboard_exclusively() const;
+
+	// Moves it onto `to`'s layers: its own output is going.
+	void rehome(Output &to);
 
 private:
 	void handle_map();

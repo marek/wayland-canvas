@@ -366,7 +366,7 @@ struct Server::SurfaceTracker {
 		if (layer != nullptr) {
 			LayerSurface *l = static_cast<LayerSurface *>(layer->data);
 			if (l != nullptr) {
-				l->output.damage();
+				l->damage();
 			}
 			return;
 		}

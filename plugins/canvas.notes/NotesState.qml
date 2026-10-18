@@ -1,34 +1,55 @@
 pragma Singleton
 
 import QtQuick
+import WaylandCanvas.Ui
 
-// The notes the plugin owns: the model (id -> {color, text, x, y, width,
-// height}) and the plugin's storage. Each note is drawn by a surface of
-// the plugin's own, placed on the plane by the compositor
-// (docs/intents/shell/notes.md), so nothing here draws or asks the
-// compositor to draw. Every change — created, typed, recoloured, moved,
-// deleted — is written to storage as it happens, and the stored notes
-// come back as surfaces when the shell starts.
+// The notes the plugin owns (docs/intents/shell/notes.md): one Note object
+// per note, changed in place — its properties tell everything bound to
+// them, the note's surface and its placement among them, what changed — and
+// the plugin's storage, where each note is a plain-HTML file of its own,
+// `<id>.html`, written at every change and read back when the shell starts.
 Item {
 	id: root
 
-	property var notes: ({})
-	property var ids: []
+	component Note: QtObject {
+		property string id
+		property string color
+		// The text as plain HTML: paragraphs, line breaks and b, i, u spans.
+		property string html
+		property int x
+		property int y
+		property int width
+		property int height
+		property string font
+		property int size
+	}
+
+	Component {
+		id: noteComponent
+		Note {}
+	}
+
+	property var notes: ({}) // id -> Note
+	property var ids: [] // the surfaces follow this list
 	property int nextId: 1
+	// The files are read once, asynchronously: a note created before they
+	// are in waits for them, so it never takes the id of one on disk.
+	property bool loaded: false
+	property var waiting: []
 
 	property var storage: null
 	property var compositor: null
 	property var colors: ({})
 	property int size: 220
-	// The colours for the editor's dots, in the manifest's own order: the
+	// The colours for the strip's dots, in the manifest's own order: the
 	// settings map arrives alphabetised (a QVariantMap sorts its keys), so
 	// its order is not the manifest's — the manifest's order lives on in
 	// its menu, the toolbar's colour menu — and a colour the menu leaves
-	// out follows after, in the map's (alphabetical) order. Built once at
-	// init; the dots bind to it directly.
+	// out follows after, in the map's (alphabetical) order.
 	property var dotList: []
 
-	readonly property string storageName: "notes.json"
+	readonly property string ink: "#1f2430"
+	readonly property string fileSuffix: ".html"
 
 	// The first plugin component to come up brings the api; there is one
 	// model per shell, rebuilt by a reload.
@@ -58,8 +79,6 @@ Item {
 				ordered.push(colors[name])
 			}
 		}
-		// Built whole, then assigned once: a var property notifies on
-		// assignment, not on a push into the array it holds.
 		var dots = []
 		for (var k = 0; k < ordered.length; k++) {
 			for (var key in colors) {
@@ -70,50 +89,52 @@ Item {
 			}
 		}
 		dotList = dots
-		var saved = storage.read(storageName)
-		if (saved != null) {
-			if (saved.notes != null) {
-				notes = saved.notes
-			}
-			if (typeof saved.nextId === "number") {
-				nextId = saved.nextId
-			}
-		}
-		refresh()
+		storage.list(load)
 	}
 
-	function save() {
+	function load(names) {
+		var found = {}
+		var order = []
+		var highest = 0
+		for (var i = 0; i < names.length; i++) {
+			var match = /^(\d+)\.html$/.exec(names[i])
+			if (match === null) {
+				continue
+			}
+			var note = parseNote(match[1], storage.readText(names[i]))
+			found[note.id] = note
+			order.push(note.id)
+			highest = Math.max(highest, Number(match[1]))
+		}
+		order.sort(function(a, b) { return Number(a) - Number(b) })
+		notes = found
+		ids = order
+		nextId = highest + 1
+		loaded = true
+		var asked = waiting
+		waiting = []
+		for (var j = 0; j < asked.length; j++) {
+			create(null, asked[j])
+		}
+	}
+
+	function save(note) {
 		if (storage !== null) {
-			storage.write(storageName, {notes: notes, nextId: nextId})
+			storage.writeText(note.id + fileSuffix, noteFile(note))
 		}
 	}
 
-	// The surfaces follow this list; it is re-made whenever a note is
-	// added or removed, because a push into the array it holds would tell
-	// no one.
-	function refresh() {
-		var next = []
-		for (var id in notes) {
-			next.push(id)
-		}
-		ids = next
-		// A changed note is a changed map, and QML tells nobody about an
-		// assignment of the same object: the map is copied, so everything
-		// bound to a note sees the change.
-		var copy = {}
-		for (var key in notes) {
-			copy[key] = notes[key]
-		}
-		notes = copy
-	}
-
-	// create {color}: a new note of that colour, centred on what the
-	// output under the cursor shows (the overview's target when it is in
-	// the overview — no place of its own is given), kept, then activated:
-	// the activated event is what opens its editor, the same path a
-	// double-click takes.
+	// create {color}: a new note of that colour, centred on what a screen
+	// in the overview shows (the first screen's view when none is), kept;
+	// its surface takes the keyboard as it maps.
 	function create(api, args) {
-		init(api)
+		if (api !== null) {
+			init(api)
+		}
+		if (!loaded) {
+			waiting = waiting.concat([args])
+			return
+		}
 		var color = args != null && typeof args.color === "string" ? args.color : ""
 		if (color === "") {
 			for (var name in colors) {
@@ -121,99 +142,201 @@ Item {
 				break
 			}
 		}
-		var id = "canvas.notes/" + nextId
+		var id = String(nextId)
 		nextId++
-		// Where the user is looking: the compositor reports each output's
-		// canvas rectangle, and a new note goes in the middle of it.
 		compositor.call("state", undefined, function(state, error) {
-			var view = null
-			if (state != null && state.outputs != null) {
-				for (var i = 0; i < state.outputs.length; i++) {
-					if (state.outputs[i].view != null) {
-						view = state.outputs[i].view
-						break
-					}
-				}
-			}
-			var x = view != null ? Math.round(view.x + view.width / 2 - size / 2) : 0
-			var y = view != null ? Math.round(view.y + view.height / 2 - size / 2) : 0
-			notes[id] = {
+			var view = shownView(state)
+			var note = noteComponent.createObject(root, {
+				id: id,
 				color: color,
-				text: "",
-				x: x,
-				y: y,
+				html: "",
+				x: view !== null ? Math.round(view.x + view.width / 2 - size / 2) : 0,
+				y: view !== null ? Math.round(view.y + view.height / 2 - size / 2) : 0,
 				width: size,
 				height: size,
-			}
-			save()
-			refresh()
+				font: UiTheme.fontFamily,
+				size: UiTheme.fontBody,
+			})
+			var next = Object.assign({}, notes)
+			next[id] = note
+			notes = next
+			ids = ids.concat([id])
+			save(note)
 		})
 	}
 
-	// What is typed into a note: kept as it is typed.
-	function typed(id, text) {
-		var note = notes[id]
-		if (note == null || note.text === text) {
-			return
+	// The canvas rectangle the user is looking at: a screen in the
+	// overview first — the toolbar's — else the first screen's.
+	function shownView(state) {
+		var outputs = state != null && state.outputs != null ? state.outputs : []
+		for (var i = 0; i < outputs.length; i++) {
+			if (outputs[i].overview === true && outputs[i].view != null) {
+				return outputs[i].view
+			}
 		}
-		note.text = text
-		save()
+		for (var j = 0; j < outputs.length; j++) {
+			if (outputs[j].view != null) {
+				return outputs[j].view
+			}
+		}
+		return null
 	}
 
-	// A colour dot on a note's strip.
-	function recolour(id, color) {
-		var note = notes[id]
-		if (note == null) {
+	function typed(note, html) {
+		if (note.html === html) {
 			return
 		}
+		note.html = html
+		save(note)
+	}
+
+	function recolour(note, color) {
 		note.color = color
-		save()
-		refresh()
+		save(note)
 	}
 
-	// A note sized by hand, or grown to hold what was typed into it.
-	function resized(id, width, height) {
-		var note = notes[id]
-		if (note == null) {
-			return
-		}
+	function moved(note, x, y) {
+		note.x = Math.round(x)
+		note.y = Math.round(y)
+		save(note)
+	}
+
+	function resized(note, width, height) {
 		var w = Math.round(width), h = Math.round(height)
 		if (note.width === w && note.height === h) {
 			return
 		}
 		note.width = w
 		note.height = h
-		save()
-		refresh()
+		save(note)
 	}
 
-	// A note dragged by its strip, or placed again after a drag.
-	function moved(id, x, y) {
-		var note = notes[id]
-		if (note == null) {
-			return
-		}
-		note.x = Math.round(x)
-		note.y = Math.round(y)
-		save()
-		refresh()
+	function setFont(note, family) {
+		note.font = family
+		save(note)
 	}
 
-	function remove(id) {
-		if (notes[id] == null) {
+	function setSize(note, px) {
+		note.size = px
+		save(note)
+	}
+
+	function remove(note) {
+		if (notes[note.id] !== note) {
 			return
 		}
-		// A `delete` on the map QML holds leaves the key behind: the map
-		// is built again without it.
+		// The surface goes with its id; the object once nothing reads it.
+		ids = ids.filter(function(id) { return id !== note.id })
 		var next = {}
-		for (var other in notes) {
-			if (other !== id) {
-				next[other] = notes[other]
+		for (var id in notes) {
+			if (id !== note.id) {
+				next[id] = notes[id]
 			}
 		}
 		notes = next
-		save()
-		refresh()
+		if (storage !== null) {
+			storage.remove(note.id + fileSuffix)
+		}
+		Qt.callLater(function() { note.destroy() })
 	}
 
+	// ---- the HTML of a note ----
+
+	// Qt's rich text, as a TextArea holds it, down to plain HTML: the
+	// paragraphs, line breaks and the b, i and u spans, and nothing of
+	// fonts, sizes or colours — those are the note's, not a span's.
+	function cleanHtml(rich) {
+		var body = rich
+		var start = rich.indexOf("<body")
+		if (start >= 0) {
+			var end = rich.lastIndexOf("</body>")
+			body = rich.substring(rich.indexOf(">", start) + 1, end >= 0 ? end : rich.length)
+		}
+		body = body.replace(/<span style="([^"]*)">([\s\S]*?)<\/span>/g,
+			function(all, style, inner) {
+				var open = "", close = ""
+				var weight = /font-weight:\s*(\d+)/.exec(style)
+				if (weight !== null && Number(weight[1]) >= 600) {
+					open += "<b>"
+					close = "</b>" + close
+				}
+				if (/font-style:\s*italic/.test(style)) {
+					open += "<i>"
+					close = "</i>" + close
+				}
+				if (/text-decoration:[^;"]*underline/.test(style)) {
+					open += "<u>"
+					close = "</u>" + close
+				}
+				return open + inner + close
+			})
+		body = body.replace(/<(\/?)([a-zA-Z0-9]+)[^>]*>/g, function(all, slash, tag) {
+			tag = tag.toLowerCase()
+			if (tag === "br") {
+				return "<br>"
+			}
+			if (tag === "p" || tag === "b" || tag === "i" || tag === "u") {
+				return "<" + slash + tag + ">"
+			}
+			return ""
+		})
+		return body.replace(/^\s+|\s+$/g, "")
+	}
+
+	// Plain HTML back into a TextArea: paragraphs without Qt's own margins,
+	// spaces kept, an empty paragraph as one empty line.
+	function richHtml(html) {
+		var marked = html.replace(/<p><br><\/p>/g,
+			"<p style=\"-qt-paragraph-type:empty\"><br /></p>")
+		return "<html><head><style>p { margin-top: 0px; margin-bottom: 0px; "
+			+ "white-space: pre-wrap; }</style></head><body>" + marked + "</body></html>"
+	}
+
+	function cssString(text) {
+		return "\"" + String(text).replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\""
+	}
+
+	// The whole file: the text, the colour, font and size as the page's
+	// style, so a browser shows the note as the card does, and the note's
+	// canvas rectangle in a meta element.
+	function noteFile(note) {
+		return "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
+			+ "<meta name=\"canvas-note\" content=\"x=" + note.x + " y=" + note.y
+			+ " width=" + note.width + " height=" + note.height + "\">\n"
+			+ "<style>\nbody { background: " + note.color + "; color: " + ink
+			+ "; font-family: " + cssString(note.font) + "; font-size: " + note.size
+			+ "px; }\np { margin-top: 0; margin-bottom: 0; white-space: pre-wrap; }\n"
+			+ "</style>\n</head>\n<body>\n" + note.html + "\n</body>\n</html>\n"
+	}
+
+	// A file back into a note; what it leaves out takes the defaults, so a
+	// page written by hand is a note too.
+	function parseNote(id, text) {
+		var place = {}
+		var meta = /<meta\s+name="canvas-note"\s+content="([^"]*)"/i.exec(text)
+		if (meta !== null) {
+			meta[1].replace(/(\w+)=(-?\d+)/g, function(all, key, value) {
+				place[key] = Number(value)
+			})
+		}
+		var style = /<style[^>]*>([\s\S]*?)<\/style>/i.exec(text)
+		var rule = style !== null ? /body\s*\{([^}]*)\}/.exec(style[1]) : null
+		var css = rule !== null ? rule[1] : ""
+		var background = /background(?:-color)?:\s*(#[0-9a-fA-F]{3,8})/.exec(css)
+		var family = /font-family:\s*"((?:[^"\\]|\\.)*)"/.exec(css)
+		var px = /font-size:\s*(\d+)px/.exec(css)
+		var body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(text)
+		var first = dotList.length > 0 ? dotList[0].color : "#ffd866"
+		return noteComponent.createObject(root, {
+			id: id,
+			color: background !== null ? background[1] : first,
+			html: body !== null ? body[1].replace(/^\s+|\s+$/g, "") : "",
+			x: place.x !== undefined ? place.x : 0,
+			y: place.y !== undefined ? place.y : 0,
+			width: place.width > 0 ? place.width : size,
+			height: place.height > 0 ? place.height : size,
+			font: family !== null ? family[1].replace(/\\(.)/g, "$1") : UiTheme.fontFamily,
+			size: px !== null ? Number(px[1]) : UiTheme.fontBody,
+		})
+	}
 }

@@ -432,12 +432,24 @@ void Output::handle_destroy() {
 	server.capture_ui.output_destroyed(*this);
 
 	// The layer surfaces die with the output; destroying each wlroots object
-	// runs its own destroy handler, which takes it out of these vectors.
-	std::vector<LayerSurface *> doomed;
+	// runs its own destroy handler, which takes it out of these vectors. A
+	// surface on the plane is not the output's: another output takes it.
+	Output *heir = nullptr;
+	for (const std::unique_ptr<Output> &other : server.outputs) {
+		if (other.get() != this) {
+			heir = other.get();
+			break;
+		}
+	}
+	std::vector<LayerSurface *> doomed, kept;
 	for (const std::vector<std::unique_ptr<LayerSurface>> &vec : layers) {
 		for (const std::unique_ptr<LayerSurface> &layer : vec) {
-			doomed.push_back(layer.get());
+			bool on_plane = layer->belongs_on_canvas() || layer->canvas_box.has_value();
+			(heir != nullptr && on_plane ? kept : doomed).push_back(layer.get());
 		}
+	}
+	for (LayerSurface *layer : kept) {
+		layer->rehome(*heir);
 	}
 	for (LayerSurface *layer : doomed) {
 		layer->attached_ = false;

@@ -326,7 +326,8 @@ own the machine's Wayland display namespace and GPU.
   change. The bar's left section ends at the logo while the scratch
   `canvas.hello` plugin is off; switching it on in the file puts its
   label past the logo, so the section's ink edge on a fresh screenshot
-  and the bar being a new layer surface prove the shell reloaded and
+  and a new bar surface — counted as wlroots announces each one, since an
+  address or a protocol id can come back — prove the shell reloaded and
   applied the edit. The file is saved over twice by rename (a sibling
   written and renamed over it, the inode replaced each time, the way an
   editor saves), deleted (the shell reloads on the defaults and writes
@@ -338,24 +339,28 @@ own the machine's Wayland display namespace and GPU.
   change, and that must not reload the shell (the settings phase proves
   it).
 
-  Last, the `canvas.notes` plugin end to end, driven
-  only through the public socket: `msg action.run canvas.notes/create`
-  puts a `canvas.notes/...` item in the state, and the plugin's editor
-  must map as a layer surface of the shell client (`namespace
-  wayland-canvas-note-editor`) holding the keyboard on its own surface as
-  it opens — its card checked, pixel by pixel on the screenshot, to sit
-  exactly at the activated box in the note's colour with the darker strip
-  on top. Typing then Escape keeps the text in the state and in the
-  plugin's storage (scratch state); a fake-pointer drag's new place
-  reaches the storage through `item.moved`; a config-rewrite reload
-  leaves exactly the one note in the state (nothing doubled), and once
-  `msg item.remove` took it off the canvas, another reload must put it
-  back from storage — the restart proof. In the overview, the settled
-  camera's own math gives the note's on-screen box; a double-click there
-  opens the editor and typed keys reach it; back in the normal view, a
-  colour dot on the strip recolours the note (state and storage), a click
-  outside closes the editor, the strip's × deletes the note from canvas
-  and storage, and a second note closed with no text is removed too.
+  Last, the `canvas.notes` plugin end to end, every change checked where
+  the user sees it — the card on the screenshot — as well as in the note's
+  own plain-HTML file in the scratch state: `msg action.run
+  canvas.notes/create` maps one surface of the shell client named
+  `wayland-canvas-canvas-canvas.notes/<id>`, placed on the plane at the
+  rectangle its file holds and holding the keyboard. Typing goes into the
+  note where it sits; a pan leaves one card where it was put; a colour dot
+  turns the file and the card green; a reload brings the note back once;
+  writing past the bottom grows the card, drawn to its new height. The
+  strip and the grip are pressed and held across steps, as a hand holds
+  them: each press hands the drag to the compositor (`surface.move`,
+  `surface.resize`), the note follows the pointer while it is held — at
+  100 %, on a desktop pinched to 75 % and in the overview at its zoom —
+  and stays, in its file and on screen, where it is let go. On a second
+  note a word selected and made bold by the strip's B is `<b>` in the file
+  and heavier on screen while the first word keeps its ink; the size menu
+  and the font menu, filtered by typing, set the whole note's size and an
+  installed family; Escape gives the keyboard back and a click takes it
+  again; a third note left empty when the keyboard goes is deleted, file
+  and all. A second output aimed at the first note hit-tests and draws it,
+  and its going leaves both notes; the strips' ×s take them away, files
+  included.
 
   Last, the `canvas.agents` plugin end to end. The bar's own `HOME` is a
   scratch one (read back from `/proc/<pid>/environ`), holding the fixture
