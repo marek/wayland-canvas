@@ -14,14 +14,15 @@ Item {
 	component Note: QtObject {
 		property string id
 		property string color
-		// The text as plain HTML: paragraphs, line breaks and b, i, u spans.
+		// The text as plain HTML: paragraphs, line breaks, b, i and u, and
+		// the size of a span that has one of its own.
 		property string html
 		property int x
 		property int y
 		property int width
 		property int height
 		property string font
-		property int size
+		property int size // of the text that names no size of its own
 	}
 
 	Component {
@@ -216,11 +217,6 @@ Item {
 		save(note)
 	}
 
-	function setSize(note, px) {
-		note.size = px
-		save(note)
-	}
-
 	function remove(note) {
 		if (notes[note.id] !== note) {
 			return
@@ -243,8 +239,8 @@ Item {
 	// ---- the HTML of a note ----
 
 	// Qt's rich text, as a TextArea holds it, down to plain HTML: the
-	// paragraphs, line breaks and the b, i and u spans, and nothing of
-	// fonts, sizes or colours — those are the note's, not a span's.
+	// paragraphs, line breaks, the b, i and u spans and a span's size, and
+	// nothing of fonts or colours — the font is the note's, not a span's.
 	function cleanHtml(rich) {
 		var body = rich
 		var start = rich.indexOf("<body")
@@ -255,6 +251,13 @@ Item {
 		body = body.replace(/<span style="([^"]*)">([\s\S]*?)<\/span>/g,
 			function(all, style, inner) {
 				var open = "", close = ""
+				// Written as px; pasted text may come in pt.
+				var size = /font-size:\s*(\d+(?:\.\d+)?)(px|pt)/.exec(style)
+				if (size !== null) {
+					var px = Math.round(Number(size[1]) * (size[2] === "pt" ? 4 / 3 : 1))
+					open += "<x-size " + px + ">"
+					close = "</x-size>"
+				}
 				var weight = /font-weight:\s*(\d+)/.exec(style)
 				if (weight !== null && Number(weight[1]) >= 600) {
 					open += "<b>"
@@ -270,16 +273,23 @@ Item {
 				}
 				return open + inner + close
 			})
-		body = body.replace(/<(\/?)([a-zA-Z0-9]+)[^>]*>/g, function(all, slash, tag) {
-			tag = tag.toLowerCase()
-			if (tag === "br") {
-				return "<br>"
-			}
-			if (tag === "p" || tag === "b" || tag === "i" || tag === "u") {
-				return "<" + slash + tag + ">"
-			}
-			return ""
-		})
+		// Every tag but these goes, its text kept; the size marks above
+		// become the plain span they stand for.
+		body = body.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>/g,
+			function(all, slash, tag, rest) {
+				tag = tag.toLowerCase()
+				if (tag === "br") {
+					return "<br>"
+				}
+				if (tag === "p" || tag === "b" || tag === "i" || tag === "u") {
+					return "<" + slash + tag + ">"
+				}
+				if (tag === "x-size") {
+					return slash !== "" ? "</span>"
+						: "<span style=\"font-size: " + rest.trim() + "px\">"
+				}
+				return ""
+			})
 		return body.replace(/^\s+|\s+$/g, "")
 	}
 
@@ -296,9 +306,10 @@ Item {
 		return "\"" + String(text).replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\""
 	}
 
-	// The whole file: the text, the colour, font and size as the page's
-	// style, so a browser shows the note as the card does, and the note's
-	// canvas rectangle in a meta element.
+	// The whole file: the text, the colour, the font and the size of the
+	// text that names none as the page's style, so a browser shows the
+	// note as the card does, and the note's canvas rectangle in a meta
+	// element.
 	function noteFile(note) {
 		return "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
 			+ "<meta name=\"canvas-note\" content=\"x=" + note.x + " y=" + note.y

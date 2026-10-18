@@ -97,8 +97,11 @@ public:
 	// held: the press its client answers by handing a drag to the
 	// compositor. The press's layout position is where that drag starts.
 	bool button_held_on(const wlr_surface *surface) const;
-	double press_lx() const { return press_lx_; }
-	double press_ly() const { return press_ly_; }
+	double press_lx() const { return held_.lx; }
+	double press_ly() const { return held_.ly; }
+	// The pointer is no longer kept on the held surface; the next motion
+	// finds what is under it. The buttons stay as they are.
+	void end_hold();
 
 	// Title double-click state: the last click and its view.
 	uint32_t last_title_click = 0;
@@ -120,10 +123,22 @@ private:
 	// Presses swallowed by a binding or a compositor grab must have their
 	// release swallowed too, or clients see stuck keys.
 	std::array<bool, 256> key_consumed_{};
-	// Set of buttons whose press was forwarded to a client, and where the
-	// last such press was (layout coordinates).
+	// Set of buttons whose press was forwarded to a client.
 	uint32_t pressed_buttons_ = 0;
-	double press_lx_ = 0, press_ly_ = 0;
+	// The surface the first of those presses reached keeps the pointer
+	// until the last is released (Wayland's implicit grab): where on it the
+	// press was, in its own coordinates, where the cursor was then (layout
+	// px), and how many surface px a layout px is (1/zoom on the plane).
+	struct HeldPress {
+		wlr_surface *surface = nullptr;
+		double sx = 0, sy = 0, lx = 0, ly = 0, scale = 1;
+	};
+	HeldPress held_;
+	Listener held_destroy_;
+	void handle_held_destroy();
+	// Motion while a press is held: to the held surface, wherever the
+	// cursor is. False when nothing holds the pointer this way.
+	bool held_motion(uint32_t time);
 	// Logo key pressed alone and nothing else happened yet: releasing it
 	// runs the action that holds the Super tap. Any other key, button,
 	// scroll or gesture cancels the tap.
@@ -164,7 +179,10 @@ private:
 	// True while the session is locked: the pointer went to the locker's
 	// surface for the output it is over, or to nothing.
 	bool locked_pointer_focus(uint32_t time);
-	void forward_press(uint32_t time, uint32_t button);
+	// A press to the client of `surface`, at (sx, sy) on it; `scale` is how
+	// many surface px one layout px is there.
+	void forward_press(uint32_t time, uint32_t button, wlr_surface *surface,
+		double sx, double sy, double scale);
 	void cursor_button_press(uint32_t time, uint32_t button);
 	void cursor_button_release(uint32_t time, uint32_t button);
 	// A press while the output is in the overview.

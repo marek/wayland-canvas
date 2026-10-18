@@ -724,6 +724,9 @@ void Input::process_cursor_motion(uint32_t time) {
 		grab.motion();
 		return;
 	}
+	if (held_motion(time)) {
+		return;
+	}
 
 	Output *output = server.output_at(server.cursor->x, server.cursor->y);
 	if (output == nullptr) {
@@ -827,12 +830,41 @@ void Input::overview_press(Output &output, uint32_t time, uint32_t button) {
 
 // ---- pointer buttons ----
 
-void Input::forward_press(uint32_t time, uint32_t button) {
+void Input::forward_press(uint32_t time, uint32_t button, wlr_surface *surface,
+		double sx, double sy, double scale) {
+	if (pressed_buttons_ == 0) {
+		held_ = HeldPress{.surface = surface, .sx = sx, .sy = sy,
+			.lx = server_.cursor->x, .ly = server_.cursor->y, .scale = scale};
+		held_destroy_.disconnect();
+		held_destroy_.connect<&Input::handle_held_destroy>(surface->events.destroy, this);
+	}
 	pressed_buttons_ |= 1u << (button & 31);
-	press_lx_ = server_.cursor->x;
-	press_ly_ = server_.cursor->y;
+	// The press goes where it landed, though no motion entered it there.
+	wlr_seat_pointer_notify_enter(server_.seat, surface, sx, sy);
 	wlr_seat_pointer_notify_button(server_.seat, time, button,
 		WL_POINTER_BUTTON_STATE_PRESSED);
+}
+
+bool Input::held_motion(uint32_t time) {
+	// A drag-and-drop the client started routes the pointer itself, from
+	// surface to surface.
+	if (held_.surface == nullptr || pressed_buttons_ == 0
+			|| server_.seat->drag != nullptr) {
+		return false;
+	}
+	wlr_seat_pointer_notify_motion(server_.seat, time,
+		held_.sx + (server_.cursor->x - held_.lx) * held_.scale,
+		held_.sy + (server_.cursor->y - held_.ly) * held_.scale);
+	return true;
+}
+
+void Input::end_hold() {
+	held_ = HeldPress{};
+	held_destroy_.disconnect();
+}
+
+void Input::handle_held_destroy() {
+	end_hold();
 }
 
 bool Input::button_held_on(const wlr_surface *surface) const {
@@ -855,6 +887,13 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	if (grab.active()) {
 		return; // extra buttons during a compositor grab are swallowed
 	}
+	if (pressed_buttons_ != 0 && held_.surface != nullptr) {
+		// Every button goes where the first held one went, until all are up.
+		pressed_buttons_ |= 1u << (button & 31);
+		wlr_seat_pointer_notify_button(server.seat, time, button,
+			WL_POINTER_BUTTON_STATE_PRESSED);
+		return;
+	}
 	Output *output = server.output_at(server.cursor->x, server.cursor->y);
 	if (output == nullptr) {
 		return;
@@ -869,11 +908,11 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	}
 	if (!output->interactive()) {
 		if (std::optional<LayerHit> shell = shell_surface_at(server, *output)) {
-			// Pointer focus is unset if the cursor has not moved since the
-			// overview opened.
-			wlr_seat_pointer_notify_enter(server.seat, shell->surface, shell->sx, shell->sy);
 			focus_layer_on_click(server, *shell->layer, shell->surface);
-			forward_press(time, button);
+			// A surface on the plane is measured in canvas px, at the zoom.
+			double scale = shell->layer->canvas_box.has_value()
+				? 1.0 / output->camera.drawn().zoom : 1.0;
+			forward_press(time, button, shell->surface, shell->sx, shell->sy, scale);
 			return;
 		}
 		overview_press(*output, time, button);
@@ -903,7 +942,10 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 		} else if (hit.layer != nullptr) {
 			focus_layer_on_click(server, *hit.layer, hit.surface);
 		}
-		forward_press(time, button);
+		bool on_plane = hit.view != nullptr
+			|| (hit.layer != nullptr && hit.layer->canvas_box.has_value());
+		forward_press(time, button, hit.surface, hit.sx, hit.sy,
+			on_plane ? 1.0 / output->camera.drawn().zoom : 1.0);
 		return;
 	}
 
@@ -966,11 +1008,18 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 		wlr_seat_pointer_notify_button(server_.seat, time, button,
 			WL_POINTER_BUTTON_STATE_RELEASED);
 	}
+	bool hold_ends = forwarded && pressed_buttons_ == 0 && held_.surface != nullptr;
+	if (hold_ends) {
+		end_hold();
+	}
 	if (grab.active()) {
 		grab.release();
 		return;
 	}
 	if (forwarded) {
+		if (hold_ends) {
+			process_cursor_motion(time); // the pointer to what is under it now
+		}
 		return;
 	}
 	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);

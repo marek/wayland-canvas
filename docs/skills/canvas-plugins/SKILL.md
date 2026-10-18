@@ -60,20 +60,41 @@ minWidth, minHeight}, cb)`; the compositor moves or sizes the surface
 with its own pointer and answers with the rectangle at the release. Keep
 a `dragging` flag: nothing places the surface until the answer.
 
+A drag *inside* the surface — a selection, a slider — needs nothing of
+its own: while a button pressed on the surface is held, the compositor
+keeps the pointer on it past its edges, in its own coordinates, until the
+release ([../../intents/input/keyboard-and-pointer.md](../../intents/input/keyboard-and-pointer.md)).
+
 ## 5. Text, fonts and formatting
 
 - A `TextArea` with `textFormat: TextEdit.RichText` holds per-span bold,
-  italic and underline; `cursorSelection.font` sets them on a selection.
-  With nothing selected `cursorSelection` takes the word under the caret,
+  italic, underline and size. Setting `cursorSelection.font` sets the
+  *whole* font over the selection, so on a mixed selection it flattens
+  every other attribute: change one attribute run by run, through a
+  `TextSelection` over each stretch of one format.
+- A `TextSelection` takes its range start first: setting `selectionStart`
+  collapses the range there, `selectionEnd` then extends it.
+- Reading `cursorSelection.font` (any `TextSelection`'s `font`) gives the
+  format of the character *before the cursor position*. After a
+  selection made backwards (Shift+Left, a drag to the left) that
+  character is outside the selection, so a strip bound to it shows the
+  wrong format: read a selection's format from its own characters, one
+  at a time through a `TextSelection` used only for reading, and skip
+  line breaks, which have no format of their own.
+- With nothing selected `cursorSelection` takes the word under the caret,
   so "for what is typed next" is a pending format applied to the typed
-  range by a `TextSelection` whose `document` is set before its range.
-- Save plain HTML, not Qt's: keep `p`, `br`, `b`, `i`, `u` and drop every
-  font, size and colour, so the item's own font and size stay the only
-  ones. Load it back with `p { margin: 0; white-space: pre-wrap }` and
-  empty paragraphs marked `-qt-paragraph-type:empty`, or the text grows a
-  line per reload.
+  range after it lands.
+- Save plain HTML, not Qt's: keep `p`, `br`, `b`, `i`, `u` and a span's
+  `font-size`, and drop every font family and colour, so the item's own
+  font stays the only one. Load it back with `p { margin: 0; white-space:
+  pre-wrap }` and empty paragraphs marked `-qt-paragraph-type:empty`, or
+  the text grows a line per reload.
 - `Keys.onPressed` does not swallow keys unless it accepts them; give the
   shortcut keys (`Ctrl+B`) `event.accepted = true`.
+- A quick second click on a `MouseArea` is `doubleClicked`, not
+  `clicked`: a stepping button (+, −) counts both.
+- A number control is − and + around a field that can be typed into, as
+  in every editor, not a list of presets.
 
 ## 6. The keyboard
 
