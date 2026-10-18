@@ -30,8 +30,9 @@ echo "check.sh: tools/build.sh"
 tools/build.sh
 
 # the suites run through meson, from the build dir build.sh just made
-if ! command -v meson >/dev/null 2>&1; then
-	export PATH="$repo/.venv/bin:$PATH"
+bin=$(tools/venv.sh --if-needed)
+if [ -n "$bin" ]; then
+	export PATH="$bin:$PATH"
 fi
 
 echo "check.sh: meson test -C build --suite unit --print-errorlogs"

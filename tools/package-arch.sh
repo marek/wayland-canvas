@@ -13,14 +13,10 @@ S=${CANVAS_TMP:-$REPO/tmp}/packaging-arch
 out=${1:-$REPO/dist}
 out=$(realpath -m "$out")
 
-# meson/ninja on PATH, the repo's .venv as fallback
-if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
-	if [ -x "$REPO/.venv/bin/meson" ]; then
-		export PATH="$REPO/.venv/bin:$PATH"
-	else
-		echo "package-arch.sh: no meson/ninja on PATH and no .venv/bin/meson" >&2
-		exit 2
-	fi
+# meson/ninja from PATH when they run there, else from the repo's .venv
+bin=$("$REPO/tools/venv.sh" --if-needed)
+if [ -n "$bin" ]; then
+	export PATH="$bin:$PATH"
 fi
 
 export PACKAGER='Marek Kudlacz <marek@kudlacz.com>'

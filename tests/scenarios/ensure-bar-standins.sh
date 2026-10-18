@@ -7,8 +7,9 @@
 # The stand-ins run on python-dbusmock, which needs dbus-python and
 # PyGObject from the system Python's distro packages and dbusmock itself
 # from pip: a git-ignored venv on the system interpreter with
-# --system-site-packages, under the repo's tmp/. The repo's own .venv is a
-# Nix Python without those modules, so the stand-ins get their own.
+# --system-site-packages, under the repo's tmp/. The repo's own .venv
+# (tools/venv.sh) has no site packages of the system's, so the stand-ins get
+# their own.
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
