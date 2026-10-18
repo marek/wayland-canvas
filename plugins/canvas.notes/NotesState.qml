@@ -97,9 +97,14 @@ Item {
 			next.push(id)
 		}
 		ids = next
-		// A changed note is a changed map: re-assign so the surfaces bound
-		// to it redraw.
-		notes = notes
+		// A changed note is a changed map, and QML tells nobody about an
+		// assignment of the same object: the map is copied, so everything
+		// bound to a note sees the change.
+		var copy = {}
+		for (var key in notes) {
+			copy[key] = notes[key]
+		}
+		notes = copy
 	}
 
 	// create {color}: a new note of that colour, centred on what the
@@ -162,6 +167,22 @@ Item {
 			return
 		}
 		note.color = color
+		save()
+		refresh()
+	}
+
+	// A note sized by hand, or grown to hold what was typed into it.
+	function resized(id, width, height) {
+		var note = notes[id]
+		if (note == null) {
+			return
+		}
+		var w = Math.round(width), h = Math.round(height)
+		if (note.width === w && note.height === h) {
+			return
+		}
+		note.width = w
+		note.height = h
 		save()
 		refresh()
 	}

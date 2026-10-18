@@ -1212,6 +1212,10 @@ void type(std::string_view s) {
 	}
 }
 
+// A press, a slow travel and a release: a drag of something that follows
+// the pointer (a note's corner, its strip).
+void drag_pointer(double x0, double y0, double x1, double y1);
+
 void click(double x, double y, int button = BTN_LEFT) {
 	t += 8;
 	wlr_pointer_motion_absolute_event m = {
@@ -1225,6 +1229,30 @@ void click(double x, double y, int button = BTN_LEFT) {
 		wl_signal_emit_mutable(&ptr.events.button, &b);
 		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 	}
+}
+
+void drag_pointer(double x0, double y0, double x1, double y1) {
+	auto at = [](double x, double y) {
+		t += 8;
+		wlr_pointer_motion_absolute_event m = {.pointer = &ptr, .time_msec = t,
+			.x = x / double(screen_w), .y = y / double(screen_h)};
+		wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
+		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	};
+	auto hold = [](bool down) {
+		t += 8;
+		wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t,
+			.button = BTN_LEFT, .state = down ? WL_POINTER_BUTTON_STATE_PRESSED
+				: WL_POINTER_BUTTON_STATE_RELEASED};
+		wl_signal_emit_mutable(&ptr.events.button, &b);
+		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	};
+	at(x0, y0);
+	hold(true);
+	for (int travel = 1; travel <= 10; travel++) {
+		at(x0 + (x1 - x0) * travel / 10.0, y0 + (y1 - y0) * travel / 10.0);
+	}
+	hold(false);
 }
 
 // The pointer at (x, y), without a click: parking it where no widget or
@@ -3554,29 +3582,6 @@ std::string plugin_setting_text(const char *id, const char *key) {
 }
 
 // The toolbar.position the scratch shell.json names now.
-std::string toolbar_position_in_config() {
-	JsonParser *parser = json_parser_new();
-	std::string named;
-	if (json_parser_load_from_file(parser, shell_config.c_str(), nullptr)
-		&& json_node_get_node_type(json_parser_get_root(parser))
-			== JSON_NODE_OBJECT) {
-		JsonObject *config = json_node_get_object(json_parser_get_root(parser));
-		JsonNode *toolbar = json_object_get_member(config, "toolbar");
-		JsonObject *toolbar_object = toolbar != nullptr
-			&& json_node_get_node_type(toolbar) == JSON_NODE_OBJECT
-			? json_node_get_object(toolbar) : nullptr;
-		if (toolbar_object != nullptr
-				&& json_object_has_member(toolbar_object, "position")) {
-			JsonNode *position = json_object_get_member(toolbar_object, "position");
-			if (position != nullptr
-					&& json_node_get_value_type(position) == G_TYPE_STRING) {
-				named = json_node_get_string(position);
-			}
-		}
-	}
-	g_object_unref(parser);
-	return named;
-}
 
 // The strip's settled box, from the surface's placed one: the surface
 // is the strip plus the pocket it slides into — overhanging the screen
@@ -3709,22 +3714,6 @@ std::pair<double, double> app_bar_flyout_row(const wlr_box &entry,
 
 // How many apps the compositor has open: the app bar draws one entry each,
 // grouped by app id (a window without one stands alone).
-int apps_open() {
-	std::vector<std::string> seen;
-	for (const std::unique_ptr<View> &view : server->toplevels) {
-		if (!view->mapped) {
-			continue;
-		}
-		const char *app_id = view->shell_app_id();
-		std::string key = app_id != nullptr && *app_id != '\0'
-			? std::string{app_id}
-			: std::format("window:{}", view->session_id);
-		if (std::ranges::find(seen, key) == seen.end()) {
-			seen.push_back(key);
-		}
-	}
-	return static_cast<int>(seen.size());
-}
 
 // The app bar's length along the edge it shares with the toolbar, 0 when it
 // is on another edge or absent: the two are centred as one strip, so the
@@ -5310,11 +5299,60 @@ int run_step() {
 			"with the text it was written in");
 		return 400;
 	}
-	case 120: { // the × on the strip takes it away
+	case 120: { // the card grows to hold what is typed into it
+		wlr_box before = note_box();
+		note.height = before.height;
+		click_note_body();
+		for (int line = 0; line < 8; line++) {
+			type("a note long enough to need another line of its own ");
+		}
+		return 1500;
+	}
+	case 121: {
+		wlr_box grown = note_box();
+		if (grown.height <= note.height && note_retries++ < 60) {
+			return -300;
+		}
+		note_retries = 0;
+		check(grown.height > note.height, std::format(
+			"a note grows as it is written in ({} px, was {})", grown.height,
+			note.height));
+		std::optional<NoteEntry> stored = stored_note(note.id);
+		check(stored.has_value() && stored->height == grown.height,
+			"and the new height is kept with it");
+		note.height = grown.height;
+		return 400;
+	}
+	case 122: { // the grip at the bottom-right corner sizes it by hand
+		wlr_box box = note_box();
+		note.width = box.width;
+		Output *o = out();
+		if (o != nullptr) {
+			Point from = o->canvas_to_local(box.x + box.width - 8,
+				box.y + box.height - 8);
+			drag_pointer(from.x, from.y, from.x + 120, from.y + 60);
+		}
+		return 1200;
+	}
+	case 123: {
+		wlr_box sized = note_box();
+		if (sized.width <= note.width && note_retries++ < 60) {
+			return -300;
+		}
+		note_retries = 0;
+		check(sized.width > note.width, std::format(
+			"a drag of the corner widens the note ({} px, was {})", sized.width,
+			note.width));
+		std::optional<NoteEntry> stored = stored_note(note.id);
+		check(stored.has_value() && stored->width == sized.width,
+			"and the size it was given is kept");
+		return 400;
+	}
+	case 124: { // the × on the strip takes it away
 		click_note_close();
 		return 1000;
 	}
-	case 121: {
+	case 125: {
 		if ((note_surfaces() != 0 || !stored_notes().empty())
 				&& note_retries++ < 120) {
 			return -300;
