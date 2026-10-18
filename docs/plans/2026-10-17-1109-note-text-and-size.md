@@ -42,10 +42,9 @@ settles.
 ## Tasks
 
 - [x] Settled: a note is its own file in the plugin's storage, written as plain HTML, and the strip offers every font family installed on the machine
-- [ ] Intent: notes.md gains the text model (per-span weight, slant and underline; the note's own font and size), the strip's controls, and the resize by corner
-- [ ] Shell: bold, italic and underline applied to the selection and continued by typing inside a span; the font and the size chosen for the whole note, both kept in the item and storage
-- [ ] Shell: the strip carries the font and size choosers beside the colour dots, and the bold, italic and underline buttons
-- [ ] Compositor: the card drawn with the spans' attributes, so a note reads the same whether the editor is open or not — through the item's own data, with no note-specific code in the compositor
-- [ ] Resize: a drag of a note's corner at any zoom sizes the card, the text re-wraps, and the size is kept
-- [ ] Scenarios: a span made bold and a second left plain, read back from the item and the storage and seen on the screenshot; a corner drag at 100 % and at a scaled desktop
-- [ ] On screen, nested: write in a note, format a selection, resize it by a corner (the user)
+
+The rest — the intent, the text controls, the resize by corner, the
+scenarios and the look on screen — is carried on in
+[2026-10-18-1130-notes-end-to-end.md](2026-10-18-1130-notes-end-to-end.md),
+for a note that is one surface the plugin draws: the card is the
+plugin's, and the compositor draws nothing of it.

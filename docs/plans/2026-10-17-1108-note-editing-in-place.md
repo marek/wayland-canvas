@@ -42,7 +42,10 @@ frame from outside.
   - `src/platform/ipc.cpp`: `item.set`, `item.remove`, `item.activate`, the `items` array in the state, the `item.moved` and `item.activated` events
   - `tests/scenarios/ipc.cpp`: its canvas-items phase, and `tests/scenarios/bar.cpp`'s leftover `NoteEntry`/`state_notes` helpers that read items
   - `docs/intents/platform/ipc.md` (the methods, the state row, the Canvas items section), `docs/intents/shell/notes.md`'s cross-link, and `docs/intents/shell/plugins.md` where items are named
-- [ ] On screen a note hovers at the centre and cannot be used, in a fresh session too. Two things are in against it now: the compositor remembers a placement by name and applies it when the surface maps (so the ask can no longer race the surface or a shell reload), and a note that is still unplaced after six seconds logs the compositor's answer and hides itself instead of floating. Try it again and read that line: it names whether the call was refused, and why
+
+The note that hovers at the centre and cannot be used is carried on in
+[2026-10-18-1130-notes-end-to-end.md](2026-10-18-1130-notes-end-to-end.md),
+which starts from the findings below.
 
 ## What was tried for the unusable note, and what it showed
 
