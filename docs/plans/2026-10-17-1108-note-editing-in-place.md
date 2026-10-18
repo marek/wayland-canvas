@@ -35,4 +35,10 @@ frame from outside.
 - [x] The bar scenario's notes phase rewritten for the surface model: the note surface by its name, its canvas placement, the storage, one card through a pan, a reload, and the strip's controls
 - [x] Keys and clicks reach a placed surface: the compositor's half (placement, hit test, keyboard focus) measured right, and the plugin's two faults fixed — an `id` named `text` shadowed the property in the typed handler, and the strip's drag area covered its own controls. Typing, the colour dots and a reload all pass now
 - [x] The × on the strip removes the note: the click was landing all along, but `delete` on the map QML holds left the key behind, so the surface was never torn down; the map is rebuilt without it
-- [ ] Canvas items removed: the compositor draws no cards for plugins, `item.*` and the item state go, and `platform/ipc.md`, `shell/notes.md` and the IPC scenario lose them
+- [ ] Canvas items removed, in one pass (nothing uses them now that notes draw themselves):
+  - `src/canvas/items.{h,cpp}` deleted, with `Items items` off `Server` and the file off `meson.build`
+  - `src/render/render.cpp`: `draw_items`, `item_texture`, the `ItemSlot` cache and its sweep
+  - `src/input/input.cpp`: the item hit in `pointer_hit_test`, `item_press`, the double-click state; `src/input/grab.cpp`: `ItemDrag` and `begin_item`
+  - `src/platform/ipc.cpp`: `item.set`, `item.remove`, `item.activate`, the `items` array in the state, the `item.moved` and `item.activated` events
+  - `tests/scenarios/ipc.cpp`: its canvas-items phase, and `tests/scenarios/bar.cpp`'s leftover `NoteEntry`/`state_notes` helpers that read items
+  - `docs/intents/platform/ipc.md` (the methods, the state row, the Canvas items section), `docs/intents/shell/notes.md`'s cross-link, and `docs/intents/shell/plugins.md` where items are named
