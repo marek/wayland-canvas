@@ -1,6 +1,6 @@
 ---
 name: debugging-discipline
-description: Lessons from debugging wayland-canvas - a repeated report is signal, not flakiness; check the environment before blaming the code and the code before blaming the environment; a second attempt at a timing or state bug should redesign rather than re-patch; fix a bug at the shared layer, not at the call site that reported it; drive a state transition explicitly. Use whenever a bug is reported again after a fix, whenever a test fails in a way that looks like a regression, whenever a first fix does not hold, and when hunting crashes, grabs that never end, or rendering corruption.
+description: Lessons from debugging wayland-canvas - run the exact command that failed, whole, before tracing anything; a repeated report is signal, not flakiness; check the environment before blaming the code and the code before blaming the environment; a second attempt at a timing or state bug should redesign rather than re-patch; fix a bug at the shared layer, not at the call site that reported it; drive a state transition explicitly. Use whenever the user reports a failing command or script, whenever a bug is reported again after a fix, whenever a test fails in a way that looks like a regression, whenever a first fix does not hold, and when hunting crashes, grabs that never end, or rendering corruption.
 ---
 
 # Debugging discipline
@@ -17,7 +17,31 @@ the cause produces a different wrong thing.
 Trust the report as stated. "The title bar draws twice" is a fact to
 root-cause with the scenarios and a nested run, not a claim to confirm.
 
-## 2. Environment or code: check, don't assume — in both directions
+## 2. Run the command that failed, whole, before anything else
+
+When the user says a command fails — `tools/build.sh`, `tools/package.sh`,
+`tools/check.sh`, a scenario — the first step is that command, exactly as
+they run it (`source .venv/bin/activate`, then the script with its
+defaults), start to finish, its whole output kept in `tmp/` and read. It
+states the failure in its own words in a minute.
+
+What it is not:
+
+- **Not the pieces.** Reading the script and re-running its steps one by
+  one, or a nearby command (`meson compile` for `build.sh`, `build.sh` for
+  `package.sh`), runs in a different directory, buildtype, toolchain or
+  root, and finds nothing: an incremental build has no work to do, a
+  debug build hides release warnings, and only the package roots install
+  just the declared dependencies.
+- **Not a summary.** An exit code, a `grep -c warning:` or a log deleted
+  unread is not reading the output; a `-Wunused-result` or a configure
+  `ERROR:` passes straight through such a filter.
+- **Not a guess.** Theories about what the script might hit come after
+  its output, from it.
+
+Then fix what it said, and run the same command again as the proof.
+
+## 3. Environment or code: check, don't assume — in both directions
 
 - **A failure that looks like a regression may be the environment.**
   Before bisecting, check: the nested host eating the gesture, a stale
@@ -28,7 +52,7 @@ root-cause with the scenarios and a nested run, not a claim to confirm.
   it needs evidence like any other. Inject the gesture through the
   scenario path and see.
 
-## 3. Crashes and corruption: use the tools built for it
+## 4. Crashes and corruption: use the tools built for it
 
 A crash in a destroy path, a grab that never ends, garbled output is a
 lifecycle or memory bug until shown otherwise.
@@ -46,7 +70,7 @@ lifecycle or memory bug until shown otherwise.
 
 `docs/intents/bugs/grabs-that-never-ended.md` is the case study.
 
-## 4. A second attempt should redesign, not re-patch
+## 5. A second attempt should redesign, not re-patch
 
 If a fix for a race, a timing-dependent failure or "it works sometimes"
 does not hold on the next report, ask what design would make the whole
@@ -55,7 +79,7 @@ Anchoring that stopped at the button release could not be patched into
 behaving; anchoring until the client acks the ending configure removed
 the class.
 
-## 5. Fix it at the layer every caller shares
+## 6. Fix it at the layer every caller shares
 
 Before wiring a fix into the call site that reported the bug, ask
 whether every other call site of the same shape has the same gap. If a
@@ -64,7 +88,7 @@ fix belongs where a grab ends, once. If one gesture left stale state
 behind, ask which other gestures leave the same state behind — the
 answer is usually "all of them".
 
-## 6. Drive a state transition explicitly
+## 7. Drive a state transition explicitly
 
 A real transition — an output plugged or unplugged, a client mapping or
 destroying, a gesture beginning or ending — gets its own explicit step
@@ -73,7 +97,7 @@ error path notice". A gesture that ends while its output is gone ends
 through a path that clears its state; it does not leave the offset for
 the next gesture to trip over.
 
-## 7. Log enough to see it
+## 8. Log enough to see it
 
 When behaviour is wrong and the cause is not visible, run with `-d`,
 add logging behind it where the debug output is thin (camera, zoom,
