@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "platform/output.h"
+#include "core/config.h"
 #include "core/server.h"
 #include "windows/view.h"
 
@@ -214,6 +215,10 @@ std::string LayerSurface::name() const {
 	return wlr->namespace_ != nullptr ? std::string{wlr->namespace_} : std::string{};
 }
 
+bool LayerSurface::belongs_on_canvas() const {
+	return name().starts_with(config::canvas_surface_prefix);
+}
+
 void Output::arrange_layers() {
 	wlr_box full{0, 0, width, height};
 	wlr_box usable = full;
@@ -225,6 +230,14 @@ void Output::arrange_layers() {
 			for (const std::unique_ptr<LayerSurface> &layer : layers[layer_order[i]]) {
 				bool exclusive = layer->wlr->current.exclusive_zone > 0;
 				if ((pass == 0) != exclusive) {
+					continue;
+				}
+				if (layer->belongs_on_canvas() && !layer->canvas_box.has_value()) {
+					// Not placed yet: the client is left to its own size so
+					// it can map and be found by name, and nothing of it is
+					// drawn until the plugin says where on the plane it goes.
+					layer->geo = wlr_box{};
+					wlr_layer_surface_v1_configure(layer->wlr, 0, 0);
 					continue;
 				}
 				if (layer->canvas_box.has_value()) {
@@ -274,8 +287,8 @@ std::optional<LayerHit> Output::canvas_surface_at(double ox, double oy) const {
 
 std::optional<LayerHit> Output::layer_surface_at(int layer, double ox, double oy) const {
 	for (const std::unique_ptr<LayerSurface> &l : layers[layer]) {
-		if (!l->mapped || l->canvas_box.has_value()) {
-			continue; // on the plane: canvas_surface_at finds it
+		if (!l->mapped || l->canvas_box.has_value() || l->belongs_on_canvas()) {
+			continue; // the plane's: canvas_surface_at finds it, or nothing does
 		}
 		double sx = 0, sy = 0;
 		wlr_surface *surface = wlr_layer_surface_v1_surface_at(

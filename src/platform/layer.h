@@ -27,6 +27,11 @@ public:
 	std::optional<wlr_box> canvas_box;
 	// The name the plugin placed it by: its layer-shell namespace.
 	std::string name() const;
+	// A surface whose name says it belongs on the plane. It is never
+	// given a place on a screen: until the plugin says where on the
+	// canvas it goes, it is not drawn at all — a surface meant for the
+	// plane must never end up centred on the screen instead.
+	bool belongs_on_canvas() const;
 	// Applies a placement the plugin asked for before this surface mapped.
 	void take_pending_place();
 

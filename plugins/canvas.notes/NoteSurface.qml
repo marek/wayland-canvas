@@ -17,8 +17,13 @@ PanelWindow {
 	property string noteId: ""
 
 	readonly property var note: Notes.notes[noteId]
-	readonly property string surfaceName: api !== null
-		? api.canvas.surfaceName("canvas.notes", noteId) : ""
+	// The name the compositor places this surface by. It is built here,
+	// from the id alone: a layer surface carries the namespace it was
+	// created with, so a name that arrives later — once `api` is set —
+	// would never reach the compositor, and the note would hang in the
+	// middle of the screen unplaced.
+	readonly property string surfaceName: "wayland-canvas-canvas-canvas.notes/"
+		+ noteId
 
 	visible: note !== undefined && !unplaceable
 	color: "transparent"
@@ -42,7 +47,7 @@ PanelWindow {
 	// and stays off the screen, rather than floating over the middle of
 	// it where it would cover what is behind and do nothing.
 	property int placeTries: 0
-	readonly property bool unplaceable: placeTries > 40 && !placed
+	readonly property bool unplaceable: placeTries > 20 && !placed
 
 	function place() {
 		if (note === undefined || api === null) {
@@ -52,11 +57,22 @@ PanelWindow {
 			x: note.x, y: note.y, width: note.width, height: note.height
 		}, function(result, error) {
 			placed = result === true
-			if (!placed) {
-				placeTries++
-				if (placeTries === 41) {
-					console.warn("[canvas.notes] the compositor would not place "
-						+ surfaceName + ": " + error)
+			if (placed) {
+				return
+			}
+			placeTries++
+			// Said once, and said plainly: a note that cannot be put on
+			// the plane is a note that cannot be used, and the reason is
+			// nearly always a compositor without `surface.place` — an
+			// older binary than the plugin it is running.
+			if (placeTries === 3) {
+				var reason = String(error)
+				console.warn("[canvas.notes] the compositor would not place "
+					+ surfaceName + ": " + reason)
+				if (reason.indexOf("unknown method") >= 0) {
+					console.warn("[canvas.notes] this compositor has no "
+						+ "surface.place: it is older than these plugins, and "
+						+ "notes cannot be shown on the canvas by it")
 				}
 			}
 		})
@@ -89,8 +105,6 @@ PanelWindow {
 			// Dragging the strip moves the note on the plane.
 			MouseArea {
 				anchors.fill: parent
-				hoverEnabled: true
-				cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 				propagateComposedEvents: true
 				property real pressX: 0
 				property real pressY: 0
@@ -120,22 +134,19 @@ PanelWindow {
 
 						required property var modelData
 
-						width: dotArea.containsMouse ? 14 : 10
-						height: width
-						radius: width / 2
+						width: 10
+						height: 10
+						radius: 5
 						color: modelData.color
 						border.width: root.note !== undefined
 							&& root.note.color === modelData.color ? 2 : 0
 						border.color: "#1f2430"
-
-						Behavior on width { NumberAnimation { duration: 80 } }
 
 						MouseArea {
 							id: dotArea
 							anchors.fill: parent
 							anchors.margins: -3 // a dot is a small target
 							hoverEnabled: true
-							cursorShape: Qt.PointingHandCursor
 							onClicked: Notes.recolour(root.noteId, dot.modelData.color)
 						}
 					}
@@ -164,7 +175,6 @@ PanelWindow {
 					id: closeArea
 					anchors.fill: parent
 					hoverEnabled: true
-					cursorShape: Qt.PointingHandCursor
 					onClicked: Notes.remove(root.noteId)
 				}
 			}
