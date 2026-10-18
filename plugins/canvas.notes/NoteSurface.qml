@@ -20,7 +20,7 @@ PanelWindow {
 	readonly property string surfaceName: api !== null
 		? api.canvas.surfaceName("canvas.notes", noteId) : ""
 
-	visible: note !== undefined
+	visible: note !== undefined && !unplaceable
 	color: "transparent"
 	exclusionMode: ExclusionMode.Ignore
 
@@ -38,6 +38,11 @@ PanelWindow {
 	// The compositor can only place a surface it knows, and it learns of
 	// one when the client creates it: the ask is repeated until it lands.
 	property bool placed: false
+	// A note belongs on the plane: one that cannot be put there says so
+	// and stays off the screen, rather than floating over the middle of
+	// it where it would cover what is behind and do nothing.
+	property int placeTries: 0
+	readonly property bool unplaceable: placeTries > 40 && !placed
 
 	function place() {
 		if (note === undefined || api === null) {
@@ -47,13 +52,20 @@ PanelWindow {
 			x: note.x, y: note.y, width: note.width, height: note.height
 		}, function(result, error) {
 			placed = result === true
+			if (!placed) {
+				placeTries++
+				if (placeTries === 41) {
+					console.warn("[canvas.notes] the compositor would not place "
+						+ surfaceName + ": " + error)
+				}
+			}
 		})
 	}
 
 	Timer {
 		interval: 150
 		repeat: true
-		running: !root.placed && root.note !== undefined
+		running: !root.placed && !root.unplaceable && root.note !== undefined
 		onTriggered: root.place()
 	}
 
