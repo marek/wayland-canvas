@@ -9,9 +9,10 @@ and pans, zooms and scales with the canvas on every output; it is typed
 into where it sits and grows as text is added; it is dragged by its strip
 and resized from its bottom-right corner. Its strip's colour dots recolour
 it, its × deletes it, and the same strip chooses the note's font — any
-family installed on the machine — and its size. Bold, italic and
-underline apply to the selected span. Each note is a plain-HTML file of
-its own in the plugin's storage.
+family installed on the machine. Bold, italic, underline and the text
+size apply to the selected span, the size set with − and + around a
+number that can also be typed. Each note is a plain-HTML file of its own
+in the plugin's storage.
 
 A note stays one surface the plugin draws
 (`plugins/canvas.notes/NoteSurface.qml`), placed on the plane by the
@@ -63,7 +64,7 @@ continues [2026-10-17-1108-note-editing-in-place.md](2026-10-17-1108-note-editin
 - [x] Plugin: one object per note with real properties, changed in place; the surfaces made by `Variants`; a note grows to hold its text
 - [x] Compositor: `surface.move` and `surface.resize` as pointer grabs answered at the release; canvas surfaces drawn and hit-tested on every output and kept when their output goes; no configure before a surface's first commit; a surface drawn at the size it committed
 - [x] Plugin: the strip drags the note and the bottom-right corner sizes it, through those methods, at any zoom; the text re-wraps and the size is kept
-- [x] Text model: bold, italic and underline on the strip, applied to the selection and continued by typing inside a span; the font and the size of the whole note on the same strip, every installed family offered
+- [x] Text model: bold, italic and underline on the strip, applied to the selection and continued by typing inside a span; the font of the whole note on the same strip, every installed family offered
 - [x] Storage: each note its own plain-HTML file, read back on start and after a reload
 - [x] Scenario: the bar scenario's notes phase checks the screen — the card recoloured, grown, moved by its strip, sized by its corner at 100 % and at a scaled desktop, a bold span and a plain one in the file and on the screenshot, the × — and two outputs drawing one note
 - [x] The reload check tells a new bar surface by something that is never reused
@@ -74,4 +75,6 @@ continues [2026-10-17-1108-note-editing-in-place.md](2026-10-17-1108-note-editin
 - [x] On screen, nested: a note created, typed into, grown, panned and zoomed, driven by keys and the socket
 - [x] Once verified: a skill for writing canvas plugins without these mistakes, and a case study of this hunt in `docs/intents/bugs/`
 - [ ] On screen, nested, by hand: drag a note by its strip, size it by its corner, recolour it, format a selection, change its font and size, delete it (the user)
-- [ ] Found here, wider than notes: a button held on a client surface does not keep the pointer on it, so a drag that leaves the surface stops reaching it (text selection past a window's edge included)
+- [ ] Text size per span, as bold is: on the selection, or with nothing selected on what is typed next; kept as the span's `font-size` in the file, the note's base size the rest's
+- [ ] The size control on the strip: − and + step the size at the caret or of the selection by a pixel, and the number between them can be typed into, Enter applying it
+- [ ] A button held on a client surface keeps the pointer on it until the release, outside its bounds too (Wayland's implicit grab), so a drag that leaves the surface — a text selection past a window's or a note's edge, a slider — still reaches it; drag-and-drop and the compositor's own grabs keep priority. Found while fixing notes, wider than them

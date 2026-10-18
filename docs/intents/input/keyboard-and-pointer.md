@@ -90,6 +90,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Subject | Rule |
 |---|---|
 | Focus | Click-to-focus, and the click raises the window |
+| A button held on a client | The surface the press reached — a window, a shell surface, a note — keeps the pointer until the last button is released, past its edges too, in its own coordinates at the zoom the press was made at: a text selection or a slider dragged out of it still follows the pointer (Wayland's implicit grab, as other compositors keep it). A drag-and-drop the client starts and a drag it hands to the compositor take the pointer from there |
 | Drag over a window | Title-bar drag and edge/corner resize: [../windows/title-bars.md](../windows/title-bars.md) |
 | Super+left-drag / Super+right-drag | Move / resize from anywhere on the window ([../windows/window-management.md](../windows/window-management.md)) |
 | Press vs drag | A press becomes a drag only past a small travel (compile-time, `src/core/config.h`); under it, the release is a click |
