@@ -132,6 +132,7 @@ Every component a plugin contributes receives `api`:
 | `api.panels` | `toggle`, `toggle`'s anchor re-aims an already-open panel (another tray icon's menu), `open`, `close`, and the name of the open panel |
 | `api.actions` | `run(<action name>, args)` |
 | `api.theme` | `mode` (`light` or `dark`), `colors` for that mode, `setMode(mode)` ([theme.md](theme.md)) |
+| `api.canvas` | A surface of the plugin's own on the plane: `place(<surface>, {x, y, width, height})` and `unplace(<surface>)`, in canvas coordinates ([../platform/ipc.md](../platform/ipc.md)). What a plugin draws there is its own — the compositor places it and nothing more |
 | `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops, canvas items), `call(method, params, callback)` with its result or error, and its events ([../platform/ipc.md](../platform/ipc.md)) |
 | `api.shell` | The shell config, live: `config`, `configPath`; every bar widget, hidden ones flagged (`barWidgets`: name, plugin name, section, order, hidden), `barHidden(name)`, `setBarHidden(name, hidden)`; `toolbarPosition`, `setToolbarPosition(edge)`. The host writes `shell.json` and applies the change at once, without a reload ([settings.md](settings.md)) |
 

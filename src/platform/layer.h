@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+#include <string>
 #include "core/util.h"
 
 class Output;
@@ -18,6 +20,13 @@ public:
 	wlr_layer_surface_v1 *const wlr;
 	wlr_box geo{}; // output-local logical
 	bool mapped = false;
+	// A surface a plugin asked to be put on the plane
+	// (docs/intents/platform/ipc.md): its rectangle in canvas pixels. It
+	// is then drawn, moved and hit-tested with the canvas instead of with
+	// the screen. Unset for an ordinary layer surface.
+	std::optional<wlr_box> canvas_box;
+	// The name the plugin placed it by: its layer-shell namespace.
+	std::string name() const;
 
 	// Keyboard interactivity, as the client last committed it.
 	bool wants_keyboard() const;

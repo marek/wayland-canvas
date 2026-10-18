@@ -283,6 +283,11 @@ Item {
 		id: panels
 	}
 
+	CanvasApi {
+		id: canvasApi
+		compositor: compositor
+	}
+
 	ActionsRunner {
 		id: actions
 	}
@@ -406,6 +411,7 @@ Item {
 					plugin: pluginApi,
 					storage: storage,
 					panels: panels,
+					canvas: canvasApi,
 					actions: actions,
 					theme: theme,
 					compositor: compositor,

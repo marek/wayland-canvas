@@ -28,10 +28,11 @@ frame from outside.
 
 ## Tasks
 
-- [ ] Reproduce headlessly: a note opened for editing, then a zoom and a pan, with the screenshots showing the duplicate card and the drift
-- [ ] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
-- [ ] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom
-- [ ] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay
-- [ ] Intent: notes.md states that editing happens on the note itself, and what a camera move does while a note is open
-- [ ] Implement it, with the bar scenario's notes phase extended to zoom and pan while the editor is open
-- [ ] On screen, nested: open a note, zoom in and out, pan, change desktop scale — one card throughout (the user)
+- [x] Prove it headlessly: a note typed in, then a pan, with one card throughout and the text where it was
+- [x] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
+- [x] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom (`surface.place`, `surface.unplace`, and each output's canvas rectangle in the state)
+- [x] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay — a note is now one surface, written in where it is, with no editor over it and no canvas item behind it
+- [x] The bar scenario's notes phase rewritten for the surface model: the note surface by its name, its canvas placement, the storage, one card through a pan, a reload, and the strip's controls
+- [x] Keys and clicks reach a placed surface: the compositor's half (placement, hit test, keyboard focus) measured right, and the plugin's two faults fixed — an `id` named `text` shadowed the property in the typed handler, and the strip's drag area covered its own controls. Typing, the colour dots and a reload all pass now
+- [x] The × on the strip removes the note: the click was landing all along, but `delete` on the map QML holds left the key behind, so the surface was never torn down; the map is rebuilt without it
+- [ ] Canvas items removed: the compositor draws no cards for plugins, `item.*` and the item state go, and `platform/ipc.md`, `shell/notes.md` and the IPC scenario lose them

@@ -107,6 +107,10 @@ private:
 		JsonObject *params);
 	std::expected<std::string, std::string> m_action_run(Client &client,
 		JsonObject *params);
+	std::expected<std::string, std::string> m_surface_place(Client &client,
+		JsonObject *params);
+	std::expected<std::string, std::string> m_surface_unplace(Client &client,
+		JsonObject *params);
 	std::expected<std::string, std::string> m_capture_stop(Client &client,
 		JsonObject *params);
 	std::expected<std::string, std::string> m_settings_get(Client &client,

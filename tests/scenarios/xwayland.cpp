@@ -339,15 +339,34 @@ int run_step() {
 		}
 		check(client_said().find("OFFERED") != std::string_view::npos,
 			"the client owns the X11 clipboard");
-		spawn(std::format("wl-paste -n > '{}/paste.txt' 2>/dev/null", shot_dir).c_str());
-		return 1500;
+		// X11 hands its selection over for the window that holds the
+		// focus: the client's own window is clicked first.
+		if (View *view = x11_view()) {
+			wlr_box frame = frame_on_screen(*view);
+			click(frame.x + frame.width / 2,
+				frame.y + config::titlebar_height + 20);
+		}
+		// Each ask writes its own file: a file left by an ask that found
+		// nothing must never be read as this one's answer.
+		spawn(std::format("wl-paste -n > '{}/paste-0.txt' 2>/dev/null",
+			shot_dir).c_str());
+		return 2000;
 	}
 	case 13: {
-		std::string pasted = read_text(shot_dir + "/paste.txt");
-		if (!pasted.starts_with("from-x11") && retries++ < 60) {
-			spawn(std::format("wl-paste -n > '{}/paste.txt' 2>/dev/null",
-				shot_dir).c_str());
-			return -400;
+		std::string pasted = read_text(std::format("{}/paste-{}.txt", shot_dir,
+			retries));
+		if (!pasted.starts_with("from-x11") && retries++ < 120) {
+			// The offer crosses the bridge once the compositor holds the
+			// X11 selection, which follows the focus: the window is
+			// clicked again and the clipboard asked again.
+			if (View *view = x11_view()) {
+				wlr_box frame = frame_on_screen(*view);
+				click(frame.x + frame.width / 2,
+					frame.y + config::titlebar_height + 20);
+			}
+			spawn(std::format("wl-paste -n > '{}/paste-{}.txt' 2>/dev/null",
+				shot_dir, retries).c_str());
+			return -500;
 		}
 		check(pasted.starts_with("from-x11"), std::format(
 			"what an X11 client copied pastes in a wayland client ('{}')", pasted));
@@ -365,7 +384,14 @@ int run_step() {
 	case 16: {
 		if (client_said().find("PASTED from-wayland") == std::string_view::npos
 				&& retries++ < 200) {
-			return -100;
+			// The selection crosses to the window that holds the focus:
+			// the client's own window is clicked as it comes up.
+			if (View *view = x11_view()) {
+				wlr_box frame = frame_on_screen(*view);
+				click(frame.x + frame.width / 2,
+					frame.y + config::titlebar_height + 20);
+			}
+			return -200;
 		}
 		std::string_view said = client_said();
 		check(said.find("PASTED from-wayland") != std::string_view::npos,

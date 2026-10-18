@@ -246,11 +246,34 @@ void screen_surface_iter(wlr_surface *surface, int sx, int sy, void *data) {
 
 // ------------------------------------------------------------- layers
 
+// A surface a plugin put on the plane: drawn in canvas space, so it pans,
+// zooms and scales with everything else there
+// (docs/intents/platform/ipc.md).
+void draw_canvas_surfaces(const RenderCtx &ctx) {
+	for (const auto &surfaces : ctx.output->layers) {
+		for (const auto &layer : surfaces) {
+			if (!layer->mapped || !layer->canvas_box.has_value()) {
+				continue;
+			}
+			const wlr_box &box = *layer->canvas_box;
+			Rect on_plane{double(box.x), double(box.y), double(box.width),
+				double(box.height)};
+			if (!on_plane.intersects(ctx.viewport)) {
+				continue;
+			}
+			wlr_surface *surface = layer->wlr->surface;
+			draw_surface_logical(ctx, surface, canvas_x(ctx, box.x),
+				canvas_y(ctx, box.y), box.width * ctx.cam.zoom,
+				box.height * ctx.cam.zoom, 1.0f, true);
+		}
+	}
+}
+
 void draw_layers(const RenderCtx &ctx, int from, int to) {
 	for (int i = from; i <= to; i++) {
 		for (const auto &layer : ctx.output->layers[static_cast<std::size_t>(i)]) {
-			if (!layer->mapped) {
-				continue;
+			if (!layer->mapped || layer->canvas_box.has_value()) {
+				continue; // on the plane, drawn with the canvas instead
 			}
 			ScreenIter it = {
 				.ctx = &ctx,
@@ -1095,6 +1118,9 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 
 	// canvas items, above the windows and their title bars
 	draw_items(ctx);
+
+	// and the surfaces plugins put on the plane, above both
+	draw_canvas_surfaces(ctx);
 
 	// top layer, unless a fullscreen view covers the output
 	if (!fullscreen_covers(ctx)) {

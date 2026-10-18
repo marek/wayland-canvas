@@ -120,7 +120,9 @@ std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
 			return hit;
 		}
 	}
-	return std::nullopt;
+	// A surface a plugin put on the plane is hit where it is drawn, which
+	// is the canvas's business, not the screen's.
+	return output.canvas_surface_at(ox, oy);
 }
 
 // A click on a shell surface that takes the keyboard gives it the keyboard,

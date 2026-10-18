@@ -12,7 +12,9 @@ size by hand.
 The result of this work:
 
 - Text in a note can be bold, italic or underlined, at a chosen size and
-  in a chosen font.
+  in a chosen font; the strip offers every font family the machine has.
+- Each note is a file of its own in the plugin's storage, written as plain
+  HTML, so a note can be read, edited or kept outside the shell.
 - Bold, italic and underline apply to the selection: a span of a note's
   text carries its own weight, slant and underline, and text typed inside
   it continues it. With nothing selected the choice applies to what is
@@ -39,7 +41,7 @@ settles.
 
 ## Tasks
 
-- [ ] (the user to decide) How a note's formatting is carried in the item state and the plugin's storage, and which fonts are offered
+- [x] Settled: a note is its own file in the plugin's storage, written as plain HTML, and the strip offers every font family installed on the machine
 - [ ] Intent: notes.md gains the text model (per-span weight, slant and underline; the note's own font and size), the strip's controls, and the resize by corner
 - [ ] Shell: bold, italic and underline applied to the selection and continued by typing inside a span; the font and the size chosen for the whole note, both kept in the item and storage
 - [ ] Shell: the strip carries the font and size choosers beside the colour dots, and the bold, italic and underline buttons
