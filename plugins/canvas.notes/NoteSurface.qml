@@ -59,7 +59,7 @@ PanelWindow {
 
 	Component.onCompleted: {
 		Qt.callLater(place)
-		Qt.callLater(function() { text.forceActiveFocus() })
+		Qt.callLater(function() { body.forceActiveFocus() })
 	}
 	onNoteChanged: Qt.callLater(place)
 
@@ -74,6 +74,24 @@ PanelWindow {
 			height: Math.min(26, parent.height / 4)
 			color: Qt.darker(parent.color, 1.18)
 
+			// Dragging the strip moves the note on the plane.
+			MouseArea {
+				anchors.fill: parent
+				propagateComposedEvents: true
+				property real pressX: 0
+				property real pressY: 0
+				onPressed: function(mouse) {
+					pressX = mouse.x
+					pressY = mouse.y
+				}
+				onPositionChanged: function(mouse) {
+					if (!pressed || root.note === undefined) {
+						return
+					}
+					Notes.moved(root.noteId, root.note.x + mouse.x - pressX,
+						root.note.y + mouse.y - pressY)
+				}
+			}
 			Row {
 				anchors.left: parent.left
 				anchors.leftMargin: 6
@@ -96,18 +114,26 @@ PanelWindow {
 
 						MouseArea {
 							anchors.fill: parent
-							onClicked: Notes.recolour(root.noteId, parent.modelData.color)
+							onClicked: Notes.recolour(root.noteId,
+								parent.modelData.color)
 						}
 					}
 				}
 			}
 
-			Text {
+			// The × and the square around it: a glyph is a smaller target
+			// than a finger or a pointer at any zoom.
+			Item {
 				anchors.right: parent.right
-				anchors.rightMargin: 8
 				anchors.verticalCenter: parent.verticalCenter
-				text: "\u00d7"
-				color: "#1f2430"
+				width: 22
+				height: parent.height
+
+				Text {
+					anchors.centerIn: parent
+					text: "\u00d7"
+					color: "#1f2430"
+				}
 
 				MouseArea {
 					anchors.fill: parent
@@ -115,28 +141,10 @@ PanelWindow {
 				}
 			}
 
-			// Dragging the strip moves the note on the plane.
-			MouseArea {
-				anchors.fill: parent
-				propagateComposedEvents: true
-				property real pressX: 0
-				property real pressY: 0
-				onPressed: function(mouse) {
-					pressX = mouse.x
-					pressY = mouse.y
-				}
-				onPositionChanged: function(mouse) {
-					if (!pressed || root.note === undefined) {
-						return
-					}
-					Notes.moved(root.noteId, root.note.x + mouse.x - pressX,
-						root.note.y + mouse.y - pressY)
-				}
-			}
 		}
 
 		TextArea {
-			id: text
+			id: body
 			focus: true
 			activeFocusOnPress: true
 			anchors.fill: parent
@@ -150,7 +158,9 @@ PanelWindow {
 			font.family: UiTheme.fontFamily
 			font.pixelSize: UiTheme.fontBody
 			text: root.note !== undefined ? root.note.text : ""
-			onTextChanged: Notes.typed(root.noteId, text)
+			// `body.text` by name: an unqualified `text` here would be the
+			// item, not what was typed into it.
+			onTextChanged: Notes.typed(root.noteId, body.text)
 
 			// A click in the card puts the caret in it, as a click in a
 			// window does.
@@ -158,7 +168,7 @@ PanelWindow {
 				anchors.fill: parent
 				acceptedButtons: Qt.LeftButton
 				onClicked: function(mouse) {
-					text.forceActiveFocus()
+					body.forceActiveFocus()
 					mouse.accepted = false
 				}
 			}

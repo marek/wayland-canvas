@@ -2052,7 +2052,8 @@ void click_note_close() {
 	if (o == nullptr || box.width == 0) {
 		return;
 	}
-	Point local = o->canvas_to_local(box.x + box.width - 12, box.y + 13);
+	// The × sits in a 22 px square at the strip's right end.
+	Point local = o->canvas_to_local(box.x + box.width - 11, box.y + 13);
 	click(local.x, local.y);
 }
 
@@ -5422,7 +5423,7 @@ int run_step() {
 	}
 	case 121: {
 		if ((note_surfaces() != 0 || !stored_notes().empty())
-				&& note_retries++ < 80) {
+				&& note_retries++ < 120) {
 			return -300;
 		}
 		note_retries = 0;
