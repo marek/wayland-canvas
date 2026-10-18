@@ -221,6 +221,8 @@ const std::vector<ActionDef> &registry() {
 		add(Scope::global, "Canvas", "pan-right", "Pan right", {"Super+Alt+Right"});
 		add(Scope::global, "Canvas", "pan-up", "Pan up", {"Super+Alt+Up"});
 		add(Scope::global, "Canvas", "pan-down", "Pan down", {"Super+Alt+Down"});
+		add(Scope::global, "Canvas", "pan-back", "Back to where the pans began",
+			{"Super Super"});
 		add(Scope::global, "Desktops", "pin-desktop", "Pin the view as a desktop",
 			{"Super+Ctrl+D"});
 		add(Scope::global, "Desktops", "abandon-desktop", "Abandon the desktop",
@@ -292,7 +294,7 @@ const std::vector<ActionDef> &registry() {
 
 std::string chord_text(Chord chord) {
 	if (chord.tap()) {
-		return "Super";
+		return chord.twice ? "Super Super" : "Super";
 	}
 	std::string out;
 	auto add = [&](std::string_view part) {
@@ -318,6 +320,15 @@ std::string chord_text(Chord chord) {
 }
 
 std::expected<Chord, std::string> parse_chord(std::string_view text, Scope scope) {
+	// `Super Super`, two lone taps of Super: the double tap. A space is
+	// otherwise only ever padding around a `+`.
+	std::string_view whole = trim(text);
+	if (std::size_t gap = whole.find_first_of(" \t");
+			gap != std::string_view::npos && whole.find('+') == std::string_view::npos
+			&& iequals(whole.substr(0, gap), "super")
+			&& iequals(trim(whole.substr(gap)), "super")) {
+		return Chord{.mods = mod_logo, .twice = true};
+	}
 	std::vector<std::string_view> tokens = split(text, '+');
 	if (std::any_of(tokens.begin(), tokens.end(),
 			[](std::string_view token) { return token.empty(); })) {

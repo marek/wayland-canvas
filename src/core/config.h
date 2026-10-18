@@ -147,6 +147,9 @@ inline constexpr double anim_ms = 280.0;
 inline constexpr int tile_gap = 8;
 inline constexpr double drag_threshold = 6.0; // px before a press becomes a drag
 inline constexpr uint32_t double_click_ms = 400;
+// Two lone Super taps this close are the double tap; a single tap with an
+// action of its own waits this long while an action holds the double tap.
+inline constexpr uint32_t double_tap_ms = 300;
 
 // Input devices.
 inline constexpr int repeat_rate = 25;

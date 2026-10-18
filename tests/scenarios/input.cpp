@@ -1235,15 +1235,75 @@ int run_step() {
 		if (!tap_given && retries++ < 100) {
 			return -100;
 		}
+		// pan-back holds the double tap by default, so the single tap runs
+		// once the double-tap interval has passed without a second.
 		key(KEY_LEFTMETA, true);
 		key(KEY_LEFTMETA, false);
+		check(!server->launcher.is_open(),
+			"the Super tap waits out the double-tap interval before it runs");
+		step = 200;
+		return -(static_cast<int>(config::double_tap_ms) + 200);
+	}
+	case 200: {
 		check(server->launcher.is_open(),
-			"the Super tap, given to the launcher, opened it");
+			"the Super tap, given to the launcher, opened it after the interval");
 		key(KEY_LEFTMETA, true);
 		key(KEY_LEFTMETA, false);
-		check(!server->launcher.is_open(), "and closed it again");
+		return static_cast<int>(config::double_tap_ms) + 200;
+	}
+	case 201: { // two taps within the interval: the double tap, not two singles
+		check(!server->launcher.is_open(), "a second tap later closed it again");
 		shot("tap-launcher");
-		return 300;
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		return static_cast<int>(config::double_tap_ms) + 200;
+	}
+	case 202: {
+		check(!server->launcher.is_open(),
+			"a double tap ran the double tap's action, neither single tap");
+		// The settings record a double tap by tapping twice.
+		raw_pid = fork_ipc_client(
+			"{\"id\":12,\"method\":\"shortcut.capture\"}\n",
+			"capture-double.out", 24);
+		return 400;
+	}
+	case 203:
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		return 400;
+	case 204: {
+		std::string out = read_file(shot_dir + "/capture-double.out").value_or("");
+		if (out.empty() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(out.find("\"keys\":\"Super Super\"") != std::string::npos,
+			std::format("the capture recorded two taps as the double tap ({})", out));
+		reap_client();
+		raw_pid = fork_ipc_client(
+			"{\"id\":13,\"method\":\"shortcut.capture\"}\n",
+			"capture-single.out", 24);
+		return 400;
+	}
+	case 205:
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTMETA, false);
+		return static_cast<int>(config::double_tap_ms) + 300;
+	case 206: {
+		std::string out = read_file(shot_dir + "/capture-single.out").value_or("");
+		if (out.empty() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(out.find("\"keys\":\"Super\"") != std::string::npos,
+			std::format("one tap, the interval passed, was recorded as the tap ({})", out));
+		reap_client();
+		step = 81;
+		return -300;
 	}
 	case 81: { // shortcut.cancel: a capture pending on one connection
 		reap_client();

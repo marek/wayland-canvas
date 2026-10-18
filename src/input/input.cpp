@@ -471,6 +471,9 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 		}
 	}
 	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		if (!logo) {
+			run_pending_tap(); // a key ends the interval: the tap was one
+		}
 		// A logo key pressed on its own may become a tap (see release).
 		super_tap_ = logo && wlr->num_keycodes == 1;
 		Output *output = server.output_under_cursor();
@@ -576,7 +579,7 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			event->state);
 	}
 	if (tap) {
-		server.bindings.handle_tap(server.output_under_cursor());
+		lone_tap();
 	}
 }
 
@@ -594,6 +597,7 @@ void Input::begin_shortcut_capture(
 	}
 	// The capture swallows everything, tap tracking included.
 	super_tap_ = false;
+	cancel_pending_tap();
 }
 
 void Input::cancel_shortcut_capture() {
@@ -639,11 +643,18 @@ void Input::capture_key(Keyboard &keyboard, wlr_keyboard_key_event *event,
 			capture.mods = pressed ? (capture.mods | *bit) : (capture.mods & ~*bit);
 		}
 	}
-	// A modifier never ends the capture by itself — except a Super
-	// pressed and released alone: the tap.
+	// A modifier never ends the capture by itself — except a Super pressed
+	// and released alone: the tap, or with a second within the interval
+	// the double tap (docs/intents/shell/settings.md).
 	if (all_modifiers) {
 		if (!pressed && logo && capture.mods == 0) {
-			end_shortcut_capture(settings::Chord{settings::mod_logo, 0});
+			if (capture.tapped) {
+				end_shortcut_capture(settings::Chord{.mods = settings::mod_logo,
+					.twice = true});
+				return;
+			}
+			capture.tapped = true;
+			arm_tap_timer();
 		}
 		return;
 	}
@@ -657,8 +668,78 @@ void Input::capture_key(Keyboard &keyboard, wlr_keyboard_key_event *event,
 		end_shortcut_capture(std::nullopt);
 		return;
 	}
+	// A key after a lone tap: the tap was the chord, the key swallowed
+	// with it.
+	if (capture.tapped) {
+		end_shortcut_capture(settings::Chord{settings::mod_logo, 0});
+		return;
+	}
 	end_shortcut_capture(
 		settings::Chord{capture.mods, xkb_keysym_to_lower(syms[0])});
+}
+
+// ---- the Super tap ----
+
+// Any other input ends a tap: one forming is no tap, and one waiting to be
+// told from a double tap runs now.
+void Input::other_input() {
+	super_tap_ = false;
+	run_pending_tap();
+}
+
+// A lone tap runs at once unless an action holds the double tap; then the
+// first waits out the interval, and a second within it is the double tap
+// (docs/intents/input/keyboard-and-pointer.md).
+void Input::lone_tap() {
+	Output *output = server_.output_under_cursor();
+	if (!server_.bindings.has_double_tap(output)) {
+		server_.bindings.handle_tap(output, false);
+		return;
+	}
+	if (tap_pending_) {
+		cancel_pending_tap();
+		server_.bindings.handle_tap(output, true);
+		return;
+	}
+	tap_pending_ = true;
+	arm_tap_timer();
+}
+
+void Input::run_pending_tap() {
+	if (!tap_pending_) {
+		return;
+	}
+	cancel_pending_tap();
+	if (server_.lock.locked()) {
+		return;
+	}
+	server_.bindings.handle_tap(server_.output_under_cursor(), false);
+}
+
+void Input::cancel_pending_tap() {
+	tap_pending_ = false;
+	if (tap_timer_ != nullptr) {
+		wl_event_source_timer_update(tap_timer_.get(), 0);
+	}
+}
+
+void Input::arm_tap_timer() {
+	if (tap_timer_ == nullptr) {
+		tap_timer_.reset(wl_event_loop_add_timer(server_.loop, &Input::handle_tap_timer, this));
+	}
+	wl_event_source_timer_update(tap_timer_.get(), static_cast<int>(config::double_tap_ms));
+}
+
+// The interval passed without a second tap: the one tap was all.
+int Input::handle_tap_timer(void *data) {
+	auto *input = static_cast<Input *>(data);
+	if (input->shortcut_capture_.has_value() && input->shortcut_capture_->tapped
+			&& !input->shortcut_capture_->ending) {
+		input->end_shortcut_capture(settings::Chord{settings::mod_logo, 0});
+		return 0;
+	}
+	input->run_pending_tap();
+	return 0;
 }
 
 // ---- cursor image and position ----
@@ -875,7 +956,7 @@ bool Input::button_held_on(const wlr_surface *surface) const {
 
 void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	Server &server = server_;
-	super_tap_ = false;
+	other_input();
 	if (server.lock.locked()) {
 		if (server.seat->pointer_state.focused_surface != nullptr) {
 			pressed_buttons_ |= 1u << (button & 31);
@@ -985,7 +1066,11 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 
 	if (button == BTN_LEFT) {
 		press_on_empty_canvas(server);
-		grab.begin_pan(*output);
+		// Panning needs Super; without it the press is a click
+		// (docs/intents/canvas/infinite-canvas.md).
+		if (super) {
+			grab.begin_pan(*output);
+		}
 	}
 }
 
@@ -1063,7 +1148,7 @@ void Input::handle_cursor_button(wlr_pointer_button_event *event) {
 void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	Server &server = server_;
 	notify_activity(server);
-	super_tap_ = false;
+	other_input();
 	if (server.lock.locked()) {
 		if (server.seat->pointer_state.focused_surface != nullptr) {
 			wlr_seat_pointer_notify_axis(server.seat, event->time_msec,
@@ -1104,24 +1189,27 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 		}
 		return;
 	}
+	// Held Super decides a scroll in the normal view: the view looks away,
+	// wherever the pointer is, and no client sees the scroll. The screen
+	// moves by the scrolled distance whatever the zoom; libinput already
+	// applied the natural-scroll direction.
+	if (!output->overview.active() && (seat_modifiers(server) & WLR_MODIFIER_LOGO) != 0) {
+		if (output->interactive() && event->delta != 0) {
+			double delta = event->delta * config::scroll_pan_speed
+				/ output->camera.current().zoom;
+			if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+				output->pan(0, delta);
+			} else {
+				output->pan(delta, 0);
+			}
+		}
+		return;
+	}
+	// Without Super a scroll over the empty canvas moves nothing.
 	if (server.seat->pointer_state.focused_surface != nullptr) {
 		wlr_seat_pointer_notify_axis(server.seat, event->time_msec,
 			event->orientation, event->delta, event->delta_discrete,
 			event->source, event->relative_direction);
-		return;
-	}
-	// Scrolling over the empty canvas pans; libinput already applied the
-	// natural-scroll direction.
-	if (output->interactive()) {
-		// A scroll pans the canvas at the camera's zoom: the screen moves
-		// by the scrolled distance whatever the zoom.
-		double delta = event->delta * config::scroll_pan_speed
-			/ output->camera.current().zoom;
-		if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-			output->pan(0, delta);
-		} else {
-			output->pan(delta, 0);
-		}
 	}
 }
 
@@ -1133,7 +1221,7 @@ void Input::handle_cursor_frame() {
 
 void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	notify_activity(server_);
-	super_tap_ = false;
+	other_input();
 	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
 		return; // the capture UI or the lock owns the pointer
 	}
@@ -1152,7 +1240,7 @@ void Input::handle_swipe_end(wlr_pointer_swipe_end_event *event) {
 
 void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 	notify_activity(server_);
-	super_tap_ = false;
+	other_input();
 	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
 		return; // the capture UI or the lock owns the pointer
 	}
@@ -1338,6 +1426,7 @@ void Input::finish() {
 	request_set_primary_selection_.disconnect();
 	request_start_drag_.disconnect();
 	start_drag_.disconnect();
+	tap_timer_.reset();
 	if (drag_icon != nullptr) {
 		drag_icon_commit_.disconnect();
 		drag_icon_destroy_.disconnect();

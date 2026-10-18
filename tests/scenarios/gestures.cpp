@@ -50,6 +50,7 @@ std::string zoom_changes;
 wlr_box frame0{}; // Desktop 1's frame at 100 % before any zoom, for the drift check
 Camera scrolled_from{}; // the camera before the 25 % scroll
 Camera hop_from{}; // where the camera was going when a hop began
+Camera look_from{}; // the view a look away began from
 std::optional<DesktopId> hop_a, hop_b, hop_c; // the row the normal-view hops walk
 std::vector<View *> launched_before; // the views before the overview launch
 wlr_box launch_box{}; // the overview target a late launch was made for
@@ -231,6 +232,41 @@ void scroll(double delta) {
 bool inside(const Rect &r, const wlr_box &b) {
 	return r.x >= b.x - 0.5 && r.y >= b.y - 0.5 && r.x + r.w <= b.x + b.width + 0.5 &&
 		r.y + r.h <= b.y + b.height + 0.5;
+}
+
+// The output-local centre of a mapped window on the screen, if any.
+std::optional<Point> window_on_screen() {
+	for (View *v : server->views) {
+		if (!v->mapped) {
+			continue;
+		}
+		Rect f = v->frame_rect();
+		Point p = out()->canvas_to_local(f.x + f.w / 2, f.y + f.h / 2);
+		if (p.x > 0 && p.x < 1280 && p.y > 0 && p.y < 720) {
+			return p;
+		}
+	}
+	return std::nullopt;
+}
+
+// An output-local point over the empty canvas: no window under it, with a
+// margin for its title bar.
+std::optional<Point> empty_spot() {
+	for (double y = 80; y < 680; y += 40) {
+		for (double x = 40; x < 1240; x += 40) {
+			Point c = out()->local_to_canvas(x, y);
+			bool covered = false;
+			for (View *v : server->views) {
+				Rect f = v->frame_rect();
+				covered = covered || (v->mapped && c.x >= f.x - 16 && c.x <= f.x + f.w + 16
+					&& c.y >= f.y - 48 && c.y <= f.y + f.h + 16);
+			}
+			if (!covered) {
+				return Point{x, y};
+			}
+		}
+	}
+	return std::nullopt;
 }
 
 // The board's slices, as fractions of its area.
@@ -1052,18 +1088,37 @@ int run_step() {
 		check(std::fabs(desk(d1)->scale() - 0.25) < 1e-9 && o->interactive(),
 			std::format("the scale reaches down to 25 % ({:.2f})", desk(d1)->scale()));
 		shot("27-desktop-25");
-		// A 2-finger scroll over the empty canvas right of the windows.
+		// A 2-finger scroll over the empty canvas moves nothing without
+		// Super; with Super held it looks away, over a window too.
+		std::optional<Point> spot = empty_spot();
+		std::optional<Point> window = window_on_screen();
+		check(spot.has_value() && window.has_value(),
+			"the 25 % view shows empty canvas and a window");
 		scrolled_from = o->camera.current();
+		if (spot.has_value()) {
+			move_to(spot->x, spot->y);
+		}
 		for (int i = 0; i < 4; i++) {
 			scroll(40);
 		}
+		check(o->camera.current() == scrolled_from,
+			"a 2-finger scroll over empty canvas without Super moves nothing");
+		if (window.has_value()) {
+			move_to(window->x, window->y);
+		}
+		key(KEY_LEFTMETA, true);
+		for (int i = 0; i < 4; i++) {
+			scroll(40);
+		}
+		key(KEY_LEFTMETA, false);
 		return 300;
 	}
 	case 66: {
 		Camera cam = o->camera.current();
 		check(cam.zoom == 0.25 && o->interactive() && std::fabs(cam.cy - scrolled_from.cy) > 100,
-			std::format("a 2-finger scroll pans the 25 % view at its zoom and leaves it"
-				" interactive (zoom {:.2f}, panned {:.0f})", cam.zoom, cam.cy - scrolled_from.cy));
+			std::format("a Super 2-finger scroll over a window pans the 25 % view at its"
+				" zoom and leaves it interactive (zoom {:.2f}, panned {:.0f})", cam.zoom,
+				cam.cy - scrolled_from.cy));
 		// A 2-finger pinch without Super belongs to the client under the
 		// pointer at any zoom, and never zooms the view.
 		pinch_down(2);
@@ -1631,6 +1686,139 @@ int run_step() {
 				" (off by {:.0f},{:.0f})", cam.cx - b.cx, cam.cy - b.cy));
 		server->gestures.set_options(GestureOptions{});
 		check(!server->gestures.options().invert, "invert off again");
+		return 0;
+	}
+	// Looking away (docs/intents/canvas/infinite-canvas.md), from B at 80 %.
+	case 113: { // a drag over empty canvas pans only with Super
+		// B is tiled full: Super+Alt+Up first shows the empty canvas above
+		// the row, one look away the drag then carries on.
+		look_from = o->camera.destination();
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTALT, true);
+		key(KEY_UP, true);
+		key(KEY_UP, false);
+		key(KEY_LEFTALT, false);
+		key(KEY_LEFTMETA, false);
+		std::optional<Point> spot = empty_spot();
+		check(spot.has_value(), "looking up from B shows the empty canvas above the row");
+		Point p = spot.value_or(Point{640, 120});
+		Camera up = o->camera.destination();
+		move_to(p.x, p.y);
+		click(BTN_LEFT, true);
+		for (int i = 1; i <= 10; i++) {
+			move_to(p.x + 20 * i, p.y + 10 * i);
+		}
+		click(BTN_LEFT, false);
+		check(o->camera.destination() == up,
+			"a drag over empty canvas without Super moves nothing");
+		key(KEY_LEFTMETA, true);
+		move_to(p.x, p.y);
+		click(BTN_LEFT, true);
+		for (int i = 1; i <= 10; i++) {
+			move_to(p.x + 20 * i, p.y + 10 * i);
+		}
+		click(BTN_LEFT, false);
+		key(KEY_LEFTMETA, false);
+		Camera cam = o->camera.current();
+		double moved_x = (up.cx - cam.cx) * cam.zoom;
+		double moved_y = (up.cy - cam.cy) * cam.zoom;
+		check(std::fabs(moved_x - 200) < 1.5 && std::fabs(moved_y - 100) < 1.5
+				&& cam.zoom == look_from.zoom && o->interactive(),
+			std::format("a Super drag over empty canvas looks away, the content following"
+				" the pointer at the desktop's zoom (moved {:.1f},{:.1f} px)", moved_x, moved_y));
+		shot("36-looked-away");
+		tap_keys({KEY_LEFTMETA, KEY_LEFTMETA});
+		return 600;
+	}
+	case 114: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(o->camera.current() == look_from && o->desktop_showing() == desk(hop_b),
+			"double Super eased back to desktop B at its 80 %");
+		// Super+Alt+Right looks away by a third of a screen; double Super
+		// comes back from it too.
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTALT, true);
+		key(KEY_RIGHT, true);
+		key(KEY_RIGHT, false);
+		key(KEY_LEFTALT, false);
+		key(KEY_LEFTMETA, false);
+		check(o->camera.destination() != look_from, "Super+Alt+Right looked away");
+		tap_keys({KEY_LEFTMETA, KEY_LEFTMETA});
+		return 600;
+	}
+	case 115: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(o->camera.current() == look_from,
+			"double Super came back from Super+Alt+Right");
+		// A hop after a look away: where it lands is the view kept.
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTALT, true);
+		key(KEY_RIGHT, true);
+		key(KEY_RIGHT, false);
+		key(KEY_LEFTALT, false);
+		key(KEY_LEFTCTRL, true);
+		key(KEY_RIGHT, true);
+		key(KEY_RIGHT, false);
+		key(KEY_LEFTCTRL, false);
+		key(KEY_LEFTMETA, false);
+		return 900;
+	}
+	case 116: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(o->desktop_showing() == desk(hop_c), "the hop after the look away landed on C");
+		hop_from = o->camera.destination();
+		tap_keys({KEY_LEFTMETA, KEY_LEFTMETA});
+		return 600;
+	}
+	case 117: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(o->camera.destination() == hop_from && o->desktop_showing() == desk(hop_c),
+			"after the hop, double Super stays on C: the hop made it the view kept");
+		// The overview is another move: what it brings back is kept, even
+		// the very view the look away had reached.
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTALT, true);
+		key(KEY_RIGHT, true);
+		key(KEY_RIGHT, false);
+		key(KEY_LEFTALT, false);
+		key(KEY_LEFTMETA, false);
+		hop_from = o->camera.destination();
+		o->overview.enter();
+		return 700;
+	}
+	case 118:
+		check(o->overview.active(), "the overview opened over the look away");
+		tap_keys({KEY_ESC});
+		return 800;
+	case 119: {
+		if ((o->camera.panning() || o->camera.zooming()) && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(!o->overview.active() && o->camera.destination() == hop_from,
+			"Escape brought the view back from the overview where the look away had it");
+		tap_keys({KEY_LEFTMETA, KEY_LEFTMETA});
+		return 600;
+	}
+	case 120: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(o->camera.destination() == hop_from,
+			"after the overview, double Super stays: the overview made that the view kept");
 		return 0;
 	}
 	default:

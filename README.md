@@ -219,9 +219,10 @@ compositor binary (build tree or install prefix) or at
   desktop has its own zoom, 25 % to 200 %: it scales the picture only, so
   windows keep their size and layout (and look soft above 100 %); Super+0
   brings it back to 100 %.
-- **Free area**: any spot that isn't a desktop; you can pan or jump there too.
-  Panning or scrolling never changes the zoom: a free area keeps the zoom you
-  panned onto it with (Super+0 returns it to 100 %).
+- **Free area**: any spot that isn't a desktop; the overview takes you there,
+  and holding Super you can look there from a desktop (double Super brings
+  you back). Panning never changes the zoom: a free area keeps the zoom you
+  came with (Super+0 returns it to 100 %).
 - **Overview**: a zoomed-out, live view of the canvas where desktops are arranged.
   It has a *target* (accent outline): a desktop, or a free screen-sized spot.
 
@@ -229,9 +230,10 @@ compositor binary (build tree or install prefix) or at
 
 | Where | Gesture | Action |
 |---|---|---|
-| Normal | 3-finger swipe | **Hop** to the closest desktop in that direction, at its zoom; none that way → you stay put (a hint says so). A swipe never leaves the desktops: reach a free area from the overview, or drag / 2-finger scroll on empty canvas, or Super+Alt+arrows |
+| Normal | 3-finger swipe | **Hop** to the closest desktop in that direction, at its zoom; none that way → you stay put (a hint says so). A swipe never leaves the desktops: reach a free area from the overview, or look there with Super |
 | Normal | 4-finger swipe up | Zoom out into the overview (follows your fingers; release early to cancel) |
 | Normal | Super + 2-finger pinch | **Zoom** the desktop shown, following your fingers; it settles on 5 % steps. Windows keep their size; Super+0 returns to 100 % |
+| Normal | Super + 2-finger scroll | **Look away**: the view pans, over windows too; double Super goes back to the view you left. Without Super a scroll is the window's, and nothing over empty canvas |
 | Overview | 3-finger swipe | Jump to the closest desktop in that direction; none that way → move one screen that way (free spot) |
 | Overview | 4-finger swipe down | Zoom into the target |
 | Overview | 4-finger swipe up | Zoom out further |
@@ -261,7 +263,7 @@ under `off`).
 | Title bar | `–` `☐` `✕` | Minimize, maximize/restore, close |
 | Window edges/corners | drag | Resize |
 | Anywhere | Super+left / Super+right drag | Move / resize |
-| Empty canvas | drag / scroll | Pan |
+| Empty canvas | Super + drag / Super + scroll | Look away (double Super goes back); without Super nothing moves |
 | Overview | click desktop / window / empty canvas | Go there (empty canvas = free area) |
 | Overview | drag a frame (tab or empty interior) | Reposition the desktop over the windows |
 | Overview | drop a frame onto another | Combine them |
@@ -275,7 +277,8 @@ under `off`).
 Every shortcut is the user's to change, in `canvas.conf` (below) or by
 pressing the new keys in the settings window; the table is the defaults.
 A lone tap of Super runs nothing by default — it is a key any action can
-hold (`Super` in `canvas.conf`). VT switching (Ctrl+Alt+F1…F12) is fixed:
+hold (`Super` in `canvas.conf`) — and a double tap (`Super Super`) goes back
+from a look away. VT switching (Ctrl+Alt+F1…F12) is fixed:
 in no file, and no chord can take it, so the way out of a stuck session
 stays.
 
@@ -290,7 +293,8 @@ stays.
 | Super+Tab, Super+W | `overview` | Toggle overview |
 | Super+Ctrl+arrows | `hop-left` … `hop-down` | Go to the desktop in that direction (none that way: stay) |
 | Super+Ctrl+Shift+arrows | `move-left` … `move-down` | Move the focused window to that desktop and follow |
-| Super+Alt+arrows | `pan-left` … `pan-down` | Pan a third of a screen |
+| Super+Alt+arrows | `pan-left` … `pan-down` | Look a third of a screen away |
+| Double Super | `pan-back` | Back to the view you looked away from |
 | Super+Ctrl+D / Super+Ctrl+F4 | `pin-desktop` / `abandon-desktop` | Make the current view a desktop / abandon the current desktop |
 | Super+T | `tiling` | Tile the current desktop (or view) |
 | Super+1…9 | `desktop-1` … `desktop-9` | Go to desktop N |

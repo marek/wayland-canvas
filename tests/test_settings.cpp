@@ -91,7 +91,7 @@ void chords_parse_and_format() {
 			"Super+Left", "Super+Up", "Super+M", "Super+T", "Super+Ctrl+D",
 			"Super+Ctrl+F4", "Super+Shift+E", "Super+Shift+5", "Super+Shift+4",
 			"Super+Ctrl+Shift+3", "F5", "Insert", "Pause", "Scroll_Lock",
-			"XF86AudioPlay", "Super",
+			"XF86AudioPlay", "Super", "Super Super",
 		}) {
 		check(settings::parse_chord(text, settings::Scope::global).has_value(),
 			std::string{"chord '"} + std::string{text} + "' parses globally");
@@ -153,6 +153,33 @@ void the_super_tap() {
 		"a modifier as the key of a chord is an error");
 }
 
+void the_super_double_tap() {
+	settings::Chord twice = chord("Super Super");
+	check(twice.tap() && twice.twice, "two Supers parse as the double tap");
+	check(twice != chord("Super"), "the double tap is not the lone tap");
+	check(settings::chord_text(chord("super  SUPER")) == "Super Super",
+		"the double tap reads in any case and spacing, written `Super Super`");
+	check(settings::parse_chord("Super Super", settings::Scope::overview).has_value(),
+		"the double tap parses in the overview too");
+	check(!settings::parse_chord("Super Super Super", settings::Scope::global).has_value()
+			&& !settings::parse_chord("Super Ctrl", settings::Scope::global).has_value()
+			&& !settings::parse_chord("Super Super+K", settings::Scope::global).has_value(),
+		"only two Supers make the double tap");
+	settings::Resolved taken = settings::resolve(settings::parse(
+		"[shortcuts]\nlauncher = Super Super\n"));
+	check(keys_of(taken, settings::Scope::global, "launcher")
+				== std::vector<std::string>{"Super Super"}
+			&& keys_of(taken, settings::Scope::global, "pan-back").empty(),
+		"a file giving the double tap to another action takes it from pan-back");
+	settings::Resolved apart = settings::resolve(settings::parse(
+		"[shortcuts]\nlauncher = Super\n"));
+	check(keys_of(apart, settings::Scope::global, "launcher")
+				== std::vector<std::string>{"Super"}
+			&& keys_of(apart, settings::Scope::global, "pan-back")
+				== std::vector<std::string>{"Super Super"},
+		"the lone tap and the double tap are held apart");
+}
+
 void validation_per_scope() {
 	auto global_error = [](std::string_view text) {
 		auto parsed = settings::parse_chord(text, settings::Scope::global);
@@ -196,14 +223,18 @@ void registry_defaults() {
 	const settings::ActionDef *tap_holder = nullptr;
 	for (const settings::ActionDef &def : settings::registry()) {
 		for (settings::Chord c : def.defaults) {
-			check(!c.tap(), std::string{"no default is the tap ("}
+			bool lone = c.tap() && !c.twice;
+			check(!lone, std::string{"no default is the lone tap ("}
 				+ std::string{def.name} + ")");
-			if (c.tap()) {
+			if (lone) {
 				tap_holder = &def;
 			}
 		}
 	}
 	check(tap_holder == nullptr, "the lone Super tap is no action's default");
+	check(keys_of(settings::resolve(settings::parse("")), settings::Scope::global, "pan-back")
+			== std::vector<std::string>{"Super Super"},
+		"the double tap goes back from a look away by default");
 }
 
 void precedence_file_beats_default() {
@@ -507,6 +538,7 @@ int main() {
 	chords_case_insensitive();
 	canonical_modifier_order();
 	the_super_tap();
+	the_super_double_tap();
 	validation_per_scope();
 	registry_defaults();
 	precedence_file_beats_default();

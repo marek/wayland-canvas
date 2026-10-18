@@ -32,12 +32,14 @@ inline constexpr int night_light_max_k = 6500;
 inline constexpr int default_night_light_k = 4000;
 
 // Modifiers then one key. `key` 0 with `mods` the logo bit is the lone-Super
-// tap; parse_chord makes no other modifier-only chord.
+// tap, and with `twice` the double tap; parse_chord makes no other
+// modifier-only chord.
 struct Chord {
 	uint32_t mods = 0;
 	xkb_keysym_t key = 0;
+	bool twice = false;
 
-	bool tap() const { return key == 0; }
+	bool tap() const { return key == 0; } // the lone tap or the double tap
 	friend bool operator==(const Chord &, const Chord &) = default;
 };
 

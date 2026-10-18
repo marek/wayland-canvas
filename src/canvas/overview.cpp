@@ -134,6 +134,9 @@ void Overview::enter() {
 
 void Overview::finish_enter(const Camera &far, double t) {
 	output_.server.input.grab.cancel();
+	// The overview is a move of its own: what it brings back is the view
+	// a look away returns to (docs/intents/canvas/infinite-canvas.md).
+	output_.forget_look_away();
 	active_ = true;
 	output_.server.ipc.emit_overview(output_, true);
 	wlr_seat_pointer_clear_focus(output_.server.seat);
