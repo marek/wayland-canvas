@@ -19,7 +19,7 @@ Item {
 	readonly property string pamService: api !== null
 		? api.plugin.settings.pamService : "wayland-canvas"
 	readonly property string pamConfigDirectory: api !== null
-		? api.plugin.settings.pamConfigDirectory : ""
+		? api.plugin.settings.pamConfigDirectory : "/etc/pam.d"
 
 	property string password: ""
 	property string failure: ""

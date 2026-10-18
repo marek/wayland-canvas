@@ -6,7 +6,7 @@
 	"description": "The lock screen: every output covered, the password checked through PAM",
 	"settings": {
 		"pamService": "wayland-canvas",
-		"pamConfigDirectory": ""
+		"pamConfigDirectory": "/etc/pam.d"
 	},
 	"contributes": {
 		"surfaces": [

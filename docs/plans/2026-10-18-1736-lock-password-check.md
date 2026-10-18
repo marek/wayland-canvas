@@ -20,7 +20,7 @@ grew out of the on-screen lock box of
 
 ## Tasks
 
-- [ ] The locker's shipped PAM directory is `/etc/pam.d`, where both packages install its service; the intent names it
+- [x] The locker's shipped PAM directory is `/etc/pam.d`, where both packages install its service; the intent names it — proven on the SDDM login by the user unlocking with that directory set
 - [ ] The fixed package installed on the SDDM login, the `pamConfigDirectory` override taken out of `~/.config/wayland-canvas/shell.json`, and a lock unlocked with the real password (the user)
 - [ ] The lock screen's clock keeps time: it shows the time the shell started, because its timer runs on `WlSessionLock.locked`, whose change Quickshell 0.3.1 announces on unlock only
 - [ ] A shell reload while locked (`shell.json` edited, a plugin file changed, the package reinstalled) destroys the lock object after `locked`; wlroots ends the shell for that protocol error and nothing draws a locker again (the user to decide: the host holds reloads until unlock, or the lock is carried across a reload)
