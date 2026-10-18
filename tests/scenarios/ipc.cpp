@@ -47,7 +47,6 @@ uint32_t t = 90000;
 pid_t grim_pid = -1;
 pid_t raw_pid = -1;
 pid_t sub_pid = -1;
-pid_t item_sub_pid = -1;
 int raw_status = 0;
 std::string shot_dir;
 std::string socket_path;
@@ -145,37 +144,9 @@ int client_code(const char *name) {
 // ------------------------------------------------------ fake pointer
 
 // Pointer at output-local logical (x, y) on the single 1280x720 output.
-void move_to(double x, double y) {
-	t += 8;
-	wlr_pointer_motion_absolute_event ev = {
-		.pointer = &ptr, .time_msec = t, .x = x / 1280.0, .y = y / 720.0};
-	wl_signal_emit_mutable(&ptr.events.motion_absolute, &ev);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-}
 
-void button(uint32_t code, bool pressed) {
-	t += 8;
-	wlr_pointer_button_event ev = {.pointer = &ptr, .time_msec = t, .button = code,
-		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
-			: WL_POINTER_BUTTON_STATE_RELEASED};
-	wl_signal_emit_mutable(&ptr.events.button, &ev);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-}
 
-void click(double x, double y) {
-	move_to(x, y);
-	button(BTN_LEFT, true);
-	button(BTN_LEFT, false);
-}
 
-void drag(double x0, double y0, double x1, double y1) {
-	move_to(x0, y0);
-	button(BTN_LEFT, true);
-	for (int i = 1; i <= 10; i++) {
-		move_to(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10);
-	}
-	button(BTN_LEFT, false);
-}
 
 // The foot window the scenario opened, whatever the canvas did around it.
 View *foot_window() {
@@ -468,21 +439,6 @@ std::optional<long long> member_int(JsonObject *object, const char *name) {
 }
 
 // A number member as a double: whole numbers and fractions alike.
-std::optional<double> member_number(JsonObject *object, const char *name) {
-	if (!json_object_has_member(object, name)) {
-		return std::nullopt;
-	}
-	JsonNode *node = json_object_get_member(object, name);
-	if (json_node_get_node_type(node) != JSON_NODE_VALUE) {
-		return std::nullopt;
-	}
-	GType type = json_node_get_value_type(node);
-	if (type == G_TYPE_INT64) {
-		return static_cast<double>(json_node_get_int(node));
-	}
-	return type == G_TYPE_DOUBLE ? std::optional{json_node_get_double(node)}
-		: std::nullopt;
-}
 
 // A string member; empty when absent or not a string.
 std::string member_string(JsonObject *object, const char *name) {
@@ -495,23 +451,6 @@ std::string member_string(JsonObject *object, const char *name) {
 		? std::string{json_node_get_string(node)} : std::string{};
 }
 
-void fill_item(ItemEntry &entry, JsonObject *object) {
-	entry.id = member_string(object, "id");
-	entry.color = member_string(object, "color");
-	entry.text = member_string(object, "text");
-	std::optional<long long> x = member_int(object, "x");
-	std::optional<long long> y = member_int(object, "y");
-	std::optional<long long> width = member_int(object, "width");
-	std::optional<long long> height = member_int(object, "height");
-	entry.placed = x.has_value() && y.has_value() && width.has_value()
-		&& height.has_value();
-	if (entry.placed) {
-		entry.x = *x;
-		entry.y = *y;
-		entry.width = *width;
-		entry.height = *height;
-	}
-}
 
 // One entry of a `msg state` result's windows array, by its id: what the app
 // bar draws (docs/intents/shell/app-bar.md).
@@ -558,59 +497,6 @@ std::optional<WindowEntry> parse_state_window(const std::string &text,
 	return out;
 }
 
-// A `msg item.set` result parsed as one item entry.
-std::optional<ItemEntry> parse_item_result(const std::string &text) {
-	JsonParser *parser = json_parser_new();
-	std::optional<ItemEntry> out;
-	if (json_parser_load_from_data(parser, text.c_str(),
-			static_cast<gssize>(text.size()), nullptr)) {
-		JsonNode *root = json_parser_get_root(parser);
-		JsonObject *object = root != nullptr
-				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
-			? json_node_get_object(root) : nullptr;
-		if (object != nullptr) {
-			out = ItemEntry{};
-			fill_item(*out, object);
-		}
-	}
-	g_object_unref(parser);
-	return out;
-}
-
-// The entry with `want_id` in a `msg state` result's items array.
-std::optional<ItemEntry> parse_state_item(const std::string &text,
-		std::string_view want_id) {
-	JsonParser *parser = json_parser_new();
-	std::optional<ItemEntry> out;
-	if (json_parser_load_from_data(parser, text.c_str(),
-			static_cast<gssize>(text.size()), nullptr)) {
-		JsonNode *root = json_parser_get_root(parser);
-		JsonObject *object = root != nullptr
-				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
-			? json_node_get_object(root) : nullptr;
-		if (object != nullptr && json_object_has_member(object, "items")) {
-			JsonNode *items = json_object_get_member(object, "items");
-			if (json_node_get_node_type(items) == JSON_NODE_ARRAY) {
-				JsonArray *array = json_node_get_array(items);
-				for (guint i = 0; i < json_array_get_length(array); i++) {
-					JsonObject *element = json_array_get_object_element(array, i);
-					if (element == nullptr) {
-						continue;
-					}
-					ItemEntry entry;
-					fill_item(entry, element);
-					if (entry.id == want_id) {
-						out = entry;
-						break;
-					}
-				}
-			}
-		}
-	}
-	g_object_unref(parser);
-	return out;
-}
-
 // The last `kind` (item.moved / item.activated) event for `id` in the item
 // subscriber's capture: its place, and for an activation the output and the
 // box on it.
@@ -620,59 +506,6 @@ struct ItemEventLine {
 	double bx = 0, by = 0, bw = 0, bh = 0; // item.activated box
 };
 
-std::optional<ItemEventLine> item_event(std::string_view kind,
-		std::string_view id) {
-	std::string text = read_file(item_events_path);
-	std::optional<ItemEventLine> out;
-	// read_file() drops the final newline, so the newest event runs to the end
-	// of the text. A line still being written fails to parse; the next poll
-	// reads it whole.
-	std::size_t start = 0;
-	while (start < text.size()) {
-		std::size_t end = std::min(text.find('\n', start), text.size());
-		std::string line = text.substr(start, end - start);
-		start = end + 1;
-		JsonParser *parser = json_parser_new();
-		if (json_parser_load_from_data(parser, line.c_str(),
-				static_cast<gssize>(line.size()), nullptr)) {
-			JsonNode *root = json_parser_get_root(parser);
-			JsonObject *object = root != nullptr
-					&& json_node_get_node_type(root) == JSON_NODE_OBJECT
-				? json_node_get_object(root) : nullptr;
-			if (object != nullptr && member_string(object, "event") == kind
-					&& json_object_has_member(object, "params")) {
-				JsonNode *params_node = json_object_get_member(object, "params");
-				JsonObject *params = json_node_get_node_type(params_node) == JSON_NODE_OBJECT
-					? json_node_get_object(params_node) : nullptr;
-				if (params != nullptr && member_string(params, "id") == id) {
-					ItemEventLine event;
-					std::optional<long long> x = member_int(params, "x");
-					std::optional<long long> y = member_int(params, "y");
-					if (x.has_value() && y.has_value()) {
-						event.x = *x;
-						event.y = *y;
-					}
-					event.output = member_string(params, "output");
-					if (json_object_has_member(params, "box")) {
-						JsonNode *box_node = json_object_get_member(params, "box");
-						JsonObject *box =
-							json_node_get_node_type(box_node) == JSON_NODE_OBJECT
-							? json_node_get_object(box_node) : nullptr;
-						if (box != nullptr) {
-							event.bx = member_number(box, "x").value_or(-1);
-							event.by = member_number(box, "y").value_or(-1);
-							event.bw = member_number(box, "width").value_or(-1);
-							event.bh = member_number(box, "height").value_or(-1);
-						}
-					}
-					out = event; // the last one wins
-				}
-			}
-		}
-		g_object_unref(parser);
-	}
-	return out;
-}
 
 // Waits for a forked raw client (or any pid) to have exited.
 bool child_exited(pid_t pid) {

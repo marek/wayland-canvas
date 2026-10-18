@@ -91,20 +91,7 @@ std::string scheme_start; // the machine's real color-scheme, read before the ru
 // and looks for on screen).
 constexpr const char *note_yellow = "#ffd866";
 constexpr const char *note_green = "#a6e3a1";
-constexpr const char *note_blue = "#7dcfff";
-constexpr const char *note_pink = "#f4b8e4";
-constexpr const char *note_purple = "#caa9f7";
-constexpr const char *note_orange = "#ff9e64";
 // The manifest's colour order, the dots' and the menu's (docs/intents/
-// shell/notes.md, Recolour): the settings map arrives alphabetised, so
-// this array is the order the run checks for.
-constexpr const char *note_palette[] = {note_yellow, note_green, note_blue,
-	note_pink, note_purple, note_orange};
-constexpr int note_size = 220;
-constexpr int note_strip = 26; // canvas px, the darker strip
-constexpr const char *note_editor_namespace = "wayland-canvas-note-editor";
-constexpr int colour_tune = 8; // channel tolerance when matching a colour on a screenshot
-constexpr int edge_tune = 4; // px tolerance where a box on a screenshot may sit
 // The scratch shell.json the plugin phase wrote: rewritten as-is, an edit
 // the shell sees, so it reloads.
 constexpr std::string_view plugin_config =
@@ -123,9 +110,6 @@ int note_retries = 0; // the notes phase's retry counter
 // click and the check that the view landed on it.
 View *app_bar_target = nullptr;
 wlr_box app_bar_entry{}; // its entry's square, for the flyout's rows
-double note_button_y = 0; // the note button's band centre, on the strip
-wlr_box note_flyout{}; // its menu's card: left of the strip, centred on it
-LayerSurface *bar_before_reload = nullptr;
 std::vector<pid_t> msg_children; // `wayland-canvas msg` runs, swept when done
 // ---- the agents phase's state (its helpers live by run_step) ----
 pid_t usage_standin_pid = -1;
@@ -230,7 +214,6 @@ constexpr int note_menu_height = note_menu_rows * 32
 	+ (note_menu_rows - 1) * 6 + 2 * 10;
 // A row's swatch centre: the card's padding (10), the row's left margin
 // (8) and half the swatch (16 / 2) from the card's left edge.
-constexpr int note_menu_swatch_x = 10 + 8 + 16 / 2;
 // The card hangs from the button's top (the flyout anchors itself
 // there), so its rows are read from a region that starts a margin above
 // the button's band and runs the card's height, with a margin's slack
@@ -1273,44 +1256,6 @@ void scroll(double x, double y, int clicks) {
 	}
 }
 
-// Two clicks close together in device time: the compositor's double-click.
-void double_click(double x, double y) {
-	click(x, y);
-	click(x, y);
-}
-
-// A drag with the fake pointer: move, press, ten moves, release. No click
-// first — a click ahead of the press would read as one half of a
-// double-click on the item.
-void drag_note(double x0, double y0, double x1, double y1) {
-	t += 8;
-	wlr_pointer_motion_absolute_event start = {
-		.pointer = &ptr, .time_msec = t,
-		.x = x0 / double(screen_w), .y = y0 / double(screen_h)};
-	wl_signal_emit_mutable(&ptr.events.motion_absolute, &start);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-	for (int pressed = 1; pressed >= 0; pressed--) {
-		t += 8;
-		wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t,
-			.button = BTN_LEFT,
-			.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
-				: WL_POINTER_BUTTON_STATE_RELEASED};
-		wl_signal_emit_mutable(&ptr.events.button, &b);
-		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-		if (pressed) {
-			for (int i = 1; i <= 10; i++) {
-				t += 8;
-				double x = x0 + (x1 - x0) * i / 10, y = y0 + (y1 - y0) * i / 10;
-				wlr_pointer_motion_absolute_event m = {
-					.pointer = &ptr, .time_msec = t,
-					.x = x / double(screen_w), .y = y / double(screen_h)};
-				wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
-				wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-			}
-		}
-	}
-}
-
 // The scratch plugin's storage file, read back as text: the proof an
 // action ran is what it wrote (api.storage writes JSON under the
 // scratch state dir).
@@ -1824,23 +1769,10 @@ bool msg_done(const char *name) {
 	return stat(std::format("{}/{}.code", shot_dir, name).c_str(), &st) == 0;
 }
 
-std::string msg_out(const char *name) {
-	return read_file(std::format("{}/{}.out", shot_dir, name));
-}
 
-std::string msg_err(const char *name) {
-	return read_file(std::format("{}/{}.err", shot_dir, name));
-}
 
 int msg_code(const char *name) {
 	return std::atoi(read_file(std::format("{}/{}.code", shot_dir, name)).c_str());
-}
-
-// Reaps the msg children that finished, so none is left a zombie.
-void sweep_children() {
-	std::erase_if(msg_children, [](pid_t pid) {
-		return waitpid(pid, nullptr, WNOHANG) == pid;
-	});
 }
 
 // Nothing the scenario started outlives it: a msg child still running at
@@ -1882,39 +1814,6 @@ void fill_note(NoteEntry &entry, JsonObject *object) {
 	entry.y = json_int(object, "y");
 	entry.width = json_int(object, "width");
 	entry.height = json_int(object, "height");
-}
-
-// The canvas.notes items a `msg state` capture reports.
-std::vector<NoteEntry> state_notes(const char *name) {
-	std::vector<NoteEntry> out;
-	std::string text = msg_out(name);
-	JsonParser *parser = json_parser_new();
-	if (json_parser_load_from_data(parser, text.c_str(),
-			static_cast<gssize>(text.size()), nullptr)) {
-		JsonNode *root = json_parser_get_root(parser);
-		JsonObject *state = root != nullptr
-				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
-			? json_node_get_object(root) : nullptr;
-		JsonNode *items = state != nullptr && json_object_has_member(state, "items")
-			? json_object_get_member(state, "items") : nullptr;
-		if (items != nullptr && json_node_get_node_type(items) == JSON_NODE_ARRAY) {
-			JsonArray *array = json_node_get_array(items);
-			for (guint i = 0; i < json_array_get_length(array); i++) {
-				JsonNode *element = json_array_get_element(array, i);
-				JsonObject *item = json_node_get_node_type(element) == JSON_NODE_OBJECT
-					? json_node_get_object(element) : nullptr;
-				NoteEntry entry;
-				entry.id = json_string(item, "id");
-				if (item == nullptr || entry.id.rfind("canvas.notes/", 0) != 0) {
-					continue;
-				}
-				fill_note(entry, item);
-				out.push_back(entry);
-			}
-		}
-	}
-	g_object_unref(parser);
-	return out;
 }
 
 // The plugin's stored notes, from its notes.json in the scratch state.
@@ -2007,19 +1906,6 @@ wlr_box note_box() {
 		? *surface->canvas_box : wlr_box{};
 }
 
-LayerSurface *editor_layer() {
-	for (const std::unique_ptr<Output> &output : server->outputs) {
-		for (auto &vec : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &l : vec) {
-				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& std::strcmp(l->wlr->namespace_, note_editor_namespace) == 0) {
-					return l.get();
-				}
-			}
-		}
-	}
-	return nullptr;
-}
 
 // The one output the headless backend gives.
 Output *out() {
@@ -2149,14 +2035,6 @@ double bar_ink_edge(cairo_surface_t *s, const wlr_box &bar, bool light) {
 	return edge;
 }
 
-// True when the editor maps and holds the keyboard on its own surface.
-bool editor_open_with_keyboard() {
-	LayerSurface *editor = editor_layer();
-	return editor != nullptr && bar_client() != nullptr
-		&& wl_resource_get_client(editor->wlr->surface->resource) == bar_client()
-		&& server->seat->keyboard_state.focused_surface == editor->wlr->surface;
-}
-
 // The one output, as the compositor has it.
 Output *the_output() {
 	return server->outputs.empty() ? nullptr : server->outputs.front().get();
@@ -2165,20 +2043,6 @@ Output *the_output() {
 // A note's box on screen right now: the compositor's own camera math, so
 // the editor and the pictures are checked against what is drawn, not
 // against a guess.
-wlr_box note_box_on_screen(const NoteEntry &entry) {
-	Output *output = the_output();
-	if (output == nullptr) {
-		return {};
-	}
-	Point top_left = output->canvas_to_local(entry.x, entry.y);
-	double zoom = output->camera.drawn().zoom;
-	return wlr_box{
-		static_cast<int>(std::round(top_left.x)),
-		static_cast<int>(std::round(top_left.y)),
-		static_cast<int>(std::round(entry.width * zoom)),
-		static_cast<int>(std::round(entry.height * zoom)),
-	};
-}
 
 // True once the overview is where the test wants it and the camera has
 // stopped easing: positions read off the screen are stable then.
@@ -2224,114 +2088,12 @@ struct ColourBox {
 	int h() const { return count > 0 ? y1 - y0 + 1 : 0; }
 };
 
-ColourBox find_colour(cairo_surface_t *s, const wlr_box &region,
-		const unsigned char rgb[3], int tune) {
-	ColourBox box;
-	if (s == nullptr) {
-		return box;
-	}
-	unsigned char *data = cairo_image_surface_get_data(s);
-	int stride = cairo_image_surface_get_stride(s);
-	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
-	for (int y = region.y; y < region.y + region.height; y++) {
-		if (y < 0 || y >= h) {
-			continue;
-		}
-		for (int x = region.x; x < region.x + region.width; x++) {
-			if (x < 0 || x >= w) {
-				continue;
-			}
-			// ARGB32 little-endian: B, G, R, A.
-			unsigned char *p = data + y * stride + x * 4;
-			if (std::abs(p[2] - rgb[0]) <= tune && std::abs(p[1] - rgb[1]) <= tune
-					&& std::abs(p[0] - rgb[2]) <= tune) {
-				if (box.count == 0 || x < box.x0) {
-					box.x0 = x;
-				}
-				if (box.count == 0 || x > box.x1) {
-					box.x1 = x;
-				}
-				if (box.count == 0 || y < box.y0) {
-					box.y0 = y;
-				}
-				if (box.count == 0 || y > box.y1) {
-					box.y1 = y;
-				}
-				box.count++;
-			}
-		}
-	}
-	return box;
-}
 
 // Where the strip's controls sit on screen, for clicking them: the dots
 // row on its left, the × square on its right.
-double strip_h_on_screen(const NoteEntry &entry) {
-	wlr_box box = note_box_on_screen(entry);
-	return std::round(note_strip * box.width / double(note_size));
-}
-
-// The note's card below its darker strip, on a screenshot: the colour's
-// bounding box there, expected where the compositor draws it. The strip
-// is searched apart because the editor's colour dots sit on it, and one
-// of them is the card's own colour.
-ColourBox card_on_shot(const char *name, const NoteEntry &entry) {
-	unsigned char rgb[3];
-	if (!hex_colour(entry.color, rgb)) {
-		return {};
-	}
-	cairo_surface_t *s = load_png(name);
-	wlr_box box = note_box_on_screen(entry);
-	int strip_h = static_cast<int>(std::round(strip_h_on_screen(entry)));
-	wlr_box below{box.x, box.y + strip_h, box.width, box.height - strip_h};
-	ColourBox found = s != nullptr
-		? find_colour(s, below, rgb, colour_tune) : ColourBox{};
-	if (s != nullptr) {
-		cairo_surface_destroy(s);
-	}
-	return found;
-}
-
-// The darker strip of the note's card on a screenshot.
-ColourBox strip_on_shot(const char *name, const NoteEntry &entry) {
-	unsigned char rgb[3], darker[3];
-	if (!hex_colour(entry.color, rgb)) {
-		return {};
-	}
-	for (int channel = 0; channel < 3; channel++) {
-		// the compositor's strip shade: the card's ink at 85 percent
-		darker[channel] = static_cast<unsigned char>(rgb[channel] * 0.85);
-	}
-	cairo_surface_t *s = load_png(name);
-	wlr_box box = note_box_on_screen(entry);
-	wlr_box strip{box.x, box.y, box.width,
-		static_cast<int>(std::round(note_strip * box.width / double(note_size)))};
-	ColourBox found = s != nullptr
-		? find_colour(s, strip, darker, colour_tune) : ColourBox{};
-	if (s != nullptr) {
-		cairo_surface_destroy(s);
-	}
-	return found;
-}
 
 // One colour dot of the strip on a screenshot: the blob of `colour`
 // inside the card's strip, where the editor lays its dots out.
-ColourBox dot_on_shot(const char *name, const NoteEntry &entry, const char *colour) {
-	unsigned char rgb[3];
-	if (!hex_colour(colour, rgb)) {
-		return {};
-	}
-	cairo_surface_t *s = load_png(name);
-	wlr_box box = note_box_on_screen(entry);
-	wlr_box strip{box.x, box.y, box.width,
-		static_cast<int>(std::round(strip_h_on_screen(entry)))};
-	ColourBox found = s != nullptr
-		? find_colour(s, strip, rgb, colour_tune) : ColourBox{};
-	if (s != nullptr) {
-		cairo_surface_destroy(s);
-	}
-	return found;
-}
 
 // ---- the indicator walk: one phase machine on step 4 ----
 
@@ -3701,7 +3463,6 @@ bool watch_settle(const char *name, bool wider, bool light,
 // The shelf's bottom line: the help line's 12 px margin and 28 px
 // height, 16 px above it (src/render/render.cpp's overview_shelf_layout
 // and the toolbar it clears). Keep in sync with it.
-constexpr int shelf_bottom_gap = 12 + 28 + 16;
 // The note button's place in the strip: order 3, the fourth square —
 // the scratch plugin's three buttons above it, the settings gear
 // (order 4) below. Keep in sync with the plugins' manifests.
@@ -5571,7 +5332,6 @@ int run_step() {
 		}
 		note_retries = 0;
 		check(overview_settled(false), "the overview closed behind the notes");
-		check(editor_layer() == nullptr, "no editor outlived the overview");
 		check(toolbar_layer() == nullptr, "the toolbar slid out with the overview");
 		step = 150; // on to the network panel's own phase, then the agents
 		// panel's (180+)
@@ -6740,8 +6500,8 @@ int run_step() {
 			"the bar's HOME is the scenario's scratch, never the "
 			"machine's");
 		check(panel_layers() == 0, "no panel outlived the agents phase");
-		check(editor_layer() == nullptr && toolbar_layer() == nullptr,
-			"no editor or toolbar outlived the agents phase");
+		check(toolbar_layer() == nullptr,
+			"no toolbar outlived the agents phase");
 		check(overview_settled(false), "the overview stayed closed");
 		step = 208; // on to the recording dot: the bar plugin's own proof
 		return -100;
