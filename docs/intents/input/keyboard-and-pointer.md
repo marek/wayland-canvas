@@ -102,7 +102,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Holder | Rule |
 |---|---|
 | The focused window | Has the keyboard unless a shell surface above the windows holds it |
-| A shell surface on the top or overlay layer asking for the keyboard on demand | Gets it when it appears and when it is clicked; gives it back to the focused window when it goes or a window is focused |
+| A shell surface on the top or overlay layer asking for the keyboard on demand | Gets it when it appears and when it is clicked; gives it back to the focused window when it goes, when it stops asking for it, when a window is focused, or when a press lands on the empty canvas |
 | A shell surface asking for the keyboard exclusively | Holds it while mapped, the topmost first; windows and on-demand surfaces cannot take it |
 | No keyboard connected yet | Focus is assigned all the same, and the seat offers a keyboard from the start, so clients are ready: the first keyboard to connect (an on-screen one, `wtype`) types into the focus from its first key |
 | The password dialog | Holds the keyboard exclusively while it is open, so no part of a password reaches a window ([../shell/password-dialog.md](../shell/password-dialog.md)) |

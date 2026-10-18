@@ -28,6 +28,12 @@ window reads and changes the shortcuts and gestures.
   surface of its own and asks for it to be placed at a canvas rectangle;
   the compositor places it, moves it with the plane and sends it input,
   and knows nothing of what is in it.
+- **A drag of a plugin's surface is the compositor's**, as an interactive
+  move or resize of a window is (xdg-shell's `move` and `resize`): the
+  plugin hands over the press, and the compositor moves or sizes the
+  surface with its own pointer until the release. A plugin that moved its
+  surface from its own pointer events would move the very coordinates
+  those events are measured in, and its drag would chase itself.
 - **A client can never stall the compositor**: a subscriber that stops
   reading is dropped rather than waited for.
 
@@ -58,14 +64,16 @@ request; responses come in request order.
 
 | Method | Params | Result |
 |---|---|---|
-| `state` | — | `{"outputs": […], "desktops": […], "windows": […], "items": […], "theme": "dark"}` |
+| `state` | — | `{"outputs": […], "desktops": […], "windows": […], "theme": "dark", "recording": null}` |
 | `subscribe` | — | `true`; from then on every event goes to this connection |
 | `launcher.toggle` | `output` (optional; default the output under the cursor) | `true` |
 | `overview.toggle` | `output` (optional, as above) | `true`; an error without an output |
 | `quit` | — | `true`, then the session ends |
 | `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (a seat session) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
-| `surface.place` | `surface` (the layer surface's name); `x`, `y`, `width`, `height` (canvas px) | `true`: that surface is drawn on the plane at the rectangle, pans and zooms with it, and takes input there (above). An error names an unknown surface or a rectangle with no area |
+| `surface.place` | `surface` (the layer surface's name); `x`, `y`, `width`, `height` (canvas px) | `true`: that surface is drawn on the plane at the rectangle, pans and zooms with it, and takes input there (below). A name no surface carries yet is remembered for when one does; an error names a rectangle with no area |
 | `surface.unplace` | `surface` | `true`; the surface goes back to being a screen-space layer surface |
+| `surface.move` | `surface` | Answered at the release: the rectangle the surface was dropped at, `{"x", "y", "width", "height"}` (canvas px). Asked while a button pressed on that surface is held — the press the plugin is answering — it hands the drag to the compositor, which moves the surface with the pointer until the button is released. An error when no button is held on the surface, it is not placed, or the pointer is already in a drag |
+| `surface.resize` | `surface`; `edges` (a list of `left`, `right`, `top`, `bottom`); `minWidth`, `minHeight` (optional, canvas px) | As `surface.move`, the compositor sizing the surface by those edges instead, never below the minimum: the client is told each size as the pointer goes, and the answer is the rectangle at the release |
 | `window.focus` | `window` (a session id from the window list) | `true`: the window is focused and the view moves to it — to its desktop at that desktop's scale, else to a view centred on the window; a screen in the overview leaves it as a shelf click does, and a minimized window is restored first ([../windows/window-management.md](../windows/window-management.md)). An error for an unknown id |
 | `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
 | `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
@@ -81,16 +89,19 @@ keybinding can run a shell action without speaking to the shell directly —
 `wayland-canvas msg action.run '{"name":"canvas.notes/create",
 "args":{"color":"#ffd8f66"}}'`.
 
-`capture.pick` and `shortcut.capture` are the methods whose answers wait
-for the user. `capture.pick` opens the compositor's own picker
-([../apps/capture.md](../apps/capture.md)) and the response goes out
+`capture.pick`, `shortcut.capture`, `surface.move` and `surface.resize`
+are the methods whose answers wait for the user. `capture.pick` opens
+the compositor's own picker ([../apps/capture.md](../apps/capture.md))
+and the response goes out
 when the pick completes; a cancel answers `cancelled`, and a second
 pick while one runs answers `a capture pick is already running`. The
 chooser of xdg-desktop-portal-wlr is this method through the msg
 client (below). `shortcut.capture` takes every key until a chord is
 pressed, Escape alone cancels, and a second capture cancels the first
 ([../shell/settings.md](../shell/settings.md)); it reports what was
-pressed, and `settings.set` decides whether that chord is allowed.
+pressed, and `settings.set` decides whether that chord is allowed. The
+two drags answer when the button is released, with the rectangle the
+surface ended at.
 
 ### Settings
 
@@ -145,9 +156,10 @@ about what the plugin put there.
 | Asking | the plugin opens a layer surface named `wayland-canvas-canvas-<plugin id>/<surface id>` — the name is set as the surface is created, since a layer surface keeps the one it was made with — and calls `surface.place` with that name and a canvas rectangle |
 | Before it is placed | a surface with that name is never given a place on a screen: until the plugin says where on the plane it goes it is not drawn at all, so a surface meant for the canvas can never appear centred on the screen instead |
 | Remembered | the compositor keeps the rectangle under the name: a placement asked for before the surface exists, or again after the shell reloads, applies when a surface of that name maps |
-| Drawing | the surface is drawn above windows in canvas space, at the size the rectangle names; the client is told the size in logical pixels and renders at the output's scale |
-| Input | clicks, scrolls and drags inside it go to the surface, in the normal view and the overview alike; the keyboard follows the same rule as any shell surface asking for it on demand ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
-| Moving | the plugin moves it by placing it again; a drag the plugin does not claim pans the canvas, as the empty plane does |
+| Drawing | the surface is drawn above windows in canvas space by every output whose view it is in, whichever output it was made on; the client is told the rectangle's size in logical pixels, renders at the scale of the outputs it is on, and is drawn at the size it last committed, so a size in flight is never stretched |
+| Input | clicks, scrolls and drags inside it go to the surface, in the normal view and the overview alike, on every output; the keyboard follows the same rule as any shell surface asking for it on demand ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
+| Moving | the plugin moves or sizes it by placing it again; a drag of it, the plugin hands to the compositor with `surface.move` or `surface.resize` from the press, as a window's client asks for an interactive move. A drag the plugin does not claim pans the canvas, as the empty plane does |
+| An output going | the surface stays on the plane, taken over by an output that is left; it closes only with the last output |
 | Going | the surface unmapping or the plugin's `surface.unplace` takes it off the plane |
 | Never | a canvas surface takes no part in window management: no placement, no tiling, no desktop membership, no minimise |
 
@@ -177,6 +189,9 @@ means the user cancelled. That command is the portal's `chooser_cmd`.
 - A subscriber whose unread events pass 1 MiB is dropped.
 - A connection that ends mid-line is dropped with its partial line.
 - The socket file is removed when the compositor exits.
+- `surface.move` or `surface.resize` asked once the button is up (a quick
+  click): an error, and nothing moves. The surface or its client going
+  mid-drag ends the drag, and nothing is answered.
 
 ## Cross-links
 

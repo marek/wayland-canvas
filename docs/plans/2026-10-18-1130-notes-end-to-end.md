@@ -59,16 +59,17 @@ continues [2026-10-17-1108-note-editing-in-place.md](2026-10-17-1108-note-editin
 ## Tasks
 
 - [x] Reproduce: each `surface.place` logged with its name, rectangle and whether the surface was found, headless and nested on screen, while a note is created from the overview's note action and typed into
-- [ ] Intent: notes.md gains the text model (per-span weight, slant and underline; the note's own font and size), the strip's controls, growth, the move by the strip, the resize by the corner and the HTML file per note; ipc.md gains `surface.move` and `surface.resize`, every output drawing a canvas surface, and loses the state's stale `items` and the contradicting error row of `surface.place`; plugins.md's storage gains text files, a listing and removal
+- [x] Intent: notes.md gains the text model (per-span weight, slant and underline; the note's own font and size), the strip's controls, growth, the move by the strip, the resize by the corner and the HTML file per note; ipc.md gains `surface.move` and `surface.resize`, every output drawing a canvas surface, and loses the state's stale `items` and the contradicting error row of `surface.place`; plugins.md's storage gains text files, a listing and removal
 - [ ] Plugin: one object per note with real properties, changed in place; the surfaces made by `Variants`; a note grows to hold its text
 - [ ] Compositor: `surface.move` and `surface.resize` as pointer grabs answered at the release; canvas surfaces drawn and hit-tested on every output and kept when their output goes; no configure before a surface's first commit; a surface drawn at the size it committed
 - [ ] Plugin: the strip drags the note and the bottom-right corner sizes it, through those methods, at any zoom; the text re-wraps and the size is kept
 - [ ] Text model: bold, italic and underline on the strip, applied to the selection and continued by typing inside a span; the font and the size of the whole note on the same strip, every installed family offered
-- [ ] Storage: each note its own plain-HTML file, read back on start and after a reload; a `notes.json` written before is taken over once
+- [ ] Storage: each note its own plain-HTML file, read back on start and after a reload
 - [ ] Scenario: the bar scenario's notes phase checks the screen — the card recoloured, grown, moved by its strip, sized by its corner at 100 % and at a scaled desktop, a bold span and a plain one in the file and on the screenshot, the × — and two outputs drawing one note
 - [ ] The reload check tells a new bar surface by something that is never reused
 - [ ] Every build and link warning fixed
 - [ ] `tools/check.sh` green, merged into main
 - [ ] On screen, nested: a note created, typed into, grown, panned and zoomed, driven by keys and the socket
+- [ ] Once verified: a skill for writing canvas plugins without these mistakes, and a case study of this hunt in `docs/intents/bugs/`
 - [ ] On screen, nested, by hand: drag a note by its strip, size it by its corner, recolour it, format a selection, change its font and size, delete it (the user)
 - [ ] Found here, wider than notes: a button held on a client surface does not keep the pointer on it, so a drag that leaves the surface stops reaching it (text selection past a window's edge included)
