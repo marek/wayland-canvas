@@ -12,6 +12,7 @@
 //
 // so the compositor's X11 half can be proven without installing an X11
 // application.
+#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,8 +143,32 @@ int main(int argc, char **argv) {
 		xcb_flush(connection);
 	}
 
+	// The window manager passes an X11 selection on for the window that
+	// holds the focus, and it learns of one when its owner changes: a
+	// client that took the clipboard before it was focused says so again,
+	// every quarter second, until it has been asked for it once.
+	struct pollfd pfd = {.fd = xcb_get_file_descriptor(connection),
+		.events = POLLIN};
+	int asserts = offer != NULL ? 60 : 0;
+	int asked = 0;
 	xcb_generic_event_t *event = NULL;
-	while ((event = xcb_wait_for_event(connection)) != NULL) {
+	while (1) {
+		while ((event = xcb_poll_for_event(connection)) == NULL) {
+			xcb_flush(connection);
+			poll(&pfd, 1, 250);
+			if (xcb_connection_has_error(connection)) {
+				return 0;
+			}
+			if (asserts > 0 && asked == 0) {
+				asserts--;
+				xcb_set_selection_owner(connection, window, clipboard,
+					XCB_CURRENT_TIME);
+				xcb_flush(connection);
+			}
+		}
+		if ((event->response_type & ~0x80) == XCB_SELECTION_REQUEST) {
+			asked = 1;
+		}
 		switch (event->response_type & ~0x80) {
 		case XCB_KEY_PRESS:
 			say("KEY %u\n", ((xcb_key_press_event_t *)event)->detail);
