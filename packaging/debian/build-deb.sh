@@ -55,6 +55,7 @@ pkg=$S/pkg
 rm -rf "$pkg"
 # wlroots is linked in statically; its own install artifacts stay out
 DESTDIR="$pkg" meson install -C build --skip-subprojects=wlroots
+packaging/check-lock-pam.sh "$pkg"
 install -d "$pkg/usr/share/doc/wayland-canvas"
 install -m644 LICENSE "$pkg/usr/share/doc/wayland-canvas/copyright"
 install -d "$pkg/DEBIAN"

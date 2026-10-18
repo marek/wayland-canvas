@@ -75,4 +75,5 @@ package() {
 	# wlroots is linked in statically; its own install artifacts stay out
 	DESTDIR="$pkgdir" meson install -C build --skip-subprojects=wlroots
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	packaging/check-lock-pam.sh "$pkgdir"
 }
