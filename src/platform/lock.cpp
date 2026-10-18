@@ -114,6 +114,7 @@ void SessionLock::lock_session() {
 	}
 	arm_idle_timer();
 	server_.input.grab.cancel();
+	server_.input.end_hold();
 	server_.input.cancel_shortcut_capture();
 	server_.launcher.close();
 	server_.focus_keyboard(nullptr);

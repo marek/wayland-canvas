@@ -7,11 +7,12 @@ import "."
 
 // One note on the plane: a card of its colour with a darker strip on top
 // holding its controls — the colour dots, bold, italic and underline, the
-// font, the size and the × — the text written straight into it, and a grip
-// in the bottom-right corner. The compositor places the surface at the
-// note's canvas rectangle and draws nothing of it; panning, zooming and a
-// desktop's scale move and size it because they move everything on the
-// plane, and a drag of the strip or the grip is the compositor's too
+// font, the text size between − and +, and the × — the text written
+// straight into it, and a grip in the bottom-right corner. The compositor
+// places the surface at the note's canvas rectangle and draws nothing of
+// it; panning, zooming and a desktop's scale move and size it because
+// they move everything on the plane, and a drag of the strip or the grip
+// is the compositor's too
 // (docs/intents/shell/notes.md).
 PanelWindow {
 	id: root
@@ -78,7 +79,7 @@ PanelWindow {
 
 	// The narrowest a note gets: its strip's controls side by side.
 	function minWidth() {
-		return Math.ceil(controls.implicitWidth + closeBox.width + 2 * stripPadding + 8)
+		return Math.ceil(controls.implicitWidth + closeBox.width + 2 * stripPadding + 2)
 	}
 
 	// The height the card needs for its text, strip and padding.
@@ -138,45 +139,150 @@ PanelWindow {
 	// on demand again once it has gone (windowActive below).
 	function giveKeyboardBack() {
 		fontMenu.close()
-		sizeMenu.close()
 		asksForKeyboard = false
 	}
 
 	// ---- formatting ----
 
-	// The format at the caret, or of the selection: what the strip's
-	// buttons show when no choice waits for what is typed next.
-	readonly property var caretFont: {
-		body.cursorPosition
-		body.selectionStart
-		body.selectionEnd
-		body.text
-		return body.cursorSelection.font
+	// What the strip shows: the format of the selection — bold, italic or
+	// underline where all of it has one, its size where it has one size —
+	// or the format at the caret. Read from the characters: the caret's own
+	// format is the one before it, outside a selection made backwards.
+	property var shown: ({bold: false, italic: false, underline: false, size: 0})
+
+	function refreshShown() {
+		shown = selectionFormat()
+	}
+
+	function selectionFormat() {
+		if (body.selectionStart === body.selectionEnd) {
+			var caret = body.cursorSelection.font
+			return {bold: caret.bold, italic: caret.italic, underline: caret.underline,
+				size: sizeOf(caret)}
+		}
+		var format = {bold: true, italic: true, underline: true, size: -1}
+		for (var i = body.selectionStart; i < body.selectionEnd; i++) {
+			if (isBreak(i)) {
+				continue
+			}
+			var font = charFont(i)
+			format.bold = format.bold && font.bold
+			format.italic = format.italic && font.italic
+			format.underline = format.underline && font.underline
+			var px = sizeOf(font)
+			format.size = format.size === -1 || format.size === px ? px : 0
+		}
+		if (format.size === -1) { // nothing but line breaks
+			return {bold: false, italic: false, underline: false,
+				size: sizeOf(charFont(body.selectionStart))}
+		}
+		return format
 	}
 
 	function shownFormat(attribute) {
 		if (body.pending[attribute] !== undefined) {
 			return body.pending[attribute]
 		}
-		return caretFont[attribute] === true
+		return shown[attribute] === true
 	}
 
-	// Bold, italic or underline: on the selected span, or — with nothing
-	// selected — on what is typed next.
-	function toggleFormat(attribute) {
+	// The text size the size control shows, in pixels: 0 over a selection
+	// of several sizes.
+	readonly property int shownSize: body.pending.pixelSize !== undefined
+		? body.pending.pixelSize : shown.size
+	readonly property int smallestSize: 6
+	readonly property int largestSize: 200
+
+	function sizeOf(font) {
+		return font.pixelSize > 0 ? font.pixelSize : Math.round(font.pointSize * 4 / 3)
+	}
+
+	function clampSize(px) {
+		return Math.max(smallestSize, Math.min(largestSize, Math.round(px)))
+	}
+
+	// One character's format, read through a selection of its own.
+	function charFont(position) {
+		probe.selectionStart = position // the start first: setting it collapses the range
+		probe.selectionEnd = position + 1
+		return probe.font
+	}
+
+	// A line or paragraph break has no text, so no format of its own.
+	function isBreak(position) {
+		return /[\n\r\u2028\u2029]/.test(body.getText(position, position + 1))
+	}
+
+	function sameFormat(a, b) {
+		return a.bold === b.bold && a.italic === b.italic
+			&& a.underline === b.underline && sizeOf(a) === sizeOf(b)
+	}
+
+	// One attribute changed over the selection, run by run of one format:
+	// a whole font set over a mixed span would flatten the weight, slant,
+	// underline or size of its other parts. `value` is the new value, or a
+	// function of the run's font giving it.
+	function applyToSelection(attribute, value) {
+		var end = body.selectionEnd
+		body.loading = true
+		for (var i = body.selectionStart; i < end;) {
+			var font = charFont(i)
+			var j = i + 1
+			while (j < end && sameFormat(charFont(j), font)) {
+				j++
+			}
+			typed.selectionStart = i
+			typed.selectionEnd = j
+			var changed = typed.font
+			changed[attribute] = typeof value === "function" ? value(font) : value
+			typed.font = changed
+			i = j
+		}
+		body.loading = false
+		Notes.typed(root.note, Notes.cleanHtml(body.text))
+		refreshShown()
+	}
+
+	// Something chosen on the strip: on the selected span, or — with
+	// nothing selected — on what is typed next.
+	function applyFormat(attribute, value) {
 		if (body.selectionStart !== body.selectionEnd) {
-			var font = body.cursorSelection.font
-			font[attribute] = !font[attribute]
-			body.cursorSelection.font = font
+			applyToSelection(attribute, value)
 			return
 		}
 		var next = Object.assign({}, body.pending)
-		next[attribute] = !shownFormat(attribute)
+		next[attribute] = value
 		body.pending = next
 	}
 
-	// The note's font or size changed: the text is read back from the note,
-	// so no span keeps the one it was typed in.
+	// Bold, italic or underline: off when all of the selection has it.
+	function toggleFormat(attribute) {
+		if (body.selectionStart !== body.selectionEnd) {
+			applyToSelection(attribute, !selectionFormat()[attribute])
+			return
+		}
+		applyFormat(attribute, !shownFormat(attribute))
+	}
+
+	// A size typed into the strip: all of the selection takes it.
+	function applySize(px) {
+		applyFormat("pixelSize", clampSize(px))
+	}
+
+	// − and +: a pixel smaller or larger, each part of a selection from its
+	// own size.
+	function stepSize(delta) {
+		if (body.selectionStart !== body.selectionEnd) {
+			applyToSelection("pixelSize", function(font) {
+				return clampSize(sizeOf(font) + delta)
+			})
+			return
+		}
+		applyFormat("pixelSize", clampSize(shownSize + delta))
+	}
+
+	// The note's font changed: the text is read back from the note, so no
+	// span keeps the one it was typed in.
 	function reloadText() {
 		var caret = body.cursorPosition
 		body.loading = true
@@ -187,9 +293,9 @@ PanelWindow {
 	}
 
 	readonly property string noteFont: note !== undefined ? note.font : ""
+	// The size of text that names none: the note's own.
 	readonly property int noteSize: note !== undefined ? note.size : 0
 	onNoteFontChanged: if (!body.loading) Qt.callLater(reloadText)
-	onNoteSizeChanged: if (!body.loading) Qt.callLater(reloadText)
 
 	readonly property int stripPadding: 6
 	readonly property int bodyTop: 4
@@ -220,7 +326,7 @@ PanelWindow {
 		property string family: ""
 		signal clicked()
 
-		width: Math.max(16, caption.implicitWidth + 6)
+		width: Math.max(14, caption.implicitWidth + 6)
 		height: 16
 		radius: 3
 		color: active ? Qt.darker(root.paper, 1.45)
@@ -241,9 +347,11 @@ PanelWindow {
 		MouseArea {
 			id: area
 			anchors.fill: parent
-			anchors.margins: -2 // a small target at any zoom
+			anchors.margins: -1 // a small target at any zoom, clear of its neighbours
 			hoverEnabled: true
 			onClicked: button.clicked()
+			// Two quick clicks are two clicks: + twice is two pixels.
+			onDoubleClicked: button.clicked()
 		}
 	}
 
@@ -285,11 +393,11 @@ PanelWindow {
 				anchors.left: parent.left
 				anchors.leftMargin: root.stripPadding
 				anchors.verticalCenter: parent.verticalCenter
-				spacing: 6
+				spacing: 4
 
 				Row {
 					anchors.verticalCenter: parent.verticalCenter
-					spacing: 4
+					spacing: 3
 
 					Repeater {
 						model: Notes.dotList
@@ -308,7 +416,7 @@ PanelWindow {
 
 							MouseArea {
 								anchors.fill: parent
-								anchors.margins: -3 // a dot is a small target
+								anchors.margins: -1 // a dot is a small target, its neighbours close
 								hoverEnabled: true
 								onClicked: Notes.recolour(root.note, dot.modelData.color)
 							}
@@ -318,7 +426,7 @@ PanelWindow {
 
 				Row {
 					anchors.verticalCenter: parent.verticalCenter
-					spacing: 2
+					spacing: 1
 
 					StripButton {
 						objectName: "bold"
@@ -343,22 +451,70 @@ PanelWindow {
 					}
 				}
 
+				StripButton {
+					anchors.verticalCenter: parent.verticalCenter
+					objectName: "font"
+					label: "Aa"
+					family: root.noteFont
+					active: fontMenu.opened
+					onClicked: fontMenu.opened ? fontMenu.close() : fontMenu.open()
+				}
+
+				// The text size: − and + step it, the number can be typed.
 				Row {
 					anchors.verticalCenter: parent.verticalCenter
-					spacing: 2
 
 					StripButton {
-						objectName: "font"
-						label: "Aa"
-						family: root.noteFont
-						active: fontMenu.opened
-						onClicked: fontMenu.opened ? fontMenu.close() : fontMenu.open()
+						objectName: "smaller"
+						width: 12
+						label: "\u2212"
+						onClicked: root.stepSize(-1)
+					}
+					Rectangle {
+						width: 20
+						height: 16
+						radius: 3
+						color: sizeField.activeFocus ? Qt.lighter(root.paper, 1.15) : "transparent"
+
+						TextInput {
+							id: sizeField
+							objectName: "size"
+							anchors.fill: parent
+							horizontalAlignment: TextInput.AlignHCenter
+							verticalAlignment: TextInput.AlignVCenter
+							color: root.ink
+							selectionColor: root.ink
+							selectedTextColor: root.paper
+							font.pixelSize: 11
+							font.family: UiTheme.fontFamily
+							maximumLength: 3
+							validator: IntValidator {
+								bottom: root.smallestSize
+								top: root.largestSize
+							}
+							text: root.shownSize > 0 ? String(root.shownSize) : ""
+							// Clicked into, the number is ready to be typed over.
+							onActiveFocusChanged: {
+								if (activeFocus) {
+									selectAll()
+									return
+								}
+								text = Qt.binding(function() {
+									return root.shownSize > 0 ? String(root.shownSize) : ""
+								})
+							}
+							onAccepted: {
+								root.applySize(Number(text))
+								body.forceActiveFocus()
+							}
+							Keys.onEscapePressed: body.forceActiveFocus()
+						}
 					}
 					StripButton {
-						objectName: "size"
-						label: String(root.noteSize)
-						active: sizeMenu.opened
-						onClicked: sizeMenu.opened ? sizeMenu.close() : sizeMenu.open()
+						objectName: "larger"
+						width: 12
+						label: "+"
+						onClicked: root.stepSize(1)
 					}
 				}
 			}
@@ -369,7 +525,7 @@ PanelWindow {
 				id: closeBox
 				anchors.right: parent.right
 				anchors.verticalCenter: parent.verticalCenter
-				width: 22
+				width: 20
 				height: parent.height
 				// The close square lights up under the pointer and darkens
 				// as it is pressed, as a window's own close button does.
@@ -424,6 +580,7 @@ PanelWindow {
 			font.pixelSize: root.noteSize > 0 ? root.noteSize : UiTheme.fontBody
 
 			onTextChanged: {
+				Qt.callLater(root.refreshShown) // formatting changes the text too
 				if (loading || root.note === undefined) {
 					return
 				}
@@ -433,8 +590,11 @@ PanelWindow {
 				Notes.typed(root.note, Notes.cleanHtml(body.text))
 			}
 			onContentHeightChanged: root.growToFit()
+			onSelectionStartChanged: Qt.callLater(root.refreshShown)
+			onSelectionEndChanged: Qt.callLater(root.refreshShown)
 			// A caret moved by hand drops a choice made for what is typed next.
 			onCursorPositionChanged: {
+				Qt.callLater(root.refreshShown)
 				if (length === lastLength && Object.keys(pending).length > 0) {
 					pending = ({})
 				}
@@ -503,6 +663,12 @@ PanelWindow {
 		// The span just typed, for the format chosen before it was.
 		TextSelection {
 			id: typed
+			document: body.textDocument
+		}
+
+		// One character at a time, read for the strip; never written.
+		TextSelection {
+			id: probe
 			document: body.textDocument
 		}
 
@@ -628,44 +794,6 @@ PanelWindow {
 								Notes.setFont(root.note, row.modelData)
 								fontMenu.close()
 							}
-						}
-					}
-				}
-			}
-		}
-
-		// The size of the note's text.
-		Popup {
-			id: sizeMenu
-			x: Math.max(4, card.width - width - 4)
-			y: strip.height
-			width: 132
-			padding: 4
-			closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-			onClosed: body.forceActiveFocus()
-
-			background: Rectangle {
-				color: Qt.lighter(root.paper, 1.08)
-				border.color: Qt.darker(root.paper, 1.4)
-				radius: 4
-			}
-
-			contentItem: Flow {
-				spacing: 2
-
-				Repeater {
-					model: [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48]
-
-					delegate: StripButton {
-						required property int modelData
-
-						width: 28
-						height: 20
-						label: String(modelData)
-						active: modelData === root.noteSize
-						onClicked: {
-							Notes.setSize(root.note, modelData)
-							sizeMenu.close()
 						}
 					}
 				}

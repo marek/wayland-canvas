@@ -99,7 +99,9 @@ own the machine's Wayland display namespace and GPU.
   answering the pending capture `{"keys": null}` and itself `true` (also
   with no capture under way) after which a bound chord runs its action
   and a plain key reaches the focused client, and the Super tap given to
-  the launcher through the socket opening and closing it.
+  the launcher through the socket opening and closing it. Last, a button
+  held on a window keeps the pointer on it while the pointer travels off
+  its edge, and the release gives the pointer to what is under it.
 - **`launcher.cpp`** — the app launcher: Super+Space opens it — the first
   run having written canvas.conf with every default into the run's own
   scratch `$XDG_CONFIG_HOME` (never the user's), and a lone Super tap
@@ -354,9 +356,15 @@ own the machine's Wayland display namespace and GPU.
   100 %, on a desktop pinched to 75 % and in the overview at its zoom —
   and stays, in its file and on screen, where it is let go. On a second
   note a word selected and made bold by the strip's B is `<b>` in the file
-  and heavier on screen while the first word keeps its ink; the size menu
-  and the font menu, filtered by typing, set the whole note's size and an
-  installed family; Escape gives the keyboard back and a click takes it
+  and heavier on screen while the first word keeps its ink; the strip's +,
+  twice on the word selected backwards, sizes that word alone two pixels
+  up, the rest at the note's size, and the strip's B shows on for it; a
+  selection dragged from the first word out past the note's edge keeps the
+  pointer on the note while the button is held, and a size typed into the
+  strip sizes all of it, each part keeping its weight, the line drawn
+  taller; Ctrl+I and the strip's U set their span; the font menu,
+  filtered by typing, sets an installed family for the whole note; Escape
+  gives the keyboard back and a click takes it
   again; a third note left empty when the keyboard goes is deleted, file
   and all. A second output aimed at the first note hit-tests and draws it,
   and its going leaves both notes; the strips' ×s take them away, files

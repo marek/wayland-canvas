@@ -47,6 +47,7 @@ wlr_box saved{};
 int saved_x = 0;
 View *closed_view = nullptr; // compared by address only, after it is freed
 View *second = nullptr; // the window beside "a" on Desktop 1
+View *held_view = nullptr; // the window a held button was pressed on
 std::optional<DesktopId> right_made; // the desktop a right click made in the overview
 std::string shot_dir;
 
@@ -1322,6 +1323,41 @@ int run_step() {
 		check(idle.find("{\"id\":11,\"result\":true}") != std::string::npos,
 			"shortcut.cancel with no capture under way answered true");
 		reap_client(cancel_pid);
+		return 300;
+	}
+	// A button held on a window keeps the pointer on it past its edge, as
+	// Wayland's implicit grab does (docs/intents/input/keyboard-and-pointer.md).
+	case 87: {
+		View *v = server->views.empty() ? nullptr : server->views.front();
+		check(v != nullptr, "a window to hold a button on");
+		if (v == nullptr) {
+			return 100;
+		}
+		held_view = v;
+		wlr_box content = v->content_box();
+		Point inside = server->outputs.front()->canvas_to_local(
+			content.x + content.width / 2.0, content.y + content.height / 2.0);
+		move_to(inside.x, inside.y);
+		button(BTN_LEFT, true);
+		return 200;
+	}
+	case 88: {
+		wlr_box frame = held_view->frame_box();
+		Output *o = server->outputs.front().get();
+		Point right = o->canvas_to_local(frame.x + frame.width + 40, frame.y + frame.height / 2.0);
+		Point left = o->canvas_to_local(frame.x - 40, frame.y + frame.height / 2.0);
+		Point outside = right.x < o->width - 10 ? right : left;
+		for (int i = 1; i <= 10; i++) {
+			move_to(outside.x, outside.y - 10 + i); // the press travels off the window
+		}
+		check(server->seat->pointer_state.focused_surface == held_view->surface(),
+			"a button held on a window keeps the pointer on it past its edge");
+		button(BTN_LEFT, false);
+		return 200;
+	}
+	case 89: {
+		check(server->seat->pointer_state.focused_surface != held_view->surface(),
+			"its release gives the pointer to what is under it");
 		return 300;
 	}
 	default:

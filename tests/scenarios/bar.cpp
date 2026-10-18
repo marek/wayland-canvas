@@ -109,6 +109,8 @@ NoteEntry note; // the note under test
 std::string second_note; // the note the formatting is checked on
 int note_retries = 0; // the notes phase's retry counter
 int note_ink_plain = 0, note_ink_word = 0; // the line's ink before the bold
+int note_plain_extent = 0; // the line's ink height at the note's own size
+uint32_t note_b_idle = 0; // the strip's B, off, just left of its glyph
 wlr_box note_before{}; // the note's rectangle before a drag
 // The window the app bar's clicked entry stands for, kept between the
 // click and the check that the view landed on it.
@@ -1989,6 +1991,32 @@ int ink_count(cairo_surface_t *s, const wlr_box &rect) {
 		}
 	}
 	return n;
+}
+
+// How many rows of a rectangle of a shot hold ink, from the first to the
+// last: the height the text there is drawn at.
+int ink_extent(cairo_surface_t *s, const wlr_box &rect) {
+	int top = -1, bottom = -1;
+	for (int y = rect.y; s != nullptr && y < rect.y + rect.height; y++) {
+		if (ink_count(s, wlr_box{rect.x, y, rect.width, 1}) > 0) {
+			top = top < 0 ? y : top;
+			bottom = y;
+		}
+	}
+	return top < 0 ? 0 : bottom - top + 1;
+}
+
+// The strip just left of a control's glyph: inside its button, whose
+// background is darker while the button is on.
+uint32_t button_background(cairo_surface_t *s, std::string_view id, const Run &run) {
+	if (s == nullptr) {
+		return 0;
+	}
+	return pixel_at(s, int(run.x0) - 2, int(note_local(id, 0, note_strip / 2.0).y));
+}
+
+int channel_sum(uint32_t px) {
+	return ((px >> 16) & 0xff) + ((px >> 8) & 0xff) + (px & 0xff);
 }
 
 // The left button: down and held, or up. A drag the plugin hands to the
@@ -5654,12 +5682,14 @@ int run_step() {
 		Point text = note_local(second_note, 8, note_strip + 4);
 		note_ink_plain = ink_count(s, wlr_box{int(text.x), int(text.y), 30, 14});
 		note_ink_word = ink_count(s, wlr_box{int(text.x) + 45, int(text.y), 27, 14});
+		note_plain_extent = ink_extent(s, wlr_box{int(text.x), int(text.y), 100, 40});
 		std::vector<Run> runs = note_strip_runs(s, second_note);
+		note_b_idle = runs.empty() ? 0 : button_background(s, second_note, runs[0]);
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
-		check(runs.size() == 6, std::format("the strip shows bold, italic, "
-			"underline, the font, the size and the × ({} controls)", runs.size()));
+		check(runs.size() == 8, std::format("the strip shows bold, italic, underline, "
+			"the font, the size between − and +, and the × ({} controls)", runs.size()));
 		chord(KEY_LEFT, std::array<uint32_t, 2>{KEY_LEFTCTRL, KEY_LEFTSHIFT});
 		click_strip_run(second_note, runs, 0);
 		return 600;
@@ -5696,30 +5726,91 @@ int run_step() {
 				<= note_ink_plain,
 			std::format("the bold word is drawn heavier ({} ink, was {}), the plain one "
 				"the same ({}, was {})", word, note_ink_word, plain, note_ink_plain));
-		std::vector<Run> runs = note_strip_runs(s, second_note);
+		note_runs = note_strip_runs(s, second_note);
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
-		click_strip_run(second_note, runs, 4); // the size: its menu
-		return 600;
-	}
-	case 144: { // 16 px from the size menu, under the strip at its right end
-		// The menu's cells (NoteSurface.qml): 28 × 20, 2 px apart, four to
-		// a row, 4 px inside a card 132 px wide set 4 px from the note's
-		// right edge; 16 is the fourth.
-		Point sixteen = note_local(second_note, -132 + 3 * 30 + 14, note_strip + 4 + 10);
-		click(sixteen.x, sixteen.y);
+		// The last word again, two pixels larger by the strip's +.
+		chord(KEY_LEFT, std::array<uint32_t, 2>{KEY_LEFTCTRL, KEY_LEFTSHIFT});
+		click_strip_run(second_note, note_runs, 6);
+		click_strip_run(second_note, note_runs, 6);
 		return 800;
 	}
-	case 145: {
+	case 144: { // the size is the span's: the first word keeps the note's own
 		std::optional<NoteEntry> stored = stored_note(second_note);
-		if ((!stored.has_value() || stored->size != 16) && note_retries++ < 40) {
+		std::string sized = std::format("<span style=\"font-size: {}px\"><b>bold</b></span>",
+			stored.has_value() ? stored->size + 2 : 0);
+		if ((!stored.has_value() || stored->text.find(sized) == std::string::npos)
+				&& note_retries++ < 40) {
 			return -200;
 		}
 		note_retries = 0;
-		check(stored.has_value() && stored->size == 16, std::format(
-			"the size menu sets the whole note's size ({} px)",
-			stored.has_value() ? stored->size : 0));
+		check(stored.has_value() && stored->text.find(sized) != std::string::npos
+				&& stored->text.starts_with("<p>plain "),
+			std::format("+ sizes the selected word alone, the rest at the note's size ({})",
+				stored.has_value() ? stored->text : std::string{}));
+		shot("note-word-selected");
+		return 500;
+	}
+	case 145: { // the strip shows the selection's own format: its B on
+		cairo_surface_t *s = load_png("note-word-selected");
+		uint32_t on = note_runs.empty() ? 0 : button_background(s, second_note, note_runs[0]);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		check(channel_sum(on) + 40 < channel_sum(note_b_idle), std::format(
+			"a bold word selected backwards shows the strip's B on (#{:06x}, off #{:06x})",
+			on & 0xffffff, note_b_idle & 0xffffff));
+		// A selection dragged from the first word out past the note's edge.
+		Point from = note_local(second_note, 9, note_strip + 4 + 6);
+		park(from.x, from.y);
+		left_button(true);
+		step = 238;
+		return -300;
+	}
+	case 238: {
+		Point from = note_local(second_note, 9, note_strip + 4 + 6);
+		Point below = note_local(second_note, 60, note_box(second_note).height + 40);
+		travel(from.x, from.y, below.x, below.y);
+		LayerSurface *surface = note_surface(second_note);
+		check(surface != nullptr
+				&& server->seat->pointer_state.focused_surface == surface->wlr->surface,
+			"a button held in the note keeps the pointer on it past its edge");
+		left_button(false);
+		return 400;
+	}
+	case 239: { // 18 typed into the size, for the selection
+		click_strip_run(second_note, note_runs, 5);
+		type("18");
+		tap(KEY_ENTER);
+		return 800;
+	}
+	case 240: {
+		std::optional<NoteEntry> stored = stored_note(second_note);
+		bool both = stored.has_value()
+			&& stored->text.find("<span style=\"font-size: 18px\">plain") != std::string::npos
+			&& stored->text.find("<span style=\"font-size: 18px\"><b>bold</b></span>")
+				!= std::string::npos;
+		if (!both && note_retries++ < 40) {
+			return -200;
+		}
+		note_retries = 0;
+		check(both, std::format("a size typed into the strip sizes the dragged selection, "
+			"each part keeping its weight ({})",
+			stored.has_value() ? stored->text : std::string{}));
+		shot("note-sized-span");
+		return 500;
+	}
+	case 241: { // and the line stands taller on screen
+		cairo_surface_t *s = load_png("note-sized-span");
+		Point text = note_local(second_note, 8, note_strip + 4);
+		int extent = ink_extent(s, wlr_box{int(text.x), int(text.y), 100, 40});
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		check(extent * 10 >= note_plain_extent * 13, std::format(
+			"the sized line is drawn taller ({} px of ink, was {})", extent,
+			note_plain_extent));
 		step = 220;
 		return -100;
 	}
@@ -5883,7 +5974,7 @@ int run_step() {
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
-		click_strip_run(note.id, first, 5);
+		click_strip_run(note.id, first, first.size() - 1); // the ×, rightmost
 		return 800;
 	}
 	case 233: {
@@ -5903,7 +5994,7 @@ int run_step() {
 		if (s != nullptr) {
 			cairo_surface_destroy(s);
 		}
-		click_strip_run(second_note, runs, 5);
+		click_strip_run(second_note, runs, runs.size() - 1); // the ×, rightmost
 		return 800;
 	}
 	case 235: {
