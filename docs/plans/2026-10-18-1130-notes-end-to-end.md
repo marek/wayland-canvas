@@ -70,7 +70,7 @@ continues [2026-10-17-1108-note-editing-in-place.md](2026-10-17-1108-note-editin
 - [x] Every build and link warning fixed
 - [x] Found here: a plan commit had dropped the bar scenario's toolbar-edges phase and the jump out of it, so the run ended after the recording dot and the settings window, app bar and capture-with-a-panel phases no longer ran; the phase and the helpers deleted as unused since are back, and every phase runs and passes
 - [x] Found here: the canvas-items removal had dropped the ipc scenario's state request, so its window-list check read nothing and failed; the request is back, beside checks of the surface role's own answers
-- [ ] `tools/check.sh` green, merged into main
+- [x] `tools/check.sh` green, merged into main
 - [x] On screen, nested: a note created, typed into, grown, panned and zoomed, driven by keys and the socket
 - [x] Once verified: a skill for writing canvas plugins without these mistakes, and a case study of this hunt in `docs/intents/bugs/`
 - [ ] On screen, nested, by hand: drag a note by its strip, size it by its corner, recolour it, format a selection, change its font and size, delete it (the user)
