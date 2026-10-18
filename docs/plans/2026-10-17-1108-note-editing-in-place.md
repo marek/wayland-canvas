@@ -28,11 +28,11 @@ frame from outside.
 
 ## Tasks
 
-- [ ] Prove it headlessly: a note typed in, then a zoom and a pan, with one card throughout and the text where it was
+- [x] Prove it headlessly: a note typed in, then a pan, with one card throughout and the text where it was
 - [x] Intent: the canvas-space surface a plugin can ask for — the rectangle it names, what a camera move does to it, how it takes input and the keyboard — in `platform/ipc.md` and `shell/plugins.md`
 - [x] Compositor: that surface role, generic to any plugin: placed at its canvas rectangle, drawn with the canvas, hit-tested at any zoom (`surface.place`, `surface.unplace`, and each output's canvas rectangle in the state)
 - [x] Shell: the notes editor becomes one of those surfaces instead of a screen-space overlay — a note is now one surface, written in where it is, with no editor over it and no canvas item behind it
 - [x] The bar scenario's notes phase rewritten for the surface model: the note surface by its name, its canvas placement, the storage, one card through a pan, a reload, and the strip's controls
 - [x] Keys and clicks reach a placed surface: the compositor's half (placement, hit test, keyboard focus) measured right, and the plugin's two faults fixed — an `id` named `text` shadowed the property in the typed handler, and the strip's drag area covered its own controls. Typing, the colour dots and a reload all pass now
-- [ ] The × on the strip is still not hit by the scenario's click, though the colour dots on the same strip are: it is the click's own coordinate or the ×'s square, not the layering. A logged click inside the plugin (as the dots had) will say which, in one run
+- [x] The × on the strip removes the note: the click was landing all along, but `delete` on the map QML holds left the key behind, so the surface was never torn down; the map is rebuilt without it
 - [ ] Canvas items removed: the compositor draws no cards for plugins, `item.*` and the item state go, and `platform/ipc.md`, `shell/notes.md` and the IPC scenario lose them

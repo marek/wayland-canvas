@@ -182,7 +182,15 @@ Item {
 		if (notes[id] == null) {
 			return
 		}
-		delete notes[id]
+		// A `delete` on the map QML holds leaves the key behind: the map
+		// is built again without it.
+		var next = {}
+		for (var other in notes) {
+			if (other !== id) {
+				next[other] = notes[other]
+			}
+		}
+		notes = next
 		save()
 		refresh()
 	}
