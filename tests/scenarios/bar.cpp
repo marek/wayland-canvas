@@ -906,8 +906,8 @@ std::string machine_wifi(const char *field) {
 		"nmcli -t -f {} device status 2>/dev/null | "
 		"awk -F: '$2 == \"wifi\" {{ print $NF }}' | head -1 > '{}'",
 		field, out);
-	std::system(cmd.c_str());
-	std::string value = read_file(out);
+	bool listed = std::system(cmd.c_str()) == 0;
+	std::string value = listed ? read_file(out) : std::string{};
 	unlink(out.c_str());
 	while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
 		value.pop_back();
@@ -7305,15 +7305,15 @@ int run_step() {
 		if (after != nullptr) {
 			cairo_surface_destroy(after);
 		}
-		std::system(std::format(
+		bool probed = std::system(std::format(
 			"ffprobe -v error -select_streams v:0 "
 				"-show_entries stream=width,height -show_entries format=duration "
 				"-of csv=p=0 \"{}\" > {}/dot-probe.txt 2>&1",
-			dot_recording, shot_dir).c_str());
+			dot_recording, shot_dir).c_str()) == 0;
 		int w = 0, h = 0;
 		double dur = 0;
 		std::string probe = read_file(std::format("{}/dot-probe.txt", shot_dir));
-		bool played = std::sscanf(probe.c_str(), "%d,%d %lf", &w, &h, &dur) == 3
+		bool played = probed && std::sscanf(probe.c_str(), "%d,%d %lf", &w, &h, &dur) == 3
 			&& w == screen_w && h == screen_h && dur >= 0.5;
 		check(played,
 			std::format("ffprobe reads the recording as a playing {}x{} file ({})",

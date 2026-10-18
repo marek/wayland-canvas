@@ -18,6 +18,7 @@ depends=(
 	'libglvnd'
 	'libinput'
 	'libstdc++'
+	'libxcb'
 	'libxkbcommon'
 	'mesa'
 	'pango'
@@ -26,6 +27,8 @@ depends=(
 	'sqlite'
 	'systemd-libs'
 	'wayland'
+	'xcb-util-errors'
+	'xcb-util-wm'
 )
 optdepends=('xorg-xwayland: X11 applications'
 	'quickshell: the top bar (started automatically when qs is on PATH)'
@@ -53,6 +56,10 @@ makedepends=(
 	'json-glib'
 	'sqlite'
 	'systemd-libs'
+	'libxcb'
+	'xcb-util-errors'
+	'xcb-util-wm'
+	'xorg-xwayland'
 )
 source=("wayland-canvas-$pkgver.tar.xz")
 sha256sums=('SKIP')

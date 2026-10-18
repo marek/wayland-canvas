@@ -22,7 +22,9 @@ public:
 	void lock_drawn();
 
 private:
+#if CANVAS_HAVE_LOGIND
 	struct Bus; // the system-bus connection (logind.cpp)
+#endif
 
 	void handle_lock();
 	void handle_unlock();
@@ -34,10 +36,13 @@ private:
 	static int handle_bus(int fd, uint32_t mask, void *data);
 	static int handle_wait_timeout(void *data);
 
+	// A build without logind has no seat-manager state at all.
+#if CANVAS_HAVE_LOGIND
 	Server &server_;
 	std::unique_ptr<Bus> bus_;
 	EventSourcePtr source_;
 	EventSourcePtr wait_timer_;
 	int inhibitor_fd_ = -1;
 	bool sleeping_ = false;
+#endif
 };

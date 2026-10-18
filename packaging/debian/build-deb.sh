@@ -20,7 +20,9 @@ apt-get install -y --no-install-recommends \
 	libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgles-dev \
 	libinput-dev libseat-dev libxkbcommon-dev libpixman-1-dev \
 	libdisplay-info-dev hwdata libcairo2-dev libpango1.0-dev \
-	librsvg2-dev libglib2.0-dev libjson-glib-dev libsqlite3-dev
+	librsvg2-dev libglib2.0-dev libjson-glib-dev libsqlite3-dev libsystemd-dev \
+	xwayland libxcb1-dev libxcb-composite0-dev libxcb-ewmh-dev libxcb-icccm4-dev \
+	libxcb-render0-dev libxcb-res0-dev libxcb-xfixes0-dev libxcb-errors-dev
 
 # std::function_ref, std::inplace_vector and std::print must all link and
 # run; fail here rather than partway through a long build.

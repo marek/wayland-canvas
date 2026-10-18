@@ -182,9 +182,7 @@ void Logind::release_sleep_inhibitor() {
 
 #else // CANVAS_HAVE_LOGIND
 
-struct Logind::Bus {};
-
-Logind::Logind(Server &server) : server_(server) {}
+Logind::Logind(Server &) {}
 Logind::~Logind() = default;
 
 void Logind::init(bool) {

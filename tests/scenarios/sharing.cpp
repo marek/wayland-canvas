@@ -80,8 +80,11 @@ void stop_portal() {
 		portal_bus_pid = -1;
 	}
 	if (!portal_runtime.empty()) {
-		std::system(std::format("fusermount3 -uz {0}/doc 2>/dev/null"
-			" || fusermount -uz {0}/doc 2>/dev/null; rm -rf {0}", portal_runtime).c_str());
+		if (std::system(std::format("fusermount3 -uz {0}/doc 2>/dev/null"
+				" || fusermount -uz {0}/doc 2>/dev/null; rm -rf {0}", portal_runtime).c_str())
+				!= 0) {
+			std::println("note: the scratch portal runtime {} was not removed", portal_runtime);
+		}
 		portal_runtime.clear();
 	}
 }
