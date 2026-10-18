@@ -125,8 +125,12 @@ std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
 
 // A click on a shell surface that takes the keyboard gives it the keyboard,
 // recorded as the holder so the keyboard goes back to the window when the
-// surface goes; an exclusive holder elsewhere keeps it.
+// surface goes; an exclusive holder elsewhere keeps it. A surface on the
+// plane comes up above the others there, as a clicked window does.
 void focus_layer_on_click(Server &server, LayerSurface &layer, wlr_surface *surface) {
+	if (layer.canvas_box.has_value()) {
+		server.raise_canvas_surface(layer);
+	}
 	if (!layer.wants_keyboard()) {
 		return;
 	}
@@ -134,6 +138,15 @@ void focus_layer_on_click(Server &server, LayerSurface &layer, wlr_surface *surf
 	if (holder == nullptr || holder == &layer || !holder->holds_keyboard_exclusively()) {
 		server.focused_layer = &layer;
 		server.focus_keyboard(surface);
+	}
+}
+
+// A press on the empty canvas takes the keyboard from a shell surface that
+// holds it on demand (a note being written in) back to the focused window.
+void press_on_empty_canvas(Server &server) {
+	LayerSurface *holder = server.focused_layer;
+	if (holder != nullptr && !holder->holds_keyboard_exclusively()) {
+		server.return_keyboard();
 	}
 }
 
@@ -805,6 +818,9 @@ void Input::overview_press(Output &output, uint32_t time, uint32_t button) {
 		overview_right_click(output, target, p);
 		return;
 	}
+	if (std::holds_alternative<PressOnEmpty>(target)) {
+		press_on_empty_canvas(server_);
+	}
 	grab.begin_overview_press(output, target);
 }
 
@@ -813,8 +829,16 @@ void Input::overview_press(Output &output, uint32_t time, uint32_t button) {
 
 void Input::forward_press(uint32_t time, uint32_t button) {
 	pressed_buttons_ |= 1u << (button & 31);
+	press_lx_ = server_.cursor->x;
+	press_ly_ = server_.cursor->y;
 	wlr_seat_pointer_notify_button(server_.seat, time, button,
 		WL_POINTER_BUTTON_STATE_PRESSED);
+}
+
+bool Input::button_held_on(const wlr_surface *surface) const {
+	wlr_surface *focus = server_.seat->pointer_state.focused_surface;
+	return pressed_buttons_ != 0 && focus != nullptr
+		&& wlr_surface_get_root_surface(focus) == surface;
 }
 
 void Input::cursor_button_press(uint32_t time, uint32_t button) {
@@ -918,6 +942,7 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	}
 
 	if (button == BTN_LEFT) {
+		press_on_empty_canvas(server);
 		grab.begin_pan(*output);
 	}
 }
@@ -932,29 +957,32 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 		}
 		return;
 	}
-	if (!grab.active()) {
-		uint32_t bit = 1u << (button & 31);
-		if (pressed_buttons_ & bit) {
-			pressed_buttons_ &= ~bit;
-			wlr_seat_pointer_notify_button(server_.seat, time, button,
-				WL_POINTER_BUTTON_STATE_RELEASED);
-		} else {
-			Output *output =
-				server_.output_at(server_.cursor->x, server_.cursor->y);
-			if (output != nullptr) {
-				if (server_.capture_ui.pointer_button(*output,
-						server_.cursor->x - output->lx,
-						server_.cursor->y - output->ly, button, false)) {
-					return;
-				}
-				server_.launcher.pointer_button(*output,
-					server_.cursor->x - output->lx,
-					server_.cursor->y - output->ly, button, false);
-			}
-		}
+	// A release whose press reached a client reaches it too, also when the
+	// client handed the drag that followed to the compositor.
+	uint32_t bit = 1u << (button & 31);
+	bool forwarded = (pressed_buttons_ & bit) != 0;
+	if (forwarded) {
+		pressed_buttons_ &= ~bit;
+		wlr_seat_pointer_notify_button(server_.seat, time, button,
+			WL_POINTER_BUTTON_STATE_RELEASED);
+	}
+	if (grab.active()) {
+		grab.release();
 		return;
 	}
-	grab.release();
+	if (forwarded) {
+		return;
+	}
+	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);
+	if (output == nullptr) {
+		return;
+	}
+	if (server_.capture_ui.pointer_button(*output, server_.cursor->x - output->lx,
+			server_.cursor->y - output->ly, button, false)) {
+		return;
+	}
+	server_.launcher.pointer_button(*output, server_.cursor->x - output->lx,
+		server_.cursor->y - output->ly, button, false);
 }
 
 // ---- cursor event handlers ----

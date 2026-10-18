@@ -199,40 +199,6 @@ std::expected<std::optional<long long>, std::string> opt_int(
 	return std::optional{json_node_get_int(node)};
 }
 
-// "#rrggbb" as 0xRRGGBBAA; nullopt when it is not that shape.
-std::optional<uint32_t> parse_color(std::string_view text) {
-	auto hex = [](char ch) -> std::optional<uint32_t> {
-		if (ch >= '0' && ch <= '9') {
-			return static_cast<uint32_t>(ch - '0');
-		}
-		if (ch >= 'a' && ch <= 'f') {
-			return static_cast<uint32_t>(ch - 'a' + 10);
-		}
-		if (ch >= 'A' && ch <= 'F') {
-			return static_cast<uint32_t>(ch - 'A' + 10);
-		}
-		return std::nullopt;
-	};
-	if (text.size() != 7 || text.front() != '#') {
-		return std::nullopt;
-	}
-	uint32_t rgb = 0;
-	for (std::size_t i = 1; i < text.size(); i++) {
-		std::optional<uint32_t> digit = hex(text[i]);
-		if (!digit.has_value()) {
-			return std::nullopt;
-		}
-		rgb = rgb << 4 | *digit;
-	}
-	return rgb << 8 | 0xffu;
-}
-
-// A colour as "#rrggbb": what item.set was given.
-std::string color_text(uint32_t rgba) {
-	return std::format("#{:02x}{:02x}{:02x}",
-		(rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff);
-}
-
 // -------------------------------------------------------- state as JSON
 
 std::string_view theme_name(ThemeMode mode) {
@@ -533,6 +499,10 @@ Ipc::Client::~Client() {
 		// The capture itself ends: no keys are swallowed for a dead client.
 		ipc.server_.input.cancel_shortcut_capture();
 	}
+	if (ipc.drag_client_ == this) {
+		ipc.drag_client_ = nullptr; // its drag runs on to the release, unanswered
+		ipc.drag_id_.clear();
+	}
 	source.reset(); // off the loop before the fd it watched is closed
 	if (fd >= 0) { // a dropped client's fd is already closed
 		close(fd);
@@ -712,6 +682,11 @@ void Ipc::handle_line(Client &client, std::string_view line) {
 	}
 	if (request.method == "shortcut.capture") {
 		shortcut_capture(client, request.id_json, request.params);
+		return;
+	}
+	if (request.method == "surface.move" || request.method == "surface.resize") {
+		surface_drag(client, request.id_json, request.params,
+			request.method == "surface.resize");
 		return;
 	}
 	std::expected<std::string, std::string> result =
@@ -990,21 +965,58 @@ std::expected<std::string, std::string> Ipc::m_window_focus(Client &,
 	return std::unexpected(std::format("unknown window id '{}'", wanted));
 }
 
+namespace {
 
-// The layer surface a plugin named, on any output; nullptr when no
-// mapped surface carries that name.
-LayerSurface *named_surface(Server &server, std::string_view name) {
+// Every layer surface carrying a plugin's name, on any output: one, or
+// briefly two while a reloading shell replaces it.
+std::vector<LayerSurface *> named_surfaces(Server &server, std::string_view name) {
+	std::vector<LayerSurface *> found;
 	for (const std::unique_ptr<Output> &output : server.outputs) {
 		for (auto &surfaces : output->layers) {
 			for (const std::unique_ptr<LayerSurface> &layer : surfaces) {
 				if (layer->name() == name) {
-					return layer.get();
+					found.push_back(layer.get());
 				}
 			}
 		}
 	}
-	return nullptr;
+	return found;
 }
+
+// The `edges` of a `surface.resize`: a list of edge names, as WLR_EDGE bits.
+std::optional<uint32_t> edge_bits(JsonObject *params) {
+	if (params == nullptr || !json_object_has_member(params, "edges")
+			|| json_node_get_node_type(json_object_get_member(params, "edges"))
+				!= JSON_NODE_ARRAY) {
+		return std::nullopt;
+	}
+	constexpr std::array names = {
+		std::pair{std::string_view{"left"}, WLR_EDGE_LEFT},
+		std::pair{std::string_view{"right"}, WLR_EDGE_RIGHT},
+		std::pair{std::string_view{"top"}, WLR_EDGE_TOP},
+		std::pair{std::string_view{"bottom"}, WLR_EDGE_BOTTOM},
+	};
+	JsonArray *list = json_object_get_array_member(params, "edges");
+	uint32_t edges = 0;
+	for (guint i = 0; i < json_array_get_length(list); i++) {
+		JsonNode *node = json_array_get_element(list, i);
+		const char *text = json_node_get_value_type(node) == G_TYPE_STRING
+			? json_node_get_string(node) : nullptr;
+		auto known = std::ranges::find_if(names, [text](const auto &entry) {
+			return text != nullptr && entry.first == text;
+		});
+		if (known == names.end()) {
+			return std::nullopt;
+		}
+		edges |= known->second;
+	}
+	if (edges == 0) {
+		return std::nullopt;
+	}
+	return edges;
+}
+
+} // namespace
 
 std::expected<std::string, std::string> Ipc::m_surface_place(Client &,
 		JsonObject *params) {
@@ -1037,11 +1049,9 @@ std::expected<std::string, std::string> Ipc::m_surface_place(Client &,
 	// Remembered by name: a surface that has not mapped yet takes it when
 	// it does, and a shell that reloads finds its places again.
 	server_.canvas_places[*(*name)] = box;
-	if (LayerSurface *surface = named_surface(server_, *(*name))) {
-		surface->canvas_box = box;
-		surface->output.arrange_layers();
+	for (LayerSurface *surface : named_surfaces(server_, *(*name))) {
+		surface->place(box);
 	}
-	server_.damage_all();
 	return std::string{"true"};
 }
 
@@ -1053,12 +1063,94 @@ std::expected<std::string, std::string> Ipc::m_surface_unplace(Client &,
 		return std::unexpected(std::string{"params: surface (a layer surface's name)"});
 	}
 	server_.canvas_places.erase(*(*name));
-	if (LayerSurface *surface = named_surface(server_, *(*name))) {
-		surface->canvas_box.reset();
-		surface->output.arrange_layers();
+	for (LayerSurface *surface : named_surfaces(server_, *(*name))) {
+		surface->unplace();
 	}
-	server_.damage_all();
 	return std::string{"true"};
+}
+
+void Ipc::surface_drag(Client &client, std::string_view id_json,
+		JsonObject *params, bool resize) {
+	auto bail = [&](std::string_view error) {
+		queue(client, response(id_json, quote(error), true));
+	};
+	std::string_view usage = resize
+		? "params: surface (a layer surface's name), edges (a list of left, "
+			"right, top, bottom), minWidth and minHeight (optional)"
+		: "params: surface (a layer surface's name)";
+	std::expected<std::optional<std::string>, std::string> name =
+		opt_string(params, "surface");
+	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
+		bail(usage);
+		return;
+	}
+	uint32_t edges = 0;
+	int min_w = 1, min_h = 1;
+	if (resize) {
+		std::optional<uint32_t> bits = edge_bits(params);
+		std::expected<std::optional<long long>, std::string> wide =
+			opt_int(params, "minWidth");
+		std::expected<std::optional<long long>, std::string> tall =
+			opt_int(params, "minHeight");
+		if (!bits.has_value() || !wide.has_value() || !tall.has_value()) {
+			bail(usage);
+			return;
+		}
+		edges = *bits;
+		min_w = static_cast<int>(wide->value_or(1));
+		min_h = static_cast<int>(tall->value_or(1));
+	}
+	// The surface of that name the pointer is pressed on: the press the
+	// plugin is answering, which the drag continues.
+	LayerSurface *held = nullptr;
+	for (LayerSurface *surface : named_surfaces(server_, *(*name))) {
+		if (surface->mapped && server_.input.button_held_on(surface->wlr->surface)) {
+			held = surface;
+		}
+	}
+	if (held == nullptr) {
+		bail("no button is held on that surface");
+		return;
+	}
+	if (!held->canvas_box.has_value()) {
+		bail("that surface is not on the plane");
+		return;
+	}
+	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);
+	if (server_.input.grab.active() || drag_client_ != nullptr || output == nullptr) {
+		bail("the pointer is already in a drag");
+		return;
+	}
+	drag_client_ = &client;
+	drag_id_ = id_json;
+	// No response yet: answer_surface_drag() sends it at the release.
+	server_.input.grab.begin_surface_drag(*held, *output, server_.input.press_lx(),
+		server_.input.press_ly(), edges, min_w, min_h);
+}
+
+void Ipc::answer_surface_drag(std::optional<wlr_box> box) {
+	if (drag_client_ == nullptr) {
+		return;
+	}
+	Client &client = *drag_client_;
+	std::string id = drag_id_;
+	drag_client_ = nullptr;
+	drag_id_.clear();
+	if (!box.has_value()) {
+		queue(client, response(id, quote("the drag ended with its surface gone"), true));
+		return;
+	}
+	std::string payload = object_text([&](JsonBuilder *builder) {
+		json_builder_set_member_name(builder, "x");
+		json_builder_add_int_value(builder, box->x);
+		json_builder_set_member_name(builder, "y");
+		json_builder_add_int_value(builder, box->y);
+		json_builder_set_member_name(builder, "width");
+		json_builder_add_int_value(builder, box->width);
+		json_builder_set_member_name(builder, "height");
+		json_builder_add_int_value(builder, box->height);
+	});
+	queue(client, response(id, payload, false));
 }
 
 std::expected<std::string, std::string> Ipc::m_action_run(Client &,

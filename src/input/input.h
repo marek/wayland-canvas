@@ -93,6 +93,13 @@ public:
 	// Ends the capture under way, if any; it answers nullopt.
 	void cancel_shortcut_capture();
 
+	// A button pressed on `surface` (or a surface of its tree) is still
+	// held: the press its client answers by handing a drag to the
+	// compositor. The press's layout position is where that drag starts.
+	bool button_held_on(const wlr_surface *surface) const;
+	double press_lx() const { return press_lx_; }
+	double press_ly() const { return press_ly_; }
+
 	// Title double-click state: the last click and its view.
 	uint32_t last_title_click = 0;
 	View *last_title_view = nullptr;
@@ -113,8 +120,10 @@ private:
 	// Presses swallowed by a binding or a compositor grab must have their
 	// release swallowed too, or clients see stuck keys.
 	std::array<bool, 256> key_consumed_{};
-	// Set of buttons whose press was forwarded to a client.
+	// Set of buttons whose press was forwarded to a client, and where the
+	// last such press was (layout coordinates).
 	uint32_t pressed_buttons_ = 0;
+	double press_lx_ = 0, press_ly_ = 0;
 	// Logo key pressed alone and nothing else happened yet: releasing it
 	// runs the action that holds the Super tap. Any other key, button,
 	// scroll or gesture cancels the tap.

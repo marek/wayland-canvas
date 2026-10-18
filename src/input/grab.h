@@ -9,6 +9,7 @@
 #include "core/geometry.h"
 #include "core/util.h"
 
+class LayerSurface;
 class Output;
 class Server;
 class View;
@@ -34,8 +35,11 @@ public:
 	struct TitleButton { View *view; Output *output; DecoPart part; };
 	struct OverviewPress { Output *output; Camera cam; double lx, ly; PressTarget target; };
 	struct DesktopDrag { Output *output; DesktopId desktop; Camera cam; double lx, ly; wlr_box start; std::optional<DesktopId> drop; };
+	// A plugin's surface on the plane, moved (no edges) or sized by its
+	// edges for the client that asked (docs/intents/platform/ipc.md).
+	struct SurfaceDrag { LayerSurface *layer; Output *output; Camera cam; double lx, ly; wlr_box start; uint32_t edges; int min_w, min_h; };
 	using State = std::variant<None, Move, Resize, Pan, TitleButton, OverviewPress,
-		DesktopDrag>;
+		DesktopDrag, SurfaceDrag>;
 
 	explicit PointerGrab(Server &server);
 	PointerGrab(const PointerGrab &) = delete;
@@ -48,6 +52,10 @@ public:
 	void begin_pan(Output &output);
 	void begin_title_button(View &view, Output &output, DecoPart part);
 	void begin_overview_press(Output &output, PressTarget target);
+	// From the press at layout (lx, ly), which the surface's client was
+	// sent and answered by asking for this drag.
+	void begin_surface_drag(LayerSurface &layer, Output &output, double lx, double ly,
+		uint32_t edges, int min_w, int min_h);
 	void motion();
 	void release(); // a button release: acts (title button, overview click, combine or raise) and ends
 	void cancel();
@@ -55,6 +63,7 @@ public:
 	std::optional<DesktopId> drop_target() const; // the desktop a dragged frame would combine into
 	void forget(const View &view); // unmapped or destroyed
 	void forget(const Output &output); // unplugged
+	void forget(const LayerSurface &layer); // unmapped or destroyed
 
 private:
 	void move_motion(Move &move);
@@ -63,6 +72,7 @@ private:
 	void title_button_motion(TitleButton &button);
 	void overview_press_motion(OverviewPress &press);
 	void desktop_drag_motion(DesktopDrag &drag);
+	void surface_drag_motion(SurfaceDrag &drag);
 	void release_title_button(TitleButton &button);
 	// An overview click that never turned into a drag.
 	void overview_click(OverviewPress &press);

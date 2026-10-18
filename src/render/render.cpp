@@ -247,25 +247,35 @@ void screen_surface_iter(wlr_surface *surface, int sx, int sy, void *data) {
 // ------------------------------------------------------------- layers
 
 // A surface a plugin put on the plane: drawn in canvas space, so it pans,
-// zooms and scales with everything else there
-// (docs/intents/platform/ipc.md).
+// zooms and scales with everything else there, by every output whose view
+// it is in (docs/intents/platform/ipc.md). Each surface of its tree is drawn
+// at the size it committed: a size in flight is never stretched.
+struct CanvasIter {
+	const RenderCtx *ctx;
+	int cx, cy; // canvas position of the surface tree's origin
+};
+
+void canvas_surface_iter(wlr_surface *surface, int sx, int sy, void *data) {
+	CanvasIter &it = *static_cast<CanvasIter *>(data);
+	const RenderCtx &ctx = *it.ctx;
+	Rect on_plane{double(it.cx + sx), double(it.cy + sy),
+		double(surface->current.width), double(surface->current.height)};
+	if (!on_plane.intersects(ctx.viewport)) {
+		return;
+	}
+	draw_surface_logical(ctx, surface, canvas_x(ctx, on_plane.x),
+		canvas_y(ctx, on_plane.y), on_plane.w * ctx.cam.zoom,
+		on_plane.h * ctx.cam.zoom, 1.0f, true);
+}
+
 void draw_canvas_surfaces(const RenderCtx &ctx) {
-	for (const auto &surfaces : ctx.output->layers) {
-		for (const auto &layer : surfaces) {
-			if (!layer->mapped || !layer->canvas_box.has_value()) {
-				continue;
-			}
-			const wlr_box &box = *layer->canvas_box;
-			Rect on_plane{double(box.x), double(box.y), double(box.width),
-				double(box.height)};
-			if (!on_plane.intersects(ctx.viewport)) {
-				continue;
-			}
-			wlr_surface *surface = layer->wlr->surface;
-			draw_surface_logical(ctx, surface, canvas_x(ctx, box.x),
-				canvas_y(ctx, box.y), box.width * ctx.cam.zoom,
-				box.height * ctx.cam.zoom, 1.0f, true);
+	for (const LayerSurface *layer : ctx.output->server.canvas_stack) {
+		if (!layer->mapped || !layer->canvas_box.has_value()) {
+			continue;
 		}
+		CanvasIter it{.ctx = &ctx, .cx = layer->canvas_box->x,
+			.cy = layer->canvas_box->y};
+		wlr_surface_for_each_surface(layer->wlr->surface, canvas_surface_iter, &it);
 	}
 }
 
@@ -732,11 +742,6 @@ void draw_drag_icon(const RenderCtx &ctx) {
 	wlr_surface_for_each_surface(server.input.drag_icon->surface,
 		screen_surface_iter, &it);
 }
-
-// ------------------------------------------------------- canvas items
-
-// Plugin-owned cards above the windows and their title bars, in canvas
-// space, below the top and overlay layers.
 
 // ------------------------------------------------- frame done/enter/present
 

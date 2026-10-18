@@ -222,6 +222,7 @@ Skills live in `docs/skills/<name>/SKILL.md`;
 | `aim-for-ideal` | A fix that works by a shortcut when the proper structure needs a larger change. |
 | `robust-architecture` | Deciding where a piece of state lives and who derives from it. |
 | `fresh-deploy` | Before deleting code, a constant or a feature, or writing a compatibility path. |
+| `canvas-plugins` | Writing or changing a shell plugin whose surfaces live on the canvas (notes, drawings), the QML model they bind to, or a scenario that checks one: notifying objects changed in place, `Variants` for windows, `surface.place` only, every drag handed to the compositor, checks on the screenshot and a second output. |
 | `canvas-autopilot` | Working through the open plans without stopping, when the user asks for that. |
 | `answering-questions` | Any question from the user (progress, why something was or was not done): answered first and in a few lines, nothing changed because of it; the `answer` tool pins it above the input until dismissed (`.omp/extensions/pinned-answers.ts` in omp, `.pi/extensions/pinned-answers.ts` in vanilla pi). |
 

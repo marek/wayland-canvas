@@ -40,7 +40,7 @@ public:
 	// focused (docs/intents/shell/app-bar.md).
 	void emit_windows();
 	void emit_theme(); // the mode changed
-	void emit_settings(); // the effective settings changed // the user dropped a dragged item
+	void emit_settings(); // the effective settings changed
 	// The user finished (or cancelled) a `capture.pick` request: answers
 	// its client now. `payload` is the result's JSON text, or the plain
 	// error message when `ok` is false. No request pending: a no-op.
@@ -49,6 +49,10 @@ public:
 	// request: answers its client with the chord's text, or null. No
 	// request pending: a no-op.
 	void answer_capture(std::optional<settings::Chord> chord);
+	// A `surface.move` or `surface.resize` drag ended: answers its client
+	// with the rectangle the surface ended at, or an error without one. No
+	// request pending: a no-op.
+	void answer_surface_drag(std::optional<wlr_box> box);
 	// A recording started (with its file) or stopped (empty path).
 	void emit_recording(bool active, const std::string &path);
 	// Runs a shell action from inside the compositor (a lock trigger): the
@@ -123,6 +127,11 @@ private:
 	// out through answer_capture() once the chord is pressed.
 	void shortcut_capture(Client &client, std::string_view id_json,
 		JsonObject *params);
+	// `surface.move` and `surface.resize` — likewise: hand the press held on
+	// a plugin's surface to a compositor drag; the response goes out through
+	// answer_surface_drag() at the release.
+	void surface_drag(Client &client, std::string_view id_json,
+		JsonObject *params, bool resize);
 	void push_event(std::string_view name, std::string_view params);
 	void queue(Client &client, std::string_view line); // append, flush, cap-check
 	void flush(Client &client); // nonblocking; keeps the remainder queued
@@ -145,6 +154,9 @@ private:
 	// Likewise the pending `shortcut.capture` request.
 	Client *capture_client_ = nullptr;
 	std::string capture_id_;
+	// Likewise the pending `surface.move` or `surface.resize` request.
+	Client *drag_client_ = nullptr;
+	std::string drag_id_;
 	std::vector<std::unique_ptr<Client>> clients_;
 };
 

@@ -15,13 +15,12 @@ Item {
 
 	Component.onCompleted: Notes.init(api)
 
-	Repeater {
+	// Variants, not a Repeater: a note is a window, and a Repeater makes
+	// items only.
+	Variants {
 		model: Notes.ids
 
-		delegate: NoteSurface {
-			required property string modelData
-
-			noteId: modelData
+		NoteSurface {
 			api: root.api
 		}
 	}

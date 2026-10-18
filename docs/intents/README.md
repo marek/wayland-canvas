@@ -83,6 +83,7 @@ their values.
 | [bugs/resize-anchor-lost-on-release.md](bugs/resize-anchor-lost-on-release.md) | Left/top resizes drifting: the client's final commit arrives after the button release |
 | [bugs/grabs-that-never-ended.md](bugs/grabs-that-never-ended.md) | Fake-device tests found pointer grabs that never ended and canvas shortcuts bound without Super |
 | [bugs/zoom-collapsed-the-grid.md](bugs/zoom-collapsed-the-grid.md) | Zooming a tiled desktop in and out left windows as bars at the screen's edge: a settled scale re-flowed the grid and its shrinking frame dropped them |
+| [bugs/notes-that-never-followed.md](bugs/notes-that-never-followed.md) | Sticky notes inert on screen while their files changed: plain JS objects that told QML nothing, drags the plugin ran against its own coordinates, and checks that read only the storage |
 
 ## Reading paths
 

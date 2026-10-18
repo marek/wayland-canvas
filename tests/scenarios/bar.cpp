@@ -36,6 +36,7 @@
 #include <poll.h>
 #include <print>
 #include <ranges>
+#include <regex>
 #include <source_location>
 #include <span>
 #include <string>
@@ -91,21 +92,24 @@ std::string scheme_start; // the machine's real color-scheme, read before the ru
 // and looks for on screen).
 constexpr const char *note_yellow = "#ffd866";
 constexpr const char *note_green = "#a6e3a1";
-// The manifest's colour order, the dots' and the menu's (docs/intents/
 // The scratch shell.json the plugin phase wrote: rewritten as-is, an edit
 // the shell sees, so it reloads.
 constexpr std::string_view plugin_config =
 	"{\n\t\"plugins\": {\n\t\t\"canvas.hello\": {\n\t\t\t\"enabled\": false\n"
 	"\t\t}\n\t}\n}\n";
 
+// A note as its file holds it (docs/intents/shell/notes.md): the
+// rectangle, the colour, font and size, and the text's HTML.
 struct NoteEntry {
-	std::string id, color, text;
-	double x = 0, y = 0;
-	long long width = 0, height = 0;
+	std::string id, color, text, font;
+	long long x = 0, y = 0, width = 0, height = 0, size = 0;
 };
 
 NoteEntry note; // the note under test
+std::string second_note; // the note the formatting is checked on
 int note_retries = 0; // the notes phase's retry counter
+int note_ink_plain = 0, note_ink_word = 0; // the line's ink before the bold
+wlr_box note_before{}; // the note's rectangle before a drag
 // The window the app bar's clicked entry stands for, kept between the
 // click and the check that the view landed on it.
 View *app_bar_target = nullptr;
@@ -138,9 +142,11 @@ wlr_box agents_box{}; // the panel's card on screen
 // ---- the settings phase's state ----
 
 std::string canvas_conf; // the scratch canvas.conf the compositor owns
-LayerSurface *settings_bar_before_reload = nullptr;
-LayerSurface *settings_bar_at_hide = nullptr; // the bar the panel opened under: no write may reload it
-uint32_t settings_bar_id = 0; // its surface's resource id, against an address reused
+// Bar surfaces the shell has made, counted as wlroots announces each: a
+// reload makes a new one. The count at the last watch_remember_bar().
+int bar_surfaces_made = 0;
+int bar_surfaces_remembered = 0;
+wl_listener bar_surface_counter{};
 std::size_t settings_base_runs = 0; // the bar's runs before the agents widget
 double settings_gear_y = 0; // the gear button's band centre, on its edge
 int settings_card_x = 0, settings_card_y = 0; // the card on the Bar tab
@@ -1212,10 +1218,6 @@ void type(std::string_view s) {
 	}
 }
 
-// A press, a slow travel and a release: a drag of something that follows
-// the pointer (a note's corner, its strip).
-void drag_pointer(double x0, double y0, double x1, double y1);
-
 void click(double x, double y, int button = BTN_LEFT) {
 	t += 8;
 	wlr_pointer_motion_absolute_event m = {
@@ -1229,30 +1231,6 @@ void click(double x, double y, int button = BTN_LEFT) {
 		wl_signal_emit_mutable(&ptr.events.button, &b);
 		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 	}
-}
-
-void drag_pointer(double x0, double y0, double x1, double y1) {
-	auto at = [](double x, double y) {
-		t += 8;
-		wlr_pointer_motion_absolute_event m = {.pointer = &ptr, .time_msec = t,
-			.x = x / double(screen_w), .y = y / double(screen_h)};
-		wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
-		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-	};
-	auto hold = [](bool down) {
-		t += 8;
-		wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t,
-			.button = BTN_LEFT, .state = down ? WL_POINTER_BUTTON_STATE_PRESSED
-				: WL_POINTER_BUTTON_STATE_RELEASED};
-		wl_signal_emit_mutable(&ptr.events.button, &b);
-		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-	};
-	at(x0, y0);
-	hold(true);
-	for (int travel = 1; travel <= 10; travel++) {
-		at(x0 + (x1 - x0) * travel / 10.0, y0 + (y1 - y0) * travel / 10.0);
-	}
-	hold(false);
 }
 
 // The pointer at (x, y), without a click: parking it where no widget or
@@ -1835,50 +1813,62 @@ long long json_int(JsonObject *object, const char *name) {
 		? json_node_get_int(node) : 0;
 }
 
-void fill_note(NoteEntry &entry, JsonObject *object) {
-	entry.color = json_string(object, "color");
-	entry.text = json_string(object, "text");
-	entry.x = json_int(object, "x");
-	entry.y = json_int(object, "y");
-	entry.width = json_int(object, "width");
-	entry.height = json_int(object, "height");
+// The plugin's notes, one plain-HTML file each in its scratch storage:
+// `<id>.html` (docs/intents/shell/notes.md).
+std::string notes_dir() {
+	return shot_dir + "/xdg/state/wayland-canvas/plugins/canvas.notes";
 }
 
-// The plugin's stored notes, from its notes.json in the scratch state.
-std::vector<NoteEntry> stored_notes() {
-	std::vector<NoteEntry> out;
-	std::string text = read_file(
-		shot_dir + "/xdg/state/wayland-canvas/plugins/canvas.notes/notes.json");
-	JsonParser *parser = json_parser_new();
-	if (json_parser_load_from_data(parser, text.c_str(),
-			static_cast<gssize>(text.size()), nullptr)) {
-		JsonNode *root = json_parser_get_root(parser);
-		JsonObject *saved = root != nullptr
-				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
-			? json_node_get_object(root) : nullptr;
-		JsonObject *notes = saved != nullptr && json_object_has_member(saved, "notes")
-				&& json_node_get_node_type(json_object_get_member(saved, "notes"))
-					== JSON_NODE_OBJECT
-			? json_node_get_object(json_object_get_member(saved, "notes")) : nullptr;
-		if (notes != nullptr) {
-			for (GList *member = json_object_get_members(notes); member != nullptr;
-					member = member->next) {
-				const char *id = static_cast<const char *>(member->data);
-				JsonNode *element = json_object_get_member(notes, id);
-				JsonObject *fields = element != nullptr
-						&& json_node_get_node_type(element) == JSON_NODE_OBJECT
-					? json_node_get_object(element) : nullptr;
-				NoteEntry entry;
-				entry.id = id;
-				if (fields == nullptr) {
-					continue;
-				}
-				fill_note(entry, fields);
-				out.push_back(entry);
-			}
+// A note's file read back: the rectangle from its canvas-note meta
+// element, the colour, font and size from the page's style, the text from
+// its body.
+NoteEntry note_from_file(const std::string &id, const std::string &file) {
+	NoteEntry entry;
+	entry.id = id;
+	std::smatch found;
+	static const std::regex meta{R"re(<meta name="canvas-note" content="([^"]*)">)re"};
+	if (std::regex_search(file, found, meta)) {
+		std::string content = found[1];
+		static const std::regex pair{R"((\w+)=(-?\d+))"};
+		for (std::sregex_iterator it(content.begin(), content.end(), pair), end;
+				it != end; ++it) {
+			std::string key = (*it)[1];
+			long long value = std::stoll((*it)[2]);
+			(key == "x" ? entry.x : key == "y" ? entry.y
+				: key == "width" ? entry.width : entry.height) = value;
 		}
 	}
-	g_object_unref(parser);
+	static const std::regex background{R"(background:\s*(#[0-9a-f]{6}))"};
+	if (std::regex_search(file, found, background)) {
+		entry.color = found[1];
+	}
+	static const std::regex family{R"re(font-family:\s*"([^"]*)")re"};
+	if (std::regex_search(file, found, family)) {
+		entry.font = found[1];
+	}
+	static const std::regex size{R"(font-size:\s*(\d+)px)"};
+	if (std::regex_search(file, found, size)) {
+		entry.size = std::stoll(found[1]);
+	}
+	static const std::regex body{R"(<body>\n?([\s\S]*?)\n?</body>)"};
+	if (std::regex_search(file, found, body)) {
+		entry.text = found[1];
+	}
+	return entry;
+}
+
+std::vector<NoteEntry> stored_notes() {
+	std::vector<NoteEntry> out;
+	std::error_code error;
+	for (const auto &file : std::filesystem::directory_iterator(notes_dir(), error)) {
+		std::string name = file.path().filename().string();
+		static const std::regex html{R"(^(\d+)\.html$)"};
+		std::smatch found;
+		if (std::regex_match(name, found, html)) {
+			out.push_back(note_from_file(found[1], read_file(file.path().string())));
+		}
+	}
+	std::ranges::sort(out, {}, [](const NoteEntry &e) { return std::stoll(e.id); });
 	return out;
 }
 
@@ -1891,99 +1881,157 @@ std::optional<NoteEntry> stored_note(const std::string &id) {
 	return std::nullopt;
 }
 
-// The mapped editor layer surface of the shell client.
 // The notes plugin's own surfaces on the plane: one per note, named by
 // the plugin and its note's id (docs/intents/platform/ipc.md).
-constexpr const char *note_surface_prefix = "wayland-canvas-canvas-canvas.notes/";
+constexpr std::string_view note_surface_prefix = "wayland-canvas-canvas-canvas.notes/";
 
-LayerSurface *note_surface() {
-	for (const std::unique_ptr<Output> &output : server->outputs) {
-		for (auto &vec : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &l : vec) {
-				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& std::strncmp(l->wlr->namespace_, note_surface_prefix,
-							std::strlen(note_surface_prefix)) == 0) {
-					return l.get();
-				}
-			}
+bool is_note_surface(const LayerSurface &l) {
+	return l.mapped && l.wlr->namespace_ != nullptr
+		&& std::string_view{l.wlr->namespace_}.starts_with(note_surface_prefix);
+}
+
+// The mapped surface of the note `id`; any note's when `id` is empty.
+LayerSurface *note_surface(std::string_view id = {}) {
+	for (LayerSurface *l : server->canvas_stack) {
+		if (is_note_surface(*l) && (id.empty()
+				|| std::string_view{l->wlr->namespace_}.substr(note_surface_prefix.size())
+					== id)) {
+			return l;
 		}
 	}
 	return nullptr;
 }
 
 int note_surfaces() {
-	int count = 0;
-	for (const std::unique_ptr<Output> &output : server->outputs) {
-		for (auto &vec : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &l : vec) {
-				if (l->mapped && l->wlr->namespace_ != nullptr
-						&& std::strncmp(l->wlr->namespace_, note_surface_prefix,
-							std::strlen(note_surface_prefix)) == 0) {
-					count++;
-				}
-			}
-		}
-	}
-	return count;
+	return static_cast<int>(std::ranges::count_if(server->canvas_stack,
+		[](const LayerSurface *l) { return is_note_surface(*l); }));
 }
 
 // The note's rectangle on the plane, as the compositor placed it.
-wlr_box note_box() {
-	LayerSurface *surface = note_surface();
+wlr_box note_box(std::string_view id) {
+	LayerSurface *surface = note_surface(id);
 	return surface != nullptr && surface->canvas_box.has_value()
 		? *surface->canvas_box : wlr_box{};
 }
 
-
-// The one output the headless backend gives.
+// The first output the headless backend gives.
 Output *out() {
 	return server->outputs.front().get();
 }
 
-// A point of the note, in output-local logical pixels: the canvas
-// rectangle the compositor placed it at, taken through the camera the way
-// the renderer draws it.
-std::pair<double, double> note_point(double fx, double fy) {
-	Output *o = out();
-	wlr_box box = note_box();
-	if (o == nullptr || box.width == 0) {
-		return {0, 0};
-	}
-	Camera cam = o->camera.drawn();
-	Point local = o->canvas_to_local(box.x + box.width * fx, box.y + box.height * fy);
-	(void)cam;
-	return {local.x, local.y};
+// A canvas point of the note `id`, `dx`, `dy` canvas px from its top-left
+// corner (negative: from its right or bottom edge), in output-local
+// logical pixels: taken through the camera the way the renderer draws it.
+Point note_local(std::string_view id, double dx, double dy) {
+	wlr_box box = note_box(id);
+	return out()->canvas_to_local(box.x + (dx < 0 ? box.width + dx : dx),
+		box.y + (dy < 0 ? box.height + dy : dy));
 }
 
-// The note's text area, its strip's n-th colour dot, and the × at the
-// strip's right. The strip is the plugin's own: 26 px of the card's top,
-// the dots 10 px wide from 6 px in, 6 px apart.
-void click_note_body() {
-	auto [x, y] = note_point(0.5, 0.6);
-	click(x, y);
+// The plugin's strip (plugins/canvas.notes/NoteSurface.qml): 26 px along
+// the card's top, the dots 8 px wide from 6 px in, 4 px apart.
+constexpr int note_strip = 26;
+std::vector<Run> note_runs; // the second note's strip controls, off its last shot
+
+void click_note_body(std::string_view id) {
+	Point p = note_local(id, 30, note_strip + 10);
+	click(p.x, p.y);
 }
 
-void click_note_dot(int index) {
-	Output *o = out();
-	wlr_box box = note_box();
-	if (o == nullptr || box.width == 0) {
-		return;
-	}
-	double zoom = o->camera.drawn().zoom;
-	Point local = o->canvas_to_local(box.x + 6 + 16 * index + 5, box.y + 13);
-	(void)zoom;
-	click(local.x, local.y);
+void click_note_dot(std::string_view id, int index) {
+	Point p = note_local(id, 6 + 12 * index + 4, note_strip / 2.0);
+	click(p.x, p.y);
 }
 
-void click_note_close() {
-	Output *o = out();
-	wlr_box box = note_box();
-	if (o == nullptr || box.width == 0) {
-		return;
+// The ink of the strip read off a shot, left to right past the dots: the
+// bold, italic and underline buttons, the font, the size and the ×, each
+// a run of dark columns along the strip's middle.
+std::vector<Run> note_strip_runs(cairo_surface_t *s, std::string_view id) {
+	std::vector<Run> runs;
+	Point from = note_local(id, 6 + 6 * 12, 7);
+	Point to = note_local(id, -1, note_strip - 7);
+	if (s == nullptr) {
+		return runs;
 	}
-	// The × sits in a 22 px square at the strip's right end.
-	Point local = o->canvas_to_local(box.x + box.width - 11, box.y + 13);
-	click(local.x, local.y);
+	int start = -1, last = -1;
+	for (int x = int(from.x); x <= int(to.x) + 1; x++) {
+		bool inked = false;
+		for (int y = int(from.y); y <= int(to.y) && x <= int(to.x); y++) {
+			uint32_t px = pixel_at(s, x, y);
+			inked = inked || ((px >> 16) & 0xff) + ((px >> 8) & 0xff) + (px & 0xff) < 250;
+		}
+		if (inked) {
+			start = start < 0 ? x : start;
+			last = x;
+		} else if (start >= 0 && x - last > 3) {
+			runs.push_back({double(start), double(last + 1)});
+			start = -1;
+		}
+	}
+	return runs;
+}
+
+// A strip control, as `note_strip_runs` found it: clicked at its centre.
+void click_strip_run(std::string_view id, const std::vector<Run> &runs,
+		std::size_t index) {
+	if (index < runs.size()) {
+		click(runs[index].centre(), note_local(id, 0, note_strip / 2.0).y);
+	}
+}
+
+// Dark pixels — the ink of the note's text — inside a rectangle of a shot.
+int ink_count(cairo_surface_t *s, const wlr_box &rect) {
+	int n = 0;
+	for (int y = rect.y; s != nullptr && y < rect.y + rect.height; y++) {
+		for (int x = rect.x; x < rect.x + rect.width; x++) {
+			uint32_t px = pixel_at(s, x, y);
+			n += ((px >> 16) & 0xff) + ((px >> 8) & 0xff) + (px & 0xff) < 300 ? 1 : 0;
+		}
+	}
+	return n;
+}
+
+// The left button: down and held, or up. A drag the plugin hands to the
+// compositor starts from a press that stays held while the client answers
+// it, so the press and the travel are steps apart, as a hand's are.
+void left_button(bool down) {
+	t += 8;
+	wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t, .button = BTN_LEFT,
+		.state = down ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED};
+	wl_signal_emit_mutable(&ptr.events.button, &b);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+// The pointer from (x0, y0) to (x1, y1) in ten steps, the button as it is.
+void travel(double x0, double y0, double x1, double y1) {
+	for (int step_n = 1; step_n <= 10; step_n++) {
+		park(x0 + (x1 - x0) * step_n / 10.0, y0 + (y1 - y0) * step_n / 10.0);
+	}
+}
+
+// The compositor runs a drag the plugin handed it.
+bool surface_drag_running() {
+	return std::holds_alternative<PointerGrab::SurfaceDrag>(server->input.grab.state());
+}
+
+// Super and a 2-finger pinch, through the pointer device as a touchpad
+// sends it: the desktop on screen scales to `scale` and settles there.
+void super_pinch(double scale) {
+	key(KEY_LEFTMETA, true);
+	t += 8;
+	wlr_pointer_pinch_begin_event begin = {.pointer = &ptr, .time_msec = t, .fingers = 2};
+	wl_signal_emit_mutable(&ptr.events.pinch_begin, &begin);
+	for (int i = 1; i <= 10; i++) {
+		t += 8;
+		wlr_pointer_pinch_update_event update = {.pointer = &ptr, .time_msec = t,
+			.fingers = 2, .dx = 0, .dy = 0, .scale = 1 + (scale - 1) * i / 10.0,
+			.rotation = 0};
+		wl_signal_emit_mutable(&ptr.events.pinch_update, &update);
+	}
+	t += 8;
+	wlr_pointer_pinch_end_event end = {.pointer = &ptr, .time_msec = t, .cancelled = false};
+	wl_signal_emit_mutable(&ptr.events.pinch_end, &end);
+	key(KEY_LEFTMETA, false);
 }
 
 bool camera_settled() {
@@ -3262,14 +3310,11 @@ int settings_chip_width(cairo_surface_t *s, int y) {
 	return n == 0 ? 0 : n + 4;
 }
 
-// True while the bar surface the panel opened under is still the bar: a
-// reload would have replaced it, so neither its address nor its resource
-// id would both come back.
+// True while the bar surface remembered last is still the bar: a reload
+// makes a new one, and the count of bar surfaces made only grows, where
+// an address or a protocol id can come back for the new surface.
 bool settings_shell_kept() {
-	LayerSurface *bar = bar_layer();
-	return bar != nullptr && settings_bar_at_hide != nullptr
-		&& bar == settings_bar_at_hide
-		&& wl_resource_get_id(bar->wlr->surface->resource) == settings_bar_id;
+	return bar_layer() != nullptr && bar_surfaces_made == bar_surfaces_remembered;
 }
 
 // canvas.conf's value on `name`'s line, "" when the file gives it none:
@@ -3445,10 +3490,7 @@ bool watch_read(const char *name, bool light, double &edge) {
 // Remembers the bar surface that is up now, so the next edit's reload is
 // told by it being replaced.
 void watch_remember_bar() {
-	LayerSurface *bar = bar_layer();
-	settings_bar_at_hide = bar;
-	settings_bar_id = bar != nullptr
-		? wl_resource_get_id(bar->wlr->surface->resource) : 0;
+	bar_surfaces_remembered = bar_surfaces_made;
 }
 
 // Settles one save of shell.json. The hello plugin's label sits past the
@@ -3491,6 +3533,7 @@ bool watch_settle(const char *name, bool wider, bool light,
 // The shelf's bottom line: the help line's 12 px margin and 28 px
 // height, 16 px above it (src/render/render.cpp's overview_shelf_layout
 // and the toolbar it clears). Keep in sync with it.
+constexpr int shelf_bottom_gap = 12 + 28 + 16;
 // The note button's place in the strip: order 3, the fourth square —
 // the scratch plugin's three buttons above it, the settings gear
 // (order 4) below. Keep in sync with the plugins' manifests.
@@ -3535,6 +3578,31 @@ bool set_shell_config(const char *section, const char *key,
 
 bool set_toolbar_position(const char *edge) {
 	return set_shell_config("toolbar", "position", edge);
+}
+
+// The toolbar.position the scratch shell.json names now.
+std::string toolbar_position_in_config() {
+	JsonParser *parser = json_parser_new();
+	std::string named;
+	if (json_parser_load_from_file(parser, shell_config.c_str(), nullptr)
+		&& json_node_get_node_type(json_parser_get_root(parser))
+			== JSON_NODE_OBJECT) {
+		JsonObject *config = json_node_get_object(json_parser_get_root(parser));
+		JsonNode *toolbar = json_object_get_member(config, "toolbar");
+		JsonObject *toolbar_object = toolbar != nullptr
+			&& json_node_get_node_type(toolbar) == JSON_NODE_OBJECT
+			? json_node_get_object(toolbar) : nullptr;
+		if (toolbar_object != nullptr
+				&& json_object_has_member(toolbar_object, "position")) {
+			JsonNode *position = json_object_get_member(toolbar_object, "position");
+			if (position != nullptr
+					&& json_node_get_value_type(position) == G_TYPE_STRING) {
+				named = json_node_get_string(position);
+			}
+		}
+	}
+	g_object_unref(parser);
+	return named;
 }
 
 bool set_app_bar_position(const char *edge) {
@@ -3642,6 +3710,25 @@ LayerSurface *app_bar_layer() {
 // surface is the strip plus the pocket it slides into.
 wlr_box app_bar_strip_box(const wlr_box &geo) {
 	return toolbar_strip_box(geo);
+}
+
+// How many apps the compositor has open: the app bar draws one entry each,
+// grouped by app id (a window without one stands alone).
+int apps_open() {
+	std::vector<std::string> seen;
+	for (const std::unique_ptr<View> &view : server->toplevels) {
+		if (!view->mapped) {
+			continue;
+		}
+		const char *app_id = view->shell_app_id();
+		std::string key = app_id != nullptr && *app_id != '\0'
+			? std::string{app_id}
+			: std::format("window:{}", view->session_id);
+		if (std::ranges::find(seen, key) == seen.end()) {
+			seen.push_back(key);
+		}
+	}
+	return static_cast<int>(seen.size());
 }
 
 // The app bar's flyout surface: an app's windows, unfolded beside its entry
@@ -5190,7 +5277,9 @@ int run_step() {
 		return -100; // without the advance: every other step moves on alone
 	}
 	// ---- the notes: the sticky-notes plugin end to end ----
-// A step range of its own, after the theme and its adoption.
+// A step range of its own, after the theme and its adoption. Every change
+// is checked where the user sees it — the card on the screenshot — as well
+// as in the note's own file.
 	case 110: // a note created the way any script would: action.run over the socket
 		run_msg("action.run",
 			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
@@ -5199,7 +5288,7 @@ int run_step() {
 		return 600;
 	case 111: { // the note is a surface of the plugin's own, on the plane
 		LayerSurface *surface = note_surface();
-		if (surface == nullptr && note_retries++ < 100) {
+		if ((surface == nullptr || stored_notes().empty()) && note_retries++ < 100) {
 			return -200;
 		}
 		note_retries = 0;
@@ -5214,16 +5303,21 @@ int run_step() {
 			"placed on the canvas, not on a screen");
 		std::vector<NoteEntry> stored = stored_notes();
 		check(stored.size() == 1, std::format(
-			"the plugin kept exactly one note ({})", stored.size()));
+			"the plugin kept exactly one note, one HTML file ({})", stored.size()));
 		if (!stored.empty()) {
-			note.id = stored.front().id;
-			note.color = stored.front().color;
+			note = stored.front();
+			wlr_box box = note_box(note.id);
 			check(note.color == note_yellow, "in the colour the action asked for");
+			check(note.x == box.x && note.y == box.y && note.width == box.width
+				&& note.height == box.height,
+				"its file holds the canvas rectangle the compositor placed it at");
 		}
+		check(server->seat->keyboard_state.focused_surface == surface->wlr->surface,
+			"the new note holds the keyboard");
 		return 400;
 	}
 	case 112: { // typing goes into the note itself, where it sits
-		click_note_body();
+		click_note_body(note.id);
 		type("hello");
 		return 800;
 	}
@@ -5240,10 +5334,8 @@ int run_step() {
 		return 300;
 	}
 	case 114: { // a pan moves the note with the plane, and leaves one card
-		wlr_box before = note_box();
+		note_before = note_box(note.id);
 		chord(KEY_RIGHT, SUPER_ALT_MOD);
-		note.x = before.x;
-		note.y = before.y;
 		return 1200;
 	}
 	case 115: {
@@ -5253,8 +5345,8 @@ int run_step() {
 		note_retries = 0;
 		check(note_surfaces() == 1, std::format(
 			"a pan leaves exactly one card on the plane ({})", note_surfaces()));
-		wlr_box after = note_box();
-		check(after.x == note.x && after.y == note.y,
+		wlr_box after = note_box(note.id);
+		check(after.x == note_before.x && after.y == note_before.y,
 			"the note stays where it was put on the canvas while the view moves");
 		std::optional<NoteEntry> stored = stored_note(note.id);
 		check(stored.has_value() && stored->text.find("hello") != std::string::npos,
@@ -5267,7 +5359,7 @@ int run_step() {
 			return -100;
 		}
 		note_retries = 0;
-		click_note_dot(1); // the second of the manifest's colours: green
+		click_note_dot(note.id, 1); // the second of the manifest's colours: green
 		return 800;
 	}
 	case 117: {
@@ -5278,13 +5370,22 @@ int run_step() {
 		}
 		note_retries = 0;
 		check(stored.has_value() && stored->color == note_green, std::format(
-			"a dot on the strip recolours the note ('{}')",
+			"a dot on the strip recolours the note's file ('{}')",
 			stored.has_value() ? stored->color : std::string{}));
-		return 300;
+		shot("note-green");
+		return 500;
 	}
-	case 118: { // the shell reloaded: the note comes back, once
-		touch_shell_config();
-        return 1500;
+	case 118: { // and the card itself, on the screen
+		cairo_surface_t *s = load_png("note-green");
+		Point paper = note_local(note.id, -24, note_strip + 30);
+		check(pixel_is(s, int(paper.x), int(paper.y), 0xa6e3a1ff), std::format(
+			"the card turned green on screen ({:06x})",
+			s != nullptr ? pixel_at(s, int(paper.x), int(paper.y)) : 0));
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		touch_shell_config(); // the shell reloads: the note comes back, once
+		return 1500;
 	}
 	case 119: {
 		if ((note_surfaces() != 1 || !stored_note(note.id).has_value())
@@ -5295,71 +5396,523 @@ int run_step() {
 		check(note_surfaces() == 1, std::format(
 			"the note comes back as one card after a reload ({})", note_surfaces()));
 		std::optional<NoteEntry> stored = stored_note(note.id);
-		check(stored.has_value() && stored->text.find("hello") != std::string::npos,
-			"with the text it was written in");
+		check(stored.has_value() && stored->text.find("hello") != std::string::npos
+				&& stored->color == note_green,
+			"with the text it was written in and its colour");
 		return 400;
 	}
 	case 120: { // the card grows to hold what is typed into it
-		wlr_box before = note_box();
-		note.height = before.height;
-		click_note_body();
+		note_before = note_box(note.id);
+		click_note_body(note.id);
 		for (int line = 0; line < 8; line++) {
 			type("a note long enough to need another line of its own ");
 		}
 		return 1500;
 	}
 	case 121: {
-		wlr_box grown = note_box();
-		if (grown.height <= note.height && note_retries++ < 60) {
+		wlr_box grown = note_box(note.id);
+		if (grown.height <= note_before.height && note_retries++ < 60) {
 			return -300;
 		}
 		note_retries = 0;
-		check(grown.height > note.height, std::format(
+		check(grown.height > note_before.height, std::format(
 			"a note grows as it is written in ({} px, was {})", grown.height,
-			note.height));
+			note_before.height));
 		std::optional<NoteEntry> stored = stored_note(note.id);
 		check(stored.has_value() && stored->height == grown.height,
-			"and the new height is kept with it");
-		note.height = grown.height;
-		return 400;
+			"and the new height is kept in its file");
+		shot("note-grown");
+		return 500;
 	}
-	case 122: { // the grip at the bottom-right corner sizes it by hand
-		wlr_box box = note_box();
-		note.width = box.width;
-		Output *o = out();
-		if (o != nullptr) {
-			Point from = o->canvas_to_local(box.x + box.width - 8,
-				box.y + box.height - 8);
-			drag_pointer(from.x, from.y, from.x + 120, from.y + 60);
+	case 122: { // the taller card on screen: paper below the old edge
+		cairo_surface_t *s = load_png("note-grown");
+		Point below = note_local(note.id, -24, note_before.height + 10);
+		check(pixel_is(s, int(below.x), int(below.y), 0xa6e3a1ff),
+			"the grown card is drawn to its new height");
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
 		}
-		return 1200;
+		// The strip held down: its client hands the drag to the compositor.
+		note_before = note_box(note.id);
+		Point strip = note_local(note.id, -30, note_strip / 2.0);
+		park(strip.x, strip.y);
+		left_button(true);
+		return 300;
 	}
 	case 123: {
-		wlr_box sized = note_box();
-		if (sized.width <= note.width && note_retries++ < 60) {
-			return -300;
+		if (!surface_drag_running() && note_retries++ < 40) {
+			return -100;
 		}
 		note_retries = 0;
-		check(sized.width > note.width, std::format(
-			"a drag of the corner widens the note ({} px, was {})", sized.width,
-			note.width));
+		check(surface_drag_running(),
+			"a press on the strip hands the drag to the compositor");
+		Point strip = note_local(note.id, -30, note_strip / 2.0);
+		travel(strip.x, strip.y, strip.x + 120, strip.y + 60);
+		return 100;
+	}
+	case 124: { // the note under the pointer while the button is held
+		wlr_box during = note_box(note.id);
+		check(during.x == note_before.x + 120 && during.y == note_before.y + 60,
+			std::format("the note follows the pointer while its strip is dragged "
+				"({},{}, from {},{})", during.x, during.y, note_before.x, note_before.y));
+		left_button(false);
+		return 600;
+	}
+	case 125: { // dropped: on the plane, in its file and on screen
 		std::optional<NoteEntry> stored = stored_note(note.id);
-		check(stored.has_value() && stored->width == sized.width,
-			"and the size it was given is kept");
-		return 400;
-	}
-	case 124: { // the × on the strip takes it away
-		click_note_close();
-		return 1000;
-	}
-	case 125: {
-		if ((note_surfaces() != 0 || !stored_notes().empty())
-				&& note_retries++ < 120) {
-			return -300;
+		wlr_box box = note_box(note.id);
+		if ((!stored.has_value() || stored->x != box.x || stored->y != box.y)
+				&& note_retries++ < 40) {
+			return -100;
 		}
 		note_retries = 0;
-		check(note_surfaces() == 0, "the × takes the note off the plane");
-		check(stored_notes().empty(), "and out of the plugin's storage");
+		check(!surface_drag_running() && box.x == note_before.x + 120
+				&& box.y == note_before.y + 60,
+			"the note stays where the strip was let go");
+		check(stored.has_value() && stored->x == box.x && stored->y == box.y,
+			"and its file keeps where it was dropped");
+		shot("note-moved");
+		return 500;
+	}
+	case 126: {
+		cairo_surface_t *s = load_png("note-moved");
+		Point now = note_local(note.id, -24, note_strip + 30);
+		Point was = out()->canvas_to_local(note_before.x + 10, note_before.y + 40);
+		check(pixel_is(s, int(now.x), int(now.y), 0xa6e3a1ff)
+				&& !pixel_is(s, int(was.x), int(was.y), 0xa6e3a1ff),
+			"the card is drawn where it was dropped, and no longer where it was");
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		// The grip held down, at 100 %.
+		note_before = note_box(note.id);
+		Point grip = note_local(note.id, -6, -6);
+		park(grip.x, grip.y);
+		left_button(true);
+		return 300;
+	}
+	case 127: {
+		if (!surface_drag_running() && note_retries++ < 40) {
+			return -100;
+		}
+		note_retries = 0;
+		check(surface_drag_running(),
+			"a press on the grip hands the corner to the compositor");
+		Point grip = note_local(note.id, -6, -6);
+		travel(grip.x, grip.y, grip.x + 90, grip.y + 50);
+		return 100;
+	}
+	case 128: {
+		wlr_box during = note_box(note.id);
+		check(during.x == note_before.x && during.y == note_before.y
+				&& during.width == note_before.width + 90
+				&& during.height == note_before.height + 50,
+			std::format("the corner follows the pointer at 100 % ({}x{}, from {}x{})",
+				during.width, during.height, note_before.width, note_before.height));
+		left_button(false);
+		return 700;
+	}
+	case 129: {
+		std::optional<NoteEntry> stored = stored_note(note.id);
+		wlr_box box = note_box(note.id);
+		if ((!stored.has_value() || stored->width != box.width) && note_retries++ < 40) {
+			return -100;
+		}
+		note_retries = 0;
+		check(stored.has_value() && stored->width == note_before.width + 90
+				&& stored->height == box.height && box.height >= note_before.height + 50,
+			"the size the corner gave is kept in its file");
+		shot("note-sized");
+		return 500;
+	}
+	case 130: { // drawn to the new corner, the text re-wrapped to the width
+		cairo_surface_t *s = load_png("note-sized");
+		Point corner = note_local(note.id, -30, -30);
+		check(pixel_is(s, int(corner.x), int(corner.y), 0xa6e3a1ff),
+			"the sized card is drawn out to its new corner");
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		super_pinch(0.75); // the desktop on screen to 75 %, the whole note in view
+		return 1200;
+	}
+	case 131: { // the corner at a scaled desktop
+		if (!camera_settled() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		check(std::fabs(out()->camera.drawn().zoom - 0.75) < 0.01, std::format(
+			"Super + a pinch scaled the desktop on screen ({:.2f})",
+			out()->camera.drawn().zoom));
+		note_before = note_box(note.id);
+		Point grip = note_local(note.id, -6, -6);
+		park(grip.x, grip.y);
+		left_button(true);
+		return 300;
+	}
+	case 132: {
+		if (!surface_drag_running() && note_retries++ < 40) {
+			return -100;
+		}
+		note_retries = 0;
+		check(surface_drag_running(), "at 75 % the grip hands the corner over too");
+		Point grip = note_local(note.id, -6, -6);
+		travel(grip.x, grip.y, grip.x + 90, grip.y + 60);
+		return 100;
+	}
+	case 133: {
+		wlr_box during = note_box(note.id);
+		check(during.width == note_before.width + 120
+				&& during.height == note_before.height + 80,
+			std::format("at 75 % the corner follows the pointer in canvas pixels "
+				"({}x{}, from {}x{})", during.width, during.height,
+				note_before.width, note_before.height));
+		left_button(false);
+		chord(KEY_0, SUPER[0]); // the desktop back to 100 %
+		return 1200;
+	}
+	case 134: { // the strip dragged in the overview, at its zoom
+		if (!camera_settled() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		chord(KEY_TAB, SUPER[0]);
+		return 1200;
+	}
+	case 135: {
+		if (!overview_settled(true) && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		note_before = note_box(note.id);
+		Point strip = note_local(note.id, -30, note_strip / 2.0);
+		park(strip.x, strip.y);
+		left_button(true);
+		return 300;
+	}
+	case 136: {
+		if (!surface_drag_running() && note_retries++ < 40) {
+			return -100;
+		}
+		note_retries = 0;
+		check(surface_drag_running(), "in the overview the strip hands the drag over too");
+		Point strip = note_local(note.id, -30, note_strip / 2.0);
+		travel(strip.x, strip.y, strip.x + 40, strip.y + 20);
+		return 100;
+	}
+	case 137: {
+		double zoom = out()->camera.drawn().zoom;
+		wlr_box during = note_box(note.id);
+		check(std::abs(during.x - (note_before.x + std::lround(40 / zoom))) <= 1
+				&& std::abs(during.y - (note_before.y + std::lround(20 / zoom))) <= 1,
+			std::format("in the overview the note follows the pointer at its zoom "
+				"({:.2f}: {},{} from {},{})", zoom, during.x, during.y,
+				note_before.x, note_before.y));
+		left_button(false);
+		return 600;
+	}
+	case 138: { // a second note, for the formatting: it takes the keyboard
+		if (out()->overview.active()) {
+			chord(KEY_TAB, SUPER[0]);
+		}
+		run_msg("action.run",
+			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
+				+ R"("}})",
+			"note-create-2");
+		return 1200;
+	}
+	case 139: {
+		LayerSurface *made = nullptr;
+		for (const NoteEntry &entry : stored_notes()) {
+			if (entry.id != note.id) {
+				second_note = entry.id;
+				made = note_surface(entry.id);
+			}
+		}
+		if ((made == nullptr || !overview_settled(false)) && note_retries++ < 100) {
+			return -200;
+		}
+		note_retries = 0;
+		check(made != nullptr && server->seat->keyboard_state.focused_surface
+				== made->wlr->surface,
+			"a second note comes up with the keyboard");
+		type("plain bold");
+		return 800;
+	}
+	case 140: { // the line as typed, and the strip's controls, off the screen
+		std::optional<NoteEntry> stored = stored_note(second_note);
+		if ((!stored.has_value() || stored->text.find("plain bold") == std::string::npos)
+				&& note_retries++ < 40) {
+			return -200;
+		}
+		note_retries = 0;
+		shot("note-plain");
+		return 500;
+	}
+	case 141: { // the last word selected, and the strip's B
+		cairo_surface_t *s = load_png("note-plain");
+		Point text = note_local(second_note, 8, note_strip + 4);
+		note_ink_plain = ink_count(s, wlr_box{int(text.x), int(text.y), 30, 14});
+		note_ink_word = ink_count(s, wlr_box{int(text.x) + 45, int(text.y), 27, 14});
+		std::vector<Run> runs = note_strip_runs(s, second_note);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		check(runs.size() == 6, std::format("the strip shows bold, italic, "
+			"underline, the font, the size and the × ({} controls)", runs.size()));
+		chord(KEY_LEFT, std::array<uint32_t, 2>{KEY_LEFTCTRL, KEY_LEFTSHIFT});
+		click_strip_run(second_note, runs, 0);
+		return 600;
+	}
+	case 142: {
+		std::optional<NoteEntry> stored = stored_note(second_note);
+		if ((!stored.has_value() || stored->text.find("<b>bold</b>") == std::string::npos)
+				&& note_retries++ < 40) {
+			return -200;
+		}
+		note_retries = 0;
+		// Nothing selected afterwards, so the line is drawn as it is: the
+		// key goes in a step of its own, a client may take keys before a
+		// click sent with them.
+		tap(KEY_END);
+		check(stored.has_value() && stored->text.find("<b>bold</b>") != std::string::npos
+				&& stored->text.find("plain") != std::string::npos
+				&& stored->text.find("<b>plain") == std::string::npos,
+			std::format("the selected word is bold in the file, the first left plain ({})",
+				stored.has_value() ? stored->text : std::string{}));
+		return 500;
+	}
+	case 143: { // and on screen: the bold word heavier, the plain one as it was
+		if (note_retries++ == 0) {
+			shot("note-bold");
+			return -500;
+		}
+		note_retries = 0;
+		cairo_surface_t *s = load_png("note-bold");
+		Point text = note_local(second_note, 8, note_strip + 4);
+		int plain = ink_count(s, wlr_box{int(text.x), int(text.y), 30, 14});
+		int word = ink_count(s, wlr_box{int(text.x) + 45, int(text.y), 27, 14});
+		check(word > note_ink_word * 6 / 5 && std::abs(plain - note_ink_plain) * 10
+				<= note_ink_plain,
+			std::format("the bold word is drawn heavier ({} ink, was {}), the plain one "
+				"the same ({}, was {})", word, note_ink_word, plain, note_ink_plain));
+		std::vector<Run> runs = note_strip_runs(s, second_note);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		click_strip_run(second_note, runs, 4); // the size: its menu
+		return 600;
+	}
+	case 144: { // 16 px from the size menu, under the strip at its right end
+		// The menu's cells (NoteSurface.qml): 28 × 20, 2 px apart, four to
+		// a row, 4 px inside a card 132 px wide set 4 px from the note's
+		// right edge; 16 is the fourth.
+		Point sixteen = note_local(second_note, -132 + 3 * 30 + 14, note_strip + 4 + 10);
+		click(sixteen.x, sixteen.y);
+		return 800;
+	}
+	case 145: {
+		std::optional<NoteEntry> stored = stored_note(second_note);
+		if ((!stored.has_value() || stored->size != 16) && note_retries++ < 40) {
+			return -200;
+		}
+		note_retries = 0;
+		check(stored.has_value() && stored->size == 16, std::format(
+			"the size menu sets the whole note's size ({} px)",
+			stored.has_value() ? stored->size : 0));
+		step = 220;
+		return -100;
+	}
+	case 220: { // the font: the menu filtered by typing, the first match taken
+		shot("note-sized-text");
+		return 500;
+	}
+	case 221: {
+		cairo_surface_t *s = load_png("note-sized-text");
+		note_runs = note_strip_runs(s, second_note);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		click_strip_run(second_note, note_runs, 3);
+		return 600;
+	}
+	case 222: {
+		type("mono");
+		tap(KEY_ENTER);
+		return 800;
+	}
+	case 223: {
+		std::optional<NoteEntry> stored = stored_note(second_note);
+		if ((!stored.has_value() || stored->font == "monospace") && note_retries++ < 40) {
+			return -200;
+		}
+		note_retries = 0;
+		check(stored.has_value() && stored->font != "monospace"
+				&& stored->font.find("ono") != std::string::npos,
+			std::format("the font menu sets an installed family for the whole note ('{}')",
+				stored.has_value() ? stored->font : std::string{}));
+		check(stored.has_value() && stored->text.find("<b>bold</b>") != std::string::npos,
+			"and the bold span keeps its weight in the new font");
+		// The first word: italic by Ctrl+I, underlined by the strip's U.
+		tap(KEY_HOME);
+		chord(KEY_RIGHT, std::array<uint32_t, 2>{KEY_LEFTCTRL, KEY_LEFTSHIFT});
+		chord(KEY_I, KEY_LEFTCTRL);
+		step = 236;
+		return -600;
+	}
+	case 236: {
+		click_strip_run(second_note, note_runs, 2);
+		return 600;
+	}
+	case 237: {
+		std::optional<NoteEntry> stored = stored_note(second_note);
+		if ((!stored.has_value() || stored->text.find("<u>") == std::string::npos)
+				&& note_retries++ < 40) {
+			return -200;
+		}
+		note_retries = 0;
+		check(stored.has_value() && stored->text.find("<i><u>plain") != std::string::npos
+				&& stored->text.find("<b>bold</b>") != std::string::npos,
+			std::format("Ctrl+I and the strip's U set their span, the bold one kept ({})",
+				stored.has_value() ? stored->text : std::string{}));
+		tap(KEY_ESC); // the keyboard back to the window
+		step = 224;
+		return -600;
+	}
+	case 224: {
+		LayerSurface *second = note_surface(second_note);
+		wlr_surface *focus = server->seat->keyboard_state.focused_surface;
+		if (second != nullptr && focus == second->wlr->surface && note_retries++ < 40) {
+			return -100;
+		}
+		note_retries = 0;
+		check(second != nullptr && focus != second->wlr->surface,
+			"Escape gives the keyboard back");
+		click_note_body(second_note);
+		return 600;
+	}
+	case 225: {
+		LayerSurface *second = note_surface(second_note);
+		check(second != nullptr
+				&& server->seat->keyboard_state.focused_surface == second->wlr->surface,
+			"and a click in the note takes it again");
+		// A third note, left empty when the keyboard goes: it goes too.
+		run_msg("action.run",
+			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_green}
+				+ R"("}})",
+			"note-create-3");
+		return 1200;
+	}
+	case 226: {
+		if (note_surfaces() != 3 && note_retries++ < 100) {
+			return -200;
+		}
+		note_retries = 0;
+		check(note_surfaces() == 3, "a third note came up");
+		tap(KEY_ESC);
+		return 800;
+	}
+	case 227: {
+		if ((note_surfaces() != 2 || stored_notes().size() != 2) && note_retries++ < 60) {
+			return -200;
+		}
+		note_retries = 0;
+		check(note_surfaces() == 2 && stored_notes().size() == 2,
+			"a note left empty when the keyboard goes is deleted, file and all");
+		// A second output, its view on the first note.
+		wlr_backend *headless = nullptr;
+		wlr_multi_for_each_backend(server->backend,
+			[](wlr_backend *backend, void *data) {
+				if (wlr_backend_is_headless(backend)) {
+					*static_cast<wlr_backend **>(data) = backend;
+				}
+			}, &headless);
+		check(headless != nullptr && wlr_headless_add_output(headless, 640, 480) != nullptr,
+			"a second output was added");
+		return 800;
+	}
+	case 228: {
+		if (server->outputs.size() < 2 && note_retries++ < 50) {
+			return -100;
+		}
+		note_retries = 0;
+		Output *second = server->outputs.back().get();
+		wlr_box box = note_box(note.id);
+		Camera cam = second->camera.current();
+		cam.cx = box.x + box.width / 2.0;
+		cam.cy = box.y + box.height / 2.0;
+		cam.zoom = 1;
+		second->camera.jump(cam);
+		return 800;
+	}
+	case 229: { // the note made on the first output, drawn and hit by the second
+		Output *second = server->outputs.back().get();
+		std::optional<LayerHit> hit = second->canvas_surface_at(second->width / 2.0,
+			second->height / 2.0);
+		check(hit.has_value() && hit->layer == note_surface(note.id),
+			"the second output hit-tests the note where its view shows it");
+		shot("note-two-outputs");
+		return 500;
+	}
+	case 230: {
+		cairo_surface_t *s = load_png("note-two-outputs");
+		Output *second = server->outputs.back().get();
+		int x = int(second->lx + second->width / 2 + 40);
+		int y = int(second->ly + second->height / 2 + 40);
+		check(pixel_is(s, x, y, 0xa6e3a1ff), std::format(
+			"the second output draws the note its view shows ({:06x})",
+			s != nullptr ? pixel_at(s, x, y) : 0));
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		wlr_output_destroy(second->wlr);
+		return 800;
+	}
+	case 231: { // the ×s take both notes away
+		if (server->outputs.size() != 1 && note_retries++ < 50) {
+			return -100;
+		}
+		note_retries = 0;
+		check(note_surfaces() == 2, "the notes stay when an output goes");
+		shot("note-close");
+		return 500;
+	}
+	case 232: {
+		cairo_surface_t *s = load_png("note-close");
+		std::vector<Run> first = note_strip_runs(s, note.id);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		click_strip_run(note.id, first, 5);
+		return 800;
+	}
+	case 233: {
+		if ((note_surfaces() != 1 || stored_note(note.id).has_value())
+				&& note_retries++ < 60) {
+			return -200;
+		}
+		note_retries = 0;
+		check(note_surfaces() == 1 && !stored_note(note.id).has_value(),
+			"the × takes its note off the plane and its file away");
+		shot("note-close-2");
+		return 500;
+	}
+	case 234: {
+		cairo_surface_t *s = load_png("note-close-2");
+		std::vector<Run> runs = note_strip_runs(s, second_note);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		click_strip_run(second_note, runs, 5);
+		return 800;
+	}
+	case 235: {
+		if ((note_surfaces() != 0 || !stored_notes().empty()) && note_retries++ < 60) {
+			return -200;
+		}
+		note_retries = 0;
+		check(note_surfaces() == 0 && stored_notes().empty(),
+			"and the other's: no note and no file left");
 		step = 146;
 		return -100;
 	}
@@ -6702,13 +7255,13 @@ int run_step() {
 			"before the settings phase ({} runs)", runs.size()));
 		check(bt_x != 0, "the bluetooth indicator's place is known");
 		settings_base_runs = runs.size();
-		settings_bar_before_reload = bar_layer();
+		watch_remember_bar();
 		drop_usage_fixtures();
 		reload_shell();
 		return 700;
 	}
 	case 401: { // the reload brings the agents widget back: one new run
-		if ((bar_layer() == nullptr || bar_layer() == settings_bar_before_reload)
+		if ((bar_layer() == nullptr || settings_shell_kept())
 				&& retries++ < 100) {
 			return -100;
 		}
@@ -6792,9 +7345,7 @@ int run_step() {
 				"the settings panel belongs to the shell client");
 		}
 		// The bar this panel opened under: nothing the phase does may reload it.
-		settings_bar_at_hide = bar_layer();
-		settings_bar_id = settings_bar_at_hide != nullptr
-			? wl_resource_get_id(settings_bar_at_hide->wlr->surface->resource) : 0;
+		watch_remember_bar();
 		shot("settings-panel");
 		return 700;
 	}
@@ -8184,6 +8735,303 @@ int run_step() {
 		// The same in the overview with the settings window open is owed:
 		// the phase could not open that window reliably this late in the
 		// run (docs/plans has the box).
+		return 100; // on to the last phase: a note's output going
+	}
+	case 300: { // the themed window focused, for the shelf's item
+		View *v = titled("themed");
+		wlr_box f = v != nullptr ? v->frame_box() : wlr_box{};
+		if (v != nullptr && server->focused_view != v) {
+			click(f.x + f.width / 2.0, f.y + f.height / 2.0);
+		}
+		if (server->focused_view != v && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		check(server->focused_view == v, "the themed window is focused");
+		chord(KEY_M, KEY_LEFTMETA); // Super+M minimizes it
+		return 400;
+	}
+	case 301: { // minimized, then the overview the toolbar lives in
+		View *v = titled("themed");
+		if (v != nullptr && !v->minimized && retries++ < 20) {
+			if (retries % 5 == 2) {
+				chord(KEY_M, KEY_LEFTMETA); // a chord may be lost: send it again
+			}
+			return -400;
+		}
+		retries = 0;
+		check(v != nullptr && v->minimized,
+			"Super+M minimized the themed window (the shelf's item)");
+		chord(KEY_TAB, KEY_LEFTMETA); // the overview: the toolbar's home
+		return 400;
+	}
+	case 302: { // the toolbar on its default right edge, then the first write
+		if ((!overview_settled(true) || !toolbar_on_edge("right")) && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		LayerSurface *toolbar = toolbar_layer();
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		check(overview_settled(true), "the overview settled for the toolbar");
+		check(toolbar != nullptr && toolbar_on_edge("right"),
+			"the toolbar mapped 8 px from the right edge, its default");
+		check(toolbar != nullptr && toolbar_centred(strip),
+			"the strip is centred along its edge");
+		check(toolbar != nullptr && strip.height / toolbar_button >= 4,
+			std::format("the strip holds its buttons ({} squares)",
+				toolbar != nullptr ? strip.height / toolbar_button : 0));
+		// The app bar: its default left edge, opposite the toolbar's, one
+		// entry per open app (docs/intents/shell/app-bar.md).
+		LayerSurface *apps = app_bar_layer();
+		wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+		check(apps != nullptr && app_strip.x == toolbar_margin
+				&& app_strip.width == toolbar_button,
+			std::format("the app bar mapped 8 px from the left edge, its default"
+				" (strip {},{} {}x{})", app_strip.x, app_strip.y,
+				app_strip.width, app_strip.height));
+		check(apps != nullptr && app_strip.height / toolbar_button == apps_open(),
+			std::format("the app bar holds one entry per open app ({} of {})",
+				apps != nullptr ? app_strip.height / toolbar_button : 0, apps_open()));
+		check(apps != nullptr
+				&& app_strip.y + app_strip.height / 2 == screen_h / 2,
+			"the app bar's strip is centred along its own edge");
+		check(set_toolbar_position("left"),
+			"toolbar.position: left written to the scratch shell.json");
+		return 800; // the reload the edit triggers takes its time
+	}
+	case 303: { // the left edge: a side toolbar clears nothing below
+		if (!toolbar_on_edge("left") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("left", "edges-left");
+		Shelf shelf = overview_shelf_layout(*server->outputs.front());
+		check(!shelf.empty(), "the minimized window sits on the shelf");
+		check(!shelf.empty()
+			&& shelf.front().box.y + shelf.front().box.height
+				== screen_h - shelf_bottom_gap,
+			"the shelf keeps its place along the bottom (a side toolbar "
+			"clears nothing)");
+		return 700;
+	}
+	case 304: { // the note button: its colour flyout, right of the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 305: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-left-flyout")
+				|| !flyout_open_checks("edges-left-flyout", "right of")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 306: { // folded; on to the top edge
+		if (!shot_landed("edges-left-folded")
+				|| !flyout_folded_checks("edges-left-folded")) {
+			return -100;
+		}
+		check(set_toolbar_position("top"),
+			"toolbar.position: top written to the scratch shell.json");
+		return 800;
+	}
+	case 307: { // the top edge: a row below the bar
+		if (!toolbar_on_edge("top") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("top", "edges-top");
+		return 700;
+	}
+	case 308: { // the note button: its colour flyout, below the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 309: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-top-flyout")
+				|| !flyout_open_checks("edges-top-flyout", "below")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 310: { // folded; on to the bottom edge
+		if (!shot_landed("edges-top-folded")
+				|| !flyout_folded_checks("edges-top-folded")) {
+			return -100;
+		}
+		check(set_toolbar_position("bottom"),
+			"toolbar.position: bottom written to the scratch shell.json");
+		return 800;
+	}
+	case 311: { // the bottom edge: the shelf above the toolbar
+		if (!toolbar_on_edge("bottom") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("bottom", "edges-bottom");
+		LayerSurface *toolbar = toolbar_layer();
+		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
+		Shelf shelf = overview_shelf_layout(*server->outputs.front());
+		check(!shelf.empty(), "the minimized window sits on the shelf");
+		check(!shelf.empty() && toolbar != nullptr
+			&& shelf.front().box.y + shelf.front().box.height
+				== strip.y - shelf_bottom_gap,
+			std::format("the shelf rose above the bottom toolbar (its bottom "
+				"at {}, the toolbar's top at {})",
+				!shelf.empty() ? shelf.front().box.y + shelf.front().box.height : 0,
+				toolbar != nullptr ? strip.y : 0));
+		return 700;
+	}
+	case 312: { // the note button: its colour flyout, above the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 313: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-bottom-flyout")
+				|| !flyout_open_checks("edges-bottom-flyout", "above")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 314: { // folded; back to the default right edge
+		if (!shot_landed("edges-bottom-folded")
+				|| !flyout_folded_checks("edges-bottom-folded")) {
+			return -100;
+		}
+		check(set_toolbar_position("right"),
+			"toolbar.position: right written to the scratch shell.json");
+		return 800;
+	}
+	case 315: { // the right edge again, as the run leaves it
+		if (!toolbar_on_edge("right") && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		edge_checks("right", "edges-right");
+		return 700;
+	}
+	case 316: { // the note button: its colour flyout, left of the strip
+		if (toolbar_layer() == nullptr && retries++ < 20) {
+			return -400;
+		}
+		retries = 0;
+		open_notes_flyout();
+		return 400;
+	}
+	case 317: // the flyout open, then folded by the button again
+		if (!shot_landed("edges-right-flyout")
+				|| !flyout_open_checks("edges-right-flyout", "left of")) {
+			return -100;
+		}
+		open_notes_flyout(); // the button again: the toggle folds
+		return 400;
+	case 318: { // folded; the overview left behind
+		if (!shot_landed("edges-right-folded")
+				|| !flyout_folded_checks("edges-right-folded")) {
+			return -100;
+		}
+		check(toolbar_layer() != nullptr, "the toolbar stays after its edges");
+		tap(KEY_ESC); // Escape leaves the overview, folding everything
+		return 400;
+	}
+	case 319: { // the toolbar's edges done: the overview closed, the world left tidy
+		if ((!overview_settled(false) || toolbar_layer() != nullptr) && retries++ < 150) {
+			return -400;
+		}
+		retries = 0;
+		check(overview_settled(false), "the overview closed behind the toolbar's edges");
+		check(toolbar_layer() == nullptr, "the toolbar slid out with the overview");
+		check(panel_layers() == 0, "no panel outlived the toolbar's edges");
+		check(toolbar_position_in_config() == "right",
+			"the scratch shell.json ends with toolbar.position: right");
+		step = 400; // on to the settings window: the gear, its tabs, its writes
+		return -100; // without the advance: every other step moves on alone
+	}
+	// ---- last: a note outlives the output it was made on (551-555) ----
+	// The run's last phase, since the first output goes in it: a second
+	// output the same size takes over, and the note made on the first is
+	// still on the plane, drawn by the output that is left.
+	case 551: {
+		wlr_backend *headless = nullptr;
+		wlr_multi_for_each_backend(server->backend,
+			[](wlr_backend *backend, void *data) {
+				if (wlr_backend_is_headless(backend)) {
+					*static_cast<wlr_backend **>(data) = backend;
+				}
+			}, &headless);
+		check(headless != nullptr
+				&& wlr_headless_add_output(headless, screen_w, screen_h) != nullptr,
+			"a second output was added for the handover");
+		return 800;
+	}
+	case 552: {
+		if (server->outputs.size() < 2 && retries++ < 50) {
+			return -100;
+		}
+		retries = 0;
+		run_msg("action.run",
+			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
+				+ R"("}})",
+			"note-create-handover");
+		return 1200;
+	}
+	case 553: {
+		LayerSurface *made = note_surface();
+		if (made == nullptr && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(made != nullptr && made->output == server->outputs.front().get(),
+			"a note made on the first output");
+		if (made == nullptr) {
+			return 100;
+		}
+		std::string id = made->name().substr(note_surface_prefix.size());
+		note = NoteEntry{.id = id};
+		wlr_output_destroy(server->outputs.front()->wlr);
+		return 1000;
+	}
+	case 554: {
+		if (server->outputs.size() != 1 && retries++ < 50) {
+			return -100;
+		}
+		retries = 0;
+		LayerSurface *kept = note_surface(note.id);
+		check(kept != nullptr && kept->output == server->outputs.front().get(),
+			"the note stays on the plane when its output goes, taken over by the one left");
+		wlr_box box = note_box(note.id);
+		Camera cam = out()->camera.current();
+		cam.cx = box.x + box.width / 2.0;
+		cam.cy = box.y + box.height / 2.0;
+		cam.zoom = 1;
+		out()->camera.jump(cam);
+		return 800;
+	}
+	case 555: {
+		if (retries++ == 0) {
+			shot("note-handover");
+			return -500;
+		}
+		retries = 0;
+		cairo_surface_t *s = load_png("note-handover");
+		Point paper = note_local(note.id, -24, note_strip + 30);
+		check(pixel_is(s, int(paper.x), int(paper.y), 0xffd866ffu), std::format(
+			"and the output that is left draws it ({:06x})",
+			s != nullptr ? pixel_at(s, int(paper.x), int(paper.y)) : 0));
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
 		return 100; // done: the summary prints and the run ends
 	}
 	default:
@@ -8486,6 +9334,16 @@ int main() {
 		stop_isolation();
 		return 2;
 	}
+	// Ahead of the compositor's own handler, while the new surface is
+	// certainly alive; no event is dispatched before the loop runs.
+	bar_surface_counter.notify = [](wl_listener *, void *data) {
+		const auto *made = static_cast<wlr_layer_surface_v1 *>(data);
+		if (made->namespace_ != nullptr && std::strcmp(made->namespace_, bar_namespace) == 0) {
+			bar_surfaces_made++;
+		}
+	};
+	wl_list_insert(&server->layer_shell->events.new_surface.listener_list,
+		&bar_surface_counter.link);
 	timer = wl_event_loop_add_timer(server->loop, [](void *data) { return handle_timer(); },
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
@@ -8498,6 +9356,7 @@ int main() {
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);
+	wl_list_remove(&bar_surface_counter.link);
 	server.reset();
 	stop_children();
 	stop_isolation();

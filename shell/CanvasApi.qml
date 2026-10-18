@@ -4,7 +4,8 @@ import QtQuick
 // (docs/intents/platform/ipc.md). The plugin draws the surface itself —
 // the compositor is told only which surface and which canvas rectangle,
 // and from then on the plane pans, zooms and scales it like everything
-// else on it.
+// else on it. A drag of the surface is the compositor's: the plugin hands
+// it the press with move() or resize(), and hears where it ended.
 QtObject {
 	id: root
 
@@ -29,5 +30,23 @@ QtObject {
 
 	function unplace(name, callback) {
 		compositor.call("surface.unplace", {surface: name}, callback)
+	}
+
+	// From a press on the surface: the compositor moves it with the
+	// pointer, and callback(box, error) hears the rectangle it was dropped
+	// at when the button is released.
+	function move(name, callback) {
+		compositor.call("surface.move", {surface: name}, callback)
+	}
+
+	// Likewise sized by its edges (["right", "bottom"]), never below
+	// minWidth × minHeight.
+	function resize(name, options, callback) {
+		compositor.call("surface.resize", {
+			surface: name,
+			edges: options.edges,
+			minWidth: Math.round(options.minWidth || 1),
+			minHeight: Math.round(options.minHeight || 1)
+		}, callback)
 	}
 }

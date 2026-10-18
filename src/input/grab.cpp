@@ -1,6 +1,8 @@
 // grab.cpp: the compositor-owned pointer grabs: window moves and resizes,
-// canvas pans, title bar buttons, overview presses and desktop frame drags.
+// canvas pans, title bar buttons, overview presses, desktop frame drags and
+// the drags of plugins' surfaces on the plane.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -8,6 +10,7 @@
 
 #include "core/config.h"
 #include "input/grab.h"
+#include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
 #include "windows/view.h"
@@ -147,6 +150,28 @@ void PointerGrab::begin_overview_press(Output &output, PressTarget target) {
 	};
 }
 
+void PointerGrab::begin_surface_drag(LayerSurface &layer, Output &output,
+		double lx, double ly, uint32_t edges, int min_w, int min_h) {
+	SurfaceDrag drag{
+		.layer = &layer,
+		.output = &output,
+		.cam = output.camera.drawn(),
+		.lx = lx,
+		.ly = ly,
+		.start = layer.canvas_box.value_or(wlr_box{}),
+		.edges = edges,
+		.min_w = std::max(min_w, 1),
+		.min_h = std::max(min_h, 1),
+	};
+	state_ = drag;
+	if (edges != 0) {
+		server_.input.set_cursor_image(
+			wlr_xcursor_get_resize_name(static_cast<wlr_edges>(edges)));
+	}
+	// The pointer may have travelled since the press: the surface catches up.
+	surface_drag_motion(std::get<SurfaceDrag>(state_));
+}
+
 
 void PointerGrab::motion() {
 	std::visit(overloaded{
@@ -156,6 +181,7 @@ void PointerGrab::motion() {
 		[this](TitleButton &s) { title_button_motion(s); },
 		[this](OverviewPress &s) { overview_press_motion(s); },
 		[this](DesktopDrag &s) { desktop_drag_motion(s); },
+		[this](SurfaceDrag &s) { surface_drag_motion(s); },
 		[](None &) {},
 	}, state_);
 }
@@ -333,6 +359,40 @@ void PointerGrab::desktop_drag_motion(DesktopDrag &drag) {
 	drag.drop = drop;
 }
 
+void PointerGrab::surface_drag_motion(SurfaceDrag &drag) {
+	double dx = (server_.cursor->x - drag.lx) / drag.cam.zoom;
+	double dy = (server_.cursor->y - drag.ly) / drag.cam.zoom;
+	double x1 = drag.start.x, y1 = drag.start.y;
+	double x2 = x1 + drag.start.width, y2 = y1 + drag.start.height;
+	if (drag.edges == 0) {
+		x1 += dx;
+		x2 += dx;
+		y1 += dy;
+		y2 += dy;
+	}
+	// A sized edge stops where the minimum would be crossed; the opposite
+	// edge never moves.
+	if (drag.edges & WLR_EDGE_LEFT) {
+		x1 = std::fmin(x1 + dx, x2 - drag.min_w);
+	}
+	if (drag.edges & WLR_EDGE_RIGHT) {
+		x2 = std::fmax(x2 + dx, x1 + drag.min_w);
+	}
+	if (drag.edges & WLR_EDGE_TOP) {
+		y1 = std::fmin(y1 + dy, y2 - drag.min_h);
+	}
+	if (drag.edges & WLR_EDGE_BOTTOM) {
+		y2 = std::fmax(y2 + dy, y1 + drag.min_h);
+	}
+	int left = static_cast<int>(std::round(x1));
+	int top = static_cast<int>(std::round(y1));
+	wlr_box box{left, top, static_cast<int>(std::round(x2)) - left,
+		static_cast<int>(std::round(y2)) - top};
+	if (drag.layer->canvas_box.has_value() && wlr_box_equal(&*drag.layer->canvas_box, &box)) {
+		return;
+	}
+	drag.layer->place(box);
+}
 
 void PointerGrab::release() {
 	std::visit(overloaded{
@@ -344,6 +404,7 @@ void PointerGrab::release() {
 		// board when dropped outside. A resize ends back on its slice.
 	[this](Move &s) { server_.canvas.drop(*s.view); },
 	[this](Resize &s) { server_.canvas.settle(*s.view); },
+		[this](SurfaceDrag &s) { server_.ipc.answer_surface_drag(s.layer->canvas_box); },
 		[](auto &) {},
 	}, state_);
 	cancel();
@@ -441,6 +502,10 @@ void PointerGrab::cancel() {
 		end_view_grab(*resize->view);
 	} else if (const auto *button = std::get_if<TitleButton>(&state_)) {
 		end_view_grab(*button->view);
+	} else if (std::holds_alternative<SurfaceDrag>(state_)) {
+		// Not ended by its release (the surface or the output went): the
+		// client still waiting is told, a release already answered it.
+		server_.ipc.answer_surface_drag(std::nullopt);
 	}
 	state_ = None{};
 	server_.damage_all();
@@ -483,6 +548,13 @@ void PointerGrab::forget(const View &view) {
 
 void PointerGrab::forget(const Output &output) {
 	if (grab_output(state_) == &output) {
+		cancel();
+	}
+}
+
+void PointerGrab::forget(const LayerSurface &layer) {
+	const SurfaceDrag *drag = std::get_if<SurfaceDrag>(&state_);
+	if (drag != nullptr && drag->layer == &layer) {
 		cancel();
 	}
 }

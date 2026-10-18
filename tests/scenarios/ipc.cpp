@@ -2,9 +2,10 @@
 // compositor exports — every method, every error case (a malformed line
 // answered with the connection kept, unknown methods, bad params, a line
 // over 64 KiB answered then dropped, a slow subscriber dropped), each event
-// type triggered for real, canvas items (created, updated, removed,
-// dragged with a fake pointer, double-clicked, drawn in both views and
-// themes), and the `wayland-canvas msg` client with its exit codes. Writes
+// type triggered for real, the canvas-surface role's answers (a place
+// with no area refused, one ahead of its surface remembered, a drag with
+// no button held refused, an edge that is not one, an unplace), and the
+// `wayland-canvas msg` client with its exit codes. Writes
 // only under $CANVAS_TMP (meson passes the repo's tmp/); meson passes the
 // compositor binary as $WAYLAND_CANVAS_BIN.
 #include <cerrno>
@@ -51,7 +52,8 @@ int raw_status = 0;
 std::string shot_dir;
 std::string socket_path;
 std::string events_path;
-std::string item_events_path; // the canvas-items subscriber's capture
+// A plugin surface name no client draws: what the socket says of it.
+const std::string surface_name = "wayland-canvas-canvas-ipc.scenario/one";
 std::string output_name; // the headless output's name, for `output` params
 wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
@@ -418,14 +420,7 @@ std::string state_mismatch(const std::string &text, std::string_view want_theme,
 	return problem;
 }
 
-// ------------------------------------------------------ item checking
-
-// One item entry: from a `msg item.set` result or a state items-array slot.
-struct ItemEntry {
-	std::string id, color, text;
-	long long x = 0, y = 0, width = 0, height = 0;
-	bool placed = false; // x, y, width and height present and whole
-};
+// ------------------------------------------------------ state checking
 
 // An integer member: nullopt when absent or not a whole number.
 std::optional<long long> member_int(JsonObject *object, const char *name) {
@@ -496,16 +491,6 @@ std::optional<WindowEntry> parse_state_window(const std::string &text,
 	g_object_unref(parser);
 	return out;
 }
-
-// The last `kind` (item.moved / item.activated) event for `id` in the item
-// subscriber's capture: its place, and for an activation the output and the
-// box on it.
-struct ItemEventLine {
-	long long x = 0, y = 0; // item.moved
-	std::string output; // item.activated
-	double bx = 0, by = 0, bw = 0, bh = 0; // item.activated box
-};
-
 
 // Waits for a forked raw client (or any pid) to have exited.
 bool child_exited(pid_t pid) {
@@ -985,14 +970,61 @@ int run_step() {
 				out));
 		return 200;
 	}
-	case 48: // the canvas-item phase is gone with the items themselves:
-		// the fake pointer still comes up, because the run ends by
-		// finishing it.
+	case 48: // the surface role's own answers, for a name no client draws
+		// The run ends by finishing the fake pointer, so it comes up here.
 		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
-		// what a plugin puts on the plane it draws itself, in a surface
-		// the compositor places (docs/intents/platform/ipc.md).
+		run_client("surface.place", std::format(
+			R"({{"surface":"{}","x":10,"y":20,"width":0,"height":5}})", surface_name),
+			"place-flat");
+		run_client("surface.place", std::format(
+			R"({{"surface":"{}","x":10,"y":20,"width":40,"height":30}})", surface_name),
+			"place-ahead");
+		run_client("surface.move", std::format(R"({{"surface":"{}"}})", surface_name),
+			"move-unheld");
+		run_client("surface.resize", std::format(
+			R"({{"surface":"{}","edges":["sideways"]}})", surface_name), "resize-edges");
+		return 400;
+	case 49: {
+		for (const char *name : {"place-flat", "place-ahead", "move-unheld", "resize-edges"}) {
+			if (!client_done(name) && retries++ < 50) {
+				return -100;
+			}
+		}
+		retries = 0;
+		check(client_code("place-flat") == 1
+				&& client_err("place-flat").find("area") != std::string::npos,
+			std::format("`surface.place` with no area: an error naming it ({})",
+				client_err("place-flat")));
+		auto remembered = server->canvas_places.find(surface_name);
+		check(client_code("place-ahead") == 0 && client_out("place-ahead") == "true"
+				&& remembered != server->canvas_places.end()
+				&& remembered->second.x == 10 && remembered->second.width == 40,
+			"`surface.place` for a name no surface carries yet is remembered for it");
+		check(client_code("move-unheld") == 1
+				&& client_err("move-unheld").find("no button") != std::string::npos,
+			std::format("`surface.move` with no button held on the surface: an error ({})",
+				client_err("move-unheld")));
+		check(client_code("resize-edges") == 1
+				&& client_err("resize-edges").find("edges") != std::string::npos,
+			std::format("`surface.resize` naming an edge there is not: the usage ({})",
+				client_err("resize-edges")));
+		check(!server->input.grab.active(), "no drag began from any of them");
+		run_client("surface.unplace", std::format(R"({{"surface":"{}"}})", surface_name),
+			"unplace");
+		return 300;
+	}
+	case 50: {
+		if (!client_done("unplace") && retries++ < 50) {
+			return -100;
+		}
+		retries = 0;
+		check(client_code("unplace") == 0
+				&& !server->canvas_places.contains(surface_name),
+			"`surface.unplace` forgets the remembered place");
+		run_client("state", "", "state-windows"); // read by the window list's check
 		step = 75;
-		return -100;
+		return -300; // without the advance: step 75 waits for that answer
+	}
 	case 75: { // the state lists the open window, and a jump goes to it
 		if (!client_done("state-windows") && retries++ < 50) {
 			return -100;

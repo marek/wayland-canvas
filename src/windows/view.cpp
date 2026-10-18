@@ -320,8 +320,8 @@ bool popup_unconstrain(Popup &popup) {
 		wlr_box box{
 			-layer->geo.x,
 			-layer->geo.y,
-			layer->output.width,
-			layer->output.height,
+			layer->output->width,
+			layer->output->height,
 		};
 		wlr_xdg_popup_unconstrain_from_box(xdg_popup, &box);
 		return true;

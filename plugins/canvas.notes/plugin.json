@@ -3,7 +3,7 @@
 	"name": "Sticky notes",
 	"version": "1.0.0",
 	"apiVersion": 1,
-	"description": "Sticky notes on the canvas: a colour choice from the overview toolbar, editing over the note, kept across restarts",
+	"description": "Sticky notes on the canvas: a colour choice from the overview toolbar, written in where they sit, each kept as an HTML file",
 	"settings": {
 		"colors": {
 			"yellow": "#ffd866",

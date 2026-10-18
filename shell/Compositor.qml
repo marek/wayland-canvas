@@ -14,9 +14,9 @@ Item {
 	readonly property bool available: path !== "" && socket.connected
 
 	// The compositor's state as `state` reported it and the events have
-	// updated it: outputs (with the overview flag), desktops, canvas items,
-	// and the theme mode.
-	property var state: ({outputs: [], desktops: [], items: [], theme: "dark"})
+	// updated it: outputs (with the overview flag), desktops, windows, and
+	// the theme mode.
+	property var state: ({outputs: [], desktops: [], windows: [], theme: "dark"})
 
 	// Every event, with its name and params, after the state was updated.
 	signal event(string name, var params)
@@ -124,14 +124,6 @@ Item {
 			state = Object.assign({}, state, {windows: params.windows || []})
 		} else if (name === "theme") {
 			state = Object.assign({}, state, {theme: params.mode})
-		} else if (name === "item.moved") {
-			state = Object.assign({}, state, {
-				items: (state.items || []).map(function(item) {
-					return item.id === params.id
-						? Object.assign({}, item, {x: params.x, y: params.y})
-						: item
-				})
-			})
 		}
 		event(name, params)
 	}
