@@ -133,6 +133,9 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 - **Gestures while a client holds a pointer grab**: compositor gestures
   still act on the canvas ([gestures.md](gestures.md)); client-bound
   gestures follow the client's grab.
+- **The session locking while a button is held on a client**: the lock
+  takes the pointer and the hold ends, so after the unlock the pointer
+  goes to what is under it, not back to the surface the press reached.
 
 ## Cross-links
 
