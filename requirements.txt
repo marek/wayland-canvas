@@ -1,0 +1,3 @@
+# The repo's .venv (tools/venv.sh): the build's meson and ninja
+meson
+ninja

@@ -59,6 +59,12 @@ if [ ! -d "$build" ]; then
 elif [ "$wipe" -eq 1 ]; then
 	echo "build.sh: meson setup --wipe $build ${native[*]} ${buildtype[*]}"
 	meson setup --wipe "$build" "${native[@]}" "${buildtype[@]}"
+elif set_up_by=$(sed -n 's/.*"meson_version": {"full": "\([^"]*\)".*/\1/p' "$build/meson-info/meson-info.json") &&
+		[ "$set_up_by" != "$(meson --version)" ]; then
+	# the venv takes the latest meson, and meson loads no build dir another
+	# version set up until it is reconfigured
+	echo "build.sh: $build/ was set up by meson $set_up_by; meson setup --reconfigure"
+	meson setup --reconfigure "$build" "${buildtype[@]}"
 elif meson introspect "$build" --compilers 2>/dev/null | grep -q '"id": "gcc"'; then
 	echo "build.sh: $build/ was configured with GCC; meson setup --wipe"
 	meson setup --wipe "$build" "${native[@]}" "${buildtype[@]}"
