@@ -89,6 +89,8 @@ PanelWindow {
 			// Dragging the strip moves the note on the plane.
 			MouseArea {
 				anchors.fill: parent
+				hoverEnabled: true
+				cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 				propagateComposedEvents: true
 				property real pressX: 0
 				property real pressY: 0
@@ -114,20 +116,27 @@ PanelWindow {
 					model: Notes.dotList
 
 					delegate: Rectangle {
+						id: dot
+
 						required property var modelData
 
-						width: 10
-						height: 10
-						radius: 5
+						width: dotArea.containsMouse ? 14 : 10
+						height: width
+						radius: width / 2
 						color: modelData.color
 						border.width: root.note !== undefined
 							&& root.note.color === modelData.color ? 2 : 0
 						border.color: "#1f2430"
 
+						Behavior on width { NumberAnimation { duration: 80 } }
+
 						MouseArea {
+							id: dotArea
 							anchors.fill: parent
-							onClicked: Notes.recolour(root.noteId,
-								parent.modelData.color)
+							anchors.margins: -3 // a dot is a small target
+							hoverEnabled: true
+							cursorShape: Qt.PointingHandCursor
+							onClicked: Notes.recolour(root.noteId, dot.modelData.color)
 						}
 					}
 				}
@@ -135,20 +144,27 @@ PanelWindow {
 
 			// The × and the square around it: a glyph is a smaller target
 			// than a finger or a pointer at any zoom.
-			Item {
+			Rectangle {
 				anchors.right: parent.right
 				anchors.verticalCenter: parent.verticalCenter
 				width: 22
 				height: parent.height
+				// The close square lights up under the pointer and darkens
+				// as it is pressed, as a window's own close button does.
+				color: closeArea.pressed ? "#c42b1c"
+					: (closeArea.containsMouse ? "#e81123" : "transparent")
 
 				Text {
 					anchors.centerIn: parent
 					text: "\u00d7"
-					color: "#1f2430"
+					color: closeArea.containsMouse ? "#ffffff" : "#1f2430"
 				}
 
 				MouseArea {
+					id: closeArea
 					anchors.fill: parent
+					hoverEnabled: true
+					cursorShape: Qt.PointingHandCursor
 					onClicked: Notes.remove(root.noteId)
 				}
 			}
