@@ -79,4 +79,4 @@ continues [2026-10-17-1108-note-editing-in-place.md](2026-10-17-1108-note-editin
 - [x] The size control on the strip: − and + step the size at the caret or of the selection by a pixel, and the number between them can be typed into, Enter applying it
 - [x] A button held on a client surface keeps the pointer on it until the release, outside its bounds too (Wayland's implicit grab), so a drag that leaves the surface — a text selection past a window's or a note's edge, a slider — still reaches it; drag-and-drop and the compositor's own grabs keep priority. Found while fixing notes, wider than them
 - [x] Found here: the strip read its format from the character before the cursor, outside a selection made backwards, so it showed B off for a bold word and + stepped from the wrong size; the strip reads the selection's own characters, and − and + step each part from its own size
-- [ ] `tools/check.sh` green with the per-span size and the held press, merged into main
+- [x] `tools/check.sh` green with the per-span size and the held press, merged into main
