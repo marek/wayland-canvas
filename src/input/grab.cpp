@@ -275,7 +275,11 @@ void PointerGrab::pan_motion(Pan &pan) {
 	Camera cam = pan.cam;
 	cam.cx -= (server_.cursor->x - pan.lx) / cam.zoom;
 	cam.cy -= (server_.cursor->y - pan.ly) / cam.zoom;
-	pan.output->camera.jump(cam);
+	if (pan.output->overview.active()) {
+		pan.output->camera.jump(cam);
+		return;
+	}
+	pan.output->look_to(cam); // the normal view's pan is a look away
 }
 
 void PointerGrab::title_button_motion(TitleButton &button) {

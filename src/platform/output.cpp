@@ -268,11 +268,33 @@ double Output::resting_zoom() const {
 	return camera.destination().zoom;
 }
 
+void Output::look_to(const Camera &to) {
+	Camera at = camera.destination();
+	if (!look_away_.has_value() || look_away_->left != at) {
+		look_away_ = LookAway{.from = at, .left = at};
+	}
+	camera.jump(to);
+	look_away_->left = camera.destination();
+}
+
 void Output::pan(double dx, double dy) {
 	Camera next = camera.current();
 	next.cx += dx;
 	next.cy += dy;
-	camera.jump(next);
+	look_to(next);
+}
+
+bool Output::pan_back() {
+	std::optional<LookAway> away = std::exchange(look_away_, std::nullopt);
+	if (!away.has_value() || away->left != camera.destination()) {
+		return false;
+	}
+	camera.animate_to(away->from);
+	return true;
+}
+
+void Output::forget_look_away() {
+	look_away_.reset();
 }
 
 void Output::goto_desktop(const Desktop &desktop) {
@@ -298,7 +320,7 @@ void Output::goto_direction(double dx, double dy) {
 	if (found == nullptr) {
 		// The normal view never hops into empty canvas, so a swipe cannot
 		// lose the user's place: free areas are the overview's to target,
-		// or a drag's or Super+Alt+arrows' to pan to.
+		// or a look away's with Super held.
 		server.hint.set("No desktop that way");
 		return;
 	}

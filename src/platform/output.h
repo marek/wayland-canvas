@@ -36,7 +36,15 @@ public:
 	double resting_zoom() const; // the zoom the camera rests at: the filling desktop's scale, else 1
 	void goto_desktop(const Desktop &desktop); // eases onto it at its scale
 	void goto_direction(double dx, double dy);
-	void pan(double dx, double dy);
+	// A pan in the normal view is a look away
+	// (docs/intents/canvas/infinite-canvas.md): the camera jumps to `to`,
+	// and the view it rested at before the look away began is kept.
+	void look_to(const Camera &to);
+	void pan(double dx, double dy); // a look away by (dx, dy) canvas px
+	// Eases back to the view the look away left; false when none is under
+	// way — nothing panned, or the camera moved otherwise since.
+	bool pan_back();
+	void forget_look_away();
 	void pin_desktop();
 
 	// layer.cpp
@@ -67,6 +75,13 @@ private:
 	void handle_request_state(wlr_output_event_request_state *event);
 	void handle_destroy();
 	double fade_last_ = 0; // clock for the desktop-frame fade
+	// The view the camera rested at before the look away, and where the
+	// last pan left the camera: moved anywhere else since, the look away
+	// is over.
+	struct LookAway {
+		Camera from, left;
+	};
+	std::optional<LookAway> look_away_;
 
 	Listener frame_, needs_frame_, request_state_, destroy_;
 };

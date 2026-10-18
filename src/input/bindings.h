@@ -36,10 +36,14 @@ public:
 	// launcher, the terminal and the [commands] chords. Unmatched keys are
 	// the caller's to swallow: the overview owns the keyboard.
 	bool handle_overview(xkb_keysym_t sym, uint32_t mods, Output &output);
-	// The lone Super tap: runs the action whose keys hold `Super` — the
-	// overview's first when that output is in the overview, then the
-	// global one. True when an action ran.
-	bool handle_tap(Output *output);
+	// The lone Super tap, or with `twice` the double tap: runs the action
+	// whose keys hold `Super` (`Super Super`) — the overview's first when
+	// that output is in the overview, then the global one. True when an
+	// action ran.
+	bool handle_tap(Output *output, bool twice);
+	// True when an action holds the double tap, so a single tap waits to be
+	// told from the first of two.
+	bool has_double_tap(Output *output) const;
 	// True when sym with mods is one of the launcher's own chords: while
 	// the launcher is open they close it.
 	bool launcher_chord(xkb_keysym_t sym, uint32_t mods) const;
@@ -50,10 +54,12 @@ public:
 private:
 	// One resolved chord: the registry action it runs (`action`, an index
 	// into settings::registry()), or a [commands] entry (`command`, an
-	// index into command_lines_). `key` 0 is the Super tap.
+	// index into command_lines_). `key` 0 is the Super tap, and with
+	// `twice` the double tap.
 	struct Bind {
 		uint32_t mods = 0;
 		xkb_keysym_t key = 0;
+		bool twice = false;
 		int action = -1;
 		int command = -1;
 	};
@@ -61,6 +67,8 @@ private:
 	// The bind for sym (any case) with mods exactly, or null.
 	const Bind *find(xkb_keysym_t sym, uint32_t mods,
 		const std::vector<Bind> &table) const;
+	// The bind holding the tap (`twice`: the double tap) for that output.
+	const Bind *tap_bind(Output *output, bool twice) const;
 	// Runs a bind's action or command. True when one ran.
 	bool run(const Bind &bind, Output *output);
 

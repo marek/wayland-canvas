@@ -160,6 +160,12 @@ void act_pan(Server &, Output *output, KeyArg arg) {
 	}
 }
 
+void act_pan_back(Server &, Output *output, KeyArg) {
+	if (output != nullptr) {
+		output->pan_back();
+	}
+}
+
 void act_pin(Server &, Output *output, KeyArg) {
 	if (output != nullptr) {
 		output->pin_desktop();
@@ -400,6 +406,7 @@ constexpr std::array runners = {
 	Runner{settings::Scope::global, "pan-right", act_pan, Dir{1, 0}},
 	Runner{settings::Scope::global, "pan-up", act_pan, Dir{0, -1}},
 	Runner{settings::Scope::global, "pan-down", act_pan, Dir{0, 1}},
+	Runner{settings::Scope::global, "pan-back", act_pan_back, 0},
 	Runner{settings::Scope::global, "pin-desktop", act_pin, 0},
 	Runner{settings::Scope::global, "abandon-desktop", act_abandon_current, 0},
 	Runner{settings::Scope::global, "tiling", act_tile_current, 0},
@@ -488,10 +495,12 @@ void Bindings::apply(const settings::Resolved &resolved) {
 	// Sys_Req on most layouts, so both keysyms are bound.
 	auto add = [](std::vector<Bind> &table, const settings::Chord &chord,
 			int action, int command) {
-		table.push_back({chord.mods, chord.key, action, command});
+		table.push_back({.mods = chord.mods, .key = chord.key, .twice = chord.twice,
+			.action = action, .command = command});
 		if (chord.key == XKB_KEY_Print
 				&& (chord.mods & settings::mod_shift) != 0) {
-			table.push_back({chord.mods, XKB_KEY_Sys_Req, action, command});
+			table.push_back({.mods = chord.mods, .key = XKB_KEY_Sys_Req,
+				.action = action, .command = command});
 		}
 	};
 
@@ -506,8 +515,8 @@ void Bindings::apply(const settings::Resolved &resolved) {
 			terminal_ = index;
 		}
 		for (const settings::Chord &chord : resolved.keys[i]) {
-			// `key` 0 is the Super tap: handle_tap runs it, find never
-			// matches it.
+			// `key` 0 is the Super tap or double tap: handle_tap runs it,
+			// find never matches it.
 			if (def.group == "Capture") {
 				add(capture_, chord, index, -1);
 			} else if (def.scope == settings::Scope::global) {
@@ -617,19 +626,31 @@ bool Bindings::handle_overview(xkb_keysym_t sym, uint32_t mods, Output &output) 
 	return false;
 }
 
-bool Bindings::handle_tap(Output *output) {
+const Bindings::Bind *Bindings::tap_bind(Output *output, bool twice) const {
 	// The overview's holder first when that output is in the overview,
 	// then the global one.
-	for (const std::vector<Bind> *table :
-			{output != nullptr && output->overview.active() ? &overview_ : nullptr,
-				&global_}) {
+	std::array<const std::vector<Bind> *, 2> tables{
+		output != nullptr && output->overview.active() ? &overview_ : nullptr, &global_};
+	for (const std::vector<Bind> *table : tables) {
+		if (table == nullptr) {
+			continue;
+		}
 		for (const Bind &bind : *table) {
-			if (bind.key == 0 && bind.mods == settings::mod_logo) {
-				return run(bind, output);
+			if (bind.key == 0 && bind.mods == settings::mod_logo && bind.twice == twice) {
+				return &bind;
 			}
 		}
 	}
-	return false;
+	return nullptr;
+}
+
+bool Bindings::handle_tap(Output *output, bool twice) {
+	const Bind *bind = tap_bind(output, twice);
+	return bind != nullptr && run(*bind, output);
+}
+
+bool Bindings::has_double_tap(Output *output) const {
+	return tap_bind(output, true) != nullptr;
 }
 
 bool Bindings::launcher_chord(xkb_keysym_t sym, uint32_t mods) const {

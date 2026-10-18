@@ -31,12 +31,14 @@ own the machine's Wayland display namespace and GPU.
   membership holds at 200 % although the frame's edges have passed its
   windows' centres, and a window opened at 200 % joining the board
   there by halving the right half, every other window keeping its box. Then,
-  views at any zoom: a desktop down at 25 %, where a 2-finger scroll, a
-  plain 2-finger pinch and a 3-finger swipe toward no desktop leave the
-  zoom alone and the view interactive, the overview opens further out and
-  returns to the free view at its zoom, and Super+0 brings a free view to
-  100 %. Last, normal-view hops along a row of three desktops (the middle
-  one at 80 %): two quick swipes walking two desktops, a swipe past the
+  views at any zoom: a desktop down at 25 %, where a 2-finger scroll over
+  empty canvas moves nothing without Super and with Super held looks away
+  even over a window, and a plain 2-finger pinch and a 3-finger swipe
+  toward no desktop leave the zoom alone and the view interactive, the
+  overview opens further out and returns to the free view at its zoom,
+  and Super+0 brings a free view to 100 %. Last, normal-view hops along a
+  row of three desktops (the middle one at 80 %): two quick swipes walking
+  two desktops, a swipe past the
   last one staying on it with a hint, a long swipe hopping only once, onto
   the 80 % desktop at its scale, a 3-finger pinch with travel hopping like
   a swipe, and from a free view below the row a swipe toward nothing
@@ -60,6 +62,14 @@ own the machine's Wayland display namespace and GPU.
   the normal view, zooming the overview camera in the overview), the help
   line naming each preset's gestures by its text (keys only under `off`),
   and the defaults restored at the end, a 3-finger hop working again.
+  Then the look away from the 80 % desktop: Super+Alt+Up and a drag over
+  the empty canvas above it — moving nothing without Super, with it
+  panning the content along with the pointer at the desktop's zoom — undone
+  together by double Super, which eases back onto the desktop at its
+  scale; Super+Alt+Right looked back from the same way; a hop after a look
+  away making its landing the view kept, so double Super stays there; and
+  the overview doing the same, even when Escape brings back the very view
+  the look away had reached.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
@@ -99,9 +109,13 @@ own the machine's Wayland display namespace and GPU.
   answering the pending capture `{"keys": null}` and itself `true` (also
   with no capture under way) after which a bound chord runs its action
   and a plain key reaches the focused client, and the Super tap given to
-  the launcher through the socket opening and closing it. Last, a button
-  held on a window keeps the pointer on it while the pointer travels off
-  its edge, and the release gives the pointer to what is under it.
+  the launcher through the socket opening and closing it once the
+  double-tap interval has passed, two quick taps running the double tap
+  (`pan-back`) and neither single tap, and `shortcut.capture` recording
+  two taps as `Super Super` and one, the interval passed, as `Super`.
+  Last, a button held on a window keeps the pointer on it while the
+  pointer travels off its edge, and the release gives the pointer to what
+  is under it.
 - **`launcher.cpp`** — the app launcher: Super+Space opens it — the first
   run having written canvas.conf with every default into the run's own
   scratch `$XDG_CONFIG_HOME` (never the user's), and a lone Super tap

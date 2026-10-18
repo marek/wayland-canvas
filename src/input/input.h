@@ -92,6 +92,9 @@ public:
 		std::function<void(std::optional<settings::Chord>)> done);
 	// Ends the capture under way, if any; it answers nullopt.
 	void cancel_shortcut_capture();
+	// Drops a tap waiting to be told from a double tap, unrun: the session
+	// locking, a capture beginning.
+	void cancel_pending_tap();
 
 	// A button pressed on `surface` (or a surface of its tree) is still
 	// held: the press its client answers by handing a drag to the
@@ -143,12 +146,22 @@ private:
 	// runs the action that holds the Super tap. Any other key, button,
 	// scroll or gesture cancels the tap.
 	bool super_tap_ = false;
+	// A lone tap waiting out the double-tap interval, since an action holds
+	// the double tap; the timer runs it when no second tap comes.
+	bool tap_pending_ = false;
+	EventSourcePtr tap_timer_;
+	void other_input();
+	void lone_tap();
+	void run_pending_tap();
+	void arm_tap_timer();
+	static int handle_tap_timer(void *data);
 
 	// A capture under way (shortcut.capture): every key belongs to it
 	// until the chord is pressed or it is cancelled.
 	struct ShortcutCapture {
 		std::function<void(std::optional<settings::Chord>)> done;
 		uint32_t mods = 0; // modifiers held inside the capture
+		bool tapped = false; // a lone Super tap: one, or the first of two
 		bool ending = false; // answered; the keys held at the end drain
 		std::vector<uint32_t> draining; // their keycodes
 	};
