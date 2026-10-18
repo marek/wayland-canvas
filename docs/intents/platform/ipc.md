@@ -1,7 +1,8 @@
 # Control IPC
 
 > Owns the compositor's control socket: the path, the JSON-lines protocol,
-> the methods and events, the state it reports, canvas items, and the `msg`
+> the methods and events, the state it reports, the surfaces a plugin
+> places on the canvas, and the `msg`
 > client. The shell's API over it is [../shell/plugins.md](../shell/plugins.md).
 
 ## Requirement
@@ -22,10 +23,11 @@ window reads and changes the shortcuts and gestures.
   keyboard and the shell cannot drift apart.
 - **State is asked for once, changes are pushed**: a client reads the whole
   state, then follows events; nothing polls.
-- **The compositor draws canvas items, plugins own them.** A sticky note is
-  a coloured card with text on the canvas: its plugin creates, updates,
-  removes and keeps it; the compositor places it, draws it, lets the user
-  drag it, and reports what the user did.
+- **The compositor draws nothing for a plugin.** A plugin that wants
+  something on the plane — a sticky note, a drawing — draws it in a
+  surface of its own and asks for it to be placed at a canvas rectangle;
+  the compositor places it, moves it with the plane and sends it input,
+  and knows nothing of what is in it.
 - **A client can never stall the compositor**: a subscriber that stops
   reading is dropped rather than waited for.
 
@@ -62,12 +64,9 @@ request; responses come in request order.
 | `overview.toggle` | `output` (optional, as above) | `true`; an error without an output |
 | `quit` | — | `true`, then the session ends |
 | `theme.set` | `mode`: `light` or `dark` | `true`; on the real session (a seat session) the applications' preference follows — [../shell/theme.md](../shell/theme.md) |
-| `item.set` | `id`; `color` (`#rrggbb`); `text`; `width`, `height` (canvas px); `x`, `y` (canvas, the top-left) | The item as placed: `{"id", "x", "y", "width", "height"}` |
-| `item.remove` | `id` | `true`; an error for an unknown id |
 | `surface.place` | `surface` (the layer surface's name); `x`, `y`, `width`, `height` (canvas px) | `true`: that surface is drawn on the plane at the rectangle, pans and zooms with it, and takes input there (above). An error names an unknown surface or a rectangle with no area |
 | `surface.unplace` | `surface` | `true`; the surface goes back to being a screen-space layer surface |
 | `window.focus` | `window` (a session id from the window list) | `true`: the window is focused and the view moves to it — to its desktop at that desktop's scale, else to a view centred on the window; a screen in the overview leaves it as a shelf click does, and a minimized window is restored first ([../windows/window-management.md](../windows/window-management.md)). An error for an unknown id |
-| `item.activate` | `id` | `true`; the compositor reports the item exactly as a double-click does — the `item.activated` event with its output and output-local box — so a plugin can open an editor over an item it just placed. An error for an unknown id, or when the item is on no output's screen |
 | `action.run` | `name` (a plugin action's global name); `args` (an object) | `true`; an `action` event with the name and args goes to every subscriber, and the host runs the named action |
 | `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
 | `capture.stop` | — | `true`; an error (`not recording`) with nothing running |
@@ -75,12 +74,6 @@ request; responses come in request order.
 | `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); `swipes` (a preset); `pinchScale` (a boolean); `invert` (a boolean); `lockIdleMinutes` (0 for never); `nightLight` (a boolean); `nightLightTemperature` (kelvin) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action or preset, a chord that does not parse or is not allowed there, the file unwritable |
 | `shortcut.capture` | `scope`: `global` (the default) or `overview` | `{"keys": "Super+Shift+K"}` once the user presses a chord, `{"keys": null}` when cancelled |
 | `shortcut.cancel` | — | `true`; a capture under way answers `{"keys": null}` |
-
-`item.set` creates the item or updates the one with that id. Without `x`
-and `y`, a new item is centred on what the output under the cursor shows
-(the overview's target there, when that output is in the overview); an
-update keeps its place. Ids are the plugin's own strings, named
-`<plugin id>/<item id>` by the shell.
 
 `action.run` is the compositor's way into the shell: it only delivers the
 event (the action itself belongs to a plugin), so a script or a
@@ -121,7 +114,6 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `view` (the canvas rectangle the output looks at: `x`, `y`, `width`, `height` in canvas px), `overview` (true while the output shows the overview) |
 | `desktops` | `id`, `number`, `x`, `y`, `width`, `height` (canvas px) |
 | `windows` | `id` (the session id), `appId`, `title`, `desktop` (its desktop's id, or null on free canvas), `minimized`, `focused`, in the order the windows opened. Where a window is on the canvas is the compositor's to act on, not a client's to read ([../shell/app-bar.md](../shell/app-bar.md)) |
-| `items` | as last set, with the place the user dragged it to |
 | `recording` | `null`, or `{"path": …}` while a recording runs |
 
 ### Events
@@ -133,8 +125,6 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `desktops` | `desktops`, as in the state | A desktop is created, moved, combined or abandoned |
 | `windows` | `windows`, as in the state | A window opens, closes, is moved, retitled, minimized, restored or focused |
 | `theme` | `mode` | The mode changes, by any client; the shell adopts it — [../shell/theme.md](../shell/theme.md) |
-| `item.moved` | `id`, `x`, `y` | The user dropped a dragged item |
-| `item.activated` | `id`, `output`, and `box`: the item on that output in output-local logical px | The user double-clicked the item, or a client ran `item.activate` |
 | `action` | `name`, `args` | A client ran `action.run`; the host runs the named plugin action |
 | `capture.recording` | `active`, `path` | A recording started (the file it writes) or stopped |
 | `settings` | The settings, as `settings.get` returns them | The effective settings change: the file saved by hand or deleted, or a `settings.set` |
@@ -158,20 +148,6 @@ about what the plugin put there.
 | Moving | the plugin moves it by placing it again; a drag the plugin does not claim pans the canvas, as the empty plane does |
 | Going | the surface unmapping or the plugin's `surface.unplace` takes it off the plane |
 | Never | a canvas surface takes no part in window management: no placement, no tiling, no desktop membership, no minimise |
-
-### Canvas items
-
-An item is drawn above windows in canvas space, so it pans and zooms with
-the canvas and shows in the overview: a card of its colour, a slightly
-darker strip along its top, its text in dark ink wrapped to its width. A
-drag that starts on an item, in the normal view or the overview, moves it
-and ends with `item.moved`; a double-click reports `item.activated`. Items
-never take part in window management (placement, tiling, desktop
-membership).
-
-Items are the compositor drawing on a plugin's behalf, which is why
-nothing new is built on them: a plugin that needs more than a coloured
-card with text uses a canvas surface and draws it itself.
 
 ### The `msg` client
 
@@ -204,7 +180,7 @@ means the user cancelled. That command is the portal's `chooser_cmd`.
 
 - [../shell/plugins.md](../shell/plugins.md) — the shell's API over this
   socket.
-- [../shell/notes.md](../shell/notes.md) — the canvas items' one user.
+- [../shell/notes.md](../shell/notes.md) — sticky notes, drawn by the plugin in surfaces on the plane.
 - [../shell/app-bar.md](../shell/app-bar.md) — the window list's and
   `window.focus`'s one user.
 - [../shell/theme.md](../shell/theme.md) — the mode the compositor follows.

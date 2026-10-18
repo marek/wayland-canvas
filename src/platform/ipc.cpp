@@ -1032,13 +1032,15 @@ std::expected<std::string, std::string> Ipc::m_surface_place(Client &,
 	if (*(*width) < 1 || *(*height) < 1) {
 		return std::unexpected(std::string{"a surface needs an area to be placed in"});
 	}
-	LayerSurface *surface = named_surface(server_, *(*name));
-	if (surface == nullptr) {
-		return std::unexpected(std::format("no surface named '{}'", *(*name)));
-	}
-	surface->canvas_box = wlr_box{static_cast<int>(*(*x)), static_cast<int>(*(*y)),
+	wlr_box box{static_cast<int>(*(*x)), static_cast<int>(*(*y)),
 		static_cast<int>(*(*width)), static_cast<int>(*(*height))};
-	surface->output.arrange_layers();
+	// Remembered by name: a surface that has not mapped yet takes it when
+	// it does, and a shell that reloads finds its places again.
+	server_.canvas_places[*(*name)] = box;
+	if (LayerSurface *surface = named_surface(server_, *(*name))) {
+		surface->canvas_box = box;
+		surface->output.arrange_layers();
+	}
 	server_.damage_all();
 	return std::string{"true"};
 }
@@ -1050,12 +1052,11 @@ std::expected<std::string, std::string> Ipc::m_surface_unplace(Client &,
 	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
 		return std::unexpected(std::string{"params: surface (a layer surface's name)"});
 	}
-	LayerSurface *surface = named_surface(server_, *(*name));
-	if (surface == nullptr) {
-		return std::unexpected(std::format("no surface named '{}'", *(*name)));
+	server_.canvas_places.erase(*(*name));
+	if (LayerSurface *surface = named_surface(server_, *(*name))) {
+		surface->canvas_box.reset();
+		surface->output.arrange_layers();
 	}
-	surface->canvas_box.reset();
-	surface->output.arrange_layers();
 	server_.damage_all();
 	return std::string{"true"};
 }

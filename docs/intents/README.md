@@ -78,7 +78,7 @@ their values.
 | [platform/protocols.md](platform/protocols.md) | The supported protocols table: protocol → what it enables / policy |
 | [platform/outputs.md](platform/outputs.md) | Outputs, layout, per-output camera, hotplug, layer-shell usable area |
 | [platform/cpp-standards.md](platform/cpp-standards.md) | What the source looks like: C++26 on clang, listeners and ownership, classes, names |
-| [platform/ipc.md](platform/ipc.md) | The control socket: path, JSON-lines protocol, methods, events, state, canvas items, the msg client |
+| [platform/ipc.md](platform/ipc.md) | The control socket: path, JSON-lines protocol, methods, events, state, surfaces on the canvas, the msg client |
 | [bugs/screencopy-never-returned.md](bugs/screencopy-never-returned.md) | grim hung forever: a frame rendered only on own damage, never on needs_frame |
 | [bugs/resize-anchor-lost-on-release.md](bugs/resize-anchor-lost-on-release.md) | Left/top resizes drifting: the client's final commit arrives after the button release |
 | [bugs/grabs-that-never-ended.md](bugs/grabs-that-never-ended.md) | Fake-device tests found pointer grabs that never ended and canvas shortcuts bound without Super |

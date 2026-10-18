@@ -27,6 +27,8 @@ public:
 	std::optional<wlr_box> canvas_box;
 	// The name the plugin placed it by: its layer-shell namespace.
 	std::string name() const;
+	// Applies a placement the plugin asked for before this surface mapped.
+	void take_pending_place();
 
 	// Keyboard interactivity, as the client last committed it.
 	bool wants_keyboard() const;

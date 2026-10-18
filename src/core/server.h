@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sys/types.h>
@@ -130,6 +131,12 @@ public:
 	// resolved settings, and the lines it ignored. `load_conf` applies them
 	// to the bindings and the gestures; `write_conf` writes a new text
 	// atomically and applies it at once.
+	// Where a plugin asked for its surfaces to be on the plane, by name
+	// (docs/intents/platform/ipc.md). Kept here, not on the surface, so a
+	// placement asked for before the surface exists — or again after a
+	// shell reload — still lands when it maps.
+	std::map<std::string, wlr_box> canvas_places;
+
 	std::string conf_path;
 	std::string conf_text;
 	settings::Resolved conf;

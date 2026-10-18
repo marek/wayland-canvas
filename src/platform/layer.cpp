@@ -132,7 +132,17 @@ bool LayerSurface::holds_keyboard_exclusively() const {
 		== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
 }
 
+// A placement the plugin asked for before this surface existed applies as
+// it maps, so the ask can never race the surface.
+void LayerSurface::take_pending_place() {
+	auto found = server.canvas_places.find(name());
+	if (found != server.canvas_places.end()) {
+		canvas_box = found->second;
+	}
+}
+
 void LayerSurface::handle_map() {
+	take_pending_place();
 	mapped = true;
 	if (attached_) {
 		// The surface's exclusive zone (if any) takes effect now.

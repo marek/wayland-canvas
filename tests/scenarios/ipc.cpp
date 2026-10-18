@@ -1153,6 +1153,9 @@ int run_step() {
 		return 200;
 	}
 	case 48: // the canvas-item phase is gone with the items themselves:
+		// the fake pointer still comes up, because the run ends by
+		// finishing it.
+		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
 		// what a plugin puts on the plane it draws itself, in a surface
 		// the compositor places (docs/intents/platform/ipc.md).
 		step = 75;

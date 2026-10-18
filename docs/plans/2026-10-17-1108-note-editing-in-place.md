@@ -35,11 +35,11 @@ frame from outside.
 - [x] The bar scenario's notes phase rewritten for the surface model: the note surface by its name, its canvas placement, the storage, one card through a pan, a reload, and the strip's controls
 - [x] Keys and clicks reach a placed surface: the compositor's half (placement, hit test, keyboard focus) measured right, and the plugin's two faults fixed — an `id` named `text` shadowed the property in the typed handler, and the strip's drag area covered its own controls. Typing, the colour dots and a reload all pass now
 - [x] The × on the strip removes the note: the click was landing all along, but `delete` on the map QML holds left the key behind, so the surface was never torn down; the map is rebuilt without it
-- [ ] Canvas items removed, in one pass (nothing uses them now that notes draw themselves):
+- [x] Canvas items removed, in one pass (nothing uses them now that notes draw themselves):
   - `src/canvas/items.{h,cpp}` deleted, with `Items items` off `Server` and the file off `meson.build`
   - `src/render/render.cpp`: `draw_items`, `item_texture`, the `ItemSlot` cache and its sweep
   - `src/input/input.cpp`: the item hit in `pointer_hit_test`, `item_press`, the double-click state; `src/input/grab.cpp`: `ItemDrag` and `begin_item`
   - `src/platform/ipc.cpp`: `item.set`, `item.remove`, `item.activate`, the `items` array in the state, the `item.moved` and `item.activated` events
   - `tests/scenarios/ipc.cpp`: its canvas-items phase, and `tests/scenarios/bar.cpp`'s leftover `NoteEntry`/`state_notes` helpers that read items
   - `docs/intents/platform/ipc.md` (the methods, the state row, the Canvas items section), `docs/intents/shell/notes.md`'s cross-link, and `docs/intents/shell/plugins.md` where items are named
-- [ ] On screen a note hovers at the centre and cannot be used: the sign of a layer surface with no anchors that was never placed, so `surface.place` is failing or arriving before the surface exists in the session (it passes headlessly). Find it from the shell's log line for the failed call and the compositor's answer, then make a note that cannot be placed say so instead of floating
+- [ ] On screen a note hovers at the centre and cannot be used, in a fresh session too. Two things are in against it now: the compositor remembers a placement by name and applies it when the surface maps (so the ask can no longer race the surface or a shell reload), and a note that is still unplaced after six seconds logs the compositor's answer and hides itself instead of floating. Try it again and read that line: it names whether the call was refused, and why

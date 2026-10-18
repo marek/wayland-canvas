@@ -2,7 +2,7 @@
 
 > Owns sticky notes: creating one from the overview toolbar, their colours
 > and look, editing, moving, deleting, and keeping them across restarts.
-> The canvas items the compositor draws are in
+> The surfaces a plugin places on the plane are in
 > [../platform/ipc.md](../platform/ipc.md); the toolbar is
 > [toolbar.md](toolbar.md).
 
@@ -50,8 +50,8 @@ were put across restarts.
 
 ## Error states, corner cases
 
-- The control socket is missing: the note button is not offered and no
-  note is drawn.
+- The control socket is missing: the note button is not offered, and a
+  note that cannot be placed on the plane says so and is not shown.
 - The shell restarts: notes stay on the canvas meanwhile and are re-sent
   from storage, so none is lost or doubled.
 - A note dragged while the caret is in it: the text stays as it was; the
@@ -63,5 +63,5 @@ were put across restarts.
 
 - [toolbar.md](toolbar.md) — the button and its colour submenu.
 - [plugins.md](plugins.md) — the plugin model and its storage.
-- [../platform/ipc.md](../platform/ipc.md) — canvas items: how notes are
-  drawn, moved and activated.
+- [../platform/ipc.md](../platform/ipc.md) — the surface a plugin places
+  on the plane, which is what a note is.
