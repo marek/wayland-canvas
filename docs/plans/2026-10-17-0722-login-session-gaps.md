@@ -98,6 +98,9 @@ These decisions close three open boxes of
 - [x] Scenarios: locking hides the windows on screen and in a capture; keys, clicks and gestures reach no window; a killed locker leaves it locked; the idle timeout locks and an inhibitor holds it off
 - [x] Scenario: a wrong password keeps it locked and the right one unlocks, through the lock plugin against a scratch PAM service
 
+The first lock on the SDDM login could check no password; that fix and what it turned up are
+[2026-10-18-1736-lock-password-check.md](2026-10-18-1736-lock-password-check.md).
+
 ## Notifications
 
 - [x] Intent: notifications: popups (place, stacking, expiry per urgency, actions, icons and images), dismiss and dismiss-all keys, the history and its bar widget, the silence switch, another server already holding the name
