@@ -43,3 +43,44 @@ frame from outside.
   - `tests/scenarios/ipc.cpp`: its canvas-items phase, and `tests/scenarios/bar.cpp`'s leftover `NoteEntry`/`state_notes` helpers that read items
   - `docs/intents/platform/ipc.md` (the methods, the state row, the Canvas items section), `docs/intents/shell/notes.md`'s cross-link, and `docs/intents/shell/plugins.md` where items are named
 - [ ] On screen a note hovers at the centre and cannot be used, in a fresh session too. Two things are in against it now: the compositor remembers a placement by name and applies it when the surface maps (so the ask can no longer race the surface or a shell reload), and a note that is still unplaced after six seconds logs the compositor's answer and hides itself instead of floating. Try it again and read that line: it names whether the call was refused, and why
+
+## What was tried for the unusable note, and what it showed
+
+Everything below is in the tree; none of it made a note usable on screen.
+
+- The surface is created, mapped and visible: a real card appears. It is
+  not placed on the plane, so the compositor treats it as screen
+  furniture — centred, and hit-tested where it is not.
+- The name was built from `api.canvas.surfaceName(...)`, so the layer
+  surface could be created before its namespace existed. It is now built
+  from the note's id alone, as the surface is created.
+- `surface.place` now records the rectangle under the surface's name and
+  applies it when a surface of that name maps, so an early ask cannot be
+  lost, and a shell reload finds its places again.
+- A surface whose name begins with the canvas prefix is never given a
+  place on a screen: unplaced, it is configured to its own size so it can
+  map and be found, and nothing of it is drawn.
+- The plugin logs the compositor's answer after three refused asks, and
+  names an older compositor when that is the reason.
+- Growing works inside the plugin and is proven by its own log: typing
+  takes a note from 220 px to 326 px and `Notes.resized` writes it. What
+  the scenario reads back from the compositor stays 220 px, so the second
+  and later `surface.place` calls are not reaching it or not being
+  applied — the first placement lands, the updates do not.
+- `refresh()` copies the notes map, because assigning the same object
+  tells QML nothing; `onNoteChanged` re-arms the placement retry.
+
+Where to look next, in order:
+
+1. Log every `surface.place` in the compositor (name, rectangle, whether a
+   surface of that name was found) and watch a note grow: that says at
+   once whether the later asks arrive.
+2. If they arrive, follow `arrange_layers` for a placed surface — the
+   configure it sends and whether the client commits that size — and the
+   drawn box in `draw_canvas_surfaces`.
+3. If they do not arrive, the fault is in the plugin's call path:
+   `onNoteChanged` firing, `api.canvas.place` reaching `Compositor.call`,
+   and the socket's answer.
+4. Only then the pointer: a placed surface is hit-tested by
+   `Output::canvas_surface_at` through `shell_surface_at`; a note that is
+   placed but still inert points there.

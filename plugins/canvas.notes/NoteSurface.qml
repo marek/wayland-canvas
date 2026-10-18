@@ -49,6 +49,21 @@ PanelWindow {
 	property int placeTries: 0
 	readonly property bool unplaceable: placeTries > 20 && !placed
 
+	// The height the card needs for its text, strip and padding.
+	function neededHeight() {
+		return Math.ceil(strip.height + 4 + body.contentHeight + 8 + 16)
+	}
+
+	function growToFit() {
+		if (note === undefined) {
+			return
+		}
+		var needed = neededHeight()
+		if (needed > note.height) {
+			Notes.resized(noteId, note.width, needed)
+		}
+	}
+
 	function place() {
 		if (note === undefined || api === null) {
 			return
@@ -85,11 +100,18 @@ PanelWindow {
 		onTriggered: root.place()
 	}
 
+	// Every change of the note is a new rectangle to be put on the plane:
+	// the ask goes out again, and the retry stands by until it lands.
+	onNoteChanged: {
+		placed = false
+		placeTries = 0
+		Qt.callLater(place)
+	}
+
 	Component.onCompleted: {
 		Qt.callLater(place)
 		Qt.callLater(function() { body.forceActiveFocus() })
 	}
-	onNoteChanged: Qt.callLater(place)
 
 	Rectangle {
 		anchors.fill: parent
@@ -181,6 +203,51 @@ PanelWindow {
 
 		}
 
+		// The text decides the card's height: a note grows as it is
+		// written in, so nothing typed into it is ever hidden below its
+		// edge. It never shrinks: a note sized by hand keeps that size.
+
+		// The grip: a drag of the bottom-right corner sizes the note, at
+		// any zoom, and the size is kept with it.
+		MouseArea {
+			id: grip
+			anchors.right: parent.right
+			anchors.bottom: parent.bottom
+			width: 16
+			height: 16
+			property real fromX: 0
+			property real fromY: 0
+
+			onPressed: function(mouse) {
+				fromX = mouse.x
+				fromY = mouse.y
+			}
+			onPositionChanged: function(mouse) {
+				if (!pressed || root.note === undefined) {
+					return
+				}
+				Notes.resized(root.noteId,
+					Math.max(120, root.note.width + mouse.x - fromX),
+					Math.max(80, root.note.height + mouse.y - fromY))
+			}
+
+			Canvas {
+				anchors.fill: parent
+				onPaint: {
+					var ctx = getContext("2d")
+					ctx.reset()
+					ctx.strokeStyle = "#1f2430"
+					ctx.globalAlpha = 0.45
+					for (var i = 1; i <= 3; i++) {
+						ctx.beginPath()
+						ctx.moveTo(width - i * 4, height)
+						ctx.lineTo(width, height - i * 4)
+						ctx.stroke()
+					}
+				}
+			}
+		}
+
 		TextArea {
 			id: body
 			focus: true
@@ -188,6 +255,7 @@ PanelWindow {
 			anchors.fill: parent
 			anchors.topMargin: strip.height + 4
 			anchors.margins: 8
+			anchors.bottomMargin: 16 // the grip's corner stays clear
 			wrapMode: TextArea.Wrap
 			color: "#1f2430"
 			selectionColor: "#1f2430"
@@ -198,7 +266,11 @@ PanelWindow {
 			text: root.note !== undefined ? root.note.text : ""
 			// `body.text` by name: an unqualified `text` here would be the
 			// item, not what was typed into it.
-			onTextChanged: Notes.typed(root.noteId, body.text)
+			onTextChanged: {
+				Notes.typed(root.noteId, body.text)
+				root.growToFit()
+			}
+			onContentHeightChanged: root.growToFit()
 
 			// A click in the card puts the caret in it, as a click in a
 			// window does.
