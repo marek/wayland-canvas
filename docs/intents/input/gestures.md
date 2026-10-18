@@ -49,6 +49,8 @@ Finger counts below are the default preset's.
 | Normal | 3 or 4 | Pinch | Treated as a swipe of the same finger count |
 | Normal | 2 | Pinch with Super held | Scale the desktop shown, following the fingers: pinching in scales it down, spreading scales it up ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Normal | 2 | Pinch or hold, without Super | Forwarded to the client under the pointer |
+| Normal | 2 | Scroll with Super held | Look away: the view pans, over windows too, and the window never sees the scroll ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
+| Normal | 2 | Scroll without Super | Over a client, scrolls it; over empty canvas, nothing |
 | Overview | 3 | Swipe | Hop: jump to the closest desktop in that direction ([../canvas/overview.md](../canvas/overview.md)) |
 | Overview | 4 | Swipe down | Zoom into the target, following the fingers ([../canvas/overview.md](../canvas/overview.md)) |
 | Overview | 4 | Swipe up | Zoom out further |
@@ -84,6 +86,10 @@ Rules that hold across the table:
   tap. On a free view the view is pinned as a desktop first. The view
   follows the scale live and settles on release; the windows are never
   told ([../canvas/desktops.md](../canvas/desktops.md)).
+- **Super held decides a scroll.** While Super is held, a 2-finger
+  scroll or a wheel looks away wherever the pointer is; once it is let
+  go the scroll is the client's again, and a scroll never counts as a
+  Super tap.
 - **Forwarding.** Only an interactive output
   ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) — resting
   at its zoom, no transition in progress — forwards gestures to clients
@@ -96,9 +102,10 @@ Rules that hold across the table:
 - **3-finger hop, 4-finger up** is the default interface. In the normal
   view a hop lands only on a desktop, never in empty canvas or between
   places, so a swipe cannot lose the user's place; the zoomed-out canvas
-  is where desktops are arranged and free spots targeted. Panning freely
-  stays with the pointer and keys: a drag or a 2-finger scroll over empty
-  canvas, Super+Alt+arrows.
+  is where desktops are arranged and free spots targeted. Looking around
+  stays with Super: a Super drag over empty canvas, a Super 2-finger
+  scroll, Super+Alt+arrows — a look away that double Super undoes
+  ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)).
 - **Presets, not single gestures**: each preset keeps the vocabulary
   whole — the count that hops also tiles and combines, the other zooms and
   abandons — so no choice leaves a gesture doing two things. No preset pans
@@ -114,7 +121,8 @@ Rules that hold across the table:
 ## Error states, corner cases
 
 - **A gesture over a client window in normal mode**: 3- and 4-finger
-  gestures still act on the canvas; 2-finger gestures are the client's.
+  gestures still act on the canvas; 2-finger gestures are the client's,
+  unless Super is held: a Super pinch scales, a Super scroll looks away.
 - **A zoom gesture released at the threshold**: past it commits.
 - **Zooming out past the bound**: the zoom clamps; the gesture keeps
   tracking without effect ([../canvas/overview.md](../canvas/overview.md)).

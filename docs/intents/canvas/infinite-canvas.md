@@ -30,6 +30,12 @@ a free area of the canvas is as easy as going to a desktop.
   free view keeps the zoom the camera brought and stays as usable as the
   desktop it was left from. The overview and a transition on its way are
   the compositor's own, not interactive ([overview.md](overview.md)).
+- **Panning needs Super.** A drag or a scroll on a desktop's background
+  is easily made by accident, and a pan it made would slide the desktop
+  off the screen and lose the user's place. Held Super makes the pan
+  deliberate, as it makes a pinch scale, and the look away it makes is
+  undone by one key. Moving desktops is the overview's
+  ([overview.md](overview.md)).
 - **A resting camera sits on the pixel grid.** At rest the camera
   position is quantised to the output's pixel grid at its zoom, so a
   window never renders subpixel-blurry. Rendering and hit testing use the
@@ -54,12 +60,20 @@ a free area of the canvas is as easy as going to a desktop.
 |---|---|
 | 3-finger swipe | Hops; the action per mode is in the gesture table ([../input/gestures.md](../input/gestures.md)) |
 | Super+Ctrl+arrows | Hops, as a 3-finger swipe does ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
-| Pointer drag on empty canvas | Pans |
-| 2-finger scroll over empty canvas | Pans; over a client, scrolls the client |
-| Super+Alt+arrows | Pans a third of a screen ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
+| Super with a pointer drag on empty canvas | Looks away |
+| Super with a 2-finger scroll, over empty canvas or a window | Looks away; the window never sees the scroll |
+| Super+Alt+arrows | Looks away by a third of a screen ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
+| Double Super | Back to the view the look away left |
+| A drag or a 2-finger scroll over empty canvas, without Super | Nothing moves; a press there stays a click |
 
 - A drag pans naturally: the content follows the pointer, like dragging
   a map.
+- A pan in the normal view is a look away, not a move. The view stays
+  where the pan leaves it, so what it shows can be used, and the output
+  keeps the view it rested at before — a desktop at its scale, or a free
+  view; double Super eases back there. Any other move — a hop, going to a
+  desktop, the overview, a Super pinch — makes the view it brings the one
+  kept. With no look away under way, double Super does nothing.
 - A hop goes the way the fingers point, to the nearest desktop in that
   direction — within a compile-time cone, straight-ahead neighbours
   beating nearer off-axis ones, as the overview's hop
@@ -71,8 +85,7 @@ a free area of the canvas is as easy as going to a desktop.
 - A hop only ever lands on a desktop: no momentum, no landing in empty
   canvas or between places, so a swipe cannot lose the user's place. A
   free area is reached from the overview (its hop and its click target
-  free spots), by a drag or a 2-finger scroll over empty canvas, or with
-  Super+Alt+arrows.
+  free spots); a look away shows one until double Super or another move.
 
 ### Free areas and orientation
 
@@ -85,8 +98,10 @@ a free area of the canvas is as easy as going to a desktop.
 ## Error states, corner cases
 
 - **Panned far from every desktop** is a valid state, not an error: the
-  grid keeps motion visible and the overview still fits everything on
-  the canvas.
+  grid keeps motion visible, double Super brings the view back, and the
+  overview still fits everything on the canvas.
+- **A look away on several outputs**: each output keeps its own view to
+  go back to; double Super brings back the output under the pointer.
 - **A wallpaper maps**: the grid hides in normal mode (the wallpaper is
   feedback enough) and stays in the zoomed-out view.
 - **Windows lying off every desktop**: they belong to no desktop

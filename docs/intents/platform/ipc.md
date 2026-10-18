@@ -80,7 +80,7 @@ request; responses come in request order.
 | `capture.stop` | — | `true`; an error (`not recording`) with nothing running |
 | `settings.get` | — | The settings (below) |
 | `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); `swipes` (a preset); `pinchScale` (a boolean); `invert` (a boolean); `lockIdleMinutes` (0 for never); `nightLight` (a boolean); `nightLightTemperature` (kelvin) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action or preset, a chord that does not parse or is not allowed there, the file unwritable |
-| `shortcut.capture` | `scope`: `global` (the default) or `overview` | `{"keys": "Super+Shift+K"}` once the user presses a chord, `{"keys": null}` when cancelled |
+| `shortcut.capture` | `scope`: `global` (the default) or `overview` | `{"keys": "Super+Shift+K"}` once the user presses a chord — `Super` for a tap, `Super Super` for a double tap — `{"keys": null}` when cancelled |
 | `shortcut.cancel` | — | `true`; a capture under way answers `{"keys": null}` |
 
 `action.run` is the compositor's way into the shell: it only delivers the

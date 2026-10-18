@@ -60,8 +60,8 @@ the same file, so the two never disagree.
 | Form | Modifiers, then one key, joined by `+`: `Super+Shift+3`, `Ctrl+Alt+BackSpace`. Several chords for one action are separated by commas; `none` is no chord |
 | Modifiers | `Super`, `Ctrl`, `Alt`, `Shift`: read in any case, written in that order |
 | Key | An XKB key name, read in any case; written as the capital letter for a letter, the digit for a digit, else the key name with a capital first letter (`Space`, `Return`, `Print`, `Left`, `F4`, `Plus`) |
-| Tap | `Super` alone is a lone tap of the Super key — pressed and released with nothing between ([keyboard-and-pointer.md](keyboard-and-pointer.md)). No other modifier stands alone |
-| Outside the overview | A chord needs Super, Ctrl or Alt, or a key that types nothing (the function keys, Print, Pause, the media keys); `Super` alone is allowed. A typing key alone or with only Shift would take typing away from the apps |
+| Tap | `Super` alone is a lone tap of the Super key — pressed and released with nothing between ([keyboard-and-pointer.md](keyboard-and-pointer.md)). `Super Super`, two such taps within a compile-time interval, is the double tap. No other modifier stands alone |
+| Outside the overview | A chord needs Super, Ctrl or Alt, or a key that types nothing (the function keys, Print, Pause, the media keys); `Super` and `Super Super` are allowed. A typing key alone or with only Shift would take typing away from the apps |
 | In the overview | Any chord: the overview owns the keyboard |
 
 ### Resolution

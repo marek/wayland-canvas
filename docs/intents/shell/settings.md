@@ -56,7 +56,8 @@ window while it is open.
 |---|---|
 | A click on the action's row | The row says "Press the new keys — Esc cancels"; from then on the compositor takes every key until a chord is pressed |
 | A chord | It replaces that action's keys; a chord another action or command held is taken from it, and the row says where it came from |
-| Super pressed and released alone | The tap, `Super` |
+| Super pressed and released alone | The tap, `Super`, once the double-tap interval has passed without a second |
+| Super tapped twice within that interval | The double tap, `Super Super` |
 | Esc alone | Cancels; the keys stay |
 | A chord not allowed for the action | The row says why (a typing key without Super, Ctrl or Alt); the keys stay |
 

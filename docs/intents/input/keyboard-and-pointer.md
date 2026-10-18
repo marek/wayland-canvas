@@ -26,7 +26,8 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 - **Super+Space opens the launcher**, the chord the user's other desktop
   opens apps with. A lone Super tap runs nothing by default; it is a key the
   user can give any action (`Super` in [config-file.md](config-file.md)),
-  and the moment Super is used with another key it is only a modifier.
+  and the moment Super is used with another key it is only a modifier. A
+  double tap goes back from a look away by default.
 - **The table below is the defaults.** `canvas.conf` changes any action's
   keys ([config-file.md](config-file.md)), and the settings window records
   new ones by pressing them ([../shell/settings.md](../shell/settings.md)).
@@ -55,7 +56,8 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Super+Tab, Super+W | `overview` | Overview toggle ([../canvas/overview.md](../canvas/overview.md)) |
 | Super+Ctrl+Arrows | `hop-left` … `hop-down` | Hop, as a 3-finger swipe does: the desktop in that direction; none that way, the view stays ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Ctrl+Shift+Arrows | `move-left` … `move-down` | Move the focused window to that desktop and follow |
-| Super+Alt+Arrows | `pan-left` … `pan-down` | Pan a third of a screen ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
+| Super+Alt+Arrows | `pan-left` … `pan-down` | Look away by a third of a screen ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
+| Double Super (`Super Super`) | `pan-back` | Back to the view a look away left: the drags, scrolls and keys that panned it undone at once ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Ctrl+D | `pin-desktop` | Pin the current view as a new desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+Ctrl+F4 | `abandon-desktop` | Abandon the current desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+T | `tiling` | Switch tiling on or off for the current desktop; a free view is pinned as a desktop first ([../canvas/desktops.md](../canvas/desktops.md)) |
@@ -81,7 +83,11 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
   the keyboard, so the chord that opened it closes it.
 - While the launcher is open, its own keys close it.
 - A lone Super tap runs whichever action holds `Super`, in the normal view
-  and in the overview.
+  and in the overview. Two lone taps within a compile-time interval
+  (`src/core/config.h`) are the double tap, which runs the action holding
+  `Super Super`. While an action holds the double tap, a single tap's own
+  action runs only once that interval has passed without a second tap;
+  with none, a single tap runs at once.
 - Sizes, colours and tuning stay in `src/core/config.h` (dwl-style: edit and
   rebuild).
 
@@ -94,8 +100,9 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Drag over a window | Title-bar drag and edge/corner resize: [../windows/title-bars.md](../windows/title-bars.md) |
 | Super+left-drag / Super+right-drag | Move / resize from anywhere on the window ([../windows/window-management.md](../windows/window-management.md)) |
 | Press vs drag | A press becomes a drag only past a small travel (compile-time, `src/core/config.h`); under it, the release is a click |
-| Drag or scroll on empty canvas | Pans ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
-| Scroll over a client | Scrolls the client |
+| Super with a drag on empty canvas, Super with a scroll anywhere | Looks away ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
+| A drag or a scroll on empty canvas, without Super | Nothing moves; a press there is a click |
+| Scroll over a client | Scrolls the client, unless Super is held |
 | In the overview | Pointer actions are [../canvas/overview.md](../canvas/overview.md)'s |
 
 ### Keyboard focus
@@ -127,9 +134,10 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
   ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)), so
   nothing is stolen. A shell surface holding the keyboard (a panel, the
   note editor) takes the keys before the overview does.
-- **A lone Super tap nested inside another compositor**: passes through
-  to the host, so the host's own Super bindings keep working; only on
-  its own outputs does the tap run the action that holds it.
+- **A lone Super tap or a double tap nested inside another compositor**:
+  passes through to the host, so the host's own Super bindings keep
+  working; only on its own outputs does a tap run the action that holds
+  it.
 - **Gestures while a client holds a pointer grab**: compositor gestures
   still act on the canvas ([gestures.md](gestures.md)); client-bound
   gestures follow the client's grab.
