@@ -15,6 +15,16 @@ Start-style launcher on a tap of the Windows key.
 Touchpad gestures lead; the keyboard and the pointer reach the same
 actions.
 
+## Why
+
+Different work wants different space. Code and writing want focus:
+windows side by side, none covering another, the screen used to the
+edge — tiling. Design, drawing and product review want room:
+references, drafts and feedback laid out in groups, as on a large
+dinner table, to step back from and take in whole, then lean in on
+one. wayland-canvas holds both on one plane: a desktop can be tiled,
+the canvas around it stays free, and a swipe moves between them.
+
 ## The experience
 
 | Area | What you get |

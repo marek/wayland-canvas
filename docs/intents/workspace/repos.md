@@ -30,7 +30,7 @@ user asking for that push at that moment.
 |---|---|
 | `src/`, `meson.build`, `protocols/`, `tests/` | Yes |
 | `README.md`, `LICENSE` | Yes |
-| `docs/` (intents, plans, skills, roles), `tools/`, `scripts/`, `.claude/settings.json`, `.omp/extensions/` (the omp extensions) | Yes |
+| `docs/` (intents, guide, media, plans, skills, roles), `tools/`, `scripts/`, `.claude/settings.json`, `.omp/extensions/` (the omp extensions) | Yes |
 | `subprojects/wlroots.wrap` | Yes |
 | `subprojects/wlroots/` — the fetched clone | No (ignored; meson fetches it) |
 | `build/`, `.venv/` | No (ignored) |

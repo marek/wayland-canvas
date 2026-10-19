@@ -30,10 +30,12 @@ Three co-equal artifacts; each keeps the others honest.
 When the spec and the code disagree, one of them drifted — your job is
 to figure out which, not to pick the convenient one.
 
-Three things sit beside the helix and are not part of it:
+Beside the helix, and not part of it:
 
 | Folder | What |
 |---|---|
+| `docs/guide/` | The user guide: installing, using and configuring the compositor, for the people who run it. |
+| `docs/media/` | The README's screenshots and walkthrough video, made by `tools/media.sh`. |
 | `docs/plans/` | Volatile checklists for a body of work. Disposable once the work ships. |
 | `docs/skills/` | How to work here: the "how" companion to intent's "what". |
 | `docs/roles/` | Who is working: the persona an agent adopts for a task. |
@@ -111,6 +113,17 @@ rules; they are binding:
 Building a plan writes its durable contract into `docs/intents/`; the
 plan itself keeps only tasks, checkboxes and decisions waiting for
 the user.
+
+### The guide and the front page
+
+`README.md` is the front page: what wayland-canvas is for, the
+pictures and the walkthrough, a quick start, links in. Detail lives
+in [docs/guide/](docs/guide/README.md), one page per subject. A change
+a user can see or set — a binding, a gesture, an option, a setting, a
+dependency — updates the guide page that describes it in the same body
+of work; the README changes only when the front page's picture of the
+compositor does. When what is on screen changes enough that the
+pictures no longer show it, `tools/media.sh` remakes them.
 
 ---
 

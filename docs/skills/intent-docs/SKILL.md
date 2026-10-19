@@ -17,7 +17,8 @@ code and not a diary.
    intent never quotes the conversation.
 2. The plans in `docs/plans/` (their design prose and decisions).
 3. The plan-time design prose for the build.
-4. The user-facing README, where it states behaviour.
+4. The user-facing README and the guide in `docs/guide/`, where they
+   state behaviour.
 
 **Not from reading the code.** Until the user lifts this, do not fill a
 doc by describing what a source file happens to do: that turns

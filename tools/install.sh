@@ -88,7 +88,7 @@ cmd_install() {
 	f=$(family)
 	case $f in
 		arch | debian) ;;
-		*) die "unsupported distro: build from source instead (see README), or package it yourself" ;;
+		*) die "unsupported distro: build from source instead (see docs/guide/install.md), or package it yourself" ;;
 	esac
 
 	local pattern
