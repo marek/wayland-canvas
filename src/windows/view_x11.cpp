@@ -32,9 +32,6 @@ bool x11_stacked(const View &view) {
 		&& !wl_list_empty(&view.x11->stack_link);
 }
 
-// The smallest pointer step a client can see: wl_fixed_t's 1/256 px.
-constexpr double wl_fixed_step = 1.0 / 256;
-
 } // namespace
 
 View::View(Server &server, wlr_xwayland_surface *x11)
@@ -214,12 +211,13 @@ int16_t View::x11_y() const {
 	return x11_coordinate(y - server.x11_offset_y);
 }
 
-void View::x11_follow_canvas() {
+bool View::x11_follow_canvas() {
 	int16_t want_x = x11_x(), want_y = x11_y();
 	if (x11->x == want_x && x11->y == want_y) {
-		return;
+		return false;
 	}
 	wlr_xwayland_surface_configure(x11, want_x, want_y, x11->width, x11->height);
+	return true;
 }
 
 void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
@@ -283,7 +281,6 @@ void Server::init_xwayland() {
 }
 
 void Server::finish_xwayland() {
-	x11_retell_.reset();
 	new_xwayland_surface_.disconnect();
 	xwayland_ready_.disconnect();
 	if (xwayland != nullptr) {
@@ -309,14 +306,18 @@ void Server::sync_x11() {
 	}
 	// Bottom first: the minimized under everything, then the canvas's order.
 	std::vector<View *> stack;
+	bool moved = false;
 	for (View *view : views) {
 		if (!view->is_x11() || view->override_redirect) {
 			continue;
 		}
-		view->x11_follow_canvas();
+		moved = view->x11_follow_canvas() || moved;
 		if (view->minimized && x11_stacked(*view)) {
 			stack.push_back(view);
 		}
+	}
+	if (moved) {
+		x11_put_pointer();
 	}
 	for (View *view : std::views::reverse(views)) {
 		if (!view->minimized && x11_stacked(*view)) {
@@ -376,32 +377,35 @@ void Server::x11_follow_pointer() {
 			each->x11_follow_canvas();
 		}
 	}
-	// Off X's screen already, this event reaches X before the move does.
-	if (rx >= 0 && rx < screen_w && ry >= 0 && ry < screen_h) {
-		return;
-	}
-	if (!x11_retell_) {
-		x11_retell_.reset(wl_event_loop_add_timer(loop,
-			[](void *data) -> int {
-				static_cast<Server *>(data)->retell_x11_pointer();
-				return 0;
-			},
-			this));
-	}
-	if (x11_retell_) {
-		wl_event_source_timer_update(x11_retell_.get(), config::x11_retell_ms);
-	}
+	x11_put_pointer();
 }
 
-// wlroots sends no motion that repeats the last one, so the pointer moves
-// by the smallest step a client can see.
-void Server::retell_x11_pointer() {
-	wlr_surface *focus = seat->pointer_state.focused_surface;
-	if (focus == nullptr || View::from_x11_surface(focus) == nullptr) {
+// X hears of its windows' moves on the window manager's connection and of
+// the pointer on Xwayland's wayland one, and may take the pointer event
+// first and keep it while the windows move away under it. X takes one
+// connection's requests in order, so a warp sent on the window manager's
+// own, after the moves, leaves X's pointer where the cursor is whichever it
+// took first. Over anything but an X11 window, X's pointer is in no window.
+void Server::x11_put_pointer() {
+	xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(xwayland);
+	Output *output = output_at(cursor->x, cursor->y);
+	if (conn == nullptr || output == nullptr) {
 		return;
 	}
-	wlr_seat_pointer_notify_motion(seat, static_cast<uint32_t>(now_ms()),
-		seat->pointer_state.sx + wl_fixed_step, seat->pointer_state.sy);
+	Point p = output->local_to_canvas(cursor->x - output->lx, cursor->y - output->ly);
+	std::optional<ViewHit> hit = view_at(p.x, p.y, output->camera.drawn().zoom);
+	if (!hit.has_value() || !hit->view->is_x11()) {
+		return;
+	}
+	// Where Xwayland puts its pointer for the same event: the window's X
+	// position plus the whole pixels of the point on its surface.
+	int16_t x = x11_coordinate(
+		hit->view->x11_x() + wl_fixed_to_int(wl_fixed_from_double(hit->sx)));
+	int16_t y = x11_coordinate(
+		hit->view->x11_y() + wl_fixed_to_int(wl_fixed_from_double(hit->sy)));
+	xcb_window_t root = xcb_setup_roots_iterator(xcb_get_setup(conn)).data->root;
+	xcb_warp_pointer(conn, XCB_NONE, root, 0, 0, 0, 0, x, y);
+	xcb_flush(conn);
 }
 
 #else // CANVAS_HAVE_XWAYLAND
@@ -416,7 +420,7 @@ void Server::finish_xwayland() {}
 void Server::handle_xwayland_ready() {}
 void Server::sync_x11() {}
 void Server::x11_follow_pointer() {}
-void Server::retell_x11_pointer() {}
+void Server::x11_put_pointer() {}
 
 View *View::from_x11_surface(wlr_surface *) {
 	return nullptr;

@@ -184,11 +184,10 @@ private:
 	Listener new_xwayland_surface_, xwayland_ready_;
 	// X's stacking as last sent, bottom first, by view session id.
 	std::vector<uint64_t> x11_stack_;
-	// A pointer event that reached X before the offset's move did is told
-	// again once the move has: the X11 window under the pointer is sent its
-	// place once more.
-	void retell_x11_pointer();
-	EventSourcePtr x11_retell_;
+	// After X's windows move, X's pointer is put where the cursor is over
+	// them, on the window manager's own connection, so X applies it after
+	// the moves.
+	void x11_put_pointer();
 	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
 	void handle_new_xdg_popup(wlr_xdg_popup *popup);
 	Listener new_xdg_toplevel_, new_xdg_popup_;

@@ -213,8 +213,9 @@ private:
 	// Where X has the window: its canvas position less the shared offset.
 	int16_t x11_x() const;
 	int16_t x11_y() const;
-	// Tells X the window's canvas place, when X has it elsewhere.
-	void x11_follow_canvas();
+	// Tells X the window's canvas place, when X has it elsewhere; true when
+	// it did.
+	bool x11_follow_canvas();
 	wlr_surface *x11_surface() const;
 	wlr_box x11_geometry() const;
 	bool x11_initialized() const;
