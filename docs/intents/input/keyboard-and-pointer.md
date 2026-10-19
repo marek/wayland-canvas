@@ -149,6 +149,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 ## Cross-links
 
 - [config-file.md](config-file.md), [gestures.md](gestures.md),
+  [touch-and-pen.md](touch-and-pen.md),
   [../shell/settings.md](../shell/settings.md),
   [../canvas/infinite-canvas.md](../canvas/infinite-canvas.md),
   [../canvas/desktops.md](../canvas/desktops.md),

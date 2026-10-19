@@ -31,7 +31,7 @@ their values.
 | `intents/*.md` | What the project is and the words it uses |
 | [workspace/](workspace/) | The repo, building and running |
 | [canvas/](canvas/) | The plane, the desktops, the overview |
-| [input/](input/) | Touchpad gestures, keyboard and pointer, the config file |
+| [input/](input/) | Touchpad gestures, keyboard and pointer, touch and the pen, the config file |
 | [windows/](windows/) | Title bars and window management |
 | [apps/](apps/) | Applications: the launcher, the desktop entries it finds them by, and the capture UI |
 | [shell/](shell/) | The desktop shell and its plugins: the top bar, the plugin model, the overview toolbar, the app bar, sticky notes, light and dark, the settings window |
@@ -54,6 +54,7 @@ their values.
 | [canvas/overview.md](canvas/overview.md) | Entering and leaving, fit, the target model, hop semantics, the overview UI: tabs, help line, shelf, hints, pointer and key actions |
 | [input/gestures.md](input/gestures.md) | The touchpad gesture table (normal vs overview), the swipe presets and the pinch switch, finger counts, hops going where the fingers point, follow-the-fingers transitions, commit/spring-back, forwarding to clients, sloppy pinches treated as swipes |
 | [input/keyboard-and-pointer.md](input/keyboard-and-pointer.md) | Bindings table (every action's name and default keys), Super tap, why every default canvas shortcut includes Super, pointer focus, drags, scroll, touchpad settings, nested-mode notes |
+| [input/touch-and-pen.md](input/touch-and-pen.md) | The touchscreen and the pen: touch and tablet input for apps, the left button and press-and-hold on the compositor's UI, two fingers move the view, swipes by the preset, the screen they act on, the lock |
 | [input/config-file.md](input/config-file.md) | `canvas.conf`: place, first run, sections, chords, resolution against the defaults, reload, errors, edits |
 | [windows/title-bars.md](windows/title-bars.md) | Server-side title bars ("menu bars"): the Windows 11 look, buttons, states, negotiation policy, resize zones |
 | [windows/x11.md](windows/x11.md) | X11 applications through Xwayland: the window as a view, the two shell halves, what is out of scope for now |

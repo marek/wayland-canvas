@@ -21,6 +21,8 @@ without a policy is not added.
 | xdg-activation | activation only with tokens that came from real input |
 | pointer-gestures | the gestures the canvas does not claim are forwarded to clients ([../input/gestures.md](../input/gestures.md)) |
 | relative-pointer | relative pointer motion for clients that ask for it |
+| wl_seat touch | touchscreens: a touch on a client surface reaches its client as touch ([../input/touch-and-pen.md](../input/touch-and-pen.md)) |
+| tablet-v2 | the pen: in and out of range, motion, pressure, tilt, the tip and the buttons, for the client under it ([../input/touch-and-pen.md](../input/touch-and-pen.md)) |
 | cursor-shape | standard cursor shapes |
 | screencopy, export-dmabuf | screenshots and capture (grim), and screen sharing through the portal ([below](#screen-sharing)); a copy asks for a frame through `needs_frame` ([../render/rendering.md](../render/rendering.md), [../bugs/screencopy-never-returned.md](../bugs/screencopy-never-returned.md)) |
 | ext-image-copy-capture-v1 | offscreen capture (grim, the portal's sharing): an output or one window ([../render/rendering.md](../render/rendering.md)); a window source re-renders the window alone at its told scale, and a frame request is always answered — with a fresh render, never damage-gated |

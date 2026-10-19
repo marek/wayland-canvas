@@ -17,7 +17,9 @@ zoomed-out one onto a free spot too — and a 4-finger swipe up opens the
 zoomed-out canvas. The user picks the preset that assigns the finger
 counts, or turns them off, whether Super + a 2-finger pinch scales a
 desktop, and which way the pointer, the scroll and the swipes point. Only 2-finger gestures and finger counts the compositor does not
-bind are forwarded to clients.
+bind are forwarded to clients. The touchscreen's three- and four-finger
+swipes run the same table by the same preset
+([touch-and-pen.md](touch-and-pen.md)).
 
 ## Presets
 
