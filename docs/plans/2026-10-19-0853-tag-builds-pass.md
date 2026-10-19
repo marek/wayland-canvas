@@ -25,7 +25,8 @@ step. The rules are in
 
 ## Tasks
 
-- [ ] The Arch job installs git, checks out, checks the tag, then installs the makedepends read from `packaging/PKGBUILD`; packaging.md's Release builds table says where each job's build dependencies come from
-- [ ] `meson.build`, the PKGBUILD, the Debian control file and `flake.nix` name 1.0.2; `tools/ci-check-tag.sh v1.0.2` passes
-- [ ] The Arch job's steps, run as root in a rootless `archlinux:base-devel` root filesystem, build the package
+- [x] The Arch job installs git, checks out, checks the tag, then installs the makedepends read from `packaging/PKGBUILD`; packaging.md's Release builds table says where each job's build dependencies come from
+- [x] `meson.build`, the PKGBUILD, the Debian control file and `flake.nix` name 1.0.2; `tools/ci-check-tag.sh v1.0.2` passes
+- [x] The Arch job's steps, run as root in a rootless `archlinux:base-devel` root filesystem, build the package
 - [ ] On GitHub: main and a v1.0.2 tag pushed build both packages and draft the release (the user pushes)
+- [ ] The Arch `depends` name librsvg and lcms2: the compositor built in that root filesystem links both, and the package does not require them (the user to decide)

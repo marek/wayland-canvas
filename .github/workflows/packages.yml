@@ -25,14 +25,10 @@ jobs:
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
-      # pacman first: actions/checkout needs git, and makepkg needs the
-      # makedepends of packaging/PKGBUILD present (it runs with --nodeps).
-      - name: build dependencies
+      # git first: actions/checkout needs it
+      - name: staging tools
         run: |
-          pacman -Syu --noconfirm --needed git clang meson ninja pkgconf \
-            wayland wayland-protocols libdrm mesa libinput seatd libxkbcommon \
-            pixman libdisplay-info hwdata cairo pango librsvg glib2 json-glib \
-            systemd-libs
+          pacman -Syu --noconfirm --needed git
           git config --system --add safe.directory '*'
 
       - uses: actions/checkout@v7
@@ -40,6 +36,14 @@ jobs:
       - name: the tag names the project version
         if: startsWith(github.ref, 'refs/tags/v')
         run: tools/ci-check-tag.sh "${{ github.ref_name }}"
+
+      # makepkg runs with --nodeps, so its makedepends must be present:
+      # read from packaging/PKGBUILD itself, the one list of them there is
+      - name: build dependencies
+        shell: bash
+        run: |
+          source packaging/PKGBUILD
+          pacman -S --noconfirm --needed "${makedepends[@]}"
 
       - name: wlroots source
         run: tools/fetch-wlroots.sh

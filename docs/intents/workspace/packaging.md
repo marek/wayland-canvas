@@ -47,6 +47,7 @@ makepkg's source tarball nor the rootless root filesystem is rebuilt there:
 |---|---|
 | Trigger | a pushed `v*` tag, or a manual run from the Actions tab; nothing on a push to a branch |
 | Tag and version agree | `tools/ci-check-tag.sh` fails the run before anything is built when the tag is not `v` plus the `meson.build` version |
+| Build dependencies | named once, in each format's own build file: the Arch job installs the `makedepends` it reads from `packaging/PKGBUILD` (makepkg runs with `--nodeps`), and `packaging/debian/build-deb.sh` installs the Debian ones with apt. The workflow keeps no list of its own |
 | wlroots | `tools/fetch-wlroots.sh` checks the wrap's revision out before the source tarball is made, so the package build itself needs no network for it |
 | Artifacts | the two packages only — `.pkg.tar.zst` and `.deb`, collected from `dist/`. No source archive: the packages are the release |
 | Release | a tag drafts a GitHub release carrying both packages; publishing it stays a human step |
