@@ -97,7 +97,7 @@ Item {
 
 				Text {
 					anchors.horizontalCenter: parent.horizontalCenter
-					text: Qt.formatTime(clock.now, "HH:mm")
+					text: Qt.formatTime(clock.date, "HH:mm")
 					color: UiTheme.text
 					font.family: UiTheme.fontFamily
 					font.pixelSize: 64
@@ -105,7 +105,7 @@ Item {
 
 				Text {
 					anchors.horizontalCenter: parent.horizontalCenter
-					text: Qt.formatDate(clock.now, "dddd d MMMM")
+					text: Qt.formatDate(clock.date, "dddd d MMMM")
 					color: UiTheme.muted
 					font.family: UiTheme.fontFamily
 					font.pixelSize: UiTheme.fontBody
@@ -144,15 +144,10 @@ Item {
 		}
 	}
 
-	QtObject {
+	// Quickshell's own clock, as the bar's: a QML Timer here never fired
+	// while the session was locked, and the time stood still.
+	SystemClock {
 		id: clock
-		property date now: new Date()
-	}
-
-	Timer {
-		running: lock.locked
-		interval: 1000
-		repeat: true
-		onTriggered: clock.now = new Date()
+		precision: SystemClock.Minutes
 	}
 }

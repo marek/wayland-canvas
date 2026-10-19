@@ -58,7 +58,7 @@ checked through PAM. A locker that dies leaves the session locked.
 
 | Subject | Rule |
 |---|---|
-| Surfaces | one per output, covering it, with the clock, the date and a password field |
+| Surfaces | one per output, covering it, with the clock — the current time to the minute, kept while the session stays locked — the date and a password field |
 | The password | checked through PAM against the service the package installs as `sysconfdir/pam.d/wayland-canvas`, which is `/etc/pam.d/wayland-canvas` for both packages; the service name and the directory it is read from are plugin settings, `wayland-canvas` and `/etc/pam.d` unless set, so a test can point them at a scratch service. The directory is always a real one: Quickshell's `PamContext` refuses an empty directory and checks no password at all |
 | A wrong password | the field clears and says so; the session stays locked and the attempt can be made again |
 | Another locker | swaylock, hyprlock or any other ext-session-lock client locks the session the same way; the plugin's own lock is only the one the shell ships |

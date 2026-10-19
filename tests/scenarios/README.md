@@ -232,6 +232,19 @@ own the machine's Wayland display namespace and GPU.
   bridge, and the scenario answers its picker by clicking the source the
   client asked for.
 
+- **`session.cpp`** — the shell plugins a login needs, in a private world:
+  its own `dbus-daemon` system and session buses under
+  `tmp/scenarios/session/bus/`, scratch XDG dirs, and a scratch PAM service
+  that accepts one known password through `pam_exec`, so the machine's
+  notification server, polkit agent, logind session and login stack are
+  never reached. The notification server keeps its bus name against a
+  second daemon; the lock shortcut locks the session through the locker
+  plugin, whose clock moves on to the next minute while locked (a shot
+  just past the minute's turn, so the run waits up to a minute), a wrong
+  password keeps it locked and the right one unlocks it; the password
+  dialog, on the polkit plugin's stand-in flow, stays open on a wrong
+  password and tells polkit so.
+
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and
   session buses on sockets under `tmp/scenarios/bar/bus/` (a bar process must

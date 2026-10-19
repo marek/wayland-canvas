@@ -8,11 +8,13 @@
 // the PAM service the locker checks against is a scratch one that accepts
 // one known password through pam_exec — never the real login stack and
 // never a real password.
+#include <algorithm>
 #include <cairo.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
@@ -249,6 +251,38 @@ long ink_in(const char *name, wlr_box box) {
 	}
 	cairo_surface_destroy(image);
 	return ink;
+}
+
+// How many pixels differ between two shots in `box`.
+long pixels_changed(const char *before, const char *after, wlr_box box) {
+	cairo_surface_t *a = load_png(before);
+	cairo_surface_t *b = load_png(after);
+	long changed = -1;
+	if (a != nullptr && b != nullptr) {
+		cairo_surface_flush(a);
+		cairo_surface_flush(b);
+		int w = std::min(cairo_image_surface_get_width(a), cairo_image_surface_get_width(b));
+		int h = std::min(cairo_image_surface_get_height(a), cairo_image_surface_get_height(b));
+		changed = 0;
+		for (int y = box.y; y < box.y + box.height && y < h; y++) {
+			const auto *ra = reinterpret_cast<const uint32_t *>(
+				cairo_image_surface_get_data(a) + y * cairo_image_surface_get_stride(a));
+			const auto *rb = reinterpret_cast<const uint32_t *>(
+				cairo_image_surface_get_data(b) + y * cairo_image_surface_get_stride(b));
+			for (int x = box.x; x < box.x + box.width && x < w; x++) {
+				if ((ra[x] & 0x00ffffffu) != (rb[x] & 0x00ffffffu)) {
+					changed++;
+				}
+			}
+		}
+	}
+	if (a != nullptr) {
+		cairo_surface_destroy(a);
+	}
+	if (b != nullptr) {
+		cairo_surface_destroy(b);
+	}
+	return changed;
 }
 
 // ------------------------------------------------- the shell's surfaces
@@ -599,7 +633,18 @@ int run_step() {
 		shot("locked");
 		return 300;
 	}
-	case 29: { // a wrong password keeps it locked
+	case 29: { // the clock keeps time while locked: a shot just past the next minute
+		int second = static_cast<int>(std::time(nullptr) % 60);
+		return (60 - second) * 1000 + 2000;
+	}
+	case 30:
+		shot("locked-next-minute");
+		return 300;
+	case 31: { // a wrong password keeps it locked
+		long moved = pixels_changed("locked", "locked-next-minute",
+			{screen_w / 2 - 150, 280, 300, 80});
+		check(moved > 100, std::format("the lock clock moved on to the next minute "
+			"({} px of it changed)", moved));
 		long ink = ink_in("locked", {screen_w / 2 - 200, screen_h / 2 - 120, 400, 240});
 		check(ink > 1000, std::format("the locker drew its card ({} px of ink)", ink));
 		type_text("wrong-password");
@@ -607,28 +652,28 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 2500;
 	}
-	case 30: {
+	case 32: {
 		check(server->lock.locked(), "a wrong password leaves the session locked");
 		type_text(password);
 		key(KEY_ENTER, true);
 		key(KEY_ENTER, false);
 		return 2500;
 	}
-	case 31: {
+	case 33: {
 		if (server->lock.locked() && retries++ < 100) {
 			return -100;
 		}
 		check(!server->lock.locked(), "the right password unlocked the session");
 		return 300;
 	}
-	case 32: { // the password dialog, on the plugin's stand-in flow: the
+	case 34: { // the password dialog, on the plugin's stand-in flow: the
 		// machine's own polkitd is never registered with.
 		run_action("canvas.polkit/test-dialog",
 			"{\"message\":\"Install a package\",\"user\":\"tester\","
 			"\"password\":\"canvas-scratch-password\"}");
 		return 1200;
 	}
-	case 33: {
+	case 35: {
 		if (layer_named("wayland-canvas-polkit") == nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -640,7 +685,7 @@ int run_step() {
 		shot("polkit");
 		return 300;
 	}
-	case 34: { // what it says, then a wrong password
+	case 36: { // what it says, then a wrong password
 		long ink = ink_in("polkit", {screen_w / 2 - 190, screen_h / 2 - 90, 380, 180});
 		check(ink > 2000, std::format("the dialog shows the action and its field "
 			"({} px of ink)", ink));
@@ -649,7 +694,7 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 1200;
 	}
-	case 35: {
+	case 37: {
 		check(layer_named("wayland-canvas-polkit") != nullptr,
 			"a wrong password leaves the dialog open");
 		check(flow_log().find("refused") != std::string::npos,
@@ -659,7 +704,7 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 1200;
 	}
-	case 36: {
+	case 38: {
 		if (layer_named("wayland-canvas-polkit") != nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -672,7 +717,7 @@ int run_step() {
 			"{\"message\":\"Something else\",\"password\":\"never typed\"}");
 		return 1200;
 	}
-	case 37: {
+	case 39: {
 		if (layer_named("wayland-canvas-polkit") == nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -682,7 +727,7 @@ int run_step() {
 		key(KEY_ESC, false);
 		return 1200;
 	}
-	case 38: {
+	case 40: {
 		if (layer_named("wayland-canvas-polkit") != nullptr && retries++ < 100) {
 			return -100;
 		}
@@ -692,7 +737,7 @@ int run_step() {
 			"polkit was told the request was cancelled");
 		return 300;
 	}
-	case 39: {
+	case 41: {
 		finished = true;
 		wl_display_terminate(server->display);
 		return -1;
