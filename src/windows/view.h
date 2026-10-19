@@ -116,6 +116,17 @@ public:
 	bool wants_fullscreen() const {
 		return is_x11() ? x11_wants_fullscreen() : xdg_wants_fullscreen();
 	}
+	// The window it belongs to: an xdg toplevel's parent, an X11 window's
+	// WM_TRANSIENT_FOR; nullptr for none.
+	View *shell_parent() const {
+		return is_x11() ? x11_parent() : xdg_parent();
+	}
+	// A modal window floats over the window it blocks and never joins a
+	// tiled board; a dialog that leaves its window usable tiles like any
+	// (docs/intents/windows/window-management.md).
+	bool is_modal() const {
+		return is_x11() ? x11_modal() : xdg_modal();
+	}
 
 	Server &server;
 	// Exactly one of the two is set; `shell()` says which.
@@ -180,6 +191,8 @@ private:
 	bool xdg_wants_maximized() const;
 	bool xdg_wants_fullscreen() const;
 	bool xdg_resize_settled(uint32_t serial) const;
+	View *xdg_parent() const;
+	bool xdg_modal() const;
 	void xdg_for_each_surface(
 		std::function_ref<void(wlr_surface *surface, int sx, int sy)> fn) const;
 	wlr_surface *xdg_surface_at(double lx, double ly, double *sx, double *sy) const;
@@ -209,6 +222,8 @@ private:
 	pid_t x11_client_pid() const;
 	bool x11_wants_maximized() const;
 	bool x11_wants_fullscreen() const;
+	View *x11_parent() const;
+	bool x11_modal() const;
 	bool x11_resize_settled(uint32_t serial) const;
 	void x11_for_each_surface(
 		std::function_ref<void(wlr_surface *surface, int sx, int sy)> fn) const;

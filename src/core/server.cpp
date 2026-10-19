@@ -530,6 +530,9 @@ bool Server::init(const Options &options) {
 	wlr_xdg_activation_v1 *activation = wlr_xdg_activation_v1_create(d);
 	request_activate_.connect<&Server::handle_request_activate>(
 		activation->events.request_activate, this);
+	// A wayland dialog says through it that it is modal: it floats over the
+	// window it blocks (docs/intents/windows/window-management.md).
+	wlr_xdg_wm_dialog_v1_create(d, 1);
 
 	new_surface_.connect<&Server::handle_new_surface>(
 		compositor->events.new_surface, this);

@@ -172,20 +172,7 @@ void Overview::finish_exit(const Camera &near, const Camera &far, double t) {
 	active_ = false;
 	server.ipc.emit_overview(output_, false);
 	output_.camera.animate_zoom(near, far, t, 0);
-	// Keyboard focus follows the target: if the focused window is not in it,
-	// focus the topmost one that is.
-	View *focused = server.focused_view;
-	bool inside = false;
-	if (focused != nullptr) {
-		Point centre = box_centre(focused->frame_box());
-		inside = wlr_box_contains_point(&target_.box, centre.x, centre.y);
-	}
-	if (!inside) {
-		std::vector<View *> in_target = server.canvas.views_in(target_.box);
-		if (!in_target.empty()) {
-			server.focus_view(in_target.front());
-		}
-	}
+	server.focus_in(target_.box);
 	server.pointer_focus_stale = true;
 }
 

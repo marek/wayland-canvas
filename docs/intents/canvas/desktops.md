@@ -14,7 +14,9 @@ own scale, set with Super and a two-finger pinch and returned to 100 % with
 Super+0: the scale enlarges or shrinks the desktop's picture, and the
 windows on it keep their size and layout and stay usable at it. Each
 desktop can be switched to tiling: while it is on, the desktop keeps its
-windows tiled, and every window opened on it joins the tiling.
+windows tiled, and every window opened on it joins the tiling, a modal
+dialog aside: it floats over the window it blocks
+([../windows/window-management.md](../windows/window-management.md)).
 
 ## Design considerations
 

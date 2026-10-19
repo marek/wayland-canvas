@@ -95,6 +95,19 @@ bool View::xdg_wants_fullscreen() const {
 	return wlr->requested.fullscreen;
 }
 
+View *View::xdg_parent() const {
+	if (wlr->parent == nullptr || wlr->parent->base == nullptr) {
+		return nullptr;
+	}
+	return static_cast<View *>(wlr->parent->base->data);
+}
+
+// Modal through xdg-dialog-v1: the client holds its parent's input until it goes.
+bool View::xdg_modal() const {
+	wlr_xdg_dialog_v1 *dialog = wlr_xdg_dialog_v1_try_from_wlr_xdg_toplevel(wlr);
+	return dialog != nullptr && dialog->modal;
+}
+
 bool View::xdg_resize_settled(uint32_t serial) const {
 	return wlr->base->current.configure_serial >= serial;
 }

@@ -23,6 +23,7 @@ or after that commit):
 |---|---|
 | Centre | centred in the viewport of the output under the cursor; from the overview, centred on the target (the desktop, or the free spot) |
 | Launched from the overview | centred on the target the overview had at the launch, even when the overview closed or its target moved before the window appeared: a window whose process (or an ancestor) the compositor launched from the overview in the last 30 s (launcher entries, Super+Return). A window handed to an instance already running, or started over D-Bus, cannot be traced and follows the rule above |
+| Dialog | a window with a parent — an xdg toplevel given one, an X11 window transient for another — is centred over it (by the rules above when it has none). A modal one — X11's `_NET_WM_STATE_MODAL`, or a wayland dialog made modal through xdg-dialog-v1 — floats there even on a tiled desktop: it never joins the board, so it sits over the window it blocks. A dialog that leaves its window usable tiles like any window |
 | Bars | inside the area not covered by layer-shell exclusive zones |
 | Title bar | clamped so the title bar is fully on screen |
 | Taken spot | if another window already occupies the position, cascade by 32 px |
@@ -37,6 +38,7 @@ raises) is owned by
 | Click-to-focus | clicking a window focuses it and raises it |
 | New window | takes the focus, except a window launched from the overview that opens where no output shows it (the overview closed, or moved on, before it appeared): the keyboard stays with the window in front of you, and a hint says where it opened ("Opened in Desktop 3", "Opened in a free area") |
 | Minimize | focus passes to the topmost visible window |
+| Going to a desktop | Super+N, a hop or leaving the overview onto it: the keyboard goes to the window last used there, the topmost of its windows, unless the focused window is already on it; a desktop with no window leaves the keyboard where it was |
 | Fullscreen | a fullscreen window is raised above the others |
 
 Maximize area, by precedence:

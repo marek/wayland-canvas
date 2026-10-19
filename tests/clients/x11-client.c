@@ -1,11 +1,13 @@
 // An X11 client for the scenarios: maps one window of a known size, colour
-// and title through xcb, and says on stdout what reaches it —
+// and title through xcb (and with --dialog, on its first key, a modal dialog
+// transient for it), and says on stdout what reaches it —
 //
 //   MAPPED <w>x<h>         the window is up
 //   KEY <keycode> <state>  a key press arrived, with X's modifier mask
 //   BUTTON <n> <x>,<y>     a pointer button arrived at that point of the window
 //   CONFIGURED <w>x<h>     the window manager resized it
 //   POPUP <x>,<y>          an override-redirect window was mapped there
+//   DIALOG <w>x<h>         the modal dialog is up, titled <title>-dialog
 //   OFFERED                the client owns the X11 clipboard
 //   PASTED <text>          what the X11 clipboard holds, read back
 //   CLOSING                WM_DELETE_WINDOW arrived; the client exits
@@ -54,7 +56,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	const char *offer = NULL;
-	int popup = 0, paste = 0, paste_tries = 0;
+	int popup = 0, paste = 0, paste_tries = 0, dialog = 0;
 	for (int i = 1; i < argc; i++) {
 		if (strncmp(argv[i], "--offer=", 8) == 0) {
 			offer = argv[i] + 8;
@@ -62,6 +64,8 @@ int main(int argc, char **argv) {
 			popup = 1;
 		} else if (strcmp(argv[i], "--paste") == 0) {
 			paste = 1;
+		} else if (strcmp(argv[i], "--dialog") == 0) {
+			dialog = 1;
 		}
 	}
 	int screen_number = 0;
@@ -173,6 +177,34 @@ int main(int argc, char **argv) {
 		}
 		switch (event->response_type & ~0x80) {
 		case XCB_KEY_PRESS:
+			// With --dialog, the first key opens a modal dialog of our own:
+			// transient for the window, of the dialog type and
+			// _NET_WM_STATE_MODAL, as toolkits make them.
+			if (dialog == 1) {
+				dialog = 2;
+				xcb_window_t modal = xcb_generate_id(connection);
+				xcb_create_window(connection, XCB_COPY_FROM_PARENT, modal, screen->root,
+					0, 0, 300, 200, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
+					XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, values);
+				char dialog_title[128];
+				snprintf(dialog_title, sizeof dialog_title, "%s-dialog", title);
+				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal,
+					XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, (uint32_t)strlen(dialog_title),
+					dialog_title);
+				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal,
+					XCB_ATOM_WM_TRANSIENT_FOR, XCB_ATOM_WINDOW, 32, 1, &window);
+				xcb_atom_t type = intern(connection, "_NET_WM_WINDOW_TYPE");
+				xcb_atom_t type_dialog = intern(connection, "_NET_WM_WINDOW_TYPE_DIALOG");
+				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal, type,
+					XCB_ATOM_ATOM, 32, 1, &type_dialog);
+				xcb_atom_t state = intern(connection, "_NET_WM_STATE");
+				xcb_atom_t state_modal = intern(connection, "_NET_WM_STATE_MODAL");
+				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal, state,
+					XCB_ATOM_ATOM, 32, 1, &state_modal);
+				xcb_map_window(connection, modal);
+				xcb_flush(connection);
+				say("DIALOG 300x200\n");
+			}
 			say("KEY %u %u\n", ((xcb_key_press_event_t *)event)->detail,
 				((xcb_key_press_event_t *)event)->state);
 			break;

@@ -381,8 +381,9 @@ void Canvas::settle(View &view) {
 		}
 		return;
 	}
-	// A window without a board joins the tiled desktop it stands on, if any.
-	if (view.mapped && !view.minimized) {
+	// A window without a board joins the tiled desktop it stands on, if any;
+	// a modal one floats over the window it blocks.
+	if (view.mapped && !view.minimized && !view.is_modal()) {
 		Point centre = box_centre(view.frame_box());
 		if (Desktop *onto = desktops.at(centre.x, centre.y); onto != nullptr
 				&& onto->tiling() && !view.maximized && !view.fullscreen) {

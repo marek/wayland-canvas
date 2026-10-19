@@ -178,6 +178,17 @@ void place(View &view) {
 		view.y = area.y + view.deco.titlebar();
 		return;
 	}
+	// A dialog sits over the window it belongs to, its title bar never above
+	// that window's.
+	if (View *parent = view.shell_parent(); parent != nullptr && parent->mapped
+			&& !parent->minimized) {
+		wlr_box over = parent->frame_box();
+		double px = over.x + (over.width - fw) / 2.0;
+		double py = std::fmax(over.y, over.y + (over.height - fh) / 2.0);
+		view.x = static_cast<int>(std::round(px)) + bw;
+		view.y = static_cast<int>(std::round(py)) + tb + bw;
+		return;
+	}
 
 	// Inside the screen minus bars (exclusive zones), at the zoom the view
 	// rests at there.
@@ -970,6 +981,21 @@ void Server::focus_view(View *view) {
 	}
 	if (focused_layer == nullptr) {
 		focus_keyboard(view != nullptr ? view->surface() : nullptr);
+	}
+}
+
+void Server::focus_in(wlr_box box) {
+	if (focused_view != nullptr) {
+		Rect frame = focused_view->frame_rect();
+		if (wlr_box_contains_point(&box, frame.cx(), frame.cy())) {
+			return;
+		}
+	}
+	for (View *view : canvas.views_in(box)) {
+		if (!view->override_redirect) {
+			focus_view(view);
+			return;
+		}
 	}
 }
 

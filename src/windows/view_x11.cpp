@@ -132,6 +132,15 @@ bool View::x11_wants_fullscreen() const {
 	return x11->fullscreen;
 }
 
+View *View::x11_parent() const {
+	return x11->parent != nullptr ? static_cast<View *>(x11->parent->data) : nullptr;
+}
+
+// _NET_WM_STATE_MODAL: the window holds its parent's input until it goes.
+bool View::x11_modal() const {
+	return x11->modal;
+}
+
 bool View::x11_resize_settled(uint32_t) const {
 	return true; // X11 acks nothing: the resize ends with the button
 }

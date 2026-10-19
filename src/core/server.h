@@ -69,6 +69,10 @@ public:
 	View *last_minimized_view();
 	// Activates and raises `view`; nullptr clears the focus.
 	void focus_view(View *view);
+	// Keyboard focus follows a move onto `box`: the focused window keeps it
+	// when it stands there, else the topmost window there, the last used,
+	// takes it (docs/intents/windows/window-management.md).
+	void focus_in(wlr_box box);
 	void focus_keyboard(wlr_surface *surface);
 	// view_x11.cpp: X's own picture of its windows follows the canvas
 	// (docs/intents/windows/x11.md). Once per frame X is told the canvas's

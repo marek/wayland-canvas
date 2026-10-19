@@ -193,6 +193,14 @@ void key(uint32_t code, bool pressed) {
 	wlr_keyboard_notify_key(&kbd, &ev);
 }
 
+// Super with one key, as the shortcuts are pressed.
+void super_key(uint32_t code) {
+	key(KEY_LEFTMETA, true);
+	key(code, true);
+	key(code, false);
+	key(KEY_LEFTMETA, false);
+}
+
 View *x11_view() {
 	for (View *view : server->views) {
 		if (view->mapped && view->is_x11()) {
@@ -671,6 +679,73 @@ int run_step() {
 			said_clicks(client)));
 		reap_client(client);
 		output().camera.jump(home);
+		return 300;
+	}
+	case 40: { // a modal dialog floats over its window on a tiled desktop
+		super_key(KEY_T);
+		check(start_client(client, {"--size=600x400", "--title=x11-tiled", "--dialog"}),
+			"an X11 window with a modal dialog started on a tiled desktop");
+		return 1500;
+	}
+	case 41: {
+		if (titled("x11-tiled") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		return 800; // tiled by now
+	}
+	case 42: { // its first key opens the dialog
+		key(KEY_D, true);
+		key(KEY_D, false);
+		return 600;
+	}
+	case 43: {
+		if (titled("x11-tiled-dialog") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		return 600;
+	}
+	case 44: {
+		View *main = titled("x11-tiled"), *dialog = titled("x11-tiled-dialog");
+		check(main != nullptr && main->tiled && main->board.has_value(),
+			"the window joined the tiled desktop's board");
+		check(dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+			"its modal dialog floats, off the board");
+		bool centred = false;
+		if (main != nullptr && dialog != nullptr) {
+			Rect a = main->frame_rect(), b = dialog->frame_rect();
+			centred = std::abs(a.cx() - b.cx()) <= 1 && std::abs(a.cy() - b.cy()) <= 1;
+		}
+		check(centred, "centred over the window it blocks");
+		// Going to a desktop gives the keyboard to the window last used there.
+		super_key(KEY_2);
+		return 1000;
+	}
+	case 45: {
+		check(start_client(other, {"--size=300x200", "--title=x11-two"}),
+			"an X11 window started on desktop 2");
+		return 1500;
+	}
+	case 46: {
+		if (titled("x11-two") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		check(titled("x11-two") != nullptr && server->focused_view == titled("x11-two"),
+			"it took the keyboard as it opened");
+		super_key(KEY_1);
+		return 1000;
+	}
+	case 47: {
+		check(server->focused_view != nullptr
+				&& server->focused_view == titled("x11-tiled-dialog"),
+			"Super+1 gave the keyboard to the window last used on desktop 1");
+		super_key(KEY_2);
+		return 1000;
+	}
+	case 48: {
+		check(server->focused_view != nullptr && server->focused_view == titled("x11-two"),
+			"Super+2 gave it back to the window on desktop 2");
+		reap_client(client);
+		reap_client(other);
 		return 300;
 	}
 	case 90: {
