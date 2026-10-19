@@ -54,8 +54,8 @@ Links: [overview.md](../intents/overview.md),
 ## Tasks
 
 - [x] Plan written and indexed
-- [ ] Intent: the purpose in `docs/intents/overview.md`; the guide and the media in the docs layout (`AGENTS.md`, `docs/intents/README.md`, `docs/intents/workspace/repos.md`, the `intent-docs` skill); the pointers that named the README (`platform/protocols.md`, `tools/install.sh`)
-- [ ] The guide in `docs/guide/`: an index and a page per subject, carrying every section the README held
+- [x] Intent: the purpose in `docs/intents/overview.md`; the guide and the media in the docs layout (`AGENTS.md`, `docs/intents/README.md`, `docs/intents/workspace/repos.md`, the `intent-docs` skill); the pointers that named the README (`platform/protocols.md`, `tools/install.sh`)
+- [x] The guide in `docs/guide/`: an index and a page per subject, carrying every section the README held
 - [ ] The media tool: `tools/media.sh` and its tour program stage the scenes on the headless backend at scale 2 with real apps in scratch profiles, take the stills and record the walkthrough
 - [ ] The media made and looked at: hero, tiling, table, the walkthrough video and its animated preview, with credits for the third-party content
 - [ ] The README rewritten: tagline, links row, hero, why, the two ways of working with their pictures, the walkthrough, features linking into the guide, quick start, the docs table, contributing, license
