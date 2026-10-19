@@ -1,0 +1,8 @@
+# The shell in the README's pictures: a short prompt and title in the
+# checkout, the build's meson on PATH, no history.
+PS1='\[\e[1;34m\]wayland-canvas\[\e[0m\] \[\e[2m\]main\[\e[0m\] \$ '
+unset PROMPT_COMMAND
+PROMPT_COMMAND='printf "\e]2;%s\a" "wayland-canvas"'
+HISTFILE=/dev/null
+cd "$MEDIA_SOURCE" || exit
+venv=$(tools/venv.sh --if-needed 2>/dev/null) && [ -n "$venv" ] && PATH=$venv:$PATH

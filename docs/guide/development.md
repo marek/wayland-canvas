@@ -17,7 +17,7 @@ skills and roles beside it.
 | `shell/` | The Quickshell shell: the plugin host and the `WaylandCanvas.Ui` kit its plugins draw with |
 | `plugins/` | The built-in plugins (`canvas.bar`, the indicators with their panels, the `canvas.theme` light/dark switch, …) the host loads beside the shell |
 | `tests/` | Unit tests and headless scenario sources (`tests/scenarios/`) |
-| `tools/` | `build.sh` (build), `check.sh` (build + test), `package.sh` (both packages), `install.sh`, `check-plans.sh`, hooks |
+| `tools/` | `build.sh` (build), `check.sh` (build + test), `package.sh` (both packages), `install.sh`, `check-plans.sh`, `media.py` (the README's pictures), `readme-preview.py` (the README as GitHub shows it), hooks |
 | `scripts/` | `agent-setup.sh` (links skills, roles and hooks into `.claude/`) |
 | `protocols/` | Protocol XML used beyond wlroots' set |
 | `docs/intents/` | Normative design specs (the intent corpus) |
@@ -25,7 +25,7 @@ skills and roles beside it.
 | `docs/skills/` | How to work here |
 | `docs/roles/` | Working personas (developer, tester, reviewer, planner) |
 | `docs/guide/` | This user guide |
-| `docs/media/` | The README's screenshots and video |
+| `docs/media/` | The README's screenshots |
 | `tmp/` | Git-ignored scratch space (`CANVAS_TMP` overrides) |
 | `packaging/` | Package definitions: Arch `PKGBUILD` + install scriptlet, Debian control and maintainer scripts, the session file, the default-session tool, the source-tarball builder |
 
@@ -38,6 +38,31 @@ tools/check.sh             # builds, then the unit and headless scenario suites
 
 The dependencies, the manual meson setup and the ways to run the result are
 in [Install, build and run](install.md).
+
+## The README and its pictures
+
+`tools/readme-preview.py` shows `README.md` as GitHub will, at a local
+address it prints and opens: GitHub's own Markdown renderer and
+stylesheet, the pictures and the video served from the checkout, and every
+other Markdown page of the checkout rendered the same way when a link leads
+there. Reload after an edit. It needs the network; with the GitHub CLI
+signed in it borrows its token for the renderer's higher rate limit.
+
+The pictures in `docs/media/` and the walkthrough video are real captures.
+`tools/media.py` fetches the tour's public-domain assets, builds the
+compositor and runs `build/media-tour` — the headless backend with real
+apps — then encodes the stills into `docs/media/` and the video into
+`tmp/media/walkthrough.mp4`. The video is a GitHub attachment: upload it
+by dragging it into any issue or comment box on GitHub, and put the link
+GitHub gives it on its own line under Walkthrough in `README.md`. It
+needs ffmpeg, curl, Chrome, Krita, imv, mpv, foot, Neovim, Quickshell,
+dbus-daemon and openssl. `--stills` remakes only the four stills; `--keep` keeps the run's
+scratch folder for a look; `--record` captures the web pages again.
+Scratch lives under `tmp/media/` (`$CANVAS_TMP` overrides `tmp/`): the
+fetched assets, the tour's run folder, and `pages/`, the captured web pages
+(`tools/media/pages.tsv` lists them). A page is captured once and replayed
+on every later run, so the pictures keep the day it was captured; delete
+its files in `pages/` (or pass `--record`) to capture it again.
 
 ## Releases
 

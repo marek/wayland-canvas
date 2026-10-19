@@ -35,7 +35,7 @@ Beside the helix, and not part of it:
 | Folder | What |
 |---|---|
 | `docs/guide/` | The user guide: installing, using and configuring the compositor, for the people who run it. |
-| `docs/media/` | The README's screenshots and walkthrough video, made by `tools/media.sh`. |
+| `docs/media/` | The README's screenshots, made by `tools/media.py`; the walkthrough video is a GitHub attachment the README links. |
 | `docs/plans/` | Volatile checklists for a body of work. Disposable once the work ships. |
 | `docs/skills/` | How to work here: the "how" companion to intent's "what". |
 | `docs/roles/` | Who is working: the persona an agent adopts for a task. |
@@ -123,7 +123,8 @@ a user can see or set — a binding, a gesture, an option, a setting, a
 dependency — updates the guide page that describes it in the same body
 of work; the README changes only when the front page's picture of the
 compositor does. When what is on screen changes enough that the
-pictures no longer show it, `tools/media.sh` remakes them.
+pictures no longer show it, `tools/media.py` remakes them;
+`tools/readme-preview.py` shows the front page as GitHub will.
 
 ---
 

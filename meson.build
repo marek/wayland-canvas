@@ -491,6 +491,20 @@ if foot_prog.found() and grim_prog.found()
 	endforeach
 endif
 
+# The README's media: the tour stages the canvas at work with real apps on
+# the headless backend, takes its stills and records its walkthrough;
+# tools/media.py runs it. Built with everything, so it keeps compiling
+# against the compositor it shows.
+executable(
+	'media-tour',
+	'tools/media/tour.cpp',
+	protocol_headers,
+	include_directories: src_inc,
+	link_with: core_lib,
+	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
+		json_glib, libinput, libdrm],
+)
+
 # The default-session tool against fake roots, one per display manager.
 packaging_env = environment()
 packaging_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')

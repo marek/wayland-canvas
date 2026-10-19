@@ -1,0 +1,12 @@
+# The web pages the tour shows: captured once by tools/media.py into
+# tmp/media/pages/ and replayed from there on every later run, so the
+# pictures keep the day they were captured. Width is the logical width of
+# the browser window that shows the page; a URL with a fragment is captured
+# from that anchor down. remove is a CSS selector list of what is taken out
+# before the capture (the ads). Old Reddit needs an account, so
+# r/programming is the logged-out reddit.com.
+# name	width	url	remove
+code	800	https://wayland.app/protocols/xdg-shell	
+writing	800	https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_touch	
+news	800	https://www.thestar.com/	.adLabelWrapper, .tnt-ads-container, [id^="google_ads_iframe"]
+forum	800	https://www.reddit.com/r/programming/	shreddit-ad-post

@@ -1,0 +1,10 @@
+# The tour's assets, public-domain works from Wikimedia Commons: fetched by
+# tools/media.py into the scratch folder and checked against their hashes.
+# file	sha256	url
+orchids.jpg	9e6948652c7728f0dbe0b76c1c42ac75fa9ec27deea0e18617ca249735957148	https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Haeckel_Orchidae.jpg/1280px-Haeckel_Orchidae.jpg
+hummingbirds.jpg	a3cdf6a3d8b3735f89b63a12586753fc7e90c3d303f29be40d1124d5ca411636	https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Haeckel_Trochilidae.jpg/1280px-Haeckel_Trochilidae.jpg
+anemones.jpg	c5cc41066697be1d1e633042bdcdbc6a35bfab700d172b52dfcb89d4111cf614	https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Haeckel_Actiniae.jpg/1280px-Haeckel_Actiniae.jpg
+mosses.jpg	96ac043a42cc452839b7226214cd629b232bda13cb8a30376b2d508bb3fccebe	https://upload.wikimedia.org/wikipedia/commons/thumb/e/ee/Haeckel_Muscinae.jpg/1280px-Haeckel_Muscinae.jpg
+rhinoceros.jpg	06d8f6318e99e758f625cb0fc37b1a18e2b0f6cabd7a71f340de838e455e3ccb	https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/D%C3%BCrer%27s_Rhinoceros%2C_1515.jpg/1920px-D%C3%BCrer%27s_Rhinoceros%2C_1515.jpg
+fisherman.jpg	84d1c9b8f89202da435269b5e22e446b9ec4f4241083191f164289c44ba3c8ff	https://upload.wikimedia.org/wikipedia/commons/thumb/6/62/Pierre_Puvis_de_Chavannes_-_The_Poor_Fisherman_-_Google_Art_Project.jpg/1280px-Pierre_Puvis_de_Chavannes_-_The_Poor_Fisherman_-_Google_Art_Project.jpg
+gymnopedie.ogg	419e37656856224227086df32d6d481a00a738961e08fca9f6147e472beea53e	https://upload.wikimedia.org/wikipedia/commons/9/90/Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg
