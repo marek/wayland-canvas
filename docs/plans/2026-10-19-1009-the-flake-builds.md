@@ -18,8 +18,8 @@ from its own revision. The rules go into
 
 ## Tasks
 
-- [ ] The flake names every library meson asks for, the optional logind and X11 ones included
-- [ ] Everything installs under the build's prefix: the session target's directory follows the prefix
-- [ ] The check phase runs the unit and packaging suites: their scripts' interpreters patched, git there for the version checks
-- [ ] The intent: build-and-run.md says what `nix build` and `nix develop` give
-- [ ] `nix build` passes; the binary it makes starts and prints its usage; the Arch and Debian packages still put the session target in `/usr/lib/systemd/user`
+- [x] The flake names every library meson asks for, the optional logind and X11 ones included
+- [x] Everything installs under the build's prefix: the session target's directory follows the prefix
+- [x] The check phase runs the unit suite: the packaging suite drives the Arch and Debian install flows through stubs written for `/usr/bin/env`, and the scenarios need a display
+- [x] The intent: build-and-run.md says what `nix build` and `nix develop` give
+- [x] `nix build` passes; the binary it makes starts and prints its usage; the Arch and Debian packages still put the session target in `/usr/lib/systemd/user`

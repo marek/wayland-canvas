@@ -255,7 +255,10 @@ install_data(
 systemd = dependency('systemd', required: false)
 systemd_user_dir = get_option('prefix') / 'lib/systemd/user'
 if systemd.found()
-	systemd_user_dir = systemd.get_variable(pkgconfig: 'systemduserunitdir')
+	# under this build's prefix, not systemd's own: the same /usr/lib/systemd/user
+	# for a /usr package, and inside the store path for a Nix build
+	systemd_user_dir = systemd.get_variable(pkgconfig: 'systemduserunitdir',
+		pkgconfig_define: ['prefix', get_option('prefix')])
 endif
 install_data(
 	'packaging/systemd/wayland-canvas-session.target',

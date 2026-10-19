@@ -45,18 +45,32 @@
           buildInputs = with pkgs; [
             cairo
             glib
+            json-glib
             libdrm
             libinput
             librsvg
+            libxcb # X11 windows through Xwayland
+            libxcb-wm # xcb_ewmh.h, which wlroots' xwayland.h includes
             libxkbcommon
             pango
             pixman
+            sqlite
+            systemdLibs # logind: the lock on `loginctl lock-session` and before sleep
             wayland
             wayland-protocols
             wlroots_0_20
           ];
 
+          # The suites a build can run: the packaging suite drives the Arch and
+          # Debian install flows through stubs, and the scenarios need a display.
           doCheck = true;
+          mesonCheckFlags = [ "--suite" "unit" ];
+          # What the unit suite reads from the machine: the desktop's GSettings
+          # schemas (theme-prefs) and the zone database (agent-usage's days).
+          preCheck = ''
+            export XDG_DATA_DIRS=${pkgs.glib.getSchemaDataDirPath pkgs.gsettings-desktop-schemas}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
+            export TZDIR=${pkgs.tzdata}/share/zoneinfo
+          '';
 
           meta = {
             description = "An infinite-canvas Wayland compositor";
