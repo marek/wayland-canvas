@@ -216,6 +216,9 @@ private:
 	// Tells X the window's canvas place, when X has it elsewhere; true when
 	// it did.
 	bool x11_follow_canvas();
+	// Tells X the window's place and size; input for an X11 window then
+	// waits until X has taken it in.
+	void x11_configure(int16_t x, int16_t y, uint16_t width, uint16_t height);
 	wlr_surface *x11_surface() const;
 	wlr_box x11_geometry() const;
 	bool x11_initialized() const;

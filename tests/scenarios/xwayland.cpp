@@ -6,8 +6,9 @@
 // follows the canvas: a window opened over another takes its clicks, the
 // one under it takes clicks where it shows and once raised, a minimized one
 // takes none, and windows past X's screen or larger than it at 25 % take
-// clicks at their own points. Writes only under $CANVAS_TMP, with
-// canvas.conf in its own scratch config dir.
+// clicks at their own points; a click after a jump, and a press in the same
+// instant as one, land where they were aimed. Writes only under
+// $CANVAS_TMP, with canvas.conf in its own scratch config dir.
 #include <cairo.h>
 #include <cerrno>
 #include <cmath>
@@ -688,34 +689,47 @@ int run_step() {
 		check(big.size() == 3 && close_to(big.back(), {3900, 100}), std::format(
 			"a click after a jump, with no motion between, lands where it was aimed ({})",
 			said_clicks(client)));
+		// A jump and a press in the same instant: the press waits until X
+		// has taken in the moves the jump sent.
+		Point p = on_screen(*titled("x11-big"), 100, 2300);
+		move_to(p.x, p.y);
+		button(BTN_LEFT, true);
+		button(BTN_LEFT, false);
+		return 800;
+	}
+	case 40: {
+		std::vector<Point> big = clicks_said(client);
+		check(big.size() == 4 && close_to(big.back(), {100, 2300}), std::format(
+			"a jump and a press in the same instant land where they were aimed ({})",
+			said_clicks(client)));
 		reap_client(client);
 		output().camera.jump(home);
 		return 300;
 	}
-	case 40: { // a modal dialog floats over its window on a tiled desktop
+	case 41: { // a modal dialog floats over its window on a tiled desktop
 		super_key(KEY_T);
 		check(start_client(client, {"--size=600x400", "--title=x11-tiled", "--dialog"}),
 			"an X11 window with a modal dialog started on a tiled desktop");
 		return 1500;
 	}
-	case 41: {
+	case 42: {
 		if (titled("x11-tiled") == nullptr && retries++ < 200) {
 			return -100;
 		}
 		return 800; // tiled by now
 	}
-	case 42: { // its first key opens the dialog
+	case 43: { // its first key opens the dialog
 		key(KEY_D, true);
 		key(KEY_D, false);
 		return 600;
 	}
-	case 43: {
+	case 44: {
 		if (titled("x11-tiled-dialog") == nullptr && retries++ < 200) {
 			return -100;
 		}
 		return 600;
 	}
-	case 44: {
+	case 45: {
 		View *main = titled("x11-tiled"), *dialog = titled("x11-tiled-dialog");
 		check(main != nullptr && main->tiled && main->board.has_value(),
 			"the window joined the tiled desktop's board");
@@ -732,11 +746,11 @@ int run_step() {
 		super_key(KEY_T);
 		return 600;
 	}
-	case 45: {
+	case 46: {
 		super_key(KEY_T);
 		return 600;
 	}
-	case 46: {
+	case 47: {
 		View *main = titled("x11-tiled"), *dialog = titled("x11-tiled-dialog");
 		check(main != nullptr && main->tiled && main->board.has_value()
 				&& dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
@@ -745,12 +759,12 @@ int run_step() {
 		super_key(KEY_2);
 		return 1000;
 	}
-	case 47: {
+	case 48: {
 		check(start_client(other, {"--size=300x200", "--title=x11-two"}),
 			"an X11 window started on desktop 2");
 		return 1500;
 	}
-	case 48: {
+	case 49: {
 		if (titled("x11-two") == nullptr && retries++ < 200) {
 			return -100;
 		}
@@ -759,26 +773,26 @@ int run_step() {
 		super_key(KEY_1);
 		return 1000;
 	}
-	case 49: {
+	case 50: {
 		check(server->focused_view != nullptr
 				&& server->focused_view == titled("x11-tiled-dialog"),
 			"Super+1 gave the keyboard to the window last used on desktop 1");
 		super_key(KEY_2);
 		return 1000;
 	}
-	case 50: {
+	case 51: {
 		check(server->focused_view != nullptr && server->focused_view == titled("x11-two"),
 			"Super+2 gave it back to the window on desktop 2");
 		reap_client(client);
 		reap_client(other);
 		return 300;
 	}
-	case 51: { // fullscreen over another window: a desktop of its own
+	case 52: { // fullscreen over another window: a desktop of its own
 		check(start_client(other, {"--size=400x300", "--title=x11-beside"}),
 			"a window to be covered started on desktop 2");
 		return 1500;
 	}
-	case 52: {
+	case 53: {
 		if (titled("x11-beside") == nullptr && retries++ < 200) {
 			return -100;
 		}
@@ -786,7 +800,7 @@ int run_step() {
 			"a window to go fullscreen started beside it");
 		return 1500;
 	}
-	case 53: {
+	case 54: {
 		if (titled("x11-fs") == nullptr && retries++ < 200) {
 			return -100;
 		}
@@ -800,7 +814,7 @@ int run_step() {
 		super_key(KEY_F);
 		return 800;
 	}
-	case 54: {
+	case 55: {
 		View *fs = titled("x11-fs"), *beside = titled("x11-beside");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		Desktop *own = fs != nullptr ? server->canvas.desktop_of(*fs) : nullptr;
@@ -819,7 +833,7 @@ int run_step() {
 		super_key(KEY_F);
 		return 800;
 	}
-	case 55: {
+	case 56: {
 		View *fs = titled("x11-fs");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		check(fs != nullptr && !fs->fullscreen && server->canvas.desktop_of(*fs) == d2
@@ -829,14 +843,14 @@ int run_step() {
 		reap_client(other);
 		return 600;
 	}
-	case 56: { // alone on its desktop: fullscreen in place
+	case 57: { // alone on its desktop: fullscreen in place
 		if (titled("x11-beside") != nullptr && retries++ < 100) {
 			return -100;
 		}
 		super_key(KEY_F);
 		return 800;
 	}
-	case 57: {
+	case 58: {
 		View *fs = titled("x11-fs");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		check(fs != nullptr && fs->fullscreen && server->canvas.desktop_of(*fs) == d2
@@ -845,7 +859,7 @@ int run_step() {
 		super_key(KEY_F);
 		return 600;
 	}
-	case 58: {
+	case 59: {
 		reap_client(client);
 		return 300;
 	}

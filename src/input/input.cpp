@@ -336,6 +336,7 @@ PointerDevice::PointerDevice(Input &input, wlr_input_device *device,
 }
 
 void PointerDevice::handle_destroy() {
+	input_.run_waiting(); // a waiting event names this device
 	destroy_owned(input_.pointers, this);
 }
 
@@ -1276,9 +1277,90 @@ void Input::outputs_changed() {
 	tablets.map_devices();
 }
 
+// ---- input that waits for X ----
+
+bool Input::is_x11(wlr_surface *surface) {
+	return surface != nullptr && View::from_x11_surface(surface) != nullptr;
+}
+
+bool Input::must_wait(bool for_x) {
+	if (forced_) {
+		return false;
+	}
+	// Replaying, the events are already in order: only a press for X that
+	// X is behind on again stops them.
+	if (!releasing_ && !waiting_.empty()) {
+		return true;
+	}
+	return for_x && !server_.x11_settled();
+}
+
+void Input::queue(std::function<void()> run) {
+	if (releasing_) {
+		waiting_.push_front(std::move(run)); // it goes first again
+		requeued_ = true;
+		return;
+	}
+	if (waiting_.empty()) {
+		if (!x_wait_timer_) {
+			x_wait_timer_.reset(wl_event_loop_add_timer(server_.loop, &Input::handle_x_wait,
+				this));
+		}
+		x_wait_since_ = now_ms();
+		wl_event_source_timer_update(x_wait_timer_.get(), 1);
+	}
+	waiting_.push_back(std::move(run));
+}
+
+// Every millisecond while input waits: X's answer read, or the wait over.
+int Input::handle_x_wait(void *data) {
+	Input &input = *static_cast<Input *>(data);
+	bool late = now_ms() - input.x_wait_since_ >= config::x11_input_wait_ms;
+	if (!late && !input.server_.x11_settled()) {
+		wl_event_source_timer_update(input.x_wait_timer_.get(), 1);
+		return 0;
+	}
+	if (late) {
+		input.server_.x11_give_up();
+	}
+	input.release_waiting(late);
+	return 0;
+}
+
+void Input::release_waiting(bool forced) {
+	if (x_wait_timer_) {
+		wl_event_source_timer_update(x_wait_timer_.get(), 0);
+	}
+	releasing_ = true;
+	forced_ = forced;
+	requeued_ = false;
+	while (!waiting_.empty() && !requeued_) {
+		std::function<void()> next = std::move(waiting_.front());
+		waiting_.pop_front();
+		next();
+	}
+	releasing_ = false;
+	forced_ = false;
+	if (requeued_) {
+		// A replayed move sent X new changes: the press waits for those.
+		requeued_ = false;
+		x_wait_since_ = now_ms();
+		wl_event_source_timer_update(x_wait_timer_.get(), 1);
+	}
+}
+
+void Input::run_waiting() {
+	if (!waiting_.empty()) {
+		release_waiting(true);
+	}
+}
+
 // ---- cursor event handlers ----
 
 void Input::handle_cursor_motion(wlr_pointer_motion_event *event) {
+	if (waits<&Input::handle_cursor_motion>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	wlr_cursor_move(server_.cursor, &event->pointer->base,
 		event->delta_x, event->delta_y);
@@ -1287,6 +1369,9 @@ void Input::handle_cursor_motion(wlr_pointer_motion_event *event) {
 
 void Input::handle_cursor_motion_absolute(
 		wlr_pointer_motion_absolute_event *event) {
+	if (waits<&Input::handle_cursor_motion_absolute>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	wlr_cursor_warp_absolute(server_.cursor, &event->pointer->base,
 		event->x, event->y);
@@ -1294,6 +1379,11 @@ void Input::handle_cursor_motion_absolute(
 }
 
 void Input::handle_cursor_button(wlr_pointer_button_event *event) {
+	if (waits<&Input::handle_cursor_button>(this, event,
+			event->state == WL_POINTER_BUTTON_STATE_PRESSED
+			&& is_x11(server_.seat->pointer_state.focused_surface))) {
+		return;
+	}
 	notify_activity(server_);
 	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		cursor_button_press(event->time_msec, event->button);
@@ -1304,6 +1394,11 @@ void Input::handle_cursor_button(wlr_pointer_button_event *event) {
 
 void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	Server &server = server_;
+	// X turns a scroll into button presses, so it waits as a press does.
+	if (waits<&Input::handle_cursor_axis>(this, event,
+			is_x11(server.seat->pointer_state.focused_surface))) {
+		return;
+	}
 	notify_activity(server);
 	other_input();
 	if (server.lock.locked()) {
@@ -1362,12 +1457,18 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 }
 
 void Input::handle_cursor_frame() {
+	if (waits<&Input::handle_cursor_frame>(this)) {
+		return;
+	}
 	wlr_seat_pointer_notify_frame(server_.seat);
 }
 
 // ---- touchpad gestures (recognition is delegated to gesture.cpp) ----
 
 void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
+	if (waits<&Input::handle_swipe_begin>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	other_input();
 	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
@@ -1377,16 +1478,25 @@ void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 }
 
 void Input::handle_swipe_update(wlr_pointer_swipe_update_event *event) {
+	if (waits<&Input::handle_swipe_update>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	server_.gestures.swipe_update(event->time_msec, event->dx, event->dy);
 }
 
 void Input::handle_swipe_end(wlr_pointer_swipe_end_event *event) {
+	if (waits<&Input::handle_swipe_end>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	server_.gestures.swipe_end(event->time_msec, event->cancelled);
 }
 
 void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
+	if (waits<&Input::handle_pinch_begin>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	other_input();
 	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
@@ -1396,22 +1506,34 @@ void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 }
 
 void Input::handle_pinch_update(wlr_pointer_pinch_update_event *event) {
+	if (waits<&Input::handle_pinch_update>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	server_.gestures.pinch_update(event->time_msec, event->dx, event->dy,
 		event->scale, event->rotation);
 }
 
 void Input::handle_pinch_end(wlr_pointer_pinch_end_event *event) {
+	if (waits<&Input::handle_pinch_end>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	server_.gestures.pinch_end(event->time_msec, event->cancelled);
 }
 
 void Input::handle_hold_begin(wlr_pointer_hold_begin_event *event) {
+	if (waits<&Input::handle_hold_begin>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	server_.gestures.hold_begin(event->time_msec, event->fingers);
 }
 
 void Input::handle_hold_end(wlr_pointer_hold_end_event *event) {
+	if (waits<&Input::handle_hold_end>(this, event, false)) {
+		return;
+	}
 	notify_activity(server_);
 	server_.gestures.hold_end(event->time_msec, event->cancelled);
 }
@@ -1578,6 +1700,8 @@ void Input::finish() {
 	request_start_drag_.disconnect();
 	start_drag_.disconnect();
 	tap_timer_.reset();
+	waiting_.clear(); // shutting down: nothing waiting runs
+	x_wait_timer_.reset();
 	touch.finish();
 	tablets.finish();
 	if (drag_icon != nullptr) {

@@ -64,6 +64,7 @@ void Touch::map_devices() {
 }
 
 void Touch::device_gone(Device *device) {
+	input_.run_waiting(); // a waiting event names this device
 	end_all(static_cast<uint32_t>(now_ms()));
 	destroy_owned(devices_, device);
 	input_.update_capabilities();
@@ -99,6 +100,14 @@ bool Touch::centroid(double &cx, double &cy) const {
 // ---- the events ----
 
 void Touch::handle_down(wlr_touch_down_event *event) {
+	// A finger on an X11 window waits until X has taken in its window moves.
+	double lx = 0, ly = 0;
+	place(event->touch, event->x, event->y, lx, ly);
+	std::optional<Input::ContactHit> landed = input_.client_at(lx, ly);
+	if (input_.waits<&Touch::handle_down>(this, event,
+			landed.has_value() && Input::is_x11(landed->surface))) {
+		return;
+	}
 	input_.contact_activity();
 	uint32_t time = event->time_msec;
 	apply_moves(); // this frame's moves count before a new finger changes the gesture
@@ -183,6 +192,9 @@ bool Touch::join_gesture(Contact &contact, std::size_t fingers, uint32_t time) {
 }
 
 void Touch::handle_motion(wlr_touch_motion_event *event) {
+	if (input_.waits<&Touch::handle_motion>(this, event, false)) {
+		return;
+	}
 	Contact *contact = find(event->touch_id);
 	if (contact == nullptr) {
 		return;
@@ -224,6 +236,9 @@ void Touch::handle_motion(wlr_touch_motion_event *event) {
 }
 
 void Touch::handle_up(wlr_touch_up_event *event) {
+	if (input_.waits<&Touch::handle_up>(this, event, false)) {
+		return;
+	}
 	auto it = std::ranges::find(contacts_, event->touch_id, &Contact::id);
 	if (it == contacts_.end()) {
 		return;
@@ -271,6 +286,9 @@ void Touch::handle_up(wlr_touch_up_event *event) {
 }
 
 void Touch::handle_cancel(wlr_touch_cancel_event *event) {
+	if (input_.waits<&Touch::handle_cancel>(this, event, false)) {
+		return;
+	}
 	auto it = std::ranges::find(contacts_, event->touch_id, &Contact::id);
 	if (it == contacts_.end()) {
 		return;
@@ -309,6 +327,9 @@ void Touch::handle_cancel(wlr_touch_cancel_event *event) {
 }
 
 void Touch::handle_frame() {
+	if (input_.waits<&Touch::handle_frame>(this)) {
+		return;
+	}
 	apply_moves();
 	wlr_seat_touch_notify_frame(server_.seat);
 }

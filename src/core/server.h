@@ -80,6 +80,15 @@ public:
 	// moves if X's pointer would leave X's screen.
 	void sync_x11();
 	void x11_follow_pointer();
+	// A move, a resize or a restack went to X: input for an X11 window waits
+	// until X has taken it in.
+	void x11_changed();
+	// Whether X has taken in every change sent to it; asks X to say so when
+	// changes went out since the last ask.
+	bool x11_settled();
+	// X did not answer within config::x11_input_wait_ms: input goes on
+	// without the answer, and the ask is dropped.
+	void x11_give_up();
 
 	// layer.cpp
 	void refocus_layers();
@@ -188,6 +197,12 @@ private:
 	// them, on the window manager's own connection, so X applies it after
 	// the moves.
 	void x11_put_pointer();
+	// Asks X, on the window manager's connection, to answer once it has
+	// taken in everything sent before: that request's sequence, and whether
+	// changes went out since it was sent.
+	void x11_ask_settled();
+	std::optional<unsigned int> x11_settle_ask_;
+	bool x11_unasked_ = false;
 	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
 	void handle_new_xdg_popup(wlr_xdg_popup *popup);
 	Listener new_xdg_toplevel_, new_xdg_popup_;

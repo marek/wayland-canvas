@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <ranges>
 #include <vector>
 #include "core/config.h"
@@ -16,6 +17,8 @@
 #include "windows/view.h"
 
 #if CANVAS_HAVE_XWAYLAND
+
+#include <xcb/xcbext.h>
 
 namespace {
 
@@ -89,8 +92,7 @@ void View::x11_configure_size(int width, int height) {
 	if (width <= 0 || height <= 0) {
 		return; // X11 has no "your own size": the window keeps what it has
 	}
-	wlr_xwayland_surface_configure(x11, x11_x(), x11_y(), static_cast<uint16_t>(width),
-		static_cast<uint16_t>(height));
+	x11_configure(x11_x(), x11_y(), static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 }
 
 void View::x11_tell_maximized(bool want) {
@@ -216,14 +218,18 @@ bool View::x11_follow_canvas() {
 	if (x11->x == want_x && x11->y == want_y) {
 		return false;
 	}
-	wlr_xwayland_surface_configure(x11, want_x, want_y, x11->width, x11->height);
+	x11_configure(want_x, want_y, x11->width, x11->height);
 	return true;
+}
+
+void View::x11_configure(int16_t x, int16_t y, uint16_t width, uint16_t height) {
+	wlr_xwayland_surface_configure(x11, x, y, width, height);
+	server.x11_changed();
 }
 
 void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
 	if (override_redirect) {
-		wlr_xwayland_surface_configure(x11, event->x, event->y, event->width,
-			event->height);
+		x11_configure(event->x, event->y, event->width, event->height);
 		damage();
 		x11_place_override_redirect();
 		damage();
@@ -235,7 +241,7 @@ void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
 		configure_size(shell_geometry().width, shell_geometry().height);
 		return;
 	}
-	wlr_xwayland_surface_configure(x11, x11_x(), x11_y(), event->width, event->height);
+	x11_configure(x11_x(), x11_y(), event->width, event->height);
 	damage();
 }
 
@@ -294,6 +300,9 @@ void Server::handle_xwayland_ready() {
 	// The clipboard goes both ways from here on: wlroots bridges the X11
 	// selection to the seat's.
 	wlr_xwayland_set_seat(xwayland, seat);
+	// A new window manager connection: an ask on the one before is void.
+	x11_settle_ask_.reset();
+	x11_unasked_ = false;
 }
 
 void Server::handle_new_xwayland_surface(wlr_xwayland_surface *surface) {
@@ -324,14 +333,18 @@ void Server::sync_x11() {
 			stack.push_back(view);
 		}
 	}
-	if (std::ranges::equal(stack, x11_stack_, {}, &View::session_id)) {
-		return;
+	if (!std::ranges::equal(stack, x11_stack_, {}, &View::session_id)) {
+		x11_stack_.clear();
+		for (View *view : stack) {
+			// Each goes above the managed windows already restacked.
+			wlr_xwayland_surface_restack(view->x11, nullptr, XCB_STACK_MODE_ABOVE);
+			x11_stack_.push_back(view->session_id);
+		}
+		x11_changed();
 	}
-	x11_stack_.clear();
-	for (View *view : stack) {
-		// Each goes above the managed windows already restacked.
-		wlr_xwayland_surface_restack(view->x11, nullptr, XCB_STACK_MODE_ABOVE);
-		x11_stack_.push_back(view->session_id);
+	// Asked now, X's answer is usually in before the next press needs it.
+	if (x11_unasked_) {
+		x11_ask_settled();
 	}
 }
 
@@ -378,6 +391,7 @@ void Server::x11_follow_pointer() {
 		}
 	}
 	x11_put_pointer();
+	x11_ask_settled();
 }
 
 // X hears of its windows' moves on the window manager's connection and of
@@ -408,6 +422,61 @@ void Server::x11_put_pointer() {
 	xcb_flush(conn);
 }
 
+void Server::x11_changed() {
+	x11_unasked_ = true;
+}
+
+// GetInputFocus answers at once: X sending it means X has taken in every
+// request sent before it on this connection, the moves and the warp too.
+void Server::x11_ask_settled() {
+	xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(xwayland);
+	if (conn == nullptr) {
+		return;
+	}
+	if (x11_settle_ask_.has_value()) {
+		xcb_discard_reply(conn, *x11_settle_ask_); // the new ask answers for both
+	}
+	x11_settle_ask_ = xcb_get_input_focus(conn).sequence;
+	x11_unasked_ = false;
+	xcb_flush(conn);
+}
+
+// Reads what X has sent without waiting; wlroots handles any event read here
+// at the end of the same dispatch, as it checks its connection every time.
+bool Server::x11_settled() {
+	xcb_connection_t *conn = xwayland != nullptr ? wlr_xwayland_get_xwm_connection(xwayland)
+		: nullptr;
+	if (conn == nullptr) {
+		x11_settle_ask_.reset();
+		x11_unasked_ = false;
+		return true;
+	}
+	if (x11_unasked_) {
+		x11_ask_settled();
+	}
+	if (!x11_settle_ask_.has_value()) {
+		return true;
+	}
+	void *reply = nullptr;
+	xcb_generic_error_t *error = nullptr;
+	if (xcb_poll_for_reply(conn, *x11_settle_ask_, &reply, &error) == 0) {
+		return false;
+	}
+	std::free(reply);
+	std::free(error);
+	x11_settle_ask_.reset();
+	return true;
+}
+
+void Server::x11_give_up() {
+	xcb_connection_t *conn = xwayland != nullptr ? wlr_xwayland_get_xwm_connection(xwayland)
+		: nullptr;
+	if (conn != nullptr && x11_settle_ask_.has_value()) {
+		xcb_discard_reply(conn, *x11_settle_ask_);
+	}
+	x11_settle_ask_.reset();
+}
+
 #else // CANVAS_HAVE_XWAYLAND
 
 // Built without Xwayland: the compositor runs, and a machine with no
@@ -421,6 +490,11 @@ void Server::handle_xwayland_ready() {}
 void Server::sync_x11() {}
 void Server::x11_follow_pointer() {}
 void Server::x11_put_pointer() {}
+void Server::x11_changed() {}
+bool Server::x11_settled() {
+	return true;
+}
+void Server::x11_give_up() {}
 
 View *View::from_x11_surface(wlr_surface *) {
 	return nullptr;

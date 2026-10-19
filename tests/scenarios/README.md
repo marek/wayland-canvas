@@ -173,7 +173,9 @@ own the machine's Wayland display namespace and GPU.
   the canvas — a window opened over another takes the click, a minimized
   one takes none, windows past X's screen or larger than it at 25 % take
   clicks at their own points, a click straight after a jump lands where
-  it was aimed; on a tiled desktop a modal dialog floating centred over
+  it was aimed and so does a press in the same instant as the jump, held
+  until X has taken in the moves; on a tiled desktop a modal dialog
+  floating centred over
   its window, still floating after Super+T switches tiling off and on;
   the keyboard following Super+1 and Super+2 to the window last used on
   each desktop; and last fullscreen: Super+F on a window beside another

@@ -88,12 +88,14 @@ void Tablets::map_devices() {
 }
 
 void Tablets::device_gone(Device *device) {
+	input_.run_waiting(); // a waiting event names this tablet
 	// The pen leaves what it is on while the tablet's twin is still there.
 	end_all(static_cast<uint32_t>(now_ms()));
 	destroy_owned(devices_, device);
 }
 
 void Tablets::tool_gone(Tool *tool) {
+	input_.run_waiting(); // a waiting event names this tool
 	if (tool->tip_as_button) {
 		input_.contact_button(static_cast<uint32_t>(now_ms()), BTN_LEFT, false);
 	}
@@ -189,6 +191,9 @@ void Tablets::send_axes(Tool &tool, const wlr_tablet_tool_axis_event &event) {
 // ---- the cursor's tablet events ----
 
 void Tablets::handle_proximity(wlr_tablet_tool_proximity_event *event) {
+	if (input_.waits<&Tablets::handle_proximity>(this, event, false)) {
+		return;
+	}
 	input_.contact_activity();
 	Device *device = device_for(event->tablet);
 	Tool *tool = tool_for(event->tool);
@@ -224,6 +229,9 @@ void Tablets::end_all(uint32_t time) {
 }
 
 void Tablets::handle_axis(wlr_tablet_tool_axis_event *event) {
+	if (input_.waits<&Tablets::handle_axis>(this, event, false)) {
+		return;
+	}
 	input_.contact_activity();
 	Device *device = device_for(event->tablet);
 	Tool *tool = tool_for(event->tool);
@@ -247,8 +255,14 @@ void Tablets::handle_axis(wlr_tablet_tool_axis_event *event) {
 }
 
 void Tablets::handle_tip(wlr_tablet_tool_tip_event *event) {
-	input_.contact_activity();
 	Tool *tool = tool_for(event->tool);
+	// The tip down on an X11 window waits until X has taken in its window moves.
+	if (input_.waits<&Tablets::handle_tip>(this, event,
+			event->state == WLR_TABLET_TOOL_TIP_DOWN && tool->v2 != nullptr
+			&& Input::is_x11(tool->v2->focused_surface))) {
+		return;
+	}
+	input_.contact_activity();
 	if (tool->v2 == nullptr) {
 		return;
 	}
@@ -276,8 +290,13 @@ void Tablets::handle_tip(wlr_tablet_tool_tip_event *event) {
 }
 
 void Tablets::handle_button(wlr_tablet_tool_button_event *event) {
-	input_.contact_activity();
 	Tool *tool = tool_for(event->tool);
+	if (input_.waits<&Tablets::handle_button>(this, event,
+			event->state == WLR_BUTTON_PRESSED && tool->v2 != nullptr
+			&& Input::is_x11(tool->v2->focused_surface))) {
+		return;
+	}
+	input_.contact_activity();
 	if (tool->v2 == nullptr) {
 		return;
 	}

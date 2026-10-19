@@ -180,6 +180,9 @@ inline constexpr double launch_trace_ms = 30000.0;
 // X's pointer is moved back to the middle of X's screen before it comes
 // this close to an edge, in X pixels.
 inline constexpr int x11_pointer_margin = 128;
+// A press, scroll, touch or pen tip for an X11 window waits until X has taken
+// in the window moves sent before it, at most this long, in ms.
+inline constexpr int x11_input_wait_ms = 50;
 
 // App launcher: tap the logo key (or Super+Space).
 inline constexpr int launcher_width = 600;
