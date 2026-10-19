@@ -61,6 +61,10 @@ public:
 	// then corners), passing taken slots over and ringing outwards, never
 	// overlapping another desktop; the frame fills `output`'s screen.
 	Desktop &create_beside(int number, const Output &output);
+	// A desktop numbered as any — the smallest unused — in the first free
+	// slot beside `anchor`, by the same order and rings as create_beside;
+	// the frame fills `output`'s screen.
+	Desktop &create_next_to(wlr_box anchor, const Output &output);
 	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
 	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows
@@ -97,6 +101,10 @@ private:
 	wlr_box anchor_frame() const;
 	// Whether `box` overlaps any desktop's frame: a slot it covers is taken.
 	bool overlaps_any(wlr_box box) const;
+	int smallest_unused_number() const;
+	// The first frame of `size` beside `anchor` that overlaps no desktop:
+	// ring 1 from slot `first`, wrapping round, then each ring further out.
+	wlr_box free_frame_beside(wlr_box anchor, wlr_box size, std::size_t first) const;
 	// Places the new desktop topmost, filling `frame` at `scale`; damages.
 	Desktop &insert(int number, wlr_box frame, double scale);
 	Server &server_;

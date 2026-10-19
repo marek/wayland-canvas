@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -135,44 +136,60 @@ Desktops::Desktops(Server &server)
 }
 
 Desktop &Desktops::create(wlr_box frame, double scale) {
-	int number = 1;
-	while (by_number(number) != nullptr) {
-		number++;
-	}
-	return insert(number, frame, scale);
+	return insert(smallest_unused_number(), frame, scale);
 }
 
 Desktop &Desktops::create_beside(int number, const Output &output) {
 	// A desktop made this way starts at 100 %: the frame fills the screen.
-	wlr_box frame{0, 0, output.width, output.height};
+	wlr_box size{0, 0, output.width, output.height};
 	wlr_box anchor = anchor_frame();
-	int gap = config::desktop_gap;
-	auto place = [&](Cell cell) -> std::optional<wlr_box> {
-		wlr_box candidate = cell_frame(anchor, cell, frame, gap);
+	// Desktop 1's own place is the anchor cell; desktop N >= 2 wants slot
+	// N - 1 of ring 1.
+	if (number == 1) {
+		wlr_box own = cell_frame(anchor, {0, 0}, size, config::desktop_gap);
+		if (!overlaps_any(own)) {
+			return insert(number, own, 1.0);
+		}
+	}
+	std::size_t first = number >= 2 ? static_cast<std::size_t>(number - 2) : 0;
+	return insert(number, free_frame_beside(anchor, size, first), 1.0);
+}
+
+Desktop &Desktops::create_next_to(wlr_box anchor, const Output &output) {
+	wlr_box size{0, 0, output.width, output.height};
+	return insert(smallest_unused_number(), free_frame_beside(anchor, size, 0), 1.0);
+}
+
+int Desktops::smallest_unused_number() const {
+	int number = 1;
+	while (std::ranges::any_of(stack_, [number](const std::unique_ptr<Desktop> &desktop) {
+			return desktop->number() == number;
+		})) {
+		number++;
+	}
+	return number;
+}
+
+wlr_box Desktops::free_frame_beside(wlr_box anchor, wlr_box size, std::size_t first) const {
+	auto free = [&](Cell cell) -> std::optional<wlr_box> {
+		wlr_box candidate = cell_frame(anchor, cell, size, config::desktop_gap);
 		if (overlaps_any(candidate)) {
 			return std::nullopt;
 		}
 		return candidate;
 	};
-	// Desktop 1's own place is the anchor cell; desktop N >= 2 wants slot
-	// N - 1 of ring 1, the search wrapping round the ring.
-	if (number == 1) {
-		if (std::optional<wlr_box> at = place({0, 0})) {
-			return insert(number, *at, 1.0);
-		}
-	}
+	// Ring 1 from slot `first`, wrapping round its start.
 	std::vector<Cell> ring = ring_cells(1);
-	std::size_t start = number >= 2 ? static_cast<std::size_t>(number - 2) : 0;
 	for (std::size_t i = 0; i < ring.size(); i++) {
-		if (std::optional<wlr_box> at = place(ring[(start + i) % ring.size()])) {
-			return insert(number, *at, 1.0);
+		if (std::optional<wlr_box> at = free(ring[(first + i) % ring.size()])) {
+			return *at;
 		}
 	}
 	// Every slot of ring 1 taken: the same order, one ring further out.
 	for (int r = 2;; r++) {
 		for (Cell cell : ring_cells(r)) {
-			if (std::optional<wlr_box> at = place(cell)) {
-				return insert(number, *at, 1.0);
+			if (std::optional<wlr_box> at = free(cell)) {
+				return *at;
 			}
 		}
 	}

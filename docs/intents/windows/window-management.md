@@ -56,7 +56,20 @@ window keeps its title bar and loses its border
 saved and restored on unmaximize.
 
 Fullscreen covers the output viewport with no decorations at all, and
-is raised.
+is raised. A window that would cover other windows goes to a desktop of
+its own instead, the way macOS gives it a space of its own, so the desktop
+it leaves keeps the rest as it was; a window alone there goes fullscreen
+in place, as Windows does
+([../canvas/desktops.md](../canvas/desktops.md)):
+
+| Subject | Rule |
+|---|---|
+| When | an open window going fullscreen — its own request, Super+F, a foreign-toplevel request — while another window stands in the area it would cover; its own dialogs and an X11 menu do not count. A window that opens fullscreen opens in place |
+| Where | a new desktop, numbered as any, in the first free slot beside the desktop it was on (Super+N's slot order, overlapping no desktop), or beside the area it covered when it stood on none; its dialogs go with it |
+| The view | the screen showing it goes to that desktop and the window has the keyboard; a window no screen shows gets its desktop without the view moving |
+| Meanwhile | the desktop is like any other: hops, Super+N and the overview reach it |
+| Back | leaving fullscreen by any path — its own request, Super+F, a maximize — puts the window and its dialogs back where they came from and removes the desktop; a screen still on that desktop goes back to the one the window came from |
+| Closed | a window closed while fullscreen takes its desktop with it, and a screen on it goes back the same way |
 
 Minimize hides the window from rendering and from input; the state is
 published on its foreign-toplevel handle
@@ -122,6 +135,9 @@ and a foreign-toplevel close request, all with the same effect.
 - A window placed from the overview lands on the target whether the
   target is a desktop or a free spot — a free spot is as good a place
   to open an app as a desktop.
+- A fullscreen window's own desktop abandoned or combined away: the
+  window stays fullscreen where it then is, and leaving fullscreen
+  still puts it back where it came from.
 
 ## Cross-links
 

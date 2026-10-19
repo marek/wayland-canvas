@@ -72,8 +72,12 @@ wlr_box maximize_area(View &view) {
 	return inset_usable(any, area, 1.0); // off every desktop the camera rests at 1
 }
 
-// Fullscreen covers the whole output viewport, no decorations, no inset.
+// Fullscreen covers the whole output viewport, no decorations, no inset; a
+// window on a desktop of its own covers that desktop.
 wlr_box fullscreen_area(View &view) {
+	if (std::optional<wlr_box> own = view.server.canvas.fullscreen_desktops.area(view)) {
+		return *own;
+	}
 	Rect frame = view.frame_rect();
 	Output *picked = nullptr;
 	for (const std::unique_ptr<Output> &output : view.server.outputs) {
@@ -499,6 +503,9 @@ void View::set_fullscreen(bool want) {
 				wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), false);
 			}
 		}
+		// Over other windows it goes to a desktop of its own and covers that
+		// (canvas/fullscreen_desktops.h).
+		server.canvas.fullscreen_desktops.enter(*this, fullscreen_area(*this));
 		wlr_box area = fullscreen_area(*this);
 		x = area.x;
 		y = area.y;

@@ -167,16 +167,20 @@ own the machine's Wayland display namespace and GPU.
   own menu — an override-redirect window — which must sit exactly where
   the client put it, wear no title bar and take no focus; the clipboard
   both ways, an X11 client's copy read with `wl-paste` and a `wl-copy`
-  read back inside the client; X's own picture following the canvas — a
-  window opened over another takes the click, a minimized one takes none,
-  windows past X's screen or larger than it at 25 % take clicks at their
-  own points, a click straight after a jump lands where it was aimed; on
-  a tiled desktop a modal dialog floating centred over its window, still
-  floating after Super+T switches tiling off and on; the keyboard
-  following Super+1 and Super+2 to the window last used on each desktop;
-  and last a compositor of its own, headless on its own display, whose
-  `WLR_XWAYLAND` names a binary that is not there: it starts, serves its
-  display and stops.
+  read back inside the client; a compositor of its own, headless on its
+  own display, whose `WLR_XWAYLAND` names a binary that is not there: it
+  starts, serves its display and stops. Then X's own picture following
+  the canvas — a window opened over another takes the click, a minimized
+  one takes none, windows past X's screen or larger than it at 25 % take
+  clicks at their own points, a click straight after a jump lands where
+  it was aimed; on a tiled desktop a modal dialog floating centred over
+  its window, still floating after Super+T switches tiling off and on;
+  the keyboard following Super+1 and Super+2 to the window last used on
+  each desktop; and last fullscreen: Super+F on a window beside another
+  taking it to a new desktop of its own, overlapping none, the screen and
+  the keyboard with it and the other window left in place, Super+F
+  bringing it back and the desktop going, and a window alone on its
+  desktop going fullscreen in place.
 
 - **`capture.cpp`** — the shots-and-recordings UI, end to end, with the
   XDG pictures and videos dirs pointing into `tmp/scenarios/capture/`

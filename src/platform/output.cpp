@@ -411,6 +411,9 @@ void Server::update_visibility() {
 void Output::handle_frame() {
 	bool animating = tick(now_ms());
 	Server &server = this->server;
+	// A window that left fullscreen, by any path, comes back from its own
+	// desktop before this frame shows where it is.
+	server.canvas.fullscreen_desktops.reconcile();
 	if (server.visibility_dirty) {
 		server.update_visibility();
 	}

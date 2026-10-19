@@ -69,6 +69,7 @@ dialog aside: it floats over the window it blocks
 | `n` in the overview | A new desktop at the target centre if that is a free spot, else at the cursor ([overview.md](overview.md)) |
 | Super+Ctrl+D | Pins the current view as a new desktop |
 | `Super+N` (`desktop-N`) | Goes to desktop N, making it first when it does not exist: beside desktop 1, in the slot order below |
+| A window going fullscreen over others | A desktop of its own, numbered as any, in the first free slot beside its desktop by the slot order below; it goes when the window leaves fullscreen ([../windows/window-management.md](../windows/window-management.md)) |
 
 A desktop `Super+N` makes is numbered N and goes beside desktop 1 in a
 fixed slot order, clockwise from the top: the four sides first (up,

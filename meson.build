@@ -177,6 +177,7 @@ core_lib = static_library(
 		'src/canvas/camera.cpp',
 		'src/canvas/canvas.cpp',
 		'src/canvas/desktop.cpp',
+		'src/canvas/fullscreen_desktops.cpp',
 		'src/canvas/overview.cpp',
 		'src/core/server.cpp',
 		'src/input/bindings.cpp',

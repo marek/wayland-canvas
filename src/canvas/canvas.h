@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "canvas/desktop.h"
+#include "canvas/fullscreen_desktops.h"
 #include "core/util.h"
 
 class Output;
@@ -49,6 +50,7 @@ public:
 	wlr_box spot_at(double cx, double cy, const Output &output);
 
 	Desktops desktops;
+	FullscreenDesktops fullscreen_desktops;
 
 private:
 	// The views the desktop's board holds: mapped, unminimized, and held by

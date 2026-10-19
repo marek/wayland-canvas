@@ -69,7 +69,7 @@ wlr_box centred_box(const Output &output, double cx, double cy) {
 } // namespace
 
 Canvas::Canvas(Server &server)
-	: desktops(server), server_(server) {
+	: desktops(server), fullscreen_desktops(server), server_(server) {
 }
 
 std::vector<View *> Canvas::views_in(wlr_box box) const {

@@ -52,6 +52,7 @@ struct X11Client {
 X11Client client, other;
 Camera home{}; // the camera the run starts at
 Point main_spot{}; // where the raised main window's click is aimed, its own point
+std::size_t desktops_before = 0; // the desktops before a fullscreen step
 std::string shot_dir;
 wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
@@ -255,6 +256,16 @@ std::string said_clicks(X11Client &c) {
 // A click arrives on whole pixels: within two of where it was aimed.
 bool close_to(Point got, Point want) {
 	return std::abs(got.x - want.x) <= 2 && std::abs(got.y - want.y) <= 2;
+}
+
+// Whether the screen's camera is going to rest on `desktop`.
+bool camera_on(const Desktop *desktop) {
+	if (desktop == nullptr) {
+		return false;
+	}
+	Camera to = output().camera.destination();
+	Point centre = desktop->centre();
+	return std::abs(to.cx - centre.x) < 1 && std::abs(to.cy - centre.y) < 1;
 }
 
 // The window's frame in output-local logical pixels.
@@ -760,6 +771,82 @@ int run_step() {
 			"Super+2 gave it back to the window on desktop 2");
 		reap_client(client);
 		reap_client(other);
+		return 300;
+	}
+	case 51: { // fullscreen over another window: a desktop of its own
+		check(start_client(other, {"--size=400x300", "--title=x11-beside"}),
+			"a window to be covered started on desktop 2");
+		return 1500;
+	}
+	case 52: {
+		if (titled("x11-beside") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		check(start_client(client, {"--size=500x300", "--title=x11-fs"}),
+			"a window to go fullscreen started beside it");
+		return 1500;
+	}
+	case 53: {
+		if (titled("x11-fs") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		View *fs = titled("x11-fs"), *beside = titled("x11-beside");
+		check(fs != nullptr && beside != nullptr && d2 != nullptr
+				&& server->canvas.desktop_of(*fs) == d2
+				&& server->canvas.desktop_of(*beside) == d2 && server->focused_view == fs,
+			"both stand on desktop 2, the newer focused");
+		desktops_before = server->canvas.desktops.size();
+		super_key(KEY_F);
+		return 800;
+	}
+	case 54: {
+		View *fs = titled("x11-fs"), *beside = titled("x11-beside");
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		Desktop *own = fs != nullptr ? server->canvas.desktop_of(*fs) : nullptr;
+		check(fs != nullptr && fs->fullscreen && own != nullptr && own != d2
+				&& server->canvas.desktops.size() == desktops_before + 1,
+			"Super+F over another window took it to a new desktop of its own");
+		bool clear = own != nullptr;
+		for (const Desktop &d : server->canvas.desktops.all()) {
+			clear = clear && (&d == own || !own->rect().intersects(d.rect()));
+		}
+		check(clear, "beside the others, overlapping none");
+		check(beside != nullptr && server->canvas.desktop_of(*beside) == d2,
+			"the covered window stayed on desktop 2");
+		check(camera_on(own) && server->focused_view == fs,
+			"the screen and the keyboard went with it");
+		super_key(KEY_F);
+		return 800;
+	}
+	case 55: {
+		View *fs = titled("x11-fs");
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		check(fs != nullptr && !fs->fullscreen && server->canvas.desktop_of(*fs) == d2
+				&& server->canvas.desktops.size() == desktops_before,
+			"Super+F again brought it back to desktop 2, and its desktop went");
+		check(camera_on(d2), "the screen came back to desktop 2 with it");
+		reap_client(other);
+		return 600;
+	}
+	case 56: { // alone on its desktop: fullscreen in place
+		if (titled("x11-beside") != nullptr && retries++ < 100) {
+			return -100;
+		}
+		super_key(KEY_F);
+		return 800;
+	}
+	case 57: {
+		View *fs = titled("x11-fs");
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		check(fs != nullptr && fs->fullscreen && server->canvas.desktop_of(*fs) == d2
+				&& server->canvas.desktops.size() == desktops_before,
+			"alone on its desktop, it went fullscreen in place");
+		super_key(KEY_F);
+		return 600;
+	}
+	case 58: {
+		reap_client(client);
 		return 300;
 	}
 	case 90: {
