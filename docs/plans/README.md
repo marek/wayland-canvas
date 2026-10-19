@@ -47,3 +47,4 @@ be worked.
 | [2026-10-18-1930-clipboard-shortcuts.md](2026-10-18-1930-clipboard-shortcuts.md) | Super+C and Super+V copy and paste in every app by sending Ctrl+Insert and Shift+Insert, rebindable in the settings | 3 | 1 |
 | [2026-10-18-1930-note-at-cursor.md](2026-10-18-1930-note-at-cursor.md) | A new sticky note opens centred on the cursor, kept on its screen and clear of the toolbar and bars | 3 | 1 |
 | [2026-10-18-1930-super-n-makes-desktops.md](2026-10-18-1930-super-n-makes-desktops.md) | Super+N makes a missing desktop beside desktop 1: sides then corners clockwise from the top, slot N-1 first, the next free slot, rings outwards, never overlapping | 3 | 1 |
+| [2026-10-18-2043-dialogs-and-desktop-focus.md](2026-10-18-2043-dialogs-and-desktop-focus.md) | A dialog floats centred over its window and never joins a tiled board; going to a desktop gives the keyboard to the window last used there | 0 | 5 |
