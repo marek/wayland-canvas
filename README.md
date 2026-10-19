@@ -29,7 +29,9 @@ directly (`pacman -R`, `apt remove`) restores the default as well.
 
 Pushing a `v<version>` tag builds both packages on GitHub Actions — the same
 `tools/package.sh` run inside an `archlinux` and a `debian:sid` container —
-and drafts a release from them.
+and drafts a release from them. The tag is the version: nothing is bumped
+before tagging, and a build between tags is `<version>.r<commits>.g<hash>`
+(`tools/version.sh`).
 
 ## Build
 

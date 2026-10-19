@@ -17,11 +17,18 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        wayland-canvas = pkgs.clangStdenv.mkDerivation {
+        wayland-canvas = pkgs.clangStdenv.mkDerivation rec {
           pname = "wayland-canvas";
-          version = "1.0.2";
+          # No tags reach a flake: tools/version.sh's untagged form, from
+          # the flake's own revision, handed to it as the tarball's VERSION.
+          version = "0.0.0.r${toString (self.revCount or 0)}.g${self.shortRev or "dirty"}";
 
           src = ./.;
+
+          postPatch = ''
+            patchShebangs tools/version.sh
+            printf '%s\n' ${version} > VERSION
+          '';
 
           strictDeps = true;
 

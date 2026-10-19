@@ -159,11 +159,7 @@ setup_rootfs() { # $1 rootfs dir — DNS resolution for apt
 
 stage_into() { # $1 stage dir; sets staged_version
 	local stage=$1
-	staged_version=$(sed -n "s/^[[:space:]]*version: '\(.*\)',/\1/p" "$REPO/meson.build")
-	[ -n "$staged_version" ] || {
-		echo "package-deb.sh: no version found in meson.build" >&2
-		return 2
-	}
+	staged_version=$("$REPO/tools/version.sh")
 	mkdir -p "$stage/packages"
 	"$P/make-source-tarball.sh" "$stage/wayland-canvas-$staged_version.tar.xz"
 	cp "$P/debian/control" "$P/debian/prerm" "$P/debian/postrm" "$P/debian/build-deb.sh" "$stage/"

@@ -25,11 +25,7 @@ stage=$S/stage
 rm -rf "$S"
 mkdir -p "$stage" "$out"
 
-version=$(sed -n "s/^[[:space:]]*version: '\(.*\)',/\1/p" "$REPO/meson.build")
-[ -n "$version" ] || {
-	echo "package-arch.sh: no version found in meson.build" >&2
-	exit 2
-}
+version=$("$REPO/tools/version.sh")
 "$P/make-source-tarball.sh" "$stage/wayland-canvas-$version.tar.xz"
 cp "$P/PKGBUILD" "$P/wayland-canvas.install" "$stage/"
 sed -i "s/^pkgver=.*/pkgver=$version/" "$stage/PKGBUILD"

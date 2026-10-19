@@ -9,7 +9,9 @@
 # changes nothing. Then the install flow against stub sudo, package managers
 # and package.sh: the step reaches the root copy, the root copy builds
 # nothing, the artifact matches the distro's format, and a root package.sh
-# without --here refuses.
+# without --here refuses. Last, tools/version.sh on scratch repositories: a
+# tagged commit, two tags on one, commits past a tag, no tag, a tarball's
+# VERSION, a tree with neither, and a tag pacman cannot take.
 #
 # No check here installs anything, builds anything or runs a real sudo.
 #
@@ -328,7 +330,6 @@ check "an Arch install takes the .pkg.tar.zst" grep -q -- '--package .*\.pkg\.ta
 P=$S/package
 mkdir -p "$P/repo/tools"
 cp "$REPO/tools/package.sh" "$P/repo/tools/"
-cp "$REPO/meson.build" "$P/repo/"
 cat >"$P/repo/tools/package-arch.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'built\n' >>"$CANVAS_IT/built-as-root"
@@ -341,6 +342,41 @@ run_check "package.sh as root without --here refuses" 'refusing to build as root
 	"$P/repo/tools/package.sh" "$P/out"
 check "package.sh as root built nothing" test ! -e "$I/built-as-root"
 check "package.sh as root left the checkout as it was" same_tree "$P/repo" "$P/pristine"
+
+# --- version.sh: the version is the git tag ------------------------------------
+
+V=$S/version
+mkdir -p "$V/repo/tools" "$V/tarball/tools"
+cp "$REPO/tools/version.sh" "$V/repo/tools/"
+cp "$REPO/tools/version.sh" "$V/tarball/tools/"
+vgit() {
+	git -C "$V/repo" -c user.name=scratch -c user.email=scratch@invalid \
+		-c commit.gpgsign=false -c tag.gpgsign=false "$@"
+}
+vhash() { git -C "$V/repo" rev-parse --short=7 HEAD; }
+fails_with() { # fails_with <cmd...>: succeeds when the command fails
+	! "$@"
+}
+vgit init -q
+vgit commit -q --allow-empty -m one
+run_check "version.sh: no tag behind the commit" "^0\.0\.0\.r1\.g$(vhash)\$" "$V/repo/tools/version.sh"
+vgit tag v1.2.3
+run_check "version.sh: a tagged commit is its tag" '^1\.2\.3$' "$V/repo/tools/version.sh"
+vgit tag v1.2.10
+run_check "version.sh: two tags on one commit, the higher" '^1\.2\.10$' "$V/repo/tools/version.sh"
+vgit commit -q --allow-empty -m two
+vgit commit -q --allow-empty -m three
+run_check "version.sh: past a tag, <tag>.r<commits>.g<hash>" "^1\.2\.10\.r2\.g$(vhash)\$" "$V/repo/tools/version.sh"
+vgit tag v2.0-rc1
+run_check "version.sh: a tag pacman cannot take fails" 'is not a version' \
+	fails_with "$V/repo/tools/version.sh"
+# the tarball sits inside this checkout's tmp/, as a package build's does:
+# the enclosing checkout's tags are not its version
+printf '3.4.5\n' >"$V/tarball/VERSION"
+run_check "version.sh: a tree with no git of its own reads VERSION" '^3\.4\.5$' "$V/tarball/tools/version.sh"
+rm "$V/tarball/VERSION"
+run_check "version.sh: neither a checkout nor a tarball fails" 'no git checkout' \
+	fails_with "$V/tarball/tools/version.sh"
 
 # ------------------------------------------------------------------------------
 

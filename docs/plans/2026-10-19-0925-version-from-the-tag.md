@@ -28,9 +28,8 @@ from the flake's own revision. The rules are in
 
 ## Tasks
 
-- [ ] The intent: packaging.md's Version row in place of "Tag and version agree", and the full-history checkout
-- [ ] `tools/version.sh`, read by meson.build, `make-source-tarball.sh` (which writes `VERSION`), `package.sh`, `package-arch.sh` and `package-deb.sh`; the PKGBUILD and the Debian control file carry placeholders; `ci-check-tag.sh` and its workflow steps removed
-- [ ] The packaging suite proves `version.sh` on scratch repositories: a tag, two tags on one commit, commits past a tag, no tag, a tarball's `VERSION`, a tree with neither, a tag with a hyphen
-- [ ] Both package builds carry the derived version; `tools/check.sh` green
-- [ ] Both package builds carry the derived version and the full depends (librsvg, lcms2, ffmpeg); `tools/check.sh` green
-- [ ] On GitHub: a pushed tag builds packages named for it (the user pushes)
+- [x] The intent: packaging.md's Version row in place of "Tag and version agree", and the full-history checkout
+- [x] `tools/version.sh`, read by meson.build, `make-source-tarball.sh` (which writes `VERSION`), `package.sh`, `package-arch.sh` and `package-deb.sh`; the PKGBUILD and the Debian control file carry placeholders; `ci-check-tag.sh` and its workflow steps removed
+- [x] The packaging suite proves `version.sh` on scratch repositories: a tag, two tags on one commit, commits past a tag, no tag, a tarball's `VERSION`, a tree with neither, a tag with a hyphen
+- [ ] `flake.nix` names no number: its build writes `VERSION` from the flake's revision (its version evaluates; no nix build run)
+- [x] Both package builds carry the derived version; `tools/check.sh` green

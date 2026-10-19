@@ -2,7 +2,8 @@
 # (ninja -C build package-arch). The source tarball is generated next to this
 # file; its checksum is SKIP because it is a local artifact, not a download.
 pkgname=wayland-canvas
-pkgver=1.0.2
+# pkgver: tools/package-arch.sh sets it from tools/version.sh
+pkgver=0
 pkgrel=1
 pkgdesc='Infinite-canvas Wayland compositor: virtual desktops are dashed frames on an unbounded zoomable canvas'
 arch=('x86_64')

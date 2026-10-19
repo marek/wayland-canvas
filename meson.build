@@ -2,7 +2,9 @@ project(
 	'wayland-canvas',
 	'cpp',
 	'c',
-	version: '1.0.2',
+	# the git tag, or the VERSION file of a source tarball
+	# (docs/intents/workspace/packaging.md)
+	version: run_command('tools/version.sh', check: true).stdout().strip(),
 	license: 'Apache-2.0',
 	meson_version: '>=1.3.0',
 	default_options: [

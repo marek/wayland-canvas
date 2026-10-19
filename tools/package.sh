@@ -61,11 +61,7 @@ fi
 out=$(realpath -m "$out")
 mkdir -p "$out"
 
-version=$(sed -n "s/^[[:space:]]*version: '\(.*\)',/\1/p" "$REPO/meson.build")
-[ -n "$version" ] || {
-	echo "package.sh: no version found in meson.build" >&2
-	exit 2
-}
+version=$("$T/version.sh")
 
 build_arch() {
 	command -v makepkg >/dev/null 2>&1 || {
