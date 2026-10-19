@@ -556,10 +556,18 @@ Parsed parse(std::string_view text) {
 					out.gestures.push_back({.line = line_no, .name = std::string{name},
 						.value = std::string{value}});
 				}
-			} else if (name == "pinch-scale" || name == "invert") {
+			} else if (name == "pinch-scale") {
 				if (value != "on" && value != "off") {
 					out.errors.push_back({.line = line_no,
 						.text = std::format("{} must be on or off", name)});
+				} else {
+					out.gestures.push_back({.line = line_no, .name = std::string{name},
+						.value = std::string{value}});
+				}
+			} else if (const Direction *direction = find_direction(name)) {
+				if (value != direction->way && value != direction->other) {
+					out.errors.push_back({.line = line_no, .text = std::format(
+						"{} must be {} or {}", name, direction->way, direction->other)});
 				} else {
 					out.gestures.push_back({.line = line_no, .name = std::string{name},
 						.value = std::string{value}});
@@ -676,7 +684,8 @@ Resolved resolve(const Parsed &parsed) {
 			temp_set = true;
 		}
 	}
-	bool swipes_set = false, pinch_set = false, invert_set = false;
+	bool swipes_set = false, pinch_set = false;
+	std::array<bool, directions.size()> direction_set{};
 	for (const Entry &entry : parsed.gestures) {
 		if (entry.name == "swipes" && !swipes_set) {
 			out.swipes = *parse_swipes(entry.value);
@@ -684,9 +693,12 @@ Resolved resolve(const Parsed &parsed) {
 		} else if (entry.name == "pinch-scale" && !pinch_set) {
 			out.pinch_scale = entry.value == "on";
 			pinch_set = true;
-		} else if (entry.name == "invert" && !invert_set) {
-			out.invert = entry.value == "on";
-			invert_set = true;
+		}
+		for (std::size_t i = 0; i < directions.size(); i++) {
+			if (entry.name == directions[i].key && !direction_set[i]) {
+				out.*directions[i].turned = entry.value == directions[i].other;
+				direction_set[i] = true;
+			}
 		}
 	}
 	return out;
@@ -737,8 +749,12 @@ std::string template_text() {
 		"swipes = three-finger-hops\n"
 		"# pinch-scale = on | off\n"
 		"pinch-scale = on\n"
-		"# invert = on | off: on reverses scrolling and the swipe hops\n"
-		"invert = off\n";
+		"# Which way each moves: the mouse wheel and the touchpad in apps, Super +\n"
+		"# scroll looking away, the swipe that opens the overview, the hops.\n";
+	for (const Direction &direction : directions) {
+		out += std::format("# {} = {} | {}\n{} = {}\n", direction.key, direction.way,
+			direction.other, direction.key, direction.way);
+	}
 	out += std::format("\n[session]\n"
 		"# lock-idle = minutes of idleness before the screen locks, or off\n"
 		"lock-idle = {}\n"
@@ -997,18 +1013,7 @@ std::expected<Edit, std::string> File::set_commands(
 }
 
 std::expected<Edit, std::string> File::set_swipes(SwipePreset preset) {
-	std::string value{swipes_text(preset)};
-	std::vector<int> lines = entry_lines("gestures", "swipes");
-	if (lines.empty()) {
-		append_entry("gestures", "swipes", value);
-	} else {
-		for (std::size_t k = lines.size(); k > 1; k--) {
-			lines_.erase(lines_.begin() + lines[k - 1]);
-		}
-		write_line(lines.front(), "swipes", value, false);
-	}
-	rejoin();
-	return Edit{text_, {}};
+	return set_gesture("swipes", swipes_text(preset));
 }
 
 std::expected<Edit, std::string> File::set_session(std::string_view name,
@@ -1026,31 +1031,44 @@ std::expected<Edit, std::string> File::set_session(std::string_view name,
 	return Edit{text_, {}};
 }
 
-// The one shape every on/off line of [gestures] is written in: the first
-// line that sets it is rewritten, any later duplicate dropped, and a
-// setting the file does not name is appended to its section.
-std::expected<Edit, std::string> File::set_gesture_switch(
-		std::string_view name, bool on) {
-	std::string value = on ? "on" : "off";
+// The one shape every line of [gestures] is written in: the first line that
+// sets it is rewritten, any later duplicate dropped, and a setting the file
+// does not name is appended to its section.
+std::expected<Edit, std::string> File::set_gesture(std::string_view name,
+		std::string_view value) {
 	std::vector<int> lines = entry_lines("gestures", name);
 	if (lines.empty()) {
-		append_entry("gestures", name, value);
+		append_entry("gestures", name, std::string{value});
 	} else {
 		for (std::size_t k = lines.size(); k > 1; k--) {
 			lines_.erase(lines_.begin() + lines[k - 1]);
 		}
-		write_line(lines.front(), name, value, false);
+		write_line(lines.front(), name, std::string{value}, false);
 	}
 	rejoin();
 	return Edit{text_, {}};
 }
 
 std::expected<Edit, std::string> File::set_pinch_scale(bool on) {
-	return set_gesture_switch("pinch-scale", on);
+	return set_gesture("pinch-scale", on ? "on" : "off");
 }
 
-std::expected<Edit, std::string> File::set_invert(bool on) {
-	return set_gesture_switch("invert", on);
+std::expected<Edit, std::string> File::set_direction(std::string_view key,
+		std::string_view way) {
+	const Direction *direction = find_direction(key);
+	if (direction == nullptr) {
+		return std::unexpected(std::format("unknown direction '{}'", key));
+	}
+	if (way != direction->way && way != direction->other) {
+		return std::unexpected(std::format("{} must be {} or {}", key, direction->way,
+			direction->other));
+	}
+	return set_gesture(key, way);
+}
+
+const Direction *find_direction(std::string_view key) {
+	auto it = std::ranges::find(directions, key, &Direction::key);
+	return it != directions.end() ? &*it : nullptr;
 }
 
 } // namespace settings

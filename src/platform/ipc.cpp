@@ -472,8 +472,10 @@ void add_settings(JsonBuilder *builder, Server &server) {
 	add_string("swipes", swipe_name(server.conf.swipes));
 	json_builder_set_member_name(builder, "pinchScale");
 	json_builder_add_boolean_value(builder, server.conf.pinch_scale);
-	json_builder_set_member_name(builder, "invert");
-	json_builder_add_boolean_value(builder, server.conf.invert);
+	for (const settings::Direction &direction : settings::directions) {
+		add_string(std::string{direction.param}.c_str(),
+			server.conf.*direction.turned ? direction.other : direction.way);
+	}
 	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "session");
 	json_builder_begin_object(builder);
@@ -1291,8 +1293,8 @@ std::expected<std::string, std::string> Ipc::m_settings_get(Client &,
 
 std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 		JsonObject *params) {
-	constexpr std::string_view usage =
-		R"(params: exactly one of action with keys, commands, swipes, pinchScale or invert)";
+	constexpr std::string_view usage = R"(params: exactly one of action with keys, commands,)"
+		R"( swipes, pinchScale, mouseScroll, touchpadScroll, pan, overviewSwipe or hopSwipe)";
 	if (params == nullptr) {
 		return std::unexpected(std::string{usage});
 	}
@@ -1300,11 +1302,18 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 	bool has_commands = json_object_has_member(params, "commands");
 	bool has_swipes = json_object_has_member(params, "swipes");
 	bool has_pinch = json_object_has_member(params, "pinchScale");
-	bool has_invert = json_object_has_member(params, "invert");
+	const settings::Direction *direction = nullptr;
+	int directions_named = 0;
+	for (const settings::Direction &each : settings::directions) {
+		if (json_object_has_member(params, std::string{each.param}.c_str())) {
+			direction = &each;
+			directions_named++;
+		}
+	}
 	bool has_idle = json_object_has_member(params, "lockIdleMinutes");
 	bool has_night = json_object_has_member(params, "nightLight");
 	bool has_temperature = json_object_has_member(params, "nightLightTemperature");
-	if (has_action + has_commands + has_swipes + has_pinch + has_invert + has_idle
+	if (has_action + has_commands + has_swipes + has_pinch + directions_named + has_idle
 			+ has_night + has_temperature != 1) {
 		return std::unexpected(std::string{usage});
 	}
@@ -1439,12 +1448,18 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 			return std::unexpected(on.error());
 		}
 		edit = file.set_pinch_scale(*on);
-	} else if (has_invert) {
-		std::expected<bool, std::string> on = req_bool(params, "invert");
-		if (!on.has_value()) {
-			return std::unexpected(on.error());
+	} else if (direction != nullptr) {
+		std::string param{direction->param};
+		std::expected<std::optional<std::string>, std::string> way =
+			opt_string(params, param.c_str());
+		if (!way.has_value()) {
+			return std::unexpected(way.error());
 		}
-		edit = file.set_invert(*on);
+		if (!way->has_value() || (**way != direction->way && **way != direction->other)) {
+			return std::unexpected(std::format("params: {} must be \"{}\" or \"{}\"", param,
+				direction->way, direction->other));
+		}
+		edit = file.set_direction(direction->key, **way);
 	} else if (has_night) {
 		std::expected<bool, std::string> on = req_bool(params, "nightLight");
 		if (!on.has_value()) {

@@ -217,13 +217,14 @@ void pinch_up(bool cancelled) {
 	wl_signal_emit_mutable(&ptr.events.pinch_end, &ev);
 }
 
-// A 2-finger scroll tick through the device path: vertical, from fingers.
+// A 2-finger scroll tick through the device path: vertical, from fingers,
+// as a touchpad with natural scrolling (the default) sends it.
 void scroll(double delta) {
 	t_ms += 8;
 	wlr_pointer_axis_event ev = {.pointer = &ptr, .time_msec = t_ms,
 		.source = WL_POINTER_AXIS_SOURCE_FINGER,
 		.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
-		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_INVERTED,
 		.delta = delta, .delta_discrete = 0};
 	wl_signal_emit_mutable(&ptr.events.axis, &ev);
 	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
@@ -1706,11 +1707,11 @@ int run_step() {
 			std::format("with the defaults back, a 3-finger swipe hopped onto C"
 				" (off by {:.0f},{:.0f})", cam.cx - c.cx, cam.cy - c.cy));
 		shot("35-default-restored");
-		// invert on: the same swipe hops the other way
+		// hop-swipe away: the same swipe hops the other way
 		// (docs/intents/input/gestures.md).
 		server->gestures.set_options({.swipes = SwipePreset::three_finger_hops,
-			.pinch_scale = true, .invert = true});
-		swipe(3, 200, 0, 8); // 3 fingers right, inverted: back onto B
+			.pinch_scale = true, .hops_away = true});
+		swipe(3, 200, 0, 8); // 3 fingers right, hopping away: back onto B
 		return 900;
 	}
 	case 112: {
@@ -1720,10 +1721,10 @@ int run_step() {
 		Camera b = camera_for_box(desk(hop_b)->frame(), 0.8);
 		Camera cam = o->camera.current();
 		check(cam.cx == b.cx && cam.cy == b.cy && o->desktop_showing() == desk(hop_b),
-			std::format("with invert on, a 3-finger swipe right hopped left, onto B"
+			std::format("with hop-swipe away, a 3-finger swipe right hopped left, onto B"
 				" (off by {:.0f},{:.0f})", cam.cx - b.cx, cam.cy - b.cy));
 		server->gestures.set_options(GestureOptions{});
-		check(!server->gestures.options().invert, "invert off again");
+		check(!server->gestures.options().hops_away, "hops go toward the fingers again");
 		return 0;
 	}
 	// Looking away (docs/intents/canvas/infinite-canvas.md), from B at 80 %.
@@ -2015,6 +2016,75 @@ int run_step() {
 		server->canvas.settle_scale(server->canvas.desktops.by_number(3)->id(), 1.0);
 		o->overview.exit();
 		return 700;
+	// Each direction switch turns its own gesture and no other
+	// (docs/intents/input/gestures.md).
+	case 135: { // hops away: four fingers up still open the overview
+		if ((o->camera.panning() || !o->interactive()) && retries++ < 100) {
+			return -100;
+		}
+		server->gestures.set_options({.hops_away = true});
+		swipe(4, 0, -300, 10);
+		return 900;
+	}
+	case 136: {
+		if (!o->overview.active() && retries++ < 30) {
+			return -100;
+		}
+		check(o->overview.active(), "with hop-swipe away, four fingers up still open the overview");
+		// overview-swipe down: in the overview, four fingers up go back in.
+		server->gestures.set_options({.overview_down = true});
+		swipe(4, 0, -300, 10);
+		return 900;
+	}
+	case 137: {
+		if ((o->overview.active() || !o->interactive()) && retries++ < 30) {
+			return -100;
+		}
+		check(!o->overview.active(), "with overview-swipe down, four fingers up went back in");
+		swipe(4, 0, 300, 10);
+		return 900;
+	}
+	case 138: {
+		if (!o->overview.active() && retries++ < 30) {
+			return -100;
+		}
+		check(o->overview.active(), "and four fingers down opened the overview");
+		server->gestures.set_options(GestureOptions{});
+		o->overview.exit();
+		return 800;
+	}
+	case 139: { // pan: Super + a scroll looks away the way the pan switch says
+		if ((o->camera.panning() || !o->interactive()) && retries++ < 100) {
+			return -100;
+		}
+		scrolled_from = o->camera.current();
+		key(KEY_LEFTMETA, true);
+		for (int i = 0; i < 4; i++) {
+			scroll(40);
+		}
+		key(KEY_LEFTMETA, false);
+		return 300;
+	}
+	case 140: {
+		double moved = o->camera.current().cy - scrolled_from.cy;
+		check(moved > 100, std::format("with pan natural, Super and fingers scrolling up "
+			"move the content up, the view down ({:+.0f})", moved));
+		o->camera.jump(scrolled_from);
+		server->conf.pan_traditional = true;
+		key(KEY_LEFTMETA, true);
+		for (int i = 0; i < 4; i++) {
+			scroll(40);
+		}
+		key(KEY_LEFTMETA, false);
+		return 300;
+	}
+	case 141: {
+		double moved = o->camera.current().cy - scrolled_from.cy;
+		check(moved < -100, std::format("with pan traditional, the same scroll moves the "
+			"view up instead ({:+.0f})", moved));
+		server->conf.pan_traditional = false;
+		return 300;
+	}
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);

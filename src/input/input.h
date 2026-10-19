@@ -85,7 +85,8 @@ public:
 	void forget(const View &view);
 
 	// canvas.conf was (re-)read: re-applies what the file decides about the
-	// devices — the scroll direction (input/gestures.md's `invert`).
+	// devices — the mouse wheel's and the touchpad's scroll direction
+	// (input/gestures.md).
 	void settings_changed();
 
 	// A shortcut capture, for the settings window: from begin to end every

@@ -134,20 +134,24 @@ void Gestures::decide(Pending &pending) {
 	double ax = pending.ax, ay = pending.ay;
 	bool vertical = std::fabs(ay) > std::fabs(ax);
 
-	// The preset the gesture began with decides what the fingers mean.
+	// The preset the gesture began with decides what the fingers mean, and
+	// its switches which way: the hop way for the hop fingers, the overview
+	// way for the overview fingers' up and down.
 	FingerCounts counts = fingers_of(pending.options);
+	double hop = pending.options.hops_away ? -1 : 1;
+	double oy = pending.options.overview_down ? -ay : ay;
 
 	// The hop fingers hop in either mode.
 	if (fingers == counts.hop) {
-		state_ = Hop{o, ax, ay, false};
+		state_ = Hop{o, ax * hop, ay * hop, false};
 		return;
 	}
 	// The rest is the overview fingers: in the normal view only a swipe
 	// up, the zoom out into the overview.
 	bool overview = o->overview.active();
-	if (!overview && fingers == counts.overview && vertical && ay < 0) {
+	if (!overview && fingers == counts.overview && vertical && oy < 0) {
 		Camera far = o->overview.prepare();
-		state_ = ZoomOut{o, o->overview.home(), far, ay, 0, 0};
+		state_ = ZoomOut{o, o->overview.home(), far, oy, 0, 0};
 		return;
 	}
 	if (!overview || fingers != counts.overview) {
@@ -157,13 +161,13 @@ void Gestures::decide(Pending &pending) {
 
 	// Overview, the overview fingers: down zooms into the target, up zooms
 	// further out, sideways abandons a desktop.
-	if (vertical && ay > 0) {
+	if (vertical && oy > 0) {
 		Camera near = o->overview.target_camera();
-		state_ = ZoomIn{o, near, o->camera.current(), ay, 0, 0};
+		state_ = ZoomIn{o, near, o->camera.current(), oy, 0, 0};
 		return;
 	}
-	if (vertical && ay < 0) {
-		state_ = ZoomFurther{o, o->camera.current().zoom, ay, 0};
+	if (vertical && oy < 0) {
+		state_ = ZoomFurther{o, o->camera.current().zoom, oy, 0};
 		return;
 	}
 	std::optional<DesktopId> d = desktop_under(*o);
@@ -177,6 +181,7 @@ void Gestures::decide(Pending &pending) {
 void Gestures::swipe_begin(uint32_t time, uint32_t fingers) {
 	Output *out = server_.output_under_cursor();
 	state_ = Idle{};
+	begun_ = options_;
 	if (out == nullptr) {
 		state_ = Ignored{};
 		return;
@@ -206,12 +211,12 @@ void Gestures::swipe_update(uint32_t time, double dx, double dy) {
 	if (state_output(state_) == nullptr) {
 		return;
 	}
-	// Inverted scrolling turns every compositor gesture around with it; a
-	// forwarded one above keeps what libinput sent (gestures.md).
-	if (options_.invert) {
-		dx = -dx;
-		dy = -dy;
-	}
+	// The hop fingers go the hop way, the overview fingers' up and down the
+	// overview way, each by the options the gesture began with; a forwarded
+	// gesture above keeps what libinput sent, and an abandon slide follows
+	// the fingers.
+	double hop_way = begun_.hops_away ? -1 : 1;
+	double zy = begun_.overview_down ? -dy : dy;
 	double dt = static_cast<double>(time) - static_cast<double>(last_time_);
 
 	// A pending gesture accumulates travel until there is enough to
@@ -231,8 +236,8 @@ void Gestures::swipe_update(uint32_t time, double dx, double dy) {
 	std::visit(overloaded{
 		[&](Hop &hop) {
 			if (!just_decided) {
-				hop.ax += dx;
-				hop.ay += dy;
+				hop.ax += dx * hop_way;
+				hop.ay += dy * hop_way;
 			}
 			if (hop.done || std::hypot(hop.ax, hop.ay) <= config::hop_threshold) {
 				return;
@@ -249,30 +254,30 @@ void Gestures::swipe_update(uint32_t time, double dx, double dy) {
 		},
 		[&](ZoomOut &z) {
 			if (!just_decided) {
-				z.ay += dy;
+				z.ay += zy;
 			}
 			if (dt > 0) {
-				z.vy = 0.8 * z.vy + 0.2 * (dy / dt);
+				z.vy = 0.8 * z.vy + 0.2 * (zy / dt);
 			}
 			z.progress = clampd(-z.ay / config::overview_swipe_distance, 0, 1);
 			z.output->camera.jump(camera_zoom_path(z.near, z.far, z.progress));
 		},
 		[&](ZoomIn &z) {
 			if (!just_decided) {
-				z.ay += dy;
+				z.ay += zy;
 			}
 			if (dt > 0) {
-				z.vy = 0.8 * z.vy + 0.2 * (dy / dt);
+				z.vy = 0.8 * z.vy + 0.2 * (zy / dt);
 			}
 			z.progress = clampd(z.ay / config::overview_swipe_distance, 0, 1);
 			z.output->camera.jump(camera_zoom_path(z.near, z.far, 1 - z.progress));
 		},
 		[&](ZoomFurther &z) {
 			if (!just_decided) {
-				z.ay += dy;
+				z.ay += zy;
 			}
 			if (dt > 0) {
-				z.vy = 0.8 * z.vy + 0.2 * (dy / dt);
+				z.vy = 0.8 * z.vy + 0.2 * (zy / dt);
 			}
 			Camera cam = z.output->camera.current();
 			cam.zoom = clampd(z.start_zoom * std::exp(z.ay / 400),
@@ -356,6 +361,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
 	Output *out = server_.output_under_cursor();
 	state_ = Idle{};
+	begun_ = options_;
 	if (out == nullptr) {
 		state_ = Ignored{};
 		return;

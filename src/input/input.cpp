@@ -278,6 +278,16 @@ void overview_right_click(Output &output, const PressTarget &target, Point p) {
 	}
 }
 
+// How far, in screen px, a scroll looks away: by the pan switch alone,
+// whichever way the device scrolls apps. libinput turns a natural device's
+// delta round and says so in relative_direction, so it is turned back first.
+double pan_delta(const Server &server, const wlr_pointer_axis_event &event) {
+	double traditional = event.relative_direction == WL_POINTER_AXIS_RELATIVE_DIRECTION_INVERTED
+		? -event.delta : event.delta;
+	return (server.conf.pan_traditional ? traditional : -traditional)
+		* config::scroll_pan_speed;
+}
+
 } // namespace
 
 // ---- keyboard devices ----
@@ -379,14 +389,15 @@ void Input::new_pointer(wlr_input_device *device) {
 	pointers.push_back(std::make_unique<PointerDevice>(*this, device, dev));
 }
 
-// The scroll direction canvas.conf chooses: natural scrolling as the
-// default, reversed while [gestures] invert is on — one direction for the
-// pointer, the touchpad and what clients are scrolled by
-// (docs/intents/input/gestures.md).
+// The scroll direction canvas.conf chooses for apps, the mouse wheel's and
+// the touchpad's apart: natural unless set traditional
+// (docs/intents/input/gestures.md). A touchpad is the device that taps.
 void Input::apply_pointer_settings(libinput_device *dev) {
 	if (libinput_device_config_scroll_has_natural_scroll(dev)) {
-		libinput_device_config_scroll_set_natural_scroll_enabled(dev,
-			config::natural_scroll != server_.conf.invert);
+		bool touchpad = libinput_device_config_tap_get_finger_count(dev) > 0;
+		bool traditional = touchpad ? server_.conf.touchpad_traditional
+			: server_.conf.mouse_traditional;
+		libinput_device_config_scroll_set_natural_scroll_enabled(dev, !traditional);
 	}
 }
 
@@ -1430,7 +1441,7 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 			output->overview.zoom_by(std::exp(-event->delta / 200.0),
 				server.cursor->x - output->lx, server.cursor->y - output->ly);
 		} else {
-			double delta = event->delta * config::scroll_pan_speed;
+			double delta = pan_delta(server, *event);
 			bool vertical = event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL;
 			look_away(*output, vertical ? 0 : delta, vertical ? delta : 0);
 		}
@@ -1438,11 +1449,11 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	}
 	// Held Super decides a scroll in the normal view: the view looks away,
 	// wherever the pointer is, and no client sees the scroll. The screen
-	// moves by the scrolled distance whatever the zoom; libinput already
-	// applied the natural-scroll direction.
+	// moves by the scrolled distance whatever the zoom, the way the pan
+	// switch says.
 	if (!output->overview.active() && (seat_modifiers(server) & WLR_MODIFIER_LOGO) != 0) {
 		if (event->delta != 0) {
-			double delta = event->delta * config::scroll_pan_speed;
+			double delta = pan_delta(server, *event);
 			bool vertical = event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL;
 			look_away(*output, vertical ? 0 : delta, vertical ? delta : 0);
 		}

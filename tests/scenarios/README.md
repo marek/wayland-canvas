@@ -61,7 +61,8 @@ own the machine's Wayland display namespace and GPU.
   pinch-scale off (a Super + 2-finger pinch scaling no desktop: forwarded in
   the normal view, zooming the overview camera in the overview), the help
   line naming each preset's gestures by its text (keys only under `off`),
-  and the defaults restored at the end, a 3-finger hop working again.
+  and the defaults restored at the end, a 3-finger hop working again;
+  hop-swipe away turning that hop round.
   Then the look away from the 80 % desktop: Super+Alt+Up and a drag over
   the empty canvas above it — moving nothing without Super, with it
   panning the content along with the pointer at the desktop's zoom — undone
@@ -71,9 +72,12 @@ own the machine's Wayland display namespace and GPU.
   the overview doing the same, even when Escape brings back the very view
   the look away had reached. Last, Super+2..5 from desktop 1 alone making
   desktops above, right of, below and left of it, and a covered slot
-  passed over; and a desktop scaled while it is the overview's target
+  passed over; a desktop scaled while it is the overview's target
   drawing its ordinary tab's label from its own text afterwards, never
-  the target's older one stretched.
+  the target's older one stretched; and each direction switch turning its
+  own gesture alone: with hops away four fingers up still open the
+  overview, with the overview swipe down four fingers up go back in and
+  down open it, and the pan switch alone turning Super + a scroll round.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

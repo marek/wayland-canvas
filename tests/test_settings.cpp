@@ -4,6 +4,7 @@
 // Run via `meson test` (test 'settings').
 
 #include <cstdio>
+#include <format>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -309,25 +310,40 @@ void errors_carry_line_numbers() {
 		"the good lines apply around the errors");
 }
 
-// [gestures] invert: the scroll and swipe direction
+// [gestures] directions: each kind of scroll and swipe turns on its own
 // (docs/intents/input/gestures.md).
-void gesture_invert() {
-	check(!settings::resolve(settings::parse("")).invert,
-		"invert defaults to off: natural scrolling stays");
-	settings::Parsed on = settings::parse("[gestures]\ninvert = on\n");
-	check(on.errors.empty() && settings::resolve(on).invert,
-		"invert = on resolves to the inverted direction");
-	settings::Parsed bad = settings::parse("[gestures]\ninvert = backwards\n");
-	check(error_at(bad, 2, "invert must be on or off"),
-		"an unknown invert value is an error with its line");
-	check(!settings::resolve(bad).invert, "the bad line leaves the default");
+void gesture_directions() {
+	settings::Resolved defaults = settings::resolve(settings::parse(""));
+	for (const settings::Direction &direction : settings::directions) {
+		check(!(defaults.*direction.turned),
+			std::format("{} defaults to {}", direction.key, direction.way));
+	}
+	// Each key turns its own direction and no other.
+	for (const settings::Direction &direction : settings::directions) {
+		settings::Parsed parsed = settings::parse(
+			std::format("[gestures]\n{} = {}\n", direction.key, direction.other));
+		settings::Resolved resolved = settings::resolve(parsed);
+		bool only_it = parsed.errors.empty();
+		for (const settings::Direction &other : settings::directions) {
+			only_it = only_it && resolved.*other.turned == (&other == &direction);
+		}
+		check(only_it, std::format("{} = {} turns that direction alone", direction.key,
+			direction.other));
+	}
+	settings::Parsed bad = settings::parse("[gestures]\nhop-swipe = sideways\n");
+	check(error_at(bad, 2, "hop-swipe must be toward or away"),
+		"a value that is neither way is an error naming both, with its line");
+	check(!settings::resolve(bad).hops_away, "the bad line leaves the default");
 
-	settings::File file{"[gestures]\ninvert = off\ninvert = on\n"};
-	auto edit = file.set_invert(true);
-	check(edit.has_value() && edit->text == "[gestures]\ninvert = on\n",
-		"set_invert rewrites the first line and drops the duplicate");
-	check(settings::File{edit->text}.resolved().invert,
-		"the written value resolves");
+	settings::File file{"[gestures]\npan = natural\npan = natural\n"};
+	auto edit = file.set_direction("pan", "traditional");
+	check(edit.has_value() && edit->text == "[gestures]\npan = traditional\n",
+		"set_direction rewrites the first line and drops the duplicate");
+	check(edit.has_value() && settings::File{edit->text}.resolved().pan_traditional,
+		"the written way resolves");
+	check(!file.set_direction("pan", "sideways").has_value()
+			&& !file.set_direction("wheel", "natural").has_value(),
+		"an unknown way or direction is an error");
 }
 
 void template_parses_back() {
@@ -341,11 +357,16 @@ void template_parses_back() {
 	check(text.find("[commands]\n") != std::string::npos
 			&& text.find("# Super+B = firefox") != std::string::npos,
 		"the template holds an empty [commands] with a commented example");
+	bool directions_written = true;
+	for (const settings::Direction &direction : settings::directions) {
+		directions_written = directions_written
+			&& text.find(std::format("\n{} = {}\n", direction.key, direction.way))
+				!= std::string::npos;
+	}
 	check(text.find("[gestures]\n") != std::string::npos
 			&& text.find("swipes = three-finger-hops") != std::string::npos
-			&& text.find("pinch-scale = on") != std::string::npos
-			&& text.find("invert = off") != std::string::npos,
-		"the template holds [gestures] at its defaults");
+			&& text.find("pinch-scale = on") != std::string::npos && directions_written,
+		"the template holds [gestures] at its defaults, every direction too");
 	check(text.find("# Apps\n") != std::string::npos
 			&& text.find("# Windows\n") != std::string::npos
 			&& text.find("# In the overview\n") != std::string::npos,
@@ -546,7 +567,7 @@ int main() {
 	precedence_none();
 	precedence_taken_from_default_holders();
 	errors_carry_line_numbers();
-	gesture_invert();
+	gesture_directions();
 	template_parses_back();
 	edit_keeps_every_other_byte();
 	edit_appends_into_missing_section();

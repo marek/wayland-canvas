@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -101,15 +102,37 @@ struct Resolved {
 	std::vector<Command> commands;
 	SwipePreset swipes = SwipePreset::three_finger_hops;
 	bool pinch_scale = true;
-	// [gestures] invert: on reverses the pointer and touchpad scroll
-	// direction and the direction a swipe hop takes (input/gestures.md).
-	bool invert = false;
+	// [gestures] directions (input/gestures.md), each true when set the other
+	// way from its default; `directions` below names them.
+	bool mouse_traditional = false;
+	bool touchpad_traditional = false;
+	bool pan_traditional = false;
+	bool overview_down = false;
+	bool hops_away = false;
 	int lock_idle_minutes = default_lock_idle_minutes; // 0: no idle lock
 	bool night_light = false;
 	int night_light_k = default_night_light_k;
 
 	friend bool operator==(const Resolved &, const Resolved &) = default;
 };
+
+// The direction switches of [gestures] (input/gestures.md): the key in the
+// file, the way it goes by default and the other way, the name
+// settings.get and settings.set give it, and the setting it resolves to.
+struct Direction {
+	std::string_view key, way, other, param;
+	bool Resolved::*turned;
+};
+inline constexpr std::array<Direction, 5> directions = {{
+	{"mouse-scroll", "natural", "traditional", "mouseScroll", &Resolved::mouse_traditional},
+	{"touchpad-scroll", "natural", "traditional", "touchpadScroll",
+		&Resolved::touchpad_traditional},
+	{"pan", "natural", "traditional", "pan", &Resolved::pan_traditional},
+	{"overview-swipe", "up", "down", "overviewSwipe", &Resolved::overview_down},
+	{"hop-swipe", "toward", "away", "hopSwipe", &Resolved::hops_away},
+}};
+// The direction a key names, or nullptr.
+const Direction *find_direction(std::string_view key);
 
 // Resolution per scope: an action's keys are its line's when the file has
 // one, else its defaults; a chord the file gives to an action or command is
@@ -174,12 +197,14 @@ public:
 
 	std::expected<Edit, std::string> set_swipes(SwipePreset preset);
 	std::expected<Edit, std::string> set_pinch_scale(bool on);
-	std::expected<Edit, std::string> set_invert(bool on);
+	// One of `directions`, by its key, to one of its two ways.
+	std::expected<Edit, std::string> set_direction(std::string_view key,
+		std::string_view way);
 
 private:
-	// One on/off line of [gestures], by its name in the file.
-	std::expected<Edit, std::string> set_gesture_switch(std::string_view name,
-		bool on);
+	// One line of [gestures], by its name in the file.
+	std::expected<Edit, std::string> set_gesture(std::string_view name,
+		std::string_view value);
 
 	Parsed parsed_;
 	Resolved resolved_;

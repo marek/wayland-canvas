@@ -175,7 +175,8 @@ GestureOptions gesture_options(const settings::Resolved &conf) {
 		break;
 	}
 	options.pinch_scale = conf.pinch_scale;
-	options.invert = conf.invert;
+	options.overview_down = conf.overview_down;
+	options.hops_away = conf.hops_away;
 	return options;
 }
 

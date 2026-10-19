@@ -308,8 +308,37 @@ PanelCard {
 
 	readonly property bool pinchScale: !(settings && settings.gestures)
 		|| settings.gestures.pinchScale !== false
-	readonly property bool invert: settings && settings.gestures
-		? settings.gestures.invert === true : false
+	// Whether a direction goes `way`; before the settings arrive, its default does.
+	function gestureWay(param, way, isDefault) {
+		if (!(settings && settings.gestures && settings.gestures[param] !== undefined)) {
+			return isDefault
+		}
+		return settings.gestures[param] === way
+	}
+	// The direction switches (docs/intents/input/gestures.md): a switch
+	// each, on meaning `onWay`, with a line saying which way it moves now.
+	readonly property var directions: [
+		{param: "mouseScroll", onWay: "natural", offWay: "traditional", onByDefault: true,
+			label: "Natural scrolling with a mouse",
+			onLine: "The content moves the way the wheel turns",
+			offLine: "The content moves against the wheel"},
+		{param: "touchpadScroll", onWay: "natural", offWay: "traditional", onByDefault: true,
+			label: "Natural scrolling on the touchpad",
+			onLine: "The content follows the fingers",
+			offLine: "The content moves against the fingers"},
+		{param: "pan", onWay: "natural", offWay: "traditional", onByDefault: true,
+			label: "Natural looking away",
+			onLine: "Super + scroll moves the content the way you scroll",
+			offLine: "Super + scroll moves the view the way you scroll"},
+		{param: "overviewSwipe", onWay: "down", offWay: "up", onByDefault: false,
+			label: "Open the overview swiping down",
+			onLine: "Swiping up goes back in",
+			offLine: "Swiping up opens it, swiping down goes back in"},
+		{param: "hopSwipe", onWay: "away", offWay: "toward", onByDefault: false,
+			label: "Swipes push the desktops along",
+			onLine: "A swipe left hops to the desktop on the right",
+			offLine: "A swipe left hops to the desktop on the left"}
+	]
 
 	// ---- the Session tab ----
 
@@ -733,21 +762,32 @@ PanelCard {
 				text: "Direction"
 			}
 
-			PanelRow {
-				label: "Invert scrolling and swipes"
-				// A write that failed says why in place of the explanation.
-				detail: root.faultRow != null && root.faultRow.what === "invert"
-					? root.faultText
-					: "The pointer, the touchpad and the hops together"
-				marked: root.faultRow != null && root.faultRow.what === "invert"
-				clickable: false
+			Repeater {
+				model: root.directions
 
-				PanelSwitch {
-					anchors.right: parent.right
-					anchors.rightMargin: 8
-					anchors.verticalCenter: parent.verticalCenter
-					checked: root.invert
-					onToggled: root.setGesture("invert", !root.invert)
+				delegate: PanelRow {
+					id: row
+					required property var modelData
+					readonly property bool switchedOn: root.gestureWay(modelData.param,
+						modelData.onWay, modelData.onByDefault)
+					readonly property bool failed: root.faultRow != null
+						&& root.faultRow.what === modelData.param
+
+					label: modelData.label
+					// A write that failed says why in place of the line.
+					detail: failed ? root.faultText
+						: switchedOn ? modelData.onLine : modelData.offLine
+					marked: failed
+					clickable: false
+
+					PanelSwitch {
+						anchors.right: parent.right
+						anchors.rightMargin: 8
+						anchors.verticalCenter: parent.verticalCenter
+						checked: row.switchedOn
+						onToggled: root.setGesture(row.modelData.param,
+							row.switchedOn ? row.modelData.offWay : row.modelData.onWay)
+					}
 				}
 			}
 		}

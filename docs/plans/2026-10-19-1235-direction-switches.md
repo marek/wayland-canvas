@@ -31,11 +31,11 @@ The rules go into [input/gestures.md](../intents/input/gestures.md),
 ## Tasks
 
 - [x] The intents: gestures.md's direction table, config-file.md's keys, keyboard-and-pointer.md's scrolling rows, settings.md's choices, ipc.md's settings keys
-- [ ] canvas.conf reads and writes the five switches and `invert` is gone; the settings unit tests cover parsing, defaults, errors and edits
-- [ ] The mouse wheel and the touchpad each take their own natural-scrolling switch
-- [ ] Looking away and the overview's scroll pan follow the panning switch, whichever way the device scrolls apps
-- [ ] The overview's swipes and the hops each follow their own switch
-- [ ] The settings window shows the five switches; `settings.set` and the state name them
-- [ ] The gestures scenario proves each switch flips its own direction and no other; the bar scenario's settings window shows the five
-- [ ] `tools/check.sh` green
+- [x] canvas.conf reads and writes the five switches and `invert` is gone; the settings unit tests cover parsing, defaults, errors and edits
+- [ ] The mouse wheel and the touchpad each take their own natural-scrolling switch (built: libinput's natural scrolling set per device, a touchpad told by its tap fingers; the scenarios' devices are not libinput's, so only the on-screen box can show it)
+- [x] Looking away and the overview's scroll pan follow the panning switch, whichever way the device scrolls apps (the gestures scenario turns Super + a scroll both ways; the overview's scroll pan takes the same delta)
+- [x] The overview's swipes and the hops each follow their own switch
+- [x] The settings window shows the five switches; `settings.set` and the state name them (the bar scenario reads the five rows off the screen; a headless run set `pan` over IPC, saw it in canvas.conf and `settings.get`, and had a bad value refused)
+- [x] The gestures scenario proves each switch flips its own direction and no other; the bar scenario's settings window shows the five
+- [x] `tools/check.sh` green
 - [ ] On screen: each switch on the laptop's touchpad and a mouse (the user)
