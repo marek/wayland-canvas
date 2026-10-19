@@ -6,7 +6,68 @@
 #include "canvas/desktop.h"
 #include "core/geometry.h"
 #include "core/server.h"
+#include "platform/output.h"
 #include "windows/view.h"
+
+namespace {
+
+// A cell of the grid around desktop 1, in units of one desktop plus the gap.
+struct Cell {
+	int x, y;
+};
+
+// Ring `r`'s cells, in the fixed order: the four sides first, then the four
+// corners, then the rest of the ring clockwise starting from the top. Ring 1
+// is the slot order of desktops 2..9.
+std::vector<Cell> ring_cells(int r) {
+	std::vector<Cell> cells{
+		{0, -r}, {r, 0}, {0, r}, {-r, 0},
+		{r, -r}, {r, r}, {-r, r}, {-r, -r},
+	};
+	// The rest, clockwise from the top: each side's cells between its middle
+	// and its corners.
+	for (int x = 1; x < r; x++) {
+		cells.push_back({x, -r}); // top row, right of the middle
+	}
+	for (int y = -r + 1; y < r; y++) {
+		if (y != 0) {
+			cells.push_back({r, y}); // right column, top to bottom
+		}
+	}
+	for (int x = r - 1; x > -r; x--) {
+		if (x != 0) {
+			cells.push_back({x, r}); // bottom row, right to left
+		}
+	}
+	for (int y = r - 1; y > -r; y--) {
+		if (y != 0) {
+			cells.push_back({-r, y}); // left column, bottom to top
+		}
+	}
+	for (int x = -r + 1; x < 0; x++) {
+		cells.push_back({x, -r}); // top row, left of the middle
+	}
+	return cells;
+}
+
+// The frame a desktop of `size` has at `cell` around `anchor`: a side cell
+// sits directly beside the anchor's frame across the gap, centred along that
+// side, and each further cell one frame and one gap on.
+wlr_box cell_frame(wlr_box anchor, Cell cell, wlr_box size, int gap) {
+	auto along = [gap](int start, int extent, int length, int step) {
+		if (step == 0) {
+			return start + (extent - length) / 2;
+		}
+		if (step > 0) {
+			return start + extent + gap + (step - 1) * (length + gap);
+		}
+		return start + step * (length + gap);
+	};
+	return wlr_box{along(anchor.x, anchor.width, size.width, cell.x),
+		along(anchor.y, anchor.height, size.height, cell.y), size.width, size.height};
+}
+
+} // namespace
 
 Desktop::Desktop(DesktopId id, int number, wlr_box frame, double scale)
 	: id_(id), number_(number), scale_(scale),
@@ -78,6 +139,73 @@ Desktop &Desktops::create(wlr_box frame, double scale) {
 	while (by_number(number) != nullptr) {
 		number++;
 	}
+	return insert(number, frame, scale);
+}
+
+Desktop &Desktops::create_beside(int number, const Output &output) {
+	// A desktop made this way starts at 100 %: the frame fills the screen.
+	wlr_box frame{0, 0, output.width, output.height};
+	wlr_box anchor = anchor_frame();
+	int gap = config::desktop_gap;
+	auto place = [&](Cell cell) -> std::optional<wlr_box> {
+		wlr_box candidate = cell_frame(anchor, cell, frame, gap);
+		if (overlaps_any(candidate)) {
+			return std::nullopt;
+		}
+		return candidate;
+	};
+	// Desktop 1's own place is the anchor cell; desktop N >= 2 wants slot
+	// N - 1 of ring 1, the search wrapping round the ring.
+	if (number == 1) {
+		if (std::optional<wlr_box> at = place({0, 0})) {
+			return insert(number, *at, 1.0);
+		}
+	}
+	std::vector<Cell> ring = ring_cells(1);
+	std::size_t start = number >= 2 ? static_cast<std::size_t>(number - 2) : 0;
+	for (std::size_t i = 0; i < ring.size(); i++) {
+		if (std::optional<wlr_box> at = place(ring[(start + i) % ring.size()])) {
+			return insert(number, *at, 1.0);
+		}
+	}
+	// Every slot of ring 1 taken: the same order, one ring further out.
+	for (int r = 2;; r++) {
+		for (Cell cell : ring_cells(r)) {
+			if (std::optional<wlr_box> at = place(cell)) {
+				return insert(number, *at, 1.0);
+			}
+		}
+	}
+}
+
+wlr_box Desktops::anchor_frame() const {
+	for (const std::unique_ptr<Desktop> &desktop : stack_) {
+		if (desktop->number() == 1) {
+			return desktop->frame();
+		}
+	}
+	// Desktop 1 abandoned: the first output's initial view, where desktop 1
+	// is made at start-up.
+	const Output &first = *server_.outputs.front();
+	return wlr_box{first.lx, first.ly, first.width, first.height};
+}
+
+bool Desktops::overlaps_any(wlr_box box) const {
+	Rect candidate{
+		static_cast<double>(box.x),
+		static_cast<double>(box.y),
+		static_cast<double>(box.width),
+		static_cast<double>(box.height),
+	};
+	for (const std::unique_ptr<Desktop> &desktop : stack_) {
+		if (candidate.intersects(desktop->rect())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+Desktop &Desktops::insert(int number, wlr_box frame, double scale) {
 	DesktopId id = next_id_;
 	next_id_ = DesktopId{static_cast<int>(next_id_) + 1};
 	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame, scale));

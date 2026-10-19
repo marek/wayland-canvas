@@ -46,4 +46,4 @@ be worked.
 | [2026-10-18-1909-recording-stop.md](2026-10-18-1909-recording-stop.md) | Stopping a recording finishes a playable file whatever was started meanwhile: no descriptor of the compositor's reaches a process it starts | 3 | 1 |
 | [2026-10-18-1930-clipboard-shortcuts.md](2026-10-18-1930-clipboard-shortcuts.md) | Super+C and Super+V copy and paste in every app by sending Ctrl+Insert and Shift+Insert, rebindable in the settings | 3 | 1 |
 | [2026-10-18-1930-note-at-cursor.md](2026-10-18-1930-note-at-cursor.md) | A new sticky note opens centred on the cursor, kept on its screen and clear of the toolbar and bars | 0 | 4 |
-| [2026-10-18-1930-super-n-makes-desktops.md](2026-10-18-1930-super-n-makes-desktops.md) | Super+N makes a missing desktop beside desktop 1: sides then corners clockwise from the top, slot N-1 first, the next free slot, rings outwards, never overlapping | 0 | 4 |
+| [2026-10-18-1930-super-n-makes-desktops.md](2026-10-18-1930-super-n-makes-desktops.md) | Super+N makes a missing desktop beside desktop 1: sides then corners clockwise from the top, slot N-1 first, the next free slot, rings outwards, never overlapping | 3 | 1 |

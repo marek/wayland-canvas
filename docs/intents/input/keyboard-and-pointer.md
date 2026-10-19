@@ -62,7 +62,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | Super+Ctrl+D | `pin-desktop` | Pin the current view as a new desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+Ctrl+F4 | `abandon-desktop` | Abandon the current desktop ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+T | `tiling` | Switch tiling on or off for the current desktop; a free view is pinned as a desktop first ([../canvas/desktops.md](../canvas/desktops.md)) |
-| Super+1..9 | `desktop-1` … `desktop-9` | Go to desktop N ([../canvas/desktops.md](../canvas/desktops.md)) |
+| Super+1..9 | `desktop-1` … `desktop-9` | Go to desktop N, making it beside desktop 1 first when it does not exist ([../canvas/desktops.md](../canvas/desktops.md)) |
 | Super+0 | `zoom-reset` | Return the view to 100 %: the desktop shown ([../canvas/desktops.md](../canvas/desktops.md)), or a free view ([../canvas/infinite-canvas.md](../canvas/infinite-canvas.md)) |
 | Super+Shift+3 / 4 / 5 | `shot-screen` / `capture-pick` / `capture-toolbar` | Whole-screen shot / the capture picker / the capture toolbar ([../apps/capture.md](../apps/capture.md)); with Ctrl added, the `-copy` action of each copies the shot |
 | Print / Shift+Print / Alt+Print | `capture-pick` / `shot-screen` / `record-stop` | The picker / whole-screen shot / stop a recording, else the toolbar on its recording choices; Ctrl added, the `-copy` actions ([../apps/capture.md](../apps/capture.md)) |

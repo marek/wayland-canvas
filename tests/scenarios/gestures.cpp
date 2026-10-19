@@ -350,6 +350,44 @@ bool help_names(const char *word) {
 	return text.find(word) != std::string_view::npos;
 }
 
+// The frame a desktop made beside desktop 1 has at grid cell (cx, cy):
+// screen-sized, directly beside the anchor's frame across the desktop gap,
+// centred along that side, each further cell one frame and one gap on.
+wlr_box beside_frame(const wlr_box &anchor, int cx, int cy) {
+	Output *o = out();
+	auto along = [](int start, int extent, int length, int step) {
+		if (step == 0) {
+			return start + (extent - length) / 2;
+		}
+		if (step > 0) {
+			return start + extent + config::desktop_gap
+				+ (step - 1) * (length + config::desktop_gap);
+		}
+		return start + step * (length + config::desktop_gap);
+	};
+	return wlr_box{along(anchor.x, anchor.width, o->width, cx),
+		along(anchor.y, anchor.height, o->height, cy), o->width, o->height};
+}
+
+// One desktop Super+N made: numbered `number`, its frame at `expected`,
+// overlapping no other desktop, and the one shown after its chord.
+void check_made_desktop(int number, const wlr_box &expected) {
+	Desktop *made = server->canvas.desktops.by_number(number);
+	bool at = made != nullptr && made->frame().x == expected.x
+		&& made->frame().y == expected.y && made->frame().width == expected.width
+		&& made->frame().height == expected.height;
+	bool clear = made != nullptr;
+	if (made != nullptr) {
+		for (const Desktop &other : server->canvas.desktops.all()) {
+			clear = clear
+				&& (&other == made || !made->rect().intersects(other.rect()));
+		}
+	}
+	check(made != nullptr && at && clear && out()->desktop_showing() == made,
+		std::format("Super+{} made desktop {} at {},{} clear of the others and shown",
+			number, number, expected.x, expected.y));
+}
+
 int run_step() {
 	Output *o = out();
 	View *one = view_titled("one"), *two = view_titled("two"), *three = view_titled("three");
@@ -1819,6 +1857,123 @@ int run_step() {
 		retries = 0;
 		check(o->camera.destination() == hop_from,
 			"after the overview, double Super stays: the overview made that the view kept");
+		return 0;
+	}
+	case 121: {
+		// Super+N makes a missing desktop beside desktop 1: from desktop 1
+		// alone, desktops 2-5 land above, right, below and left of it.
+		std::vector<DesktopId> others;
+		for (const Desktop &d : server->canvas.desktops.all()) {
+			if (d.number() != 1) {
+				others.push_back(d.id());
+			}
+		}
+		for (DesktopId id : others) {
+			o->overview.abandon(id);
+		}
+		// Super+1 goes to desktop 1, making it at its own place when even
+		// that is gone.
+		key(KEY_LEFTMETA, true);
+		key(KEY_1, true);
+		key(KEY_1, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	}
+	case 122: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		check(server->canvas.desktops.size() == 1
+				&& o->desktop_showing() == server->canvas.desktops.by_number(1),
+			std::format("Super+N starts from desktop 1 alone ({} desktops)",
+				server->canvas.desktops.size()));
+		key(KEY_LEFTMETA, true);
+		key(KEY_2, true);
+		key(KEY_2, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	}
+	case 123: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		wlr_box anchor = server->canvas.desktops.by_number(1)->frame();
+		check_made_desktop(2, beside_frame(anchor, 0, -1));
+		key(KEY_LEFTMETA, true);
+		key(KEY_3, true);
+		key(KEY_3, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	}
+	case 124: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		wlr_box anchor = server->canvas.desktops.by_number(1)->frame();
+		check_made_desktop(3, beside_frame(anchor, 1, 0));
+		key(KEY_LEFTMETA, true);
+		key(KEY_4, true);
+		key(KEY_4, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	}
+	case 125: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		wlr_box anchor = server->canvas.desktops.by_number(1)->frame();
+		check_made_desktop(4, beside_frame(anchor, 0, 1));
+		key(KEY_LEFTMETA, true);
+		key(KEY_5, true);
+		key(KEY_5, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	}
+	case 126: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		wlr_box anchor = server->canvas.desktops.by_number(1)->frame();
+		check_made_desktop(5, beside_frame(anchor, -1, 0));
+		shot("37-super-n-made-beside");
+		return 500;
+	}
+	case 127: {
+		// The up slot already covered: Super+2 passes over it to the next
+		// free slot, right of desktop 1.
+		wlr_box anchor = server->canvas.desktops.by_number(1)->frame();
+		wlr_box up = beside_frame(anchor, 0, -1);
+		Desktop *three_desk = server->canvas.desktops.by_number(3);
+		Desktop *two_desk = server->canvas.desktops.by_number(2);
+		check(two_desk != nullptr && three_desk != nullptr,
+			"desktops 2 and 3 exist before the covered-slot round");
+		if (two_desk == nullptr || three_desk == nullptr) {
+			return 0;
+		}
+		o->overview.abandon(two_desk->id());
+		server->canvas.desktops.move(three_desk->id(), up.x, up.y);
+		check(server->canvas.desktops.by_number(2) == nullptr
+				&& three_desk->frame().x == up.x && three_desk->frame().y == up.y,
+			"desktop 2 abandoned, desktop 3 moved onto the up slot");
+		key(KEY_LEFTMETA, true);
+		key(KEY_2, true);
+		key(KEY_2, false);
+		key(KEY_LEFTMETA, false);
+		return 700;
+	}
+	case 128: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		wlr_box anchor = server->canvas.desktops.by_number(1)->frame();
+		check_made_desktop(2, beside_frame(anchor, 1, 0));
+		shot("38-super-n-passed-slot");
 		return 0;
 	}
 	default:

@@ -230,10 +230,13 @@ void act_goto_desktop(Server &server, Output *output, KeyArg arg) {
 	if (output == nullptr) {
 		return;
 	}
-	Desktop *desktop = server.canvas.desktops.by_number(std::get<int>(arg));
-	if (desktop != nullptr) {
-		output->goto_desktop(*desktop);
+	int number = std::get<int>(arg);
+	Desktop *desktop = server.canvas.desktops.by_number(number);
+	if (desktop == nullptr) {
+		// A missing desktop is made beside desktop 1, then gone to the same way.
+		desktop = &server.canvas.desktops.create_beside(number, *output);
 	}
+	output->goto_desktop(*desktop);
 }
 
 // Super+0: the view back to 100 %, the camera easing with it: the desktop
@@ -414,11 +417,11 @@ struct Runner {
 constexpr std::array runners = {
 	Runner{settings::Scope::global, "launcher", act_launcher, 0},
 	Runner{settings::Scope::global, "terminal", act_spawn, config::terminal_cmd},
+	Runner{settings::Scope::global, "copy", act_clipboard_chord, 0},
+	Runner{settings::Scope::global, "paste", act_clipboard_chord, 1},
 	Runner{settings::Scope::global, "close", act_close, 0},
 	Runner{settings::Scope::global, "minimize", act_minimize, 0},
 	Runner{settings::Scope::global, "restore", act_restore_minimized, 0},
-	Runner{settings::Scope::global, "copy", act_clipboard_chord, 0},
-	Runner{settings::Scope::global, "paste", act_clipboard_chord, 1},
 	Runner{settings::Scope::global, "fullscreen", act_fullscreen, 0},
 	Runner{settings::Scope::global, "snap-left", act_arrow, Dir{-1, 0}},
 	Runner{settings::Scope::global, "snap-right", act_arrow, Dir{1, 0}},

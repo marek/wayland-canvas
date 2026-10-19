@@ -145,6 +145,7 @@ inline constexpr double combine_overlap = 0.5; // dropping a frame this far onto
 
 inline constexpr double anim_ms = 280.0;
 inline constexpr int tile_gap = 8;
+inline constexpr int desktop_gap = 8; // canvas px between desktops made beside desktop 1
 inline constexpr double drag_threshold = 6.0; // px before a press becomes a drag
 inline constexpr uint32_t double_click_ms = 400;
 // Two lone Super taps this close are the double tap; a single tap with an
@@ -169,12 +170,12 @@ inline constexpr const char *terminal_cmd = "exec ${TERMINAL:-foot}";
 // how long wlroots keeps an xdg-activation token.
 inline constexpr double launch_trace_ms = 30000.0;
 
-// App launcher: tap the logo key (or Super+Space).
 // X11 windows through Xwayland (docs/intents/windows/x11.md). Zoomed out,
 // X's pointer is moved back to the middle of X's screen before it comes
 // this close to an edge, in X pixels.
 inline constexpr int x11_pointer_margin = 128;
 
+// App launcher: tap the logo key (or Super+Space).
 inline constexpr int launcher_width = 600;
 inline constexpr int launcher_search_height = 56;
 inline constexpr int launcher_row_height = 44;

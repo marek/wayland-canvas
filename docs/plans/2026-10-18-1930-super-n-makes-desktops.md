@@ -18,7 +18,7 @@ and [../intents/input/keyboard-and-pointer.md](../intents/input/keyboard-and-poi
 
 ## Tasks
 
-- [ ] The intent: the slot order and the rings in desktops.md's Create, and the Super+1..9 row
-- [ ] Super+N for a missing desktop makes it in its slot, or the next free one, rings outwards, and goes there
-- [ ] A scenario proves it: Super+2..5 from desktop 1 alone make desktops above, right of, below and left of it, and a covered slot is passed over; `tools/check.sh` green
+- [x] The intent: the slot order and the rings in desktops.md's Create, and the Super+1..9 row
+- [x] Super+N for a missing desktop makes it in its slot, or the next free one, rings outwards, and goes there
+- [x] A scenario proves it: Super+2..5 from desktop 1 alone make desktops above, right of, below and left of it, and a covered slot is passed over; `tools/check.sh` green
 - [ ] On screen (the user)

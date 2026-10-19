@@ -8,6 +8,8 @@
 #include "core/geometry.h"
 #include "core/util.h"
 
+class Output;
+
 class Server;
 
 // A desktop's unique identity; handed out once and never reused.
@@ -21,7 +23,7 @@ public:
 	Desktop(DesktopId id, int number, wlr_box frame, double scale);
 
 	DesktopId id() const;
-	int number() const; // "Desktop 2": the smallest unused number at creation
+	int number() const; // "Desktop 2": the smallest unused number at creation, N when Super+N makes it
 	const wlr_box &frame() const; // canvas coordinates
 	Rect rect() const;
 	Point centre() const; // exact: the frame resizes around it, so zooms never drift it
@@ -53,6 +55,12 @@ public:
 	// The smallest unused number, placed topmost, filling the screen with
 	// `frame` at `scale` (a view pinned at its zoom); damages.
 	Desktop &create(wlr_box frame, double scale = 1.0);
+	// Super+N for a missing desktop: makes it numbered `number` — the one
+	// exception to the smallest-unused rule — beside desktop 1, in slot
+	// `number` - 1 of the fixed clockwise order from the top (sides first,
+	// then corners), passing taken slots over and ringing outwards, never
+	// overlapping another desktop; the frame fills `output`'s screen.
+	Desktop &create_beside(int number, const Output &output);
 	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
 	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows
@@ -84,6 +92,13 @@ public:
 	}
 
 private:
+	// Where desktop 1 sits — its frame — or, with it abandoned, the first
+	// output's initial view, the box desktop 1 is made at on start-up.
+	wlr_box anchor_frame() const;
+	// Whether `box` overlaps any desktop's frame: a slot it covers is taken.
+	bool overlaps_any(wlr_box box) const;
+	// Places the new desktop topmost, filling `frame` at `scale`; damages.
+	Desktop &insert(int number, wlr_box frame, double scale);
 	Server &server_;
 	std::vector<std::unique_ptr<Desktop>> stack_; // front is topmost
 	DesktopId next_id_ = DesktopId{1}; // handed out once, never reused

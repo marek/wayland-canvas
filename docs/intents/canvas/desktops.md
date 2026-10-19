@@ -35,6 +35,8 @@ windows tiled, and every window opened on it joins the tiling.
 - **Ids are the smallest unused number**, matching Windows' virtual
   desktop numbering that `Super+1..9` addresses
   ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)).
+  The one exception is a desktop `Super+N` makes, which takes the number
+  N it was asked for, so the chord's promise holds.
 - **Scale and tiling belong to the desktop**, not to the screen or a
   window, so going to a desktop brings its scale and its layout with it.
   A free view has neither: asking a free view for a scale or for tiling
@@ -55,7 +57,7 @@ windows tiled, and every window opened on it joins the tiling.
 | Membership | A window belongs to the desktop its frame centre lies in, or to the tiled desktop whose board holds it |
 | Overlapping frames | The topmost frame containing the centre owns the window |
 | First desktop | Desktop 1 exists from the start, at the first output's initial view |
-| Ids | Smallest unused number |
+| Ids | Smallest unused number; a desktop `Super+N` makes is numbered N |
 
 ### Create
 
@@ -64,6 +66,24 @@ windows tiled, and every window opened on it joins the tiling.
 | Right click (a two-finger tap or press) on empty overview canvas | A new desktop at that spot |
 | `n` in the overview | A new desktop at the target centre if that is a free spot, else at the cursor ([overview.md](overview.md)) |
 | Super+Ctrl+D | Pins the current view as a new desktop |
+| `Super+N` (`desktop-N`) | Goes to desktop N, making it first when it does not exist: beside desktop 1, in the slot order below |
+
+A desktop `Super+N` makes is numbered N and goes beside desktop 1 in a
+fixed slot order, clockwise from the top: the four sides first (up,
+right, down, left), then the four corners (top-right, bottom-right,
+bottom-left, top-left); desktop N wants slot N - 1 of that order, and
+desktop 1 the anchor cell itself. A slot is taken when the frame it
+would give overlaps any existing desktop's frame — a made desktop never
+overlaps another — and the search passes on through the ring's order,
+wrapping round its start; with every slot of the ring taken it repeats
+one ring further out, a ring being its four sides, its four corners,
+then the rest clockwise from the top. A made desktop is screen-sized at
+100 %; one in a side slot sits directly beside desktop 1's frame, across
+the desktop gap (a compile-time constant in `src/core/config.h`) and
+centred along that side, whatever desktop 1's scale, and each further
+cell is one frame and one gap on. With desktop 1 itself abandoned, the
+anchor is the first output's initial view, where desktop 1 is made at
+start-up.
 
 ### Abandon
 
