@@ -917,7 +917,7 @@ void CaptureUi::start_recording(Output &output, const std::optional<wlr_box> &ar
 	// ffmpeg reads raw BGRA frames from the pipe and does the encoding;
 	// the crop keeps odd-sized areas encodable as yuv420p.
 	int fds[2];
-	if (pipe(fds) < 0) {
+	if (pipe2(fds, O_CLOEXEC) < 0) {
 		wlr_log_errno(WLR_ERROR, "capture: could not open the recorder pipe");
 		recorder_path_.clear();
 		recorder_output_ = nullptr;
@@ -944,6 +944,9 @@ void CaptureUi::start_recording(Output &output, const std::optional<wlr_box> &ar
 				close(null);
 			}
 		}
+		// ffmpeg starts with only its three standard fds: nothing the
+		// compositor holds open reaches it.
+		close_range(STDERR_FILENO + 1, ~0U, 0);
 		std::vector<std::string> args{config::capture_recorder, "-hide_banner",
 			"-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgra",
 			"-s", std::format("{}x{}", dev.width, dev.height),

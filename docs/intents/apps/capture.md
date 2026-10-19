@@ -87,6 +87,8 @@ shot takes, the compositor's own UI excluded), piped as raw frames to
 and the TTY both work, no external capture protocol involved. Files land
 in the XDG videos dir as `Screen Recording <date> at <time>.mp4`. The
 bar's recording dot (a shell plugin) appears while one runs: red, a
-click stops it, like Alt+Print. A recording that cannot start says so
-with a hint; shots are unaffected. The timer, when set, counts down on a hint
-first; Esc cancels it.
+click stops it, like Alt+Print. A stop ends the recorder on the end of
+its input, so the file is left finished and playable and the dot is
+gone, whatever was started while the recording ran. A recording that
+cannot start says so with a hint; shots are unaffected. The timer,
+when set, counts down on a hint first; Esc cancels it.

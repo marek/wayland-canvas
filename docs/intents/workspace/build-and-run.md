@@ -59,7 +59,10 @@ that would steer a client to another compositor (`DISPLAY`,
 `HYPRLAND_INSTANCE_SIGNATURE`, `SWAYSOCK`, `I3SOCK`, `NIRI_SOCKET`) are
 unset, the signal mask is empty, and SIGPIPE is as the compositor found
 it — the compositor ignores SIGPIPE for itself (a control-socket client
-may leave mid-write), and that ignore never reaches what it starts.
+may leave mid-write), and that ignore never reaches what it starts. A
+started process holds only stdin, stdout and stderr of the
+compositor's descriptors: nothing it has open — the recorder's pipe,
+its sockets — reaches it.
 
 A single-instance app that is already running in another session — a
 browser or an Electron app open in the host compositor of a nested run,

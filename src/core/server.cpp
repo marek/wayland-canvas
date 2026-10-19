@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <format>
 #include <limits.h>
 #include <optional>
@@ -302,7 +303,7 @@ pid_t spawn(const char *cmd) {
 	// The intermediate child reports the command's pid through a pipe, so a
 	// launch can be traced to the windows its processes open.
 	int report[2];
-	if (pipe(report) < 0) {
+	if (pipe2(report, O_CLOEXEC) < 0) {
 		wlr_log_errno(WLR_ERROR, "pipe failed");
 		return -1;
 	}
@@ -323,7 +324,9 @@ pid_t spawn(const char *cmd) {
 		std::signal(SIGPIPE, inherited_sigpipe);
 		pid_t command = fork();
 		if (command == 0) {
-			close(report[1]);
+			// The command starts with only its three standard fds:
+			// nothing the compositor holds open reaches it.
+			close_range(STDERR_FILENO + 1, ~0U, 0);
 			execl("/bin/sh", "/bin/sh", "-c", cmd, static_cast<char *>(nullptr));
 			_exit(127);
 		}

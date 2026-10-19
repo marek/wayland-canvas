@@ -6,7 +6,9 @@
 // the `wayland-canvas msg capture.pick` chooser bridge, and recordings
 // (the compositor's own offscreen frames piped into ffmpeg; started,
 // stopped by Alt+Print and by `capture.stop`, left as playable files,
-// proven by ffprobe). Shots are compared against grim pixel for pixel.
+// proven by ffprobe, with a command started beside one holding none of
+// the compositor's descriptors). Shots are compared against grim
+// pixel for pixel.
 // Writes only under $CANVAS_TMP: the XDG pictures and videos dirs point
 // into it, and xdg-open is a stub.
 #include <algorithm>
@@ -51,6 +53,7 @@ bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
 pid_t sub_pid = -1; // the events subscriber
+pid_t held_pid = -1; // the command a recording runs beside
 std::string shot_dir;
 std::string pictures_dir; // the scratch XDG pictures dir
 std::string videos_dir; // the scratch XDG videos dir
@@ -138,6 +141,33 @@ std::vector<std::string> files_with(const std::string &dir, std::string_view pre
 		return mtime(a) > mtime(b);
 	});
 	return out;
+}
+
+// The descriptors a live process holds, sorted; empty when it is gone.
+std::vector<std::string> proc_fds(pid_t pid) {
+	std::string dir = std::format("/proc/{}/fd", pid);
+	std::vector<std::string> out;
+	DIR *d = opendir(dir.c_str());
+	if (d == nullptr) {
+		return out;
+	}
+	while (dirent *e = readdir(d)) {
+		if (e->d_name[0] != '.') {
+			out.push_back(e->d_name);
+		}
+	}
+	closedir(d);
+	std::ranges::sort(out);
+	return out;
+}
+
+// Kills the command a recording ran beside; the double fork in spawn
+// reparented it, so there is nothing to wait on.
+void kill_held() {
+	if (held_pid > 0) {
+		kill(held_pid, SIGKILL);
+		held_pid = -1;
+	}
 }
 
 // ------------------------------------------------------------- pictures
@@ -1246,17 +1276,28 @@ int run_step() {
 		check(!rec.empty() && rec != "none",
 			std::format("the state reports the recording ({})", rec));
 		shot("recording-hint");
+		// the spawn path a shortcut takes, running beside the recording
+		held_pid = spawn("sleep 60");
 		return 2500; // some footage
 	}
-	case 52: { // Alt+Print stops it
+	case 52: { // the started command holds nothing of the compositor's
 		if (grim_running()) {
 			return -100;
 		}
+		std::vector<std::string> fds = proc_fds(held_pid);
+		std::string held;
+		for (const std::string &fd : fds) {
+			held += held.empty() ? fd : ", " + fd;
+		}
+		check(fds == std::vector<std::string>{"0", "1", "2"},
+			std::format("the command started beside the recording holds only "
+				"fds 0, 1, 2 ({})", held));
 		chord(KEY_SYSRQ, ALT);
 		return 400;
 	}
 	case 53: {
-		if (server->capture_ui.recording() && retries++ < 30) {
+		// ffmpeg finalises the file after the pipe's end: a wide budget
+		if (server->capture_ui.recording() && retries++ < 100) {
 			return -100;
 		}
 		if (acted) {
@@ -1287,6 +1328,7 @@ int run_step() {
 				std::format("ffprobe reads the recording as a 1280x720 video ({})",
 					probe));
 		}
+		kill_held();
 		return 300;
 	}
 	case 55: { // capture.stop on nothing is an error
@@ -1533,6 +1575,7 @@ int main() {
 		nullptr);
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display); // `msg quit` ends it
+	kill_held(); // an early end leaves no command behind either
 	if (!finished) {
 		check(false, std::format("the run ended at step {}, before its last step", step));
 	}

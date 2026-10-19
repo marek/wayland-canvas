@@ -20,7 +20,7 @@ for what a started process gets.
 
 ## Tasks
 
-- [ ] The intents state it: a stop always ends in a finished file, and a started process holds only its stdin, stdout and stderr of the compositor's
-- [ ] The recorder's pipe is close-on-exec, and every command the compositor starts begins with no descriptor above stderr
-- [ ] The capture scenario proves it: a command started during a recording holds no compositor descriptor, and the recording stopped while it runs is a file ffprobe reads; `tools/check.sh` green
+- [x] The intents state it: a stop always ends in a finished file, and a started process holds only its stdin, stdout and stderr of the compositor's
+- [x] The recorder's pipe is close-on-exec, and every command the compositor starts begins with no descriptor above stderr
+- [x] The capture scenario proves it: a command started during a recording holds no compositor descriptor, and the recording stopped while it runs is a file ffprobe reads (it failed on all four before the fix); `tools/check.sh` green
 - [ ] Whether a full-screen recording on the 2880x1800 panel stalls the compositor in its blocking pipe writes (on screen, the user)
