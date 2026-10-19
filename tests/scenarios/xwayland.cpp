@@ -716,16 +716,30 @@ int run_step() {
 			centred = std::abs(a.cx() - b.cx()) <= 1 && std::abs(a.cy() - b.cy()) <= 1;
 		}
 		check(centred, "centred over the window it blocks");
+		// Switching tiling off and on lays the desktop out again: the modal
+		// dialog still floats over its window.
+		super_key(KEY_T);
+		return 600;
+	}
+	case 45: {
+		super_key(KEY_T);
+		return 600;
+	}
+	case 46: {
+		View *main = titled("x11-tiled"), *dialog = titled("x11-tiled-dialog");
+		check(main != nullptr && main->tiled && main->board.has_value()
+				&& dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+			"switched off and on, tiling leaves the modal dialog floating");
 		// Going to a desktop gives the keyboard to the window last used there.
 		super_key(KEY_2);
 		return 1000;
 	}
-	case 45: {
+	case 47: {
 		check(start_client(other, {"--size=300x200", "--title=x11-two"}),
 			"an X11 window started on desktop 2");
 		return 1500;
 	}
-	case 46: {
+	case 48: {
 		if (titled("x11-two") == nullptr && retries++ < 200) {
 			return -100;
 		}
@@ -734,14 +748,14 @@ int run_step() {
 		super_key(KEY_1);
 		return 1000;
 	}
-	case 47: {
+	case 49: {
 		check(server->focused_view != nullptr
 				&& server->focused_view == titled("x11-tiled-dialog"),
 			"Super+1 gave the keyboard to the window last used on desktop 1");
 		super_key(KEY_2);
 		return 1000;
 	}
-	case 48: {
+	case 50: {
 		check(server->focused_view != nullptr && server->focused_view == titled("x11-two"),
 			"Super+2 gave it back to the window on desktop 2");
 		reap_client(client);

@@ -28,4 +28,6 @@ and [../intents/canvas/desktops.md](../intents/canvas/desktops.md).
 - [x] A dialog opens centred over its parent; a modal one never joins a tiled board
 - [x] Going to a desktop gives the keyboard to its topmost window, the overview's exit and Super+N and hops alike
 - [x] The xwayland scenario proves both: on a tiled desktop a modal dialog floats centred over its tiled window, and Super+N moves the keyboard to the last window used on each desktop; the gestures and input scenarios still pass
+- [x] What a window is — ordinary, dialog, modal, placed by its client — is answered once (`src/windows/view_kind.h`) and read by placement, every way onto a board, and the focus picks, in place of checks scattered through them
+- [x] Switching tiling off and on, a drop, a combine or a free-spot tile never put a modal dialog on a board; the xwayland scenario proves Super+T off and on (it failed before the fix)
 - [ ] On screen: Krita's dialogs on a tiled desktop, a shell taking keys after Super+N (the user)

@@ -106,6 +106,14 @@ and a foreign-toplevel close request, all with the same effect.
   a screen-shaped box around itself — it never fails to find an area.
 - **The saved box is the content box**, not the frame, so unmaximize
   puts back exactly what the client had before.
+- **One answer to what a window is.** A window is ordinary, a dialog that
+  leaves its window usable, a modal dialog, or placed by its own client
+  (an X11 menu, tooltip or drag icon). Its shell answers which once, and
+  every rule — where it opens, whether it takes a slice of a board,
+  whether it is given the keyboard — reads that answer
+  (`src/windows/view_kind.h`), never the shell's own flags. A rule that
+  asks the shells itself misses a way in: a modal dialog kept off the
+  board when it opens joins it when tiling is switched off and on.
 
 ## Error states, corner cases
 

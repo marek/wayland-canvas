@@ -180,8 +180,8 @@ void place(View &view) {
 	}
 	// A dialog sits over the window it belongs to, its title bar never above
 	// that window's.
-	if (View *parent = view.shell_parent(); parent != nullptr && parent->mapped
-			&& !parent->minimized) {
+	View *parent = opens_over_parent(view.kind()) ? view.shell_parent() : nullptr;
+	if (parent != nullptr && parent->mapped && !parent->minimized) {
 		wlr_box over = parent->frame_box();
 		double px = over.x + (over.width - fw) / 2.0;
 		double py = std::fmax(over.y, over.y + (over.height - fh) / 2.0);
@@ -717,7 +717,7 @@ void View::handle_map() {
 	mapped = true;
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
-	if (override_redirect) {
+	if (kind() == ViewKind::client_placed) {
 		// A menu or a tooltip belongs where its client put it, beside the
 		// window it hangs from; it joins no board and takes no focus
 		// unless it asks for one.
@@ -925,7 +925,7 @@ std::optional<ViewHit> Server::view_at(double cx, double cy, double zoom) {
 
 View *Server::top_visible_view(Output *output) {
 	for (View *view : views) {
-		if (!view->mapped || view->minimized) {
+		if (!view->mapped || view->minimized || !takes_focus(view->kind())) {
 			continue;
 		}
 		if (output == nullptr
@@ -992,7 +992,7 @@ void Server::focus_in(wlr_box box) {
 		}
 	}
 	for (View *view : canvas.views_in(box)) {
-		if (!view->override_redirect) {
+		if (takes_focus(view->kind())) {
 			focus_view(view);
 			return;
 		}

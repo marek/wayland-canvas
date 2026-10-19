@@ -142,6 +142,7 @@ Rect Canvas::tiling_area(const Desktop &desktop) {
 
 void Canvas::tile(wlr_box area, const Output &output) {
 	std::vector<View *> in_area = views_in(area);
+	std::erase_if(in_area, [](const View *view) { return !tiles(view->kind()); });
 	if (in_area.empty()) {
 		server_.hint.set("No windows to tile here");
 		return;
@@ -224,6 +225,11 @@ void Canvas::place_on_slice(View &view, const Desktop &desktop, Slice slice) {
 }
 
 void Canvas::join(Desktop &desktop, View &view) {
+	// Every way onto a board comes through here — a window opened, dropped,
+	// combined in, tiling switched on — so the kind is asked here once.
+	if (!tiles(view.kind())) {
+		return;
+	}
 	std::vector<View *> views = board_views(desktop);
 	std::vector<Slice> occupied = held_slices(desktop);
 	std::optional<SlicePlacement> placed = place_new(occupied);
@@ -381,9 +387,8 @@ void Canvas::settle(View &view) {
 		}
 		return;
 	}
-	// A window without a board joins the tiled desktop it stands on, if any;
-	// a modal one floats over the window it blocks.
-	if (view.mapped && !view.minimized && !view.is_modal()) {
+	// A window without a board joins the tiled desktop it stands on, if any.
+	if (view.mapped && !view.minimized) {
 		Point centre = box_centre(view.frame_box());
 		if (Desktop *onto = desktops.at(centre.x, centre.y); onto != nullptr
 				&& onto->tiling() && !view.maximized && !view.fullscreen) {

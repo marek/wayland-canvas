@@ -6,6 +6,7 @@
 #include "canvas/desktop.h"
 #include "windows/decoration.h"
 #include "windows/launches.h"
+#include "windows/view_kind.h"
 #include "core/geometry.h"
 #include "core/util.h"
 
@@ -121,11 +122,17 @@ public:
 	View *shell_parent() const {
 		return is_x11() ? x11_parent() : xdg_parent();
 	}
-	// A modal window floats over the window it blocks and never joins a
-	// tiled board; a dialog that leaves its window usable tiles like any
-	// (docs/intents/windows/window-management.md).
-	bool is_modal() const {
-		return is_x11() ? x11_modal() : xdg_modal();
+	// What the window is to the window manager; every layout rule reads it
+	// (windows/view_kind.h). Modal by X11's _NET_WM_STATE_MODAL or by
+	// xdg-dialog-v1.
+	ViewKind kind() const {
+		if (override_redirect) {
+			return ViewKind::client_placed;
+		}
+		if (is_x11() ? x11_modal() : xdg_modal()) {
+			return ViewKind::modal;
+		}
+		return shell_parent() != nullptr ? ViewKind::dialog : ViewKind::normal;
 	}
 
 	Server &server;

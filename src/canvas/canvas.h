@@ -19,8 +19,8 @@ public:
 	std::vector<View *> views_in(wlr_box box) const;
 	// The desktop the view's centre lies in.
 	Desktop *desktop_of(const View &view);
-	// The views in `area` as slices on a one-shot board, once: a free spot has
-	// no tiling switch. They keep no board membership.
+	// The views in `area` whose kind tiles, as slices on a one-shot board,
+	// once: a free spot has no tiling switch. They keep no board membership.
 	void tile(wlr_box area, const Output &output);
 	// Flips a desktop's tiling switch: on lays its standing windows onto the
 	// board by the new-window rule; off leaves them where the board left
@@ -64,7 +64,8 @@ private:
 	// fullscreen views only get the slice.
 	void place_on_slice(View &view, const Desktop &desktop, Slice slice);
 	// A new window on the desktop's board: the largest free slice, or half of
-	// the largest slice when none is free. The view joins the board.
+	// the largest slice when none is free. The view joins the board, unless
+	// its kind does not tile (windows/view_kind.h).
 	void join(Desktop &desktop, View &view);
 	// Drops the view from its board: told it is no longer tiled, slice and
 	// membership dropped with it.
