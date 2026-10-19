@@ -28,5 +28,5 @@ step. The rules are in
 - [x] The Arch job installs git, checks out, checks the tag, then installs the makedepends read from `packaging/PKGBUILD`; packaging.md's Release builds table says where each job's build dependencies come from
 - [x] `meson.build`, the PKGBUILD, the Debian control file and `flake.nix` name 1.0.2; `tools/ci-check-tag.sh v1.0.2` passes
 - [x] The Arch job's steps, run as root in a rootless `archlinux:base-devel` root filesystem, build the package
-- [ ] On GitHub: main and a v1.0.2 tag pushed build both packages and draft the release (the user pushes)
-- [ ] The packages require what they use: the Arch `depends` name librsvg and lcms2, which the compositor links (lcms2 a makedepend too, so every build links it), and ffmpeg, which records; the Debian `Depends` adds ffmpeg to the computed libraries
+- [ ] On GitHub: main and a new v* tag pushed build both packages, named for the tag, and draft the release (the user pushes)
+- [x] The packages require what they use: the Arch `depends` name librsvg and lcms2, which the compositor links (lcms2 a makedepend too, so every build links it), and ffmpeg, which records; the Debian `Depends` adds ffmpeg to the computed libraries

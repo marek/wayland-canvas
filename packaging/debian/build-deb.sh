@@ -88,7 +88,9 @@ if [ -z "$depends" ]; then
 	echo "deb-build: dpkg-shlibdeps produced no dependencies" >&2
 	exit 2
 fi
-sed -i "s/^Depends:.*/Depends: $depends/" "$pkg/DEBIAN/control"
-echo "deb-build: Depends: $depends"
+# the computed libraries go where the control file names them, beside the
+# programs it declares itself (ffmpeg, run for recordings, is linked by none)
+sed -i "s/\${shlibs:Depends}/$depends/" "$pkg/DEBIAN/control"
+echo "deb-build: $(grep '^Depends:' "$pkg/DEBIAN/control")"
 
 dpkg-deb --build -Zxz "$pkg" "$S/packages/wayland-canvas_${version}-1_${arch}.deb"

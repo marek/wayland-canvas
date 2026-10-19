@@ -83,7 +83,7 @@ taken under it — offscreen captures exclude the compositor's own UI.
 Recordings are the compositor's own doing: each frame is an offscreen
 capture of the chosen screen, window or region (the same render path a
 shot takes, the compositor's own UI excluded), piped as raw frames to
-`ffmpeg` (an optional dependency) for H.264 encoding — so nested runs
+`ffmpeg` (a dependency of both packages) for H.264 encoding — so nested runs
 and the TTY both work, no external capture protocol involved. Files land
 in the XDG videos dir as `Screen Recording <date> at <time>.mp4`. The
 bar's recording dot (a shell plugin) appears while one runs: red, a

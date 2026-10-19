@@ -11,12 +11,15 @@ options=('!debug')
 install=wayland-canvas.install
 depends=(
 	'cairo'
+	'ffmpeg'
 	'glib2'
 	'json-glib'
+	'lcms2'
 	'libdisplay-info'
 	'libgcc'
 	'libglvnd'
 	'libinput'
+	'librsvg'
 	'libstdc++'
 	'libxcb'
 	'libxkbcommon'
@@ -32,8 +35,7 @@ depends=(
 )
 optdepends=('xorg-xwayland: X11 applications'
 	'quickshell: the top bar (started automatically when qs is on PATH)'
-	'xdg-desktop-portal-wlr: screen sharing and screenshots for apps (Chrome, video calls)'
-	'ffmpeg: screen and window recordings (shots never need it)')
+	'xdg-desktop-portal-wlr: screen sharing and screenshots for apps (Chrome, video calls)')
 makedepends=(
 	'clang'
 	'git'
@@ -52,6 +54,7 @@ makedepends=(
 	'cairo'
 	'pango'
 	'librsvg'
+	'lcms2'
 	'glib2'
 	'json-glib'
 	'sqlite'

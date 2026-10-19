@@ -127,8 +127,8 @@ Recordings go to `~/Videos` (the XDG videos dir); a red dot in the bar marks a
 running one and stops it on a click. The compositor itself renders every
 recording frame offscreen (the same path a shot takes) and pipes them to
 `ffmpeg`, so recordings work nested and from a TTY alike, and none of the
-capture UI (picker, toolbar, thumbnail) is ever in them. Recordings need
-ffmpeg (optional — shots never depend on it):
+capture UI (picker, toolbar, thumbnail) is ever in them. Both packages depend
+on ffmpeg for this; a build run from the checkout needs it installed:
 
 ```sh
 sudo pacman -S ffmpeg   # Debian: apt install ffmpeg
