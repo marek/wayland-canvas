@@ -175,6 +175,12 @@ void View::handle_x11_associate() {
 	unmap_.connect<&View::handle_unmap>(x11->surface->events.unmap, this);
 	commit_.connect<&View::handle_commit>(x11->surface->events.commit, this);
 	handle_first_commit();
+	// A surface Xwayland drew on before wlroots paired it with its window
+	// maps only on its next commit, which a window that never redraws never
+	// makes: map it now, as wlroots' own role does for a commit with a buffer.
+	if (!x11->surface->mapped && wlr_surface_has_buffer(x11->surface)) {
+		wlr_surface_map(x11->surface);
+	}
 }
 
 void View::handle_x11_dissociate() {
