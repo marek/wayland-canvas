@@ -19,10 +19,10 @@ The contract is [../intents/windows/x11.md](../intents/windows/x11.md).
 
 ## Tasks
 
-- [ ] The intent states how X's stack and positions follow the canvas, and the corner cases (x11.md)
-- [ ] X's stacking order follows the compositor's: a mapped or raised window is on top in X too, a minimized one at the bottom
-- [ ] X positions are canvas positions less the offset, sent wherever a window is placed, moved or resized; an override-redirect window is placed back through the same offset
-- [ ] The offset moves when the pointer over an X11 window would leave X's screen, every X11 window moving with it
-- [ ] The xwayland scenario proves it: a window opened over another takes the click, the window under it takes clicks where it shows, a window opened past X's screen takes the click, a window larger than X's screen takes clicks at its far corners with the right coordinates, a minimized window takes no click; `tools/check.sh` green
-- [ ] Krita's New and Open dialogs take the pointer in a headless run, read back from X, and with Krita maximized at 25 % its whole window does
+- [x] The intent states how X's stack and positions follow the canvas, and the corner cases (x11.md)
+- [x] X's stacking order follows the compositor's: a mapped or raised window is on top in X too, a minimized one at the bottom
+- [x] X positions are canvas positions less the offset, sent wherever a window is placed, moved or resized; an override-redirect window is placed back through the same offset
+- [x] The offset moves when the pointer over an X11 window would leave X's screen, every X11 window moving with it
+- [x] The xwayland scenario proves it: a window opened over another takes the click, the window under it takes clicks where it shows, a window opened past X's screen takes the click, a window larger than X's screen takes clicks at its far corners with the right coordinates, a minimized window takes no click; `tools/check.sh` green
+- [ ] Krita's New and Open dialogs take the pointer in a headless run, read back from X, and with Krita maximized at 25 % its whole window does (not run: testing kept to the suites)
 - [ ] On screen, in the session: Krita's dialogs and a zoomed-out desktop (the user)

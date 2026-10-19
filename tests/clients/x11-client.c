@@ -1,14 +1,14 @@
-// An X11 client for the scenarios: maps one window of a known size and
-// colour through xcb, and says on stdout what reaches it —
+// An X11 client for the scenarios: maps one window of a known size, colour
+// and title through xcb, and says on stdout what reaches it —
 //
-//   MAPPED <w>x<h>    the window is up
-//   KEY <keycode>     a key press arrived
-//   BUTTON <n>        a pointer button arrived
-//   CONFIGURED <w>x<h> the window manager resized it
-//   POPUP <x>,<y>     an override-redirect window was mapped there
-//   OFFERED           the client owns the X11 clipboard
-//   PASTED <text>     what the X11 clipboard holds, read back
-//   CLOSING           WM_DELETE_WINDOW arrived; the client exits
+//   MAPPED <w>x<h>         the window is up
+//   KEY <keycode> <state>  a key press arrived, with X's modifier mask
+//   BUTTON <n> <x>,<y>     a pointer button arrived at that point of the window
+//   CONFIGURED <w>x<h>     the window manager resized it
+//   POPUP <x>,<y>          an override-redirect window was mapped there
+//   OFFERED                the client owns the X11 clipboard
+//   PASTED <text>          what the X11 clipboard holds, read back
+//   CLOSING                WM_DELETE_WINDOW arrived; the client exits
 //
 // so the compositor's X11 half can be proven without installing an X11
 // application.
@@ -43,11 +43,14 @@ int main(int argc, char **argv) {
 	// windows in.
 	int popup_x = 120, popup_y = 140, popup_w = 160, popup_h = 90;
 	uint32_t colour = 0x00c04040;
+	const char *title = "canvas-x11";
 	for (int i = 1; i < argc; i++) {
 		if (strncmp(argv[i], "--size=", 7) == 0) {
 			sscanf(argv[i] + 7, "%dx%d", &width, &height);
 		} else if (strncmp(argv[i], "--colour=", 9) == 0) {
 			colour = (uint32_t)strtoul(argv[i] + 9, NULL, 16);
+		} else if (strncmp(argv[i], "--title=", 8) == 0) {
+			title = argv[i] + 8;
 		}
 	}
 	const char *offer = NULL;
@@ -83,7 +86,6 @@ int main(int argc, char **argv) {
 		XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
 		XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, values);
 
-	const char *title = "canvas-x11";
 	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, window,
 		XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, (uint32_t)strlen(title), title);
 	const char *class_hint = "canvas-x11\0canvas-x11";
@@ -171,11 +173,14 @@ int main(int argc, char **argv) {
 		}
 		switch (event->response_type & ~0x80) {
 		case XCB_KEY_PRESS:
-			say("KEY %u\n", ((xcb_key_press_event_t *)event)->detail);
+			say("KEY %u %u\n", ((xcb_key_press_event_t *)event)->detail,
+				((xcb_key_press_event_t *)event)->state);
 			break;
-		case XCB_BUTTON_PRESS:
-			say("BUTTON %u\n", ((xcb_button_press_event_t *)event)->detail);
+		case XCB_BUTTON_PRESS: {
+			xcb_button_press_event_t *press = (xcb_button_press_event_t *)event;
+			say("BUTTON %u %d,%d\n", press->detail, press->event_x, press->event_y);
 			break;
+		}
 		case XCB_CONFIGURE_NOTIFY: {
 			xcb_configure_notify_event_t *configure =
 				(xcb_configure_notify_event_t *)event;

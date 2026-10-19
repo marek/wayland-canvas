@@ -170,6 +170,11 @@ inline constexpr const char *terminal_cmd = "exec ${TERMINAL:-foot}";
 inline constexpr double launch_trace_ms = 30000.0;
 
 // App launcher: tap the logo key (or Super+Space).
+// X11 windows through Xwayland (docs/intents/windows/x11.md). Zoomed out,
+// X's pointer is moved back to the middle of X's screen before it comes
+// this close to an edge, in X pixels.
+inline constexpr int x11_pointer_margin = 128;
+
 inline constexpr int launcher_width = 600;
 inline constexpr int launcher_search_height = 56;
 inline constexpr int launcher_row_height = 44;

@@ -4,12 +4,35 @@
 //
 // An X11 window is a view like any other — title bar, desktop, overview,
 // minimize, maximize, fullscreen, close (docs/intents/windows/x11.md).
+#include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <ranges>
+#include <vector>
+#include "core/config.h"
 #include "core/server.h"
 #include "platform/output.h"
 #include "windows/view.h"
 
 #if CANVAS_HAVE_XWAYLAND
+
+namespace {
+
+// X positions are 16-bit: a window farther than that from the pointer waits
+// at the limit (docs/intents/windows/x11.md).
+int16_t x11_coordinate(int value) {
+	return static_cast<int16_t>(std::clamp<int>(value, INT16_MIN, INT16_MAX));
+}
+
+// Whether X stacks the window: wlroots puts it in its stack on X's
+// MapNotify, at the bottom, which can come after the surface maps here.
+bool x11_stacked(const View &view) {
+	return view.is_x11() && !view.override_redirect
+		&& !wl_list_empty(&view.x11->stack_link);
+}
+
+} // namespace
 
 View::View(Server &server, wlr_xwayland_surface *x11)
 	: server(server), x11(x11), deco(*this) {
@@ -28,6 +51,7 @@ void View::listen_x11() {
 	destroy_.connect<&View::handle_destroy>(x11->events.destroy, this);
 	request_move_.connect<&View::handle_request_move>(x11->events.request_move, this);
 	x11_configure_.connect<&View::handle_x11_configure>(x11->events.request_configure, this);
+	x11_set_geometry_.connect<&View::handle_x11_set_geometry>(x11->events.set_geometry, this);
 	request_maximize_.connect<&View::handle_x11_request_maximize>(
 		x11->events.request_maximize, this);
 	request_minimize_.connect<&View::handle_x11_request_minimize>(
@@ -65,8 +89,7 @@ void View::x11_configure_size(int width, int height) {
 	if (width <= 0 || height <= 0) {
 		return; // X11 has no "your own size": the window keeps what it has
 	}
-	wlr_xwayland_surface_configure(x11, static_cast<int16_t>(x),
-		static_cast<int16_t>(y), static_cast<uint16_t>(width),
+	wlr_xwayland_surface_configure(x11, x11_x(), x11_y(), static_cast<uint16_t>(width),
 		static_cast<uint16_t>(height));
 }
 
@@ -158,19 +181,35 @@ void View::handle_x11_dissociate() {
 }
 
 // Where an override-redirect window asked to be: X11 places it itself, in
-// the same space the compositor configures its windows in, so the request
-// is the canvas position.
+// the space the compositor configures its windows in, the canvas less the
+// shared offset.
 void View::x11_place_override_redirect() {
-	x = x11->x;
-	y = x11->y;
+	x = x11->x + server.x11_offset_x;
+	y = x11->y + server.x11_offset_y;
+}
+
+int16_t View::x11_x() const {
+	return x11_coordinate(x - server.x11_offset_x);
+}
+
+int16_t View::x11_y() const {
+	return x11_coordinate(y - server.x11_offset_y);
+}
+
+void View::x11_follow_canvas() {
+	int16_t want_x = x11_x(), want_y = x11_y();
+	if (x11->x == want_x && x11->y == want_y) {
+		return;
+	}
+	wlr_xwayland_surface_configure(x11, want_x, want_y, x11->width, x11->height);
 }
 
 void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
 	if (override_redirect) {
 		wlr_xwayland_surface_configure(x11, event->x, event->y, event->width,
 			event->height);
-		x = event->x;
-		y = event->y;
+		damage();
+		x11_place_override_redirect();
 		damage();
 		return;
 	}
@@ -180,9 +219,20 @@ void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
 		configure_size(shell_geometry().width, shell_geometry().height);
 		return;
 	}
-	wlr_xwayland_surface_configure(x11, static_cast<int16_t>(x),
-		static_cast<int16_t>(y), event->width, event->height);
+	wlr_xwayland_surface_configure(x11, x11_x(), x11_y(), event->width, event->height);
 	damage();
+}
+
+// An override-redirect window its client moved: the canvas follows. A
+// managed window's geometry is the compositor's own, echoed back.
+void View::handle_x11_set_geometry() {
+	if (!override_redirect || !mapped) {
+		return;
+	}
+	damage();
+	x11_place_override_redirect();
+	damage();
+	server.visibility_dirty = true;
 }
 
 void View::handle_x11_request_maximize() {
@@ -234,6 +284,78 @@ void Server::handle_new_xwayland_surface(wlr_xwayland_surface *surface) {
 	toplevels.push_back(std::make_unique<View>(*this, surface));
 }
 
+void Server::sync_x11() {
+	if (xwayland == nullptr) {
+		return;
+	}
+	// Bottom first: the minimized under everything, then the canvas's order.
+	std::vector<View *> stack;
+	for (View *view : views) {
+		if (!view->is_x11() || view->override_redirect) {
+			continue;
+		}
+		view->x11_follow_canvas();
+		if (view->minimized && x11_stacked(*view)) {
+			stack.push_back(view);
+		}
+	}
+	for (View *view : std::views::reverse(views)) {
+		if (!view->minimized && x11_stacked(*view)) {
+			stack.push_back(view);
+		}
+	}
+	if (std::ranges::equal(stack, x11_stack_, {}, &View::session_id)) {
+		return;
+	}
+	x11_stack_.clear();
+	for (View *view : stack) {
+		// Each goes above the managed windows already restacked.
+		wlr_xwayland_surface_restack(view->x11, nullptr, XCB_STACK_MODE_ABOVE);
+		x11_stack_.push_back(view->session_id);
+	}
+}
+
+void Server::x11_pointer_at(wlr_surface *surface, double sx, double sy) {
+	View *view = surface != nullptr ? View::from_x11_surface(surface) : nullptr;
+	Output *output = output_under_cursor();
+	if (view == nullptr || output == nullptr) {
+		return;
+	}
+	wlr_box layout{};
+	wlr_output_layout_get_box(output_layout, nullptr, &layout);
+	// X's screen runs from X's origin to the far corner of the layout.
+	double screen_w = layout.x + layout.width;
+	double screen_h = layout.y + layout.height;
+	// Zoomed out, X's pointer moves faster than the cursor and could outrun
+	// a move of the windows: it is brought back before it nears an edge.
+	double zoom = output->camera.drawn().zoom;
+	double margin = zoom < 1
+		? std::min<double>(config::x11_pointer_margin, std::min(screen_w, screen_h) / 4)
+		: 0;
+	// Where Xwayland puts its pointer: the window's X position plus the event's.
+	double rx = view->x11->x + sx;
+	double ry = view->x11->y + sy;
+	if (rx >= margin && rx < screen_w - margin && ry >= margin && ry < screen_h - margin) {
+		return;
+	}
+	// The offset that puts X's pointer where the cursor is, or zoomed out in
+	// the middle of X's screen; every X11 window moves with it.
+	double to_x = zoom < 1 ? screen_w / 2 : cursor->x;
+	double to_y = zoom < 1 ? screen_h / 2 : cursor->y;
+	int dx = static_cast<int>(std::lround(view->x + sx - to_x));
+	int dy = static_cast<int>(std::lround(view->y + sy - to_y));
+	if (dx == x11_offset_x && dy == x11_offset_y) {
+		return;
+	}
+	x11_offset_x = dx;
+	x11_offset_y = dy;
+	for (View *each : views) {
+		if (each->is_x11()) {
+			each->x11_follow_canvas();
+		}
+	}
+}
+
 #else // CANVAS_HAVE_XWAYLAND
 
 // Built without Xwayland: the compositor runs, and a machine with no
@@ -244,6 +366,8 @@ void Server::init_xwayland() {
 
 void Server::finish_xwayland() {}
 void Server::handle_xwayland_ready() {}
+void Server::sync_x11() {}
+void Server::x11_pointer_at(wlr_surface *, double, double) {}
 
 View *View::from_x11_surface(wlr_surface *) {
 	return nullptr;

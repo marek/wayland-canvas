@@ -862,6 +862,7 @@ void Input::process_cursor_motion(uint32_t time) {
 	PointerHit hit = pointer_hit_test(server, *output);
 	if (hit.surface != nullptr) {
 		set_view_hover(server, nullptr, DecoPart::none);
+		server.x11_pointer_at(hit.surface, hit.sx, hit.sy);
 		wlr_seat_pointer_notify_enter(server.seat, hit.surface, hit.sx, hit.sy);
 		wlr_seat_pointer_notify_motion(server.seat, time, hit.sx, hit.sy);
 		// The client owns the cursor image while it has pointer focus.
@@ -921,6 +922,7 @@ void Input::forward_press(uint32_t time, uint32_t button, wlr_surface *surface,
 	}
 	pressed_buttons_ |= 1u << (button & 31);
 	// The press goes where it landed, though no motion entered it there.
+	server_.x11_pointer_at(surface, sx, sy);
 	wlr_seat_pointer_notify_enter(server_.seat, surface, sx, sy);
 	wlr_seat_pointer_notify_button(server_.seat, time, button,
 		WL_POINTER_BUTTON_STATE_PRESSED);
@@ -933,9 +935,10 @@ bool Input::held_motion(uint32_t time) {
 			|| server_.seat->drag != nullptr) {
 		return false;
 	}
-	wlr_seat_pointer_notify_motion(server_.seat, time,
-		held_.sx + (server_.cursor->x - held_.lx) * held_.scale,
-		held_.sy + (server_.cursor->y - held_.ly) * held_.scale);
+	double sx = held_.sx + (server_.cursor->x - held_.lx) * held_.scale;
+	double sy = held_.sy + (server_.cursor->y - held_.ly) * held_.scale;
+	server_.x11_pointer_at(held_.surface, sx, sy);
+	wlr_seat_pointer_notify_motion(server_.seat, time, sx, sy);
 	return true;
 }
 

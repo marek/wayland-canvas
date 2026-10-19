@@ -420,6 +420,7 @@ void Output::handle_frame() {
 		server.pointer_focus_stale = false;
 		server.input.rebase_cursor();
 	}
+	server.sync_x11();
 	// needs_frame: screencopy clients and software cursors wait for a commit.
 	if (!dirty && !animating && !wlr->needs_frame) {
 		return;

@@ -190,6 +190,11 @@ private:
 
 	// view_x11.cpp
 	void x11_place_override_redirect();
+	// Where X has the window: its canvas position less the shared offset.
+	int16_t x11_x() const;
+	int16_t x11_y() const;
+	// Tells X the window's canvas place, when X has it elsewhere.
+	void x11_follow_canvas();
 	wlr_surface *x11_surface() const;
 	wlr_box x11_geometry() const;
 	bool x11_initialized() const;
@@ -224,6 +229,7 @@ private:
 	void handle_x11_associate();
 	void handle_x11_dissociate();
 	void handle_x11_configure(wlr_xwayland_surface_configure_event *event);
+	void handle_x11_set_geometry();
 	void handle_x11_request_maximize();
 	void handle_x11_request_minimize();
 	void handle_x11_request_fullscreen();
@@ -243,7 +249,7 @@ private:
 		request_fullscreen_;
 	Listener set_title_, set_app_id_;
 	// X11 only: the surface coming and going, and its own requests.
-	Listener x11_associate_, x11_dissociate_, x11_configure_;
+	Listener x11_associate_, x11_dissociate_, x11_configure_, x11_set_geometry_;
 	Listener foreign_activate_, foreign_maximize_, foreign_minimize_, foreign_fullscreen_,
 		foreign_close_;
 	// The ext-foreign-toplevel-list handle: created on map, closed on unmap,
