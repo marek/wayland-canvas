@@ -18,8 +18,8 @@ view, and three or four fingers swipe as they do on the touchpad.
 - **Apps own what lands on them.** A contact on a client surface goes to
   that client in its own protocol — touch as touch, the pen through
   tablet-v2 — so apps keep their own scrolling, inking, palm handling and
-  long press. An app with no tablet support still gets the pen, as the
-  pointer.
+  long press. An app with no touch support still gets a finger, and one
+  with no tablet support the pen, as the pointer.
 - **The compositor's UI has one pointer path.** A finger or the pen on a
   title bar, a button or the overview drives the same handling a mouse
   button does, so every press, drag and click there works by touch and by
@@ -45,11 +45,11 @@ view, and three or four fingers swipe as they do on the touchpad.
 
 | Where a finger lands | What happens |
 |---|---|
-| A window, a popup, a shell surface (the bar, a panel), a note, the locker | Its client gets the touch; each finger stays with the surface it landed on until it lifts, past its edges too |
+| A window, a popup, a shell surface (the bar, a panel), a note, the locker | Its client gets the touch; each finger stays with the surface it landed on until it lifts, past its edges too. A client with no touch support gets its first finger as the pointer, as the compositor's UI does below: a tap clicks, a drag drags, held still a right click |
 | The compositor's UI: a title bar and its buttons, a resize edge, the overview's tabs, frames and shelf, the launcher, the capture UI | One finger is the left button: a tap clicks, a drag drags — a title bar moves its window, an edge resizes it |
 | The compositor's UI, the finger held still | A right click, once the finger has stayed within the press-vs-drag travel for a compile-time time (`src/core/config.h`): what a right click does there, such as a new desktop on the overview's empty canvas |
 | Empty canvas, one finger | A tap is a click (in the overview it targets a free spot); a drag moves nothing |
-| Empty canvas, two fingers | A drag looks away, and in the overview pans; a pinch does what Super and a 2-finger pinch do on the touchpad: scales the shown desktop, or with pinch scale off zooms as the plain pinch does ([gestures.md](gestures.md)) |
+| Empty canvas, two fingers | A drag looks away, and in the overview pans, the content following the fingers; a pinch does what Super and a 2-finger pinch do on the touchpad, by its pinch-scale switch ([gestures.md](gestures.md)). Which comes first decides it: their spread changing by a compile-time fraction, or their middle travelling the press-vs-drag travel (`src/core/config.h`); fingers moving together count once all of them have moved |
 | Anywhere, three or four fingers | The touchpad's swipe for that count, by the preset ([gestures.md](gestures.md)); the fingers that had reached a client are cancelled for it. Under `off` every finger reaches the client under it |
 
 ### The pen
@@ -62,13 +62,16 @@ view, and three or four fingers swipe as they do on the touchpad.
 ### While locked
 
 Touch and the pen reach the locker's surface and nothing else: no gesture,
-no title bar, no canvas ([../shell/lock.md](../shell/lock.md)).
+no title bar, no canvas ([../shell/lock.md](../shell/lock.md)). A contact
+made before the session locked ends as it locks.
 
 ## Error states, corner cases
 
-- **A touchscreen or tablet unplugged mid-contact**, or **the output under
-  a touch gone**: its contacts end; a client's touches are cancelled and a
-  drag on the compositor's UI ends as a release would.
+- **A touchscreen or tablet unplugged mid-contact, an output going away,
+  or the session locking**: every contact ends. A client's touches are
+  cancelled, a drag on the compositor's UI ends as a release would, and
+  the pen leaves the client it is on, the tip lifting first. Fingers still
+  down reach nothing until they lift.
 - **The pen leaving range with the tip down**: the tip lifts first, so no
   press is left held.
 - **An X11 window**: a touch or a pen tip for it reaches X only once X has

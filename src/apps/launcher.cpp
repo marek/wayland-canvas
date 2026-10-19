@@ -535,6 +535,10 @@ bool Launcher::is_open() const {
 	return open_;
 }
 
+bool Launcher::open_on(const Output &output) const {
+	return open_ && output_ == &output;
+}
+
 void Launcher::output_destroyed(Output &output) {
 	if (open_ && output_ == &output) {
 		close();

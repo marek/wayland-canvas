@@ -42,6 +42,7 @@ checked through PAM. A locker that dies leaves the session locked.
 | Captures | a screenshot, a recording and a shared screen take the same path as the screen, so they show the lock; a capture of a single window is refused while locked |
 | Keyboard | the locker's surface for the output under the pointer, else any of its surfaces; no canvas shortcut, no `[commands]` chord, no Super tap, and no client behind the lock |
 | Pointer and touchpad | motion, buttons and scrolling go to the locker's surface; canvas gestures do nothing and are not forwarded |
+| Touch and the pen | the locker's surface only, as touch and tablet input or as the pointer where it takes neither; a contact made before the session locked ends as it locks ([../input/touch-and-pen.md](../input/touch-and-pen.md)) |
 | The way out | VT switching (Ctrl+Alt+F1…F12) stays, as everywhere ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)) |
 | Unlocking | the locker asks the protocol to unlock after PAM says the password is right; the windows, the focus and the bar come back as they were |
 

@@ -182,6 +182,26 @@ own the machine's Wayland display namespace and GPU.
   bringing it back and the desktop going, and a window alone on its
   desktop going fullscreen in place.
 
+- **`touch.cpp`** — the touchscreen and the pen, through a fake
+  touchscreen and a fake pen tablet announced on the headless backend and
+  a touch, pointer and tablet-tool client of the scenarios' own
+  (`tests/clients/touch-client.c`, which asks for the compositor's title
+  bar and can leave touch or tablet support out). A tap and a drag reach a
+  window as touch, the drag still its window's past the window's edge;
+  one finger drags a window by its title bar; a finger held still on the
+  overview's empty canvas makes a desktop there, as a right click does;
+  two fingers on the canvas look away and spread to scale the shown
+  desktop; three fingers hop and four open the overview. A finger on a
+  window as the session locks is cancelled for it, and locked, a tap
+  reaches only the locker, as a click since it takes no touch. A window
+  without touch support gets a tap as a click; the pen reaches a tablet
+  client with pressure and tilt, a client without tablet support as the
+  pointer with the barrel button as the right one, and drags a title bar.
+  Where this machine has Xwayland, a tap and the pen's tip reach an X11
+  window as its press, within a pixel (Xwayland passes a touch through its
+  device's 0..65535 range and back). Last, a touchscreen naming a second
+  output acts on that output.
+
 - **`capture.cpp`** — the shots-and-recordings UI, end to end, with the
   XDG pictures and videos dirs pointing into `tmp/scenarios/capture/`
   and an `xdg-open` stub on PATH (nothing touches the real user dirs or

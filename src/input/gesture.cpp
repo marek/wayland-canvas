@@ -350,6 +350,10 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 }
 
 void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
+	pinch_begin(time, fingers, super_held(server_));
+}
+
+void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
 	Output *out = server_.output_under_cursor();
 	state_ = Idle{};
 	if (out == nullptr) {
@@ -358,7 +362,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 	}
 	last_time_ = time;
 
-	if (fingers == 2 && super_held(server_) && options_.pinch_scale) {
+	if (fingers == 2 && super && options_.pinch_scale) {
 		// Super decides a 2-finger pinch at its start: it scales a
 		// desktop and never reaches a client. A free view — and, in the
 		// overview, a free-spot target — is pinned as a desktop first.

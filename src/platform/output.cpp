@@ -451,6 +451,9 @@ void Output::handle_request_state(wlr_output_event_request_state *event) {
 void Output::handle_destroy() {
 	Server &server = this->server;
 
+	// The layout every touch and pen is placed in changes: they end first,
+	// a drag on the compositor's UI as a release would, while all is whole.
+	server.input.end_contacts();
 	server.input.grab.forget(*this);
 	server.gestures.output_gone(*this);
 	for (View *view : server.views) {
@@ -486,6 +489,7 @@ void Output::handle_destroy() {
 	server.visibility_dirty = true;
 	destroy_owned(server.outputs, this);
 	server.ipc.emit_outputs(); // the state no longer lists this output
+	server.input.outputs_changed(); // a touchscreen or a pen loses its output
 }
 
 void Server::handle_new_output(wlr_output *wlr) {
@@ -524,6 +528,7 @@ void Server::handle_new_output(wlr_output *wlr) {
 
 	wlr_output_layout_add_auto(output_layout, wlr);
 	update_output_geometry(output);
+	input.outputs_changed(); // a touchscreen or a pen may be built into it
 	// The canvas starts out aligned with the output layout.
 	output.camera.jump(Camera{
 		.cx = output.lx + output.width / 2.0,

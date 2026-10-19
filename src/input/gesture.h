@@ -59,6 +59,9 @@ public:
 	void swipe_update(uint32_t time, double dx, double dy);
 	void swipe_end(uint32_t time, bool cancelled);
 	void pinch_begin(uint32_t time, uint32_t fingers);
+	// As above, with Super said rather than read from the keyboard: two
+	// fingers on a touchscreen stand for it (docs/intents/input/touch-and-pen.md).
+	void pinch_begin(uint32_t time, uint32_t fingers, bool super);
 	void pinch_update(uint32_t time, double dx, double dy, double scale, double rotation);
 	void pinch_end(uint32_t time, bool cancelled);
 	void hold_begin(uint32_t time, uint32_t fingers);

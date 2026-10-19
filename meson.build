@@ -95,6 +95,9 @@ client_protocols = []
 foreach xml : [
 	wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
 	wl_protocol_dir / 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml',
+	wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
+	wl_protocol_dir / 'stable/tablet/tablet-v2.xml',
+	wl_protocol_dir / 'unstable/xdg-decoration/xdg-decoration-unstable-v1.xml',
 	'protocols/wlr-gamma-control-unstable-v1.xml',
 ]
 	client_protocols += custom_target(
@@ -186,6 +189,8 @@ core_lib = static_library(
 		'src/input/gesture.cpp',
 		'src/input/grab.cpp',
 		'src/input/input.cpp',
+		'src/input/tablet.cpp',
+		'src/input/touch.cpp',
 		'src/platform/ipc.cpp',
 		'src/platform/image_capture.cpp',
 		'src/platform/lock.cpp',
@@ -406,8 +411,19 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [wayland_client],
 	)
 	scenario_env.set('CANVAS_GAMMA_CLIENT', gamma_client.full_path())
+	# A touch, pointer and tablet-tool client of the scenarios' own:
+	# what the compositor forwards of a touchscreen or pen is asserted
+	# from its own stdout.
+	touch_client = executable(
+		'touch-client',
+		'tests/clients/touch-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_TOUCH_CLIENT', touch_client.full_path())
 	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
-		'nightlight']
+		'nightlight', 'touch']
 	# An X11 client of the scenarios' own: this machine has no xterm or
 	# xeyes, and the X11 half must be proven by a real X client.
 	if xcb.found()

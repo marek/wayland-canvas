@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string_view>
 #include <vector>
 #include <linux/input-event-codes.h>
 #include "core/config.h"
@@ -108,10 +109,10 @@ struct PointerHit {
 };
 
 // The shell surface (top or overlay layer: the bar, panels, the toolbar)
-// under the cursor, if any.
-std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
-	double ox = server.cursor->x - output.lx;
-	double oy = server.cursor->y - output.ly;
+// at output-local (ox, oy), if any.
+std::optional<LayerHit> shell_surface_at(Server &server, Output &output, double ox,
+		double oy) {
+	(void)server;
 	for (int l = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
 			l >= ZWLR_LAYER_SHELL_V1_LAYER_TOP; l--) {
 		if (std::optional<LayerHit> hit = output.layer_surface_at(l, ox, oy)) {
@@ -121,6 +122,12 @@ std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
 	// A surface a plugin put on the plane is hit where it is drawn, which
 	// is the canvas's business, not the screen's.
 	return output.canvas_surface_at(ox, oy);
+}
+
+// The shell surface under the cursor.
+std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
+	return shell_surface_at(server, output, server.cursor->x - output.lx,
+		server.cursor->y - output.ly);
 }
 
 // A click on a shell surface that takes the keyboard gives it the keyboard,
@@ -150,12 +157,10 @@ void press_on_empty_canvas(Server &server) {
 	}
 }
 
-PointerHit pointer_hit_test(Server &server, Output &output) {
+PointerHit pointer_hit_test(Server &server, Output &output, double ox, double oy) {
 	PointerHit hit;
-	double ox = server.cursor->x - output.lx;
-	double oy = server.cursor->y - output.ly;
 
-	if (std::optional<LayerHit> shell = shell_surface_at(server, output)) {
+	if (std::optional<LayerHit> shell = shell_surface_at(server, output, ox, oy)) {
 		hit.surface = shell->surface;
 		hit.layer = shell->layer;
 		hit.sx = shell->sx;
@@ -189,6 +194,12 @@ PointerHit pointer_hit_test(Server &server, Output &output) {
 		}
 	}
 	return hit;
+}
+
+// What is under the cursor.
+PointerHit pointer_hit_test(Server &server, Output &output) {
+	return pointer_hit_test(server, output, server.cursor->x - output.lx,
+		server.cursor->y - output.ly);
 }
 
 uint32_t quadrant_edges(View &view, double cx, double cy) {
@@ -329,7 +340,7 @@ void PointerDevice::handle_destroy() {
 }
 
 Input::Input(Server &server)
-	: grab(server), server_(server) {
+	: grab(server), touch(server, *this), tablets(server, *this), server_(server) {
 }
 
 Input::~Input() = default;
@@ -391,6 +402,12 @@ void Input::handle_new_input(wlr_input_device *device) {
 		break;
 	case WLR_INPUT_DEVICE_POINTER:
 		new_pointer(device);
+		break;
+	case WLR_INPUT_DEVICE_TOUCH:
+		touch.new_device(device);
+		break;
+	case WLR_INPUT_DEVICE_TABLET:
+		tablets.new_device(device);
 		break;
 	default:
 		break;
@@ -1121,6 +1138,144 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 		server_.cursor->y - output->ly, button, false);
 }
 
+// ---- touch and the pen ----
+
+std::optional<Input::ContactHit> Input::client_at(double lx, double ly) {
+	Server &server = server_;
+	Output *output = server.output_at(lx, ly);
+	if (output == nullptr) {
+		return std::nullopt;
+	}
+	double ox = lx - output->lx, oy = ly - output->ly;
+	if (server.lock.locked()) {
+		wlr_surface *surface = server.lock.surface_for(*output);
+		if (surface == nullptr) {
+			return std::nullopt;
+		}
+		return ContactHit{.surface = surface, .sx = ox, .sy = oy};
+	}
+	if (server.capture_ui.takes_pointer_at(*output, ox, oy)
+			|| server.launcher.open_on(*output)) {
+		return std::nullopt;
+	}
+	double zoom = output->camera.drawn().zoom;
+	if (!output->interactive()) {
+		// The overview and a transition: shell surfaces only.
+		std::optional<LayerHit> shell = shell_surface_at(server, *output, ox, oy);
+		if (!shell.has_value()) {
+			return std::nullopt;
+		}
+		return ContactHit{.surface = shell->surface, .sx = shell->sx, .sy = shell->sy,
+			.scale = shell->layer->canvas_box.has_value() ? 1.0 / zoom : 1.0,
+			.layer = shell->layer};
+	}
+	PointerHit hit = pointer_hit_test(server, *output, ox, oy);
+	if (hit.surface == nullptr) {
+		return std::nullopt;
+	}
+	bool on_plane = hit.view != nullptr
+		|| (hit.layer != nullptr && hit.layer->canvas_box.has_value());
+	return ContactHit{.surface = hit.surface, .sx = hit.sx, .sy = hit.sy,
+		.scale = on_plane ? 1.0 / zoom : 1.0, .view = hit.view, .layer = hit.layer};
+}
+
+bool Input::canvas_at(double lx, double ly) {
+	Server &server = server_;
+	Output *output = server.output_at(lx, ly);
+	if (output == nullptr || server.lock.locked()) {
+		return false;
+	}
+	double ox = lx - output->lx, oy = ly - output->ly;
+	if (server.capture_ui.takes_pointer_at(*output, ox, oy)
+			|| server.launcher.open_on(*output)
+			|| shell_surface_at(server, *output, ox, oy).has_value()) {
+		return false;
+	}
+	if (!output->interactive()) {
+		return output->overview.active();
+	}
+	PointerHit hit = pointer_hit_test(server, *output, ox, oy);
+	return hit.surface == nullptr && hit.view == nullptr;
+}
+
+void Input::contact_focus(const ContactHit &hit) {
+	if (hit.view != nullptr) {
+		server_.focus_view(hit.view);
+	} else if (hit.layer != nullptr) {
+		focus_layer_on_click(server_, *hit.layer, hit.surface);
+	}
+}
+
+void Input::contact_motion(uint32_t time, double lx, double ly) {
+	wlr_cursor_warp_closest(server_.cursor, nullptr, lx, ly);
+	process_cursor_motion(time);
+}
+
+void Input::contact_button(uint32_t time, uint32_t button, bool pressed) {
+	if (pressed) {
+		cursor_button_press(time, button);
+	} else {
+		cursor_button_release(time, button);
+	}
+	wlr_seat_pointer_notify_frame(server_.seat);
+}
+
+void Input::look_away(Output &output, double dx, double dy) {
+	if (output.overview.active()) {
+		Camera cam = output.camera.drawn();
+		cam.cx += dx / cam.zoom;
+		cam.cy += dy / cam.zoom;
+		output.camera.jump(cam);
+		return;
+	}
+	if (output.interactive()) {
+		double zoom = output.camera.current().zoom;
+		output.pan(dx / zoom, dy / zoom);
+	}
+}
+
+void Input::contact_activity() {
+	notify_activity(server_);
+	other_input();
+}
+
+void Input::end_contacts() {
+	uint32_t time = static_cast<uint32_t>(now_ms());
+	touch.end_all(time);
+	tablets.end_all(time);
+}
+
+Output *Input::output_for_device(const char *output_name) {
+	Server &server = server_;
+	if (output_name != nullptr) {
+		for (const std::unique_ptr<Output> &output : server.outputs) {
+			if (std::strcmp(output->wlr->name, output_name) == 0) {
+				return output.get();
+			}
+		}
+	}
+	for (const std::unique_ptr<Output> &output : server.outputs) {
+		std::string_view name = output->wlr->name;
+		if (name.starts_with("eDP") || name.starts_with("LVDS") || name.starts_with("DSI")) {
+			return output.get();
+		}
+	}
+	return server.outputs.empty() ? nullptr : server.outputs.front().get();
+}
+
+void Input::update_capabilities() {
+	uint32_t caps = WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD;
+	if (touch.connected()) {
+		caps |= WL_SEAT_CAPABILITY_TOUCH;
+	}
+	wlr_seat_set_capabilities(server_.seat, caps);
+}
+
+void Input::outputs_changed() {
+	touch.map_devices();
+	tablets.map_devices();
+}
+
 // ---- cursor event handlers ----
 
 void Input::handle_cursor_motion(wlr_pointer_motion_event *event) {
@@ -1181,13 +1336,8 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 				server.cursor->x - output->lx, server.cursor->y - output->ly);
 		} else {
 			double delta = event->delta * config::scroll_pan_speed;
-			Camera cam = output->camera.drawn();
-			if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-				cam.cy += delta / cam.zoom;
-			} else {
-				cam.cx += delta / cam.zoom;
-			}
-			output->camera.jump(cam);
+			bool vertical = event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL;
+			look_away(*output, vertical ? 0 : delta, vertical ? delta : 0);
 		}
 		return;
 	}
@@ -1196,14 +1346,10 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	// moves by the scrolled distance whatever the zoom; libinput already
 	// applied the natural-scroll direction.
 	if (!output->overview.active() && (seat_modifiers(server) & WLR_MODIFIER_LOGO) != 0) {
-		if (output->interactive() && event->delta != 0) {
-			double delta = event->delta * config::scroll_pan_speed
-				/ output->camera.current().zoom;
-			if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
-				output->pan(0, delta);
-			} else {
-				output->pan(delta, 0);
-			}
+		if (event->delta != 0) {
+			double delta = event->delta * config::scroll_pan_speed;
+			bool vertical = event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL;
+			look_away(*output, vertical ? 0 : delta, vertical ? delta : 0);
 		}
 		return;
 	}
@@ -1404,6 +1550,9 @@ void Input::init() {
 		server.seat->events.request_start_drag, this);
 	start_drag_.connect<&Input::handle_start_drag>(
 		server.seat->events.start_drag, this);
+
+	touch.init();
+	tablets.init();
 }
 
 void Input::finish() {
@@ -1429,6 +1578,8 @@ void Input::finish() {
 	request_start_drag_.disconnect();
 	start_drag_.disconnect();
 	tap_timer_.reset();
+	touch.finish();
+	tablets.finish();
 	if (drag_icon != nullptr) {
 		drag_icon_commit_.disconnect();
 		drag_icon_destroy_.disconnect();

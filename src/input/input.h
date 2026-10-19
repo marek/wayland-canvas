@@ -9,9 +9,12 @@
 #include <string>
 #include <vector>
 #include "input/grab.h"
+#include "input/tablet.h"
+#include "input/touch.h"
 #include "core/settings.h"
 #include "core/util.h"
 
+class LayerSurface;
 class Output;
 class Server;
 class View;
@@ -105,6 +108,10 @@ public:
 	// The pointer is no longer kept on the held surface; the next motion
 	// finds what is under it. The buttons stay as they are.
 	void end_hold();
+	// Every touch contact and every pen in range ends as if lifted: the
+	// session locking or an output going, so none goes on reaching what it
+	// reached before.
+	void end_contacts();
 
 	// Title double-click state: the last click and its view.
 	uint32_t last_title_click = 0;
@@ -119,6 +126,49 @@ public:
 
 	wlr_drag_icon *drag_icon = nullptr;
 	double drag_icon_dx = 0, drag_icon_dy = 0;
+
+	// ---- touch and the pen (input/touch.cpp, input/tablet.cpp) ----
+
+	// What a touch or the pen at layout (lx, ly) reaches of the clients'
+	// surfaces, by the pointer's own precedence: the locker while the
+	// session is locked, a shell surface, a window, a lower layer. Nothing
+	// over the compositor's own UI and the empty canvas, which take a
+	// contact as the pointer (docs/intents/input/touch-and-pen.md).
+	struct ContactHit {
+		wlr_surface *surface = nullptr;
+		double sx = 0, sy = 0; // where on it
+		double scale = 1; // its px per layout px
+		View *view = nullptr; // the window it belongs to, if any
+		LayerSurface *layer = nullptr; // or the shell surface
+	};
+	std::optional<ContactHit> client_at(double lx, double ly);
+	// The canvas itself at (lx, ly), where two fingers move the view: in
+	// the normal view no window, title bar or surface is there; in the
+	// overview anything but a shell surface.
+	bool canvas_at(double lx, double ly);
+	// A contact landing on `hit` as a click would: its window is focused
+	// and raised, its shell surface given the keyboard if it takes it.
+	void contact_focus(const ContactHit &hit);
+	// A contact driving the pointer: the cursor goes to (lx, ly) and acts
+	// there as the mouse does; its buttons are the mouse's.
+	void contact_motion(uint32_t time, double lx, double ly);
+	void contact_button(uint32_t time, uint32_t button, bool pressed);
+	// What Super and a scroll do, by (dx, dy) screen px: the view looks
+	// away, or in the overview its camera pans.
+	void look_away(Output &output, double dx, double dy);
+	// Touch and pen input are activity: the idle countdown restarts and a
+	// Super tap is off.
+	void contact_activity();
+	// The output a touchscreen or a pen acts on: the one it names, else the
+	// built-in panel, else the first.
+	Output *output_for_device(const char *output_name);
+	// The seat offers touch while a touchscreen is connected.
+	void update_capabilities();
+	// Outputs came or went: every touchscreen and tablet is mapped again.
+	void outputs_changed();
+
+	Touch touch;
+	Tablets tablets;
 
 private:
 	Server &server_;

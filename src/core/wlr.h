@@ -43,6 +43,8 @@ extern "C" {
 #include <wlr/interfaces/wlr_ext_image_capture_source_v1.h>
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/interfaces/wlr_pointer.h>
+#include <wlr/interfaces/wlr_tablet_tool.h>
+#include <wlr/interfaces/wlr_touch.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/pass.h>
 #include <wlr/render/swapchain.h>
@@ -81,6 +83,9 @@ extern "C" {
 #include <wlr/types/wlr_server_decoration.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_tablet_tool.h>
+#include <wlr/types/wlr_tablet_v2.h>
+#include <wlr/types/wlr_touch.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_xcursor_manager.h>

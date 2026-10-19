@@ -109,6 +109,10 @@ public:
 	bool pointer_motion(Output &output, double ox, double oy);
 	bool pointer_button(Output &output, double ox, double oy, uint32_t button,
 		bool pressed);
+	// Whether the pointer at output-local (ox, oy) would be the capture
+	// UI's — the claim pointer_motion makes, without its hover: a touch or
+	// the pen asks before it picks a client.
+	bool takes_pointer_at(const Output &output, double ox, double oy) const;
 	// The cursor image the picker wants (crosshair while framing a region).
 	const char *cursor_image() const;
 

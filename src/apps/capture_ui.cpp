@@ -472,6 +472,18 @@ bool CaptureUi::owns_keyboard() const {
 	return picker_.active || toolbar_ || deferred_.kind != Deferred::Kind::none;
 }
 
+bool CaptureUi::takes_pointer_at(const Output &output, double ox, double oy) const {
+	if (picker_.active) {
+		bool every = picker_.what == PickWhat::any || picker_.what == PickWhat::output;
+		return &output == picker_.output || every;
+	}
+	if (toolbar_ && &output == toolbar_output_) {
+		return true;
+	}
+	return thumb_texture_ != nullptr
+		&& (thumb_pressed_ || (thumb_output_ == &output && box_contains(thumb_box_, ox, oy)));
+}
+
 void CaptureUi::key(xkb_keysym_t sym, uint32_t mods) {
 	sym = xkb_keysym_to_lower(sym);
 	if (sym == XKB_KEY_Escape) {

@@ -23,6 +23,9 @@ public:
 	void toggle(Output *output);
 	void close();
 	bool is_open() const;
+	// Open on `output`: every press there is the launcher's, inside the
+	// panel or a click outside that closes it.
+	bool open_on(const Output &output) const;
 
 	// While open the launcher owns the keyboard: every press is consumed. `utf32` is the
 	// character the key produces (0 for none), `mods` the WLR_MODIFIER_* mask.

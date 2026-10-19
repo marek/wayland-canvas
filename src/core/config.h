@@ -147,6 +147,12 @@ inline constexpr double anim_ms = 280.0;
 inline constexpr int tile_gap = 8;
 inline constexpr int desktop_gap = 8; // canvas px between desktops made beside desktop 1
 inline constexpr double drag_threshold = 6.0; // px before a press becomes a drag
+// A finger held this long within drag_threshold on the compositor's UI is a
+// right click (docs/intents/input/touch-and-pen.md).
+inline constexpr int touch_hold_ms = 600;
+// Two fingers on the canvas pinch once their distance changes by this
+// fraction before their middle has travelled drag_threshold; else they look away.
+inline constexpr double touch_pinch_ratio = 0.08;
 inline constexpr uint32_t double_click_ms = 400;
 // Two lone Super taps this close are the double tap; a single tap with an
 // action of its own waits this long while an action holds the double tap.

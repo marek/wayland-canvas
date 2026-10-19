@@ -115,6 +115,7 @@ void SessionLock::lock_session() {
 	arm_idle_timer();
 	server_.input.grab.cancel();
 	server_.input.end_hold();
+	server_.input.end_contacts();
 	server_.input.cancel_shortcut_capture();
 	server_.input.cancel_pending_tap();
 	server_.launcher.close();
