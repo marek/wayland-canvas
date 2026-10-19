@@ -32,6 +32,9 @@ bool x11_stacked(const View &view) {
 		&& !wl_list_empty(&view.x11->stack_link);
 }
 
+// The smallest pointer step a client can see: wl_fixed_t's 1/256 px.
+constexpr double wl_fixed_step = 1.0 / 256;
+
 } // namespace
 
 View::View(Server &server, wlr_xwayland_surface *x11)
@@ -265,6 +268,7 @@ void Server::init_xwayland() {
 }
 
 void Server::finish_xwayland() {
+	x11_retell_.reset();
 	new_xwayland_surface_.disconnect();
 	xwayland_ready_.disconnect();
 	if (xwayland != nullptr) {
@@ -315,10 +319,10 @@ void Server::sync_x11() {
 	}
 }
 
-void Server::x11_pointer_at(wlr_surface *surface, double sx, double sy) {
-	View *view = surface != nullptr ? View::from_x11_surface(surface) : nullptr;
-	Output *output = output_under_cursor();
-	if (view == nullptr || output == nullptr) {
+void Server::x11_follow_pointer() {
+	Output *output = output_at(cursor->x, cursor->y);
+	if (xwayland == nullptr || output == nullptr || !output->interactive()
+			|| std::ranges::none_of(views, &View::is_x11)) {
 		return;
 	}
 	wlr_box layout{};
@@ -332,9 +336,12 @@ void Server::x11_pointer_at(wlr_surface *surface, double sx, double sy) {
 	double margin = zoom < 1
 		? std::min<double>(config::x11_pointer_margin, std::min(screen_w, screen_h) / 4)
 		: 0;
-	// Where Xwayland puts its pointer: the window's X position plus the event's.
-	double rx = view->x11->x + sx;
-	double ry = view->x11->y + sy;
+	// Where Xwayland puts its pointer over an X11 window here: the canvas
+	// point under the cursor less the offset, wherever the pointer is, so
+	// entering a window meets one X already has in place.
+	Point p = output->local_to_canvas(cursor->x - output->lx, cursor->y - output->ly);
+	double rx = p.x - x11_offset_x;
+	double ry = p.y - x11_offset_y;
 	if (rx >= margin && rx < screen_w - margin && ry >= margin && ry < screen_h - margin) {
 		return;
 	}
@@ -342,8 +349,8 @@ void Server::x11_pointer_at(wlr_surface *surface, double sx, double sy) {
 	// the middle of X's screen; every X11 window moves with it.
 	double to_x = zoom < 1 ? screen_w / 2 : cursor->x;
 	double to_y = zoom < 1 ? screen_h / 2 : cursor->y;
-	int dx = static_cast<int>(std::lround(view->x + sx - to_x));
-	int dy = static_cast<int>(std::lround(view->y + sy - to_y));
+	int dx = static_cast<int>(std::lround(p.x - to_x));
+	int dy = static_cast<int>(std::lround(p.y - to_y));
 	if (dx == x11_offset_x && dy == x11_offset_y) {
 		return;
 	}
@@ -354,6 +361,32 @@ void Server::x11_pointer_at(wlr_surface *surface, double sx, double sy) {
 			each->x11_follow_canvas();
 		}
 	}
+	// Off X's screen already, this event reaches X before the move does.
+	if (rx >= 0 && rx < screen_w && ry >= 0 && ry < screen_h) {
+		return;
+	}
+	if (!x11_retell_) {
+		x11_retell_.reset(wl_event_loop_add_timer(loop,
+			[](void *data) -> int {
+				static_cast<Server *>(data)->retell_x11_pointer();
+				return 0;
+			},
+			this));
+	}
+	if (x11_retell_) {
+		wl_event_source_timer_update(x11_retell_.get(), config::x11_retell_ms);
+	}
+}
+
+// wlroots sends no motion that repeats the last one, so the pointer moves
+// by the smallest step a client can see.
+void Server::retell_x11_pointer() {
+	wlr_surface *focus = seat->pointer_state.focused_surface;
+	if (focus == nullptr || View::from_x11_surface(focus) == nullptr) {
+		return;
+	}
+	wlr_seat_pointer_notify_motion(seat, static_cast<uint32_t>(now_ms()),
+		seat->pointer_state.sx + wl_fixed_step, seat->pointer_state.sy);
 }
 
 #else // CANVAS_HAVE_XWAYLAND
@@ -367,7 +400,8 @@ void Server::init_xwayland() {
 void Server::finish_xwayland() {}
 void Server::handle_xwayland_ready() {}
 void Server::sync_x11() {}
-void Server::x11_pointer_at(wlr_surface *, double, double) {}
+void Server::x11_follow_pointer() {}
+void Server::retell_x11_pointer() {}
 
 View *View::from_x11_surface(wlr_surface *) {
 	return nullptr;

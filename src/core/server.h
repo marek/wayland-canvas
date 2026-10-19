@@ -72,10 +72,10 @@ public:
 	void focus_keyboard(wlr_surface *surface);
 	// view_x11.cpp: X's own picture of its windows follows the canvas
 	// (docs/intents/windows/x11.md). Once per frame X is told the canvas's
-	// stacking and the windows' places; before a pointer event reaches an
-	// X11 window, the offset moves if X's pointer would leave X's screen.
+	// stacking and the windows' places; at every pointer move the offset
+	// moves if X's pointer would leave X's screen.
 	void sync_x11();
-	void x11_pointer_at(wlr_surface *surface, double sx, double sy);
+	void x11_follow_pointer();
 
 	// layer.cpp
 	void refocus_layers();
@@ -180,6 +180,11 @@ private:
 	Listener new_xwayland_surface_, xwayland_ready_;
 	// X's stacking as last sent, bottom first, by view session id.
 	std::vector<uint64_t> x11_stack_;
+	// A pointer event that reached X before the offset's move did is told
+	// again once the move has: the X11 window under the pointer is sent its
+	// place once more.
+	void retell_x11_pointer();
+	EventSourcePtr x11_retell_;
 	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
 	void handle_new_xdg_popup(wlr_xdg_popup *popup);
 	Listener new_xdg_toplevel_, new_xdg_popup_;

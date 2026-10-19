@@ -653,6 +653,22 @@ int run_step() {
 				&& close_to(big[1], {100, 100}), std::format(
 			"at 25 %, the larger window takes clicks at its far corners ({})",
 			said_clicks(client)));
+		// A jump across the window, then a press with no motion between: X
+		// saw the jump before its windows moved, and is told it again.
+		Point p = on_screen(*titled("x11-big"), 3900, 100);
+		move_to(p.x, p.y);
+		return 400;
+	}
+	case 38: {
+		button(BTN_LEFT, true);
+		button(BTN_LEFT, false);
+		return 800;
+	}
+	case 39: {
+		std::vector<Point> big = clicks_said(client);
+		check(big.size() == 3 && close_to(big.back(), {3900, 100}), std::format(
+			"a click after a jump, with no motion between, lands where it was aimed ({})",
+			said_clicks(client)));
 		reap_client(client);
 		output().camera.jump(home);
 		return 300;

@@ -24,5 +24,7 @@ The contract is [../intents/windows/x11.md](../intents/windows/x11.md).
 - [x] X positions are canvas positions less the offset, sent wherever a window is placed, moved or resized; an override-redirect window is placed back through the same offset
 - [x] The offset moves when the pointer over an X11 window would leave X's screen, every X11 window moving with it
 - [x] The xwayland scenario proves it: a window opened over another takes the click, the window under it takes clicks where it shows, a window opened past X's screen takes the click, a window larger than X's screen takes clicks at its far corners with the right coordinates, a minimized window takes no click; `tools/check.sh` green
+- [x] The offset follows the pointer wherever it is on the canvas, not only over an X11 window, so entering a window rarely meets one X has elsewhere
+- [x] A pointer event X placed before its windows' move reached it is told again a frame later; the xwayland scenario proves a click after a jump, with no motion between, lands where it was aimed
 - [ ] Krita's New and Open dialogs take the pointer in a headless run, read back from X, and with Krita maximized at 25 % its whole window does (not run: testing kept to the suites)
 - [ ] On screen, in the session: Krita's dialogs and a zoomed-out desktop (the user)
