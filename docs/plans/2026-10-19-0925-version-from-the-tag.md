@@ -32,5 +32,7 @@ from the flake's own revision. The rules are in
 - [x] `tools/version.sh`, read by meson.build, `make-source-tarball.sh` (which writes `VERSION`), `package.sh`, `package-arch.sh` and `package-deb.sh`; the PKGBUILD and the Debian control file carry placeholders; `ci-check-tag.sh` and its workflow steps removed
 - [x] The packaging suite proves `version.sh` on scratch repositories: a tag, two tags on one commit, commits past a tag, no tag, a tarball's `VERSION`, a tree with neither, a tag with a hyphen
 - [x] `flake.nix` names no number: its build writes `VERSION` from the flake's revision
-- [ ] The flake builds: a `nix build` stops at meson's dependency check, json-glib and other inputs missing from its `buildInputs` (found while checking the version; not started)
 - [x] Both package builds carry the derived version; `tools/check.sh` green
+
+The flake's missing inputs, found while checking its version, are
+[2026-10-19-1009-the-flake-builds.md](2026-10-19-1009-the-flake-builds.md).
