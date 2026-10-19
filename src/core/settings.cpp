@@ -192,6 +192,8 @@ const std::vector<ActionDef> &registry() {
 		};
 		add(Scope::global, "Apps", "launcher", "App launcher", {"Super+Space"});
 		add(Scope::global, "Apps", "terminal", "Terminal", {"Super+Return"});
+		add(Scope::global, "Clipboard", "copy", "Copy", {"Super+C"});
+		add(Scope::global, "Clipboard", "paste", "Paste", {"Super+V"});
 		add(Scope::global, "Windows", "close", "Close the window",
 			{"Super+Q", "Alt+F4"});
 		add(Scope::global, "Windows", "minimize", "Minimize", {"Super+M"});

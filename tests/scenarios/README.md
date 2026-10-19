@@ -116,6 +116,11 @@ own the machine's Wayland display namespace and GPU.
   Last, a button held on a window keeps the pointer on it while the
   pointer travels off its edge, and the release gives the pointer to what
   is under it.
+  Last, the clipboard chords: an X11 client of the scenarios' own
+  (`tests/clients/x11-client.c`, through Xwayland) started late and clicked
+  to the keyboard, Super+C and Super+V each sending it the app's own chord —
+  Ctrl+Insert for the copy, Shift+Insert for the paste — the client saying
+  so by X's keycode and modifier state.
 - **`launcher.cpp`** — the app launcher: Super+Space opens it — the first
   run having written canvas.conf with every default into the run's own
   scratch `$XDG_CONFIG_HOME` (never the user's), and a lone Super tap

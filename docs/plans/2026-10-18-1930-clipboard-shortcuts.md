@@ -16,7 +16,7 @@ The contract is
 
 ## Tasks
 
-- [ ] The intent: the two actions, the chords they send, rebindable like the rest
-- [ ] `copy` and `paste` actions under Super+C and Super+V, in the settings window, sending Ctrl+Insert and Shift+Insert to the surface with the keyboard with only that modifier held
-- [ ] A scenario proves a client with the keyboard receives each chord; `tools/check.sh` green
+- [x] The intent: the two actions, the chords they send, rebindable like the rest
+- [x] `copy` and `paste` actions under Super+C and Super+V, in the settings window, sending Ctrl+Insert and Shift+Insert to the surface with the keyboard with only that modifier held
+- [x] A scenario proves a client with the keyboard receives each chord; `tools/check.sh` green
 - [ ] On screen: Super+C and Super+V in foot, Krita and Chrome (the user)

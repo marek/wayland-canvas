@@ -10,7 +10,9 @@
 #include <optional>
 #include <variant>
 
+#include <linux/input-event-codes.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
+#include <xkbcommon/xkbcommon-names.h>
 
 #include "input/bindings.h"
 #include "core/config.h"
@@ -42,6 +44,33 @@ void act_spawn(Server &server, Output *output, KeyArg arg) {
 
 void act_launcher(Server &server, Output *output, KeyArg) {
 	server.launcher.toggle(output);
+}
+
+// Super+C and Super+V: the surface with the keyboard is sent the clipboard
+// chord — Ctrl+Insert to copy, Shift+Insert to paste, the keys GTK, Qt,
+// Chrome and Electron apps take natively and terminals are set to take —
+// with only that modifier held (not the Super of the shortcut), then the
+// keyboard's real modifiers again.
+void act_clipboard_chord(Server &server, Output *, KeyArg arg) {
+	wlr_seat *seat = server.seat;
+	wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
+	if (keyboard == nullptr || seat->keyboard_state.focused_surface == nullptr) {
+		return;
+	}
+	xkb_mod_index_t mod = xkb_keymap_mod_get_index(keyboard->keymap,
+		std::get<int>(arg) != 0 ? XKB_MOD_NAME_SHIFT : XKB_MOD_NAME_CTRL);
+	if (mod == XKB_MOD_INVALID) {
+		return;
+	}
+	wlr_keyboard_modifiers chord{};
+	chord.depressed = 1u << mod;
+	uint32_t now = static_cast<uint32_t>(now_ms());
+	wlr_seat_keyboard_notify_modifiers(seat, &chord);
+	wlr_seat_keyboard_notify_key(seat, now, KEY_INSERT,
+		WL_KEYBOARD_KEY_STATE_PRESSED);
+	wlr_seat_keyboard_notify_key(seat, now, KEY_INSERT,
+		WL_KEYBOARD_KEY_STATE_RELEASED);
+	wlr_seat_keyboard_notify_modifiers(seat, &keyboard->modifiers);
 }
 
 void act_close(Server &server, Output *, KeyArg) {
@@ -388,6 +417,8 @@ constexpr std::array runners = {
 	Runner{settings::Scope::global, "close", act_close, 0},
 	Runner{settings::Scope::global, "minimize", act_minimize, 0},
 	Runner{settings::Scope::global, "restore", act_restore_minimized, 0},
+	Runner{settings::Scope::global, "copy", act_clipboard_chord, 0},
+	Runner{settings::Scope::global, "paste", act_clipboard_chord, 1},
 	Runner{settings::Scope::global, "fullscreen", act_fullscreen, 0},
 	Runner{settings::Scope::global, "snap-left", act_arrow, Dir{-1, 0}},
 	Runner{settings::Scope::global, "snap-right", act_arrow, Dir{1, 0}},

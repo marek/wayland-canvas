@@ -49,6 +49,7 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 |---|---|---|
 | Super+Space | `launcher` | App launcher ([../apps/launcher.md](../apps/launcher.md)) |
 | Super+Return | `terminal` | Terminal: `$TERMINAL`, else `foot` |
+| Super+C / Super+V | `copy` / `paste` | Copy / paste in the app with the keyboard: it is sent Ctrl+Insert / Shift+Insert, the chord GTK, Qt, Chrome and Electron apps take natively and terminals are set to take; rebindable like every shortcut |
 | Super+Q, Alt+F4 | `close` | Close the window ([../windows/window-management.md](../windows/window-management.md)) |
 | Super+M / Super+Shift+M | `minimize` / `restore` | Minimize / restore the last minimized window |
 | Super+arrows | `snap-left`, `snap-right`, `snap-up`, `snap-down` | On a tiled desktop, step the focused window's slice: the far half becomes the whole, the whole the near half, the near half stays (both orders reach the quarters); covered windows are pushed into the largest free slice, or the halving splits one. On a floating desktop only `snap-up` does anything: maximize toggle |

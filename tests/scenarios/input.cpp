@@ -8,11 +8,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <format>
 #include <linux/input-event-codes.h>
 #include <optional>
 #include <print>
 #include <ranges>
+#include <signal.h>
 #include <source_location>
 #include <span>
 #include <string>
@@ -54,6 +56,9 @@ std::string shot_dir;
 std::string canvas_conf; // this run's scratch canvas.conf
 pid_t raw_pid = -1;      // a forked raw socket client, reaped by a later step
 pid_t cancel_pid = -1;   // the second forked client of a step that needs two
+pid_t x11_pid = -1;      // the scenario's X11 client, its stdout piped here
+int x11_out = -1;
+std::string x11_lines;   // everything that client has said so far
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -84,7 +89,8 @@ Output *out() {
 
 View *titled(const char *title) {
 	for (View *v : server->views) {
-		if (v->mapped && v->wlr->title && std::strcmp(v->wlr->title, title) == 0) {
+		const char *name = v->shell_title();
+		if (v->mapped && name != nullptr && std::strcmp(name, title) == 0) {
 			return v;
 		}
 	}
@@ -350,6 +356,65 @@ void reap_client(pid_t &pid = raw_pid) {
 		waitpid(pid, nullptr, WNOHANG);
 		pid = -1;
 	}
+}
+
+// ------------------------------------------------------ the X11 client
+
+// The scenarios' X11 client (tests/clients/x11-client.c, built as
+// CANVAS_X11_CLIENT), stdout piped: it says what keys reach it, so the
+// clipboard chords are proven on the far side of Xwayland.
+bool start_x11_client() {
+	const char *bin = std::getenv("CANVAS_X11_CLIENT");
+	if (bin == nullptr || *bin == '\0') {
+		return false;
+	}
+	int fds[2];
+	if (pipe(fds) != 0) {
+		return false;
+	}
+	x11_pid = fork();
+	if (x11_pid == 0) {
+		close(fds[0]);
+		dup2(fds[1], 1);
+		close(fds[1]);
+		execl(bin, "x11-client", "--size=400x300", static_cast<char *>(nullptr));
+		_exit(127);
+	}
+	close(fds[1]);
+	fcntl(fds[0], F_SETFL, O_NONBLOCK);
+	x11_out = fds[0];
+	x11_lines.clear();
+	return x11_pid > 0;
+}
+
+std::string_view x11_said() {
+	char buf[512];
+	ssize_t got = 0;
+	while (x11_out >= 0 && (got = read(x11_out, buf, sizeof buf)) > 0) {
+		x11_lines.append(buf, static_cast<std::size_t>(got));
+	}
+	return x11_lines;
+}
+
+void reap_x11_client() {
+	if (x11_pid > 0) {
+		kill(x11_pid, SIGKILL);
+		waitpid(x11_pid, nullptr, 0);
+		x11_pid = -1;
+	}
+	if (x11_out >= 0) {
+		close(x11_out);
+		x11_out = -1;
+	}
+}
+
+View *x11_view() {
+	for (View *view : server->views) {
+		if (view->mapped && view->is_x11()) {
+			return view;
+		}
+	}
+	return nullptr;
 }
 
 void swipe(uint32_t fingers, double dx, double dy) {
@@ -1418,6 +1483,50 @@ int run_step() {
 	case 89: {
 		check(server->seat->pointer_state.focused_surface != held_view->surface(),
 			"its release gives the pointer to what is under it");
+		return 300;
+	}
+	// Super+C and Super+V send the app with the keyboard the clipboard
+	// chords (docs/intents/input/keyboard-and-pointer.md); an X11 client
+	// through Xwayland proves them, the same as a wayland client takes them.
+	case 90:
+		check(std::getenv("DISPLAY") != nullptr,
+			"the session names an X display for X11 clients");
+		check(start_x11_client(), "the scenario's X11 client started");
+		return 1500;
+	case 91: { // the client's window is up; a click gives it the keyboard
+		View *v = x11_view();
+		if (v == nullptr && retries++ < 200) {
+			return -100;
+		}
+		check(v != nullptr, "the X11 window mapped as a view");
+		if (v != nullptr) {
+			wlr_box frame = v->frame_box();
+			Point inside = out()->canvas_to_local(frame.x + frame.width / 2.0,
+				frame.y + config::titlebar_height + 20.0);
+			click(inside.x, inside.y, BTN_LEFT);
+		}
+		return 400;
+	}
+	case 92: { // the shortcuts: each sends the client the app's own chord
+		View *v = x11_view();
+		check(v != nullptr && server->focused_view == v,
+			"the X11 window holds the keyboard");
+		chord(KEY_C, SUPER);
+		chord(KEY_V, SUPER);
+		return 500;
+	}
+	case 93: {
+		std::string_view said = x11_said();
+		if ((said.find("KEY 118 4") == std::string_view::npos
+				|| said.find("KEY 118 1") == std::string_view::npos)
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(said.find("KEY 118 4") != std::string_view::npos,
+			"Super+C sent the X11 client Ctrl+Insert (keycode 118, state 4)");
+		check(said.find("KEY 118 1") != std::string_view::npos,
+			"Super+V sent the X11 client Shift+Insert (keycode 118, state 1)");
+		reap_x11_client();
 		return 300;
 	}
 	default:
