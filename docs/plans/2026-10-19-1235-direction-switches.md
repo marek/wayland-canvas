@@ -30,7 +30,7 @@ The rules go into [input/gestures.md](../intents/input/gestures.md),
 
 ## Tasks
 
-- [ ] The intents: gestures.md's direction table, config-file.md's keys, keyboard-and-pointer.md's scrolling rows, settings.md's switches
+- [x] The intents: gestures.md's direction table, config-file.md's keys, keyboard-and-pointer.md's scrolling rows, settings.md's choices, ipc.md's settings keys
 - [ ] canvas.conf reads and writes the five switches and `invert` is gone; the settings unit tests cover parsing, defaults, errors and edits
 - [ ] The mouse wheel and the touchpad each take their own natural-scrolling switch
 - [ ] Looking away and the overview's scroll pan follow the panning switch, whichever way the device scrolls apps

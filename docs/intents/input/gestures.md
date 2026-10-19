@@ -15,11 +15,14 @@ the canvas: a 3-finger swipe hops to the nearest desktop in its
 direction — in the normal view only ever onto a desktop, in the
 zoomed-out one onto a free spot too — and a 4-finger swipe up opens the
 zoomed-out canvas. The user picks the preset that assigns the finger
-counts, or turns them off, whether Super + a 2-finger pinch scales a
-desktop, and which way the pointer, the scroll and the swipes point. Only 2-finger gestures and finger counts the compositor does not
-bind are forwarded to clients. The touchscreen's three- and four-finger
-swipes run the same table by the same preset
-([touch-and-pen.md](touch-and-pen.md)).
+counts, or turns them off, and whether Super + a 2-finger pinch scales a
+desktop. Which way things move is set one direction at a time, since one
+switch for all of them suits nobody: the mouse wheel and the touchpad each
+scroll apps their own way, and looking away, the overview swipe and the
+hops each have their own switch. Only 2-finger gestures and finger counts
+the compositor does not bind are forwarded to clients. The touchscreen's
+three- and four-finger swipes run the same table by the same preset and
+the same direction switches ([touch-and-pen.md](touch-and-pen.md)).
 
 ## Presets
 
@@ -34,13 +37,16 @@ swipes run the same table by the same preset
 | On (the default) | `on` | Scales a desktop, as the table says |
 | Off | `off` | A plain 2-finger pinch: the client's in the normal view, the overview's zoom around the cursor in the overview |
 
-| Direction | `invert =` | Scrolling and swiping |
-|---|---|---|
-| As it is (the default) | `off` | Natural scrolling: the content follows the fingers, and a swipe hops the way the fingers point |
-| Inverted | `on` | Both reverse together — a scroll moves the view the way the fingers move, and a swipe hops away from them. One direction for the session: every pointer and touchpad device, what clients are scrolled by, the canvas pan and the hops |
+| Direction | Key | The default | The other way |
+|---|---|---|---|
+| The mouse wheel in apps | `mouse-scroll =` | `natural`: the content moves the way the top of the wheel turns | `traditional`: the content moves against it |
+| The touchpad in apps | `touchpad-scroll =` | `natural`: the content follows the fingers | `traditional`: the content moves against them |
+| Looking away | `pan =` | `natural`: Super + a scroll in the normal view, and a scroll in the overview, move the content the way the fingers move or the top of the wheel turns | `traditional`: the content moves against them. The pan turns with this switch alone, whichever way the device scrolls apps; a Super + drag and fingers on a touchscreen always keep the content under them |
+| The overview swipe | `overview-swipe =` | `up`: the overview's finger count swiping up opens the overview and zooms further out; swiping down goes back in | `down`: the other way round |
+| Hops | `hop-swipe =` | `toward`: a swipe hops onto the desktop the fingers point at, a swipe left onto the one on the left | `away`: onto the desktop on the other side, as if the fingers pushed the desktops along: a swipe left hops right |
 
-A change applies from the next gesture; one in progress keeps going.
-Finger counts below are the default preset's.
+A change applies from the next gesture, scroll or device; one in progress
+keeps going. Finger counts and directions below are the defaults'.
 
 ## Behavior
 
@@ -65,9 +71,9 @@ Finger counts below are the default preset's.
 Rules that hold across the table:
 
 - **Hops go where the fingers point.** A 3-finger swipe to the left
-  hops to the desktop on the left, in either mode — unless `invert` is
-  on, when every direction in the table reverses with the scroll
-  direction.
+  hops to the desktop on the left, in either mode — unless `hop-swipe`
+  turns every hop round. The overview swipe turns with `overview-swipe`
+  alone, and neither follows the scroll direction.
 - **Follow the fingers.** A gesture that drives a zoom transition moves
   the camera along the zoom path continuously; nothing jumps.
 - **Commit or spring back.** Release past a threshold of progress — or
