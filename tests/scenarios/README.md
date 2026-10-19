@@ -69,7 +69,11 @@ own the machine's Wayland display namespace and GPU.
   scale; Super+Alt+Right looked back from the same way; a hop after a look
   away making its landing the view kept, so double Super stays there; and
   the overview doing the same, even when Escape brings back the very view
-  the look away had reached.
+  the look away had reached. Last, Super+2..5 from desktop 1 alone making
+  desktops above, right of, below and left of it, and a covered slot
+  passed over; and a desktop scaled while it is the overview's target
+  drawing its ordinary tab's label from its own text afterwards, never
+  the target's older one stretched.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

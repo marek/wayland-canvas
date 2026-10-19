@@ -56,12 +56,17 @@ TextTexture draw_text(wlr_renderer *renderer, const char *text, const char *font
 		return {};
 	}
 
-	// Measure on a scratch context: the surface needs its final size up front.
+	// Measure at the scale it is drawn at, rounding up: hinting lays text
+	// out wider at some scales than at others, and a box measured at
+	// another scale cuts off the end of the text.
 	CairoSurfacePtr scratch{cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1)};
 	CairoPtr cr{cairo_create(scratch.get())};
+	cairo_scale(cr.get(), scale, scale);
 	PangoLayoutPtr layout = make_layout(cr.get(), text, font);
-	int lw = 0, lh = 0;
-	pango_layout_get_pixel_size(layout.get(), &lw, &lh);
+	PangoRectangle logical{};
+	pango_layout_get_extents(layout.get(), nullptr, &logical);
+	int lw = static_cast<int>(std::ceil(static_cast<double>(logical.width) / PANGO_SCALE));
+	int lh = static_cast<int>(std::ceil(static_cast<double>(logical.height) / PANGO_SCALE));
 	layout.reset();
 	cr.reset();
 	scratch.reset();

@@ -1976,6 +1976,45 @@ int run_step() {
 		shot("38-super-n-passed-slot");
 		return 0;
 	}
+	case 129: // a tab's label follows its desktop on an ordinary tab and the target's alike
+		o->overview.enter();
+		return 700;
+	case 130: {
+		// Desktop 3's ordinary tab was drawn as the overview opened; now it
+		// is the target, and is scaled while it is.
+		Desktop *d3 = server->canvas.desktops.by_number(3);
+		check(o->overview.active() && d3 != nullptr,
+			"the overview opened with desktop 3 on the canvas");
+		if (d3 == nullptr) {
+			return 0;
+		}
+		o->overview.set_target(d3->frame(), d3->id(), false);
+		return 400;
+	}
+	case 131:
+		server->canvas.settle_scale(server->canvas.desktops.by_number(3)->id(), 0.7);
+		return 400;
+	case 132: {
+		Desktop *d2 = server->canvas.desktops.by_number(2);
+		o->overview.set_target(d2->frame(), d2->id(), false);
+		return 400;
+	}
+	case 133: {
+		Desktop *d3 = server->canvas.desktops.by_number(3);
+		float scale = o->wlr->scale;
+		DesktopLabel label = server->painter.desktop_label(*d3, scale, false);
+		uint32_t drawn = label.texture != nullptr ? label.texture->width : 0;
+		check(label.texture != nullptr
+				&& drawn == static_cast<uint32_t>(std::ceil(label.w * scale)),
+			std::format("scaled while it was the target, desktop 3's ordinary tab draws "
+				"its label from its own text ({} px for {} logical)", drawn, label.w));
+		shot("39-tab-labels");
+		return 300;
+	}
+	case 134:
+		server->canvas.settle_scale(server->canvas.desktops.by_number(3)->id(), 1.0);
+		o->overview.exit();
+		return 700;
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);

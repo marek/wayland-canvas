@@ -163,15 +163,22 @@ private:
 	void draw_scene(const RenderCtx &ctx);
 	void draw_lock(const RenderCtx &ctx);
 
-	// One slot of the desktop-label cache: one texture per fill the label
-	// sits on — the panel of an ordinary tab, the accent of the target.
+	// One rendered tab label and what it was made for: the number and scale
+	// its text names and the output scale it was drawn at.
+	struct LabelImage {
+		TexturePtr texture;
+		int number = 0, w = 0, h = 0;
+		double desktop_scale = 1;
+		float scale = 0;
+		bool current(const Desktop &desktop, float at) const;
+	};
+	// One slot of the desktop-label cache: an image per fill the label sits
+	// on — the panel of an ordinary tab, the accent of the target — each
+	// keyed on its own, so redrawing one never passes the other off as
+	// current.
 	struct LabelSlot {
 		DesktopId id{};
-		TexturePtr texture;
-		TexturePtr accent_texture;
-		int number = 0, w = 0, h = 0;
-		double desktop_scale = 1; // the scale the label names
-		float scale = 0;
+		LabelImage plain, accent;
 	};
 
 	LabelSlot *label_slot(DesktopId id);

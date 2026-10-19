@@ -92,7 +92,7 @@ is a click ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)
 
 | Element | Rule |
 |---|---|
-| Tabs | Each desktop has a tab: its name, its scale when not 100 %, the Tile switch (lit while tiling is on) and Abandon |
+| Tabs | Each desktop has a tab: its name, its scale when not 100 %, the Tile switch (lit while tiling is on) and Abandon. The label reads as the desktop is now, whole and at the screen's own scale, on an ordinary tab and on the target's alike |
 | Shelf | Minimized windows along the bottom, above the toolbar when it is on the bottom edge ([../shell/toolbar.md](../shell/toolbar.md)); clicking one restores it and goes there ([../windows/window-management.md](../windows/window-management.md)) |
 | Help line | Along the bottom, above a bottom toolbar, naming the gestures of the preset in force; under off, only the pointer and key hints |
 | Hints | Transient messages for completed actions (e.g. "Tiling on for Desktop 2", "Desktop 2 at 80 %") |

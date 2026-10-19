@@ -818,18 +818,21 @@ const Painter::LabelSlot *Painter::label_slot(DesktopId id) const {
 	return nullptr;
 }
 
+bool Painter::LabelImage::current(const Desktop &desktop, float at) const {
+	return texture != nullptr && number == desktop.number()
+		&& desktop_scale == desktop.scale() && scale == at;
+}
+
 DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale, bool on_accent) {
 	LabelSlot *slot = label_slot(desktop.id());
 	if (slot == nullptr) {
 		label_cache_.push_back(LabelSlot{.id = desktop.id()});
 		slot = label_slot(desktop.id());
 	}
-	TexturePtr &texture = on_accent ? slot->accent_texture : slot->texture;
-	if (texture != nullptr && slot->number == desktop.number()
-			&& slot->desktop_scale == desktop.scale() && slot->scale == scale) {
-		return {texture.get(), slot->w, slot->h};
+	LabelImage &image = on_accent ? slot->accent : slot->plain;
+	if (image.current(desktop, scale)) {
+		return {image.texture.get(), image.w, image.h};
 	}
-	texture.reset();
 	char buf[48];
 	int len;
 	if (desktop.scale() == 1.0) {
@@ -840,22 +843,22 @@ DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale, bool on
 	}
 	// The same text in the colour its fill asks for: the panel text of an
 	// ordinary tab, the contrasting accent text of the target's accent.
-	int w = 0, h = 0;
+	TextTexture t;
 	if (len > 0) {
-		TextTexture t = draw_text(server_.renderer, buf, config::ui_font_bold,
+		t = draw_text(server_.renderer, buf, config::ui_font_bold,
 			on_accent ? server_.theme.colors().accent_text
 				  : server_.theme.colors().panel_text,
 			0x00000000u, scale, 0, 0);
-		texture = std::move(t.texture);
-		w = t.width;
-		h = t.height;
 	}
-	slot->number = desktop.number();
-	slot->desktop_scale = desktop.scale();
-	slot->scale = scale;
-	slot->w = w;
-	slot->h = h;
-	return {texture.get(), slot->w, slot->h};
+	image = LabelImage{
+		.texture = std::move(t.texture),
+		.number = desktop.number(),
+		.w = t.width,
+		.h = t.height,
+		.desktop_scale = desktop.scale(),
+		.scale = scale,
+	};
+	return {image.texture.get(), image.w, image.h};
 }
 
 
@@ -871,9 +874,17 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 	char buf[32];
 	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.number());
 	const LabelSlot *slot = label_slot(desktop.id());
-	int label_w = slot != nullptr && slot->scale == o.wlr->scale
-		&& slot->desktop_scale == desktop.scale()
-		? slot->w : 9 * (len > 0 ? len : 0);
+	// The text's width from whichever image of it is current, else a guess
+	// until the first frame draws one.
+	int label_w = 9 * (len > 0 ? len : 0);
+	if (slot != nullptr) {
+		for (const LabelImage *image : {&slot->plain, &slot->accent}) {
+			if (image->current(desktop, o.wlr->scale)) {
+				label_w = image->w;
+				break;
+			}
+		}
+	}
 
 	TabLayout layout;
 	layout.tab.x = static_cast<int>(std::round(frame_left));
@@ -1173,8 +1184,8 @@ void Painter::theme_changed() {
 		slot.texture.reset();
 	}
 	for (LabelSlot &slot : label_cache_) {
-		slot.texture.reset();
-		slot.accent_texture.reset();
+		slot.plain.texture.reset();
+		slot.accent.texture.reset();
 	}
 }
 
