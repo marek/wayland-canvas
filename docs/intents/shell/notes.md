@@ -56,8 +56,8 @@ is a plain-HTML file that can be read and edited outside the shell.
 
 | Subject | Rule |
 |---|---|
-| Create | The toolbar's note button expands into colour swatches; choosing one puts a note of that colour at the centre of what the overview is aimed at, and gives it the keyboard |
-| Action | `canvas.notes/create {color}`: the one action behind it all — the toolbar's entries run it, and so does the control socket's `action.run`, so a script or a keybinding can put a note too. It places the note at the centre of what a screen in the overview shows (the first screen's view when none is), keeps it, and gives it the keyboard |
+| Create | The toolbar's note button expands into colour swatches; choosing one puts a note of that colour centred on the cursor — moved only as far as it takes to lie fully on the screen the cursor is on, at that screen's current camera, and clear of the toolbar and the bars — and gives it the keyboard |
+| Action | `canvas.notes/create {color}`: the one action behind it all — the toolbar's entries run it, and so does the control socket's `action.run`, so a script or a keybinding can put a note too. It places the note centred on the cursor, kept on the cursor's screen and clear of the toolbar and the bars, keeps it, and gives it the keyboard |
 | Colours | Yellow, green, blue, pink, purple and orange; the values are the plugin's settings |
 | Card | 220 × 220 canvas px when created, a plugin setting |
 | Look | A card of the note's colour, a darker strip along the top holding the note's controls, the text in dark ink, a grip in the bottom-right corner |
@@ -77,6 +77,9 @@ is a plain-HTML file that can be read and edited outside the shell.
 
 - The control socket is missing: the note button is not offered, and a
   note that cannot be placed on the plane says so and is not shown.
+- No cursor to centre on (a `state` that reports none): the note goes to
+  the centre of what a screen in the overview shows, the first screen's
+  view when none is.
 - The shell restarts: its note surfaces go with it and come back from the
   files, each at its place, none lost or doubled.
 - A note dragged while the caret is in it: the text stays as it was; the

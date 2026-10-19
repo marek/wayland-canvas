@@ -125,9 +125,9 @@ Item {
 		}
 	}
 
-	// create {color}: a new note of that colour, centred on what a screen
-	// in the overview shows (the first screen's view when none is), kept;
-	// its surface takes the keyboard as it maps.
+	// create {color}: a new note of that colour, centred on the cursor and
+	// kept clear of the chrome of the screen it lands on; its surface takes
+	// the keyboard as it maps.
 	function create(api, args) {
 		if (api !== null) {
 			init(api)
@@ -146,13 +146,13 @@ Item {
 		var id = String(nextId)
 		nextId++
 		compositor.call("state", undefined, function(state, error) {
-			var view = shownView(state)
+			var spot = noteSpot(state)
 			var note = noteComponent.createObject(root, {
 				id: id,
 				color: color,
 				html: "",
-				x: view !== null ? Math.round(view.x + view.width / 2 - size / 2) : 0,
-				y: view !== null ? Math.round(view.y + view.height / 2 - size / 2) : 0,
+				x: spot.x,
+				y: spot.y,
 				width: size,
 				height: size,
 				font: UiTheme.fontFamily,
@@ -166,8 +166,9 @@ Item {
 		})
 	}
 
-	// The canvas rectangle the user is looking at: a screen in the
-	// overview first — the toolbar's — else the first screen's.
+	// The canvas rectangle the user is looking at, when there is no cursor
+	// to centre on: a screen in the overview first — the toolbar's — else
+	// the first screen's.
 	function shownView(state) {
 		var outputs = state != null && state.outputs != null ? state.outputs : []
 		for (var i = 0; i < outputs.length; i++) {
@@ -181,6 +182,41 @@ Item {
 			}
 		}
 		return null
+	}
+
+	// A new note's place: centred on the cursor's canvas point, moved only
+	// as far as it takes to lie in the free area of the screen the cursor
+	// is on — what the bars and the overview's strips leave of that
+	// screen's view. With no cursor to centre on, the centre of what a
+	// screen in the overview shows (the first screen's view when none is).
+	function noteSpot(state) {
+		var cursor = state != null && state.cursor != null ? state.cursor : null
+		var outputs = state != null && state.outputs != null ? state.outputs : []
+		var on = null
+		if (cursor != null) {
+			for (var i = 0; i < outputs.length; i++) {
+				if (outputs[i].name === cursor.output) {
+					on = outputs[i]
+				}
+			}
+		}
+		if (on == null) {
+			var view = shownView(state)
+			return {
+				x: view !== null ? Math.round(view.x + view.width / 2 - size / 2) : 0,
+				y: view !== null ? Math.round(view.y + view.height / 2 - size / 2) : 0,
+			}
+		}
+		var free = on.usable != null ? on.usable : on.view
+		return {
+			x: Math.round(clamp(cursor.x - size / 2, free.x, free.x + free.width - size)),
+			y: Math.round(clamp(cursor.y - size / 2, free.y, free.y + free.height - size)),
+		}
+	}
+
+	// `value` into [low, high], as far as it takes and no further.
+	function clamp(value, low, high) {
+		return Math.max(low, Math.min(high, value))
 	}
 
 	function typed(note, html) {

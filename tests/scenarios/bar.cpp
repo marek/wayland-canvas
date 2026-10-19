@@ -92,6 +92,11 @@ std::string scheme_start; // the machine's real color-scheme, read before the ru
 // and looks for on screen).
 constexpr const char *note_yellow = "#ffd866";
 constexpr const char *note_green = "#a6e3a1";
+// The output-local point the pointer is parked at before a note is made,
+// so its centring on the cursor can be checked: comfortably inside the
+// free area of the 1280x720 screen under its bar, so nothing moves the
+// note from where the cursor centres it.
+constexpr double note_cursor_x = 500, note_cursor_y = 350;
 // The scratch shell.json the plugin phase wrote: rewritten as-is, an edit
 // the shell sees, so it reloads.
 constexpr std::string_view plugin_config =
@@ -5308,12 +5313,21 @@ int run_step() {
 // A step range of its own, after the theme and its adoption. Every change
 // is checked where the user sees it — the card on the screenshot — as well
 // as in the note's own file.
-	case 110: // a note created the way any script would: action.run over the socket
+	case 110: { // a note created the way any script would: action.run over the socket
+		// The note goes centred on the cursor: the pointer is parked at a
+		// known point first, on a settled camera, so the check that follows
+		// reads the centring alone.
+		if (!camera_settled() && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
+		park(note_cursor_x, note_cursor_y);
 		run_msg("action.run",
 			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
 				+ R"("}})",
 			"note-create");
 		return 600;
+	}
 	case 111: { // the note is a surface of the plugin's own, on the plane
 		LayerSurface *surface = note_surface();
 		if ((surface == nullptr || stored_notes().empty()) && note_retries++ < 100) {
@@ -5339,6 +5353,16 @@ int run_step() {
 			check(note.x == box.x && note.y == box.y && note.width == box.width
 				&& note.height == box.height,
 				"its file holds the canvas rectangle the compositor placed it at");
+			// The cursor's canvas point at the parked pointer, and the
+			// note's centre: the same point, within the half-pixel the
+			// plugin's rounding of the note's corner can move it.
+			Point aimed = out()->local_to_canvas(note_cursor_x, note_cursor_y);
+			check(std::abs(box.x + box.width / 2.0 - aimed.x) <= 0.5
+					&& std::abs(box.y + box.height / 2.0 - aimed.y) <= 0.5,
+				std::format("the note is centred on the cursor's canvas point "
+					"(centre {},{}, cursor at {},{})",
+					box.x + box.width / 2.0, box.y + box.height / 2.0,
+					aimed.x, aimed.y));
 		}
 		check(server->seat->keyboard_state.focused_surface == surface->wlr->surface,
 			"the new note holds the keyboard");

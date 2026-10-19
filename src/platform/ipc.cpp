@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -205,6 +206,61 @@ std::string_view theme_name(ThemeMode mode) {
 	return mode == ThemeMode::light ? "light" : "dark";
 }
 
+// The overview's strip surfaces (the toolbar, the app bar): overlays that
+// reserve no exclusive zone, so the free box cuts them out by hand. Keep
+// the namespaces in sync with plugins/canvas.toolbar and
+// plugins/canvas.apps (docs/intents/shell/toolbar.md, app-bar.md).
+constexpr std::string_view overview_strip_namespaces[] = {
+	"wayland-canvas-toolbar",
+	"wayland-canvas-app-bar",
+};
+
+bool is_overview_strip(std::string_view namespace_) {
+	for (std::string_view name : overview_strip_namespaces) {
+		if (name == namespace_) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// The output-local rectangle the chrome leaves of the screen: the bars'
+// exclusive zones (Output::usable), less the overview's strips while the
+// overview shows. A strip's window is its settled square plus the pocket
+// that overhangs the edge it hugs — the strip lies against the window's
+// inner side — so the free box ends at the window's far edge.
+wlr_box free_screen_box(const Output &output) {
+	wlr_box free = output.usable;
+	if (!output.overview.active()) {
+		return free;
+	}
+	for (const auto &surfaces : output.layers) {
+		for (const std::unique_ptr<LayerSurface> &layer : surfaces) {
+			if (!layer->mapped || layer->wlr->namespace_ == nullptr
+					|| !is_overview_strip(layer->wlr->namespace_)) {
+				continue;
+			}
+			const wlr_box &geo = layer->geo;
+			if (geo.x < 0) { // hugs the left edge, pocket past it
+				int inner = std::max(free.x, geo.x + geo.width);
+				free.width = std::max(0, free.x + free.width - inner);
+				free.x = inner;
+			} else if (geo.y < 0) { // the top edge
+				int inner = std::max(free.y, geo.y + geo.height);
+				free.height = std::max(0, free.y + free.height - inner);
+				free.y = inner;
+			} else if (geo.x + geo.width > output.width) { // the right edge
+				free.width = std::max(0,
+					std::min(free.x + free.width, geo.x) - free.x);
+			} else if (geo.y + geo.height > output.height) { // the bottom edge
+				free.height = std::max(0,
+					std::min(free.y + free.height, geo.y) - free.y);
+			}
+		}
+	}
+	return free;
+}
+
 void add_output(JsonBuilder *builder, const Output &output) {
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "name");
@@ -232,6 +288,25 @@ void add_output(JsonBuilder *builder, const Output &output) {
 	json_builder_add_double_value(builder, view.w);
 	json_builder_set_member_name(builder, "height");
 	json_builder_add_double_value(builder, view.h);
+	json_builder_end_object(builder);
+	// What that view leaves free of the chrome, in canvas pixels — the
+	// bars' exclusive zones, and the overview's strips while the overview
+	// shows: where a plugin keeps something it puts where the user is
+	// looking clear of them.
+	wlr_box screen = free_screen_box(output);
+	Point tl = output.local_to_canvas(screen.x, screen.y);
+	Point br = output.local_to_canvas(screen.x + screen.width,
+		screen.y + screen.height);
+	json_builder_set_member_name(builder, "usable");
+	json_builder_begin_object(builder);
+	json_builder_set_member_name(builder, "x");
+	json_builder_add_double_value(builder, tl.x);
+	json_builder_set_member_name(builder, "y");
+	json_builder_add_double_value(builder, tl.y);
+	json_builder_set_member_name(builder, "width");
+	json_builder_add_double_value(builder, br.x - tl.x);
+	json_builder_set_member_name(builder, "height");
+	json_builder_add_double_value(builder, br.y - tl.y);
 	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "overview");
 	json_builder_add_boolean_value(builder, output.overview.active());
@@ -839,6 +914,24 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 	return object_text([&](JsonBuilder *builder) {
 		add_outputs_array(builder, server_);
+		// Where the cursor is on the canvas, on the output it is on: a
+		// read for the moment of the answer — no event carries it, so a
+		// client that needs it asks.
+		json_builder_set_member_name(builder, "cursor");
+		if (Output *under = server_.output_under_cursor()) {
+			Point at = under->local_to_canvas(server_.cursor->x - under->lx,
+				server_.cursor->y - under->ly);
+			json_builder_begin_object(builder);
+			json_builder_set_member_name(builder, "x");
+			json_builder_add_double_value(builder, at.x);
+			json_builder_set_member_name(builder, "y");
+			json_builder_add_double_value(builder, at.y);
+			json_builder_set_member_name(builder, "output");
+			json_builder_add_string_value(builder, under->wlr->name);
+			json_builder_end_object(builder);
+		} else {
+			json_builder_add_null_value(builder);
+		}
 		add_desktops_array(builder, server_);
 		add_windows_array(builder, server_);
 		json_builder_set_member_name(builder, "theme");

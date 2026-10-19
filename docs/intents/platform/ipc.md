@@ -64,7 +64,7 @@ request; responses come in request order.
 
 | Method | Params | Result |
 |---|---|---|
-| `state` | — | `{"outputs": […], "desktops": […], "windows": […], "theme": "dark", "recording": null}` |
+| `state` | — | `{"outputs": […], "cursor": …, "desktops": […], "windows": […], "theme": "dark", "recording": null}` |
 | `subscribe` | — | `true`; from then on every event goes to this connection |
 | `launcher.toggle` | `output` (optional; default the output under the cursor) | `true` |
 | `overview.toggle` | `output` (optional, as above) | `true`; an error without an output |
@@ -122,7 +122,8 @@ settings of [../input/config-file.md](../input/config-file.md):
 
 | Part | Each entry |
 |---|---|
-| `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `view` (the canvas rectangle the output looks at: `x`, `y`, `width`, `height` in canvas px), `overview` (true while the output shows the overview) |
+| `outputs` | `name`, `x`, `y`, `width`, `height` (layout px), `scale`, `view` (the canvas rectangle the output looks at: `x`, `y`, `width`, `height` in canvas px), `usable` (the canvas rectangle of that view the bars and the overview's toolbar and app bar leave free, in canvas px), `overview` (true while the output shows the overview) |
+| `cursor` | `x`, `y` (canvas px), `output` (the output the cursor is on); a read for the moment of the answer — no event carries it, so a client that needs it asks `state` |
 | `desktops` | `id`, `number`, `x`, `y`, `width`, `height` (canvas px) |
 | `windows` | `id` (the session id), `appId`, `title`, `desktop` (its desktop's id, or null on free canvas), `minimized`, `focused`, in the order the windows opened. Where a window is on the canvas is the compositor's to act on, not a client's to read ([../shell/app-bar.md](../shell/app-bar.md)) |
 | `recording` | `null`, or `{"path": …}` while a recording runs |

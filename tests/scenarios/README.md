@@ -364,8 +364,9 @@ own the machine's Wayland display namespace and GPU.
   the user sees it — the card on the screenshot — as well as in the note's
   own plain-HTML file in the scratch state: `msg action.run
   canvas.notes/create` maps one surface of the shell client named
-  `wayland-canvas-canvas-canvas.notes/<id>`, placed on the plane at the
-  rectangle its file holds and holding the keyboard. Typing goes into the
+  `wayland-canvas-canvas-canvas.notes/<id>`, placed on the plane centred
+  on the parked pointer — kept on its screen and clear of the bars — at
+  the rectangle its file holds, and holding the keyboard. Typing goes into the
   note where it sits; a pan leaves one card where it was put; a colour dot
   turns the file and the card green; a reload brings the note back once;
   writing past the bottom grows the card, drawn to its new height. The
