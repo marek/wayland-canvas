@@ -27,5 +27,6 @@ The contract is [../intents/windows/x11.md](../intents/windows/x11.md).
 - [x] The offset follows the pointer wherever it is on the canvas, not only over an X11 window, so entering a window rarely meets one X has elsewhere
 - [x] A pointer event X placed before its windows' move reached it is told again a frame later; the xwayland scenario proves a click after a jump, with no motion between, lands where it was aimed
 - [x] A window Xwayland drew before wlroots paired it with its surface maps as it is paired (a second X11 window at times never appeared); the xwayland scenario's two-window steps passed four runs in a row with it
+- [ ] A click after a jump lands where it was aimed in every run: on 2026-10-19 the xwayland scenario's check failed in three of four runs, with the same scenario binary that had passed it earlier that day, the click after the jump never reaching the client (found, not started)
 - [ ] Krita's New and Open dialogs take the pointer in a headless run, read back from X, and with Krita maximized at 25 % its whole window does (not run: testing kept to the suites)
 - [ ] On screen, in the session: Krita's dialogs and a zoomed-out desktop (the user)
