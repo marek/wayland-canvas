@@ -64,6 +64,10 @@ public:
 	// canvas.cpp
 	void reveal_view(View &view);
 
+	// A window was unmapped or destroyed: every holder of a pointer to it
+	// drops it, here and nowhere else.
+	void view_gone(View &view);
+
 	// view.cpp
 	std::optional<ViewHit> view_at(double cx, double cy, double zoom);
 	View *top_visible_view(Output *output);
@@ -231,6 +235,7 @@ private:
 	static int handle_conf_change(int fd, uint32_t mask, void *data);
 	int conf_inotify_fd_ = -1;
 	EventSourcePtr conf_inotify_source_;
+	EventSourcePtr sigint_source_, sigterm_source_;
 	std::vector<std::unique_ptr<SurfaceTracker>> trackers_;
 	std::vector<std::unique_ptr<Inhibitor>> inhibitors_;
 	Listener new_surface_, request_activate_, new_inhibitor_;

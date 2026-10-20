@@ -4,10 +4,11 @@
 // over 64 KiB answered then dropped, a slow subscriber dropped), each event
 // type triggered for real, the canvas-surface role's answers (a place
 // with no area refused, one ahead of its surface remembered, a drag with
-// no button held refused, an edge that is not one, an unplace), and the
-// `wayland-canvas msg` client with its exit codes. Writes
-// only under $CANVAS_TMP (meson passes the repo's tmp/); meson passes the
-// compositor binary as $WAYLAND_CANVAS_BIN.
+// no button held refused, an edge that is not one, an unplace), the calls a
+// client leaves pending (a `surface.move` drag, a `capture.pick`, a
+// `shortcut.capture`) outliving it, and the `wayland-canvas msg` client
+// with its exit codes. Writes only under $CANVAS_TMP (meson passes the
+// repo's tmp/); meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
 #include <cerrno>
 #include <cmath>
 #include <fcntl.h>
@@ -22,6 +23,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <sys/poll.h>
 #include <sys/socket.h>
 #include <vector>
@@ -32,6 +34,7 @@
 #include <unistd.h>
 #include <linux/input-event-codes.h>
 #include <json-glib/json-glib.h>
+#include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
 #include "core/theme.h"
@@ -57,6 +60,10 @@ const std::string surface_name = "wayland-canvas-canvas-ipc.scenario/one";
 std::string output_name; // the headless output's name, for `output` params
 wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
+wlr_keyboard kbd{};
+const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
+pid_t layer_pid = -1; // the layer-shell client drawing the plugin surface
+pid_t pending_pid = -1; // a client that disconnects with a call pending
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -146,9 +153,52 @@ int client_code(const char *name) {
 // ------------------------------------------------------ fake pointer
 
 // Pointer at output-local logical (x, y) on the single 1280x720 output.
+void move_to(double x, double y) {
+	t += 8;
+	wlr_pointer_motion_absolute_event ev = {
+		.pointer = &ptr, .time_msec = t, .x = x / 1280.0, .y = y / 720.0};
+	wl_signal_emit_mutable(&ptr.events.motion_absolute, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
 
+void button(uint32_t code, bool pressed) {
+	t += 8;
+	wlr_pointer_button_event ev = {.pointer = &ptr, .time_msec = t, .button = code,
+		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED};
+	wl_signal_emit_mutable(&ptr.events.button, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
 
+void key(uint32_t code, bool pressed) {
+	t += 8;
+	wlr_keyboard_key_event ev = {.time_msec = t, .keycode = code, .update_state = true,
+		.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED};
+	wlr_keyboard_notify_key(&kbd, &ev);
+}
 
+void tap(uint32_t code) {
+	key(code, true);
+	key(code, false);
+}
+
+// The plugin surface the layer client draws, once the compositor maps it.
+LayerSurface *plugin_surface() {
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (const auto &layer : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &surface : layer) {
+				if (surface->mapped && surface->name() == surface_name) {
+					return surface.get();
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+// The compositor runs a drag the plugin handed it.
+bool surface_drag_running() {
+	return std::holds_alternative<PointerGrab::SurfaceDrag>(server->input.grab.state());
+}
 
 // The foot window the scenario opened, whatever the canvas did around it.
 View *foot_window() {
@@ -255,6 +305,22 @@ pid_t fork_raw(const std::string &to_send, bool half_close, const char *out) {
 	}
 	std::fflush(f);
 	std::fclose(f);
+	close(fd);
+	_exit(0);
+}
+
+// Forks a child that sends one request line, lingers `linger_ms` without
+// reading the answer, and hangs up: a call left pending when its client goes.
+pid_t fork_hangup(const std::string &request, int linger_ms) {
+	pid_t pid = fork();
+	if (pid != 0) {
+		return pid;
+	}
+	int fd = child_connect();
+	if (fd < 0 || !child_write_all(fd, request + "\n")) {
+		_exit(125);
+	}
+	usleep(static_cast<useconds_t>(linger_ms) * 1000);
 	close(fd);
 	_exit(0);
 }
@@ -971,8 +1037,11 @@ int run_step() {
 		return 200;
 	}
 	case 48: // the surface role's own answers, for a name no client draws
-		// The run ends by finishing the fake pointer, so it comes up here.
+		// The run ends by finishing the fake devices, so they come up here.
 		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
+		wlr_keyboard_init(&kbd, &kbd_impl, "fake-keyboard");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
 		run_client("surface.place", std::format(
 			R"({{"surface":"{}","x":10,"y":20,"width":0,"height":5}})", surface_name),
 			"place-flat");
@@ -1022,8 +1091,137 @@ int run_step() {
 				&& !server->canvas_places.contains(surface_name),
 			"`surface.unplace` forgets the remembered place");
 		run_client("state", "", "state-windows"); // read by the window list's check
-		step = 75;
-		return -300; // without the advance: step 75 waits for that answer
+		return 300;
+	}
+	case 51: // a plugin's surface on the plane, drawn by a real layer-shell client
+		layer_pid = spawn(std::format("exec \"$CANVAS_LAYER_CLIENT\" '{}' > '{}/layer.out' 2>&1",
+			surface_name, shot_dir).c_str());
+		return 500;
+	case 52: { // it maps, and `surface.place` puts it where the pointer reaches it
+		Output *output = server->output_under_cursor();
+		LayerSurface *layer = plugin_surface();
+		if ((layer == nullptr || output == nullptr) && retries++ < 100) {
+			return -100;
+		}
+		if (layer == nullptr || output == nullptr) {
+			check(false, "the layer client's surface mapped");
+			step = 55; // nothing to press: on to the picks
+			return 1;
+		}
+		retries = 0;
+		Rect area = output->viewport();
+		run_client("surface.place", std::format(
+			R"({{"surface":"{}","x":{},"y":{},"width":200,"height":100}})", surface_name,
+			static_cast<int>(area.x) + 40, static_cast<int>(area.y) + 400), "layer-place");
+		return 400;
+	}
+	case 53: { // the press the plugin answers, then a `surface.move` whose client leaves
+		Output *output = server->output_under_cursor();
+		LayerSurface *layer = plugin_surface();
+		if ((!client_done("layer-place") || layer == nullptr || !layer->canvas_box.has_value())
+				&& retries++ < 50) {
+			return -100;
+		}
+		retries = 0;
+		check(client_code("layer-place") == 0 && layer != nullptr
+				&& layer->canvas_box.has_value(),
+			"the layer client's surface is on the plane at its place");
+		if (layer == nullptr || output == nullptr || !layer->canvas_box.has_value()) {
+			step = 55;
+			return 1;
+		}
+		Point at = output->canvas_to_local(layer->canvas_box->x + 100, layer->canvas_box->y + 50);
+		move_to(at.x, at.y);
+		button(BTN_LEFT, true);
+		check(server->input.button_held_on(layer->wlr->surface),
+			"the pointer's press is held on the plugin's surface");
+		pending_pid = fork_hangup(std::format(
+			R"({{"id":1,"method":"surface.move","params":{{"surface":"{}"}}}})", surface_name),
+			1000);
+		return 500;
+	}
+	case 54: { // the drag runs while its client lingers, and goes on after it hangs up
+		check(surface_drag_running(), "the compositor began the drag the client asked for");
+		if (!child_exited(pending_pid) && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		return 400; // the compositor reads the hang-up and drops the client
+	}
+	case 55: { // the drag ends at the release with nobody left to answer
+		Output *output = server->output_under_cursor();
+		LayerSurface *layer = plugin_surface();
+		if (layer != nullptr && output != nullptr && layer->canvas_box.has_value()) {
+			int before = layer->canvas_box->x;
+			check(surface_drag_running(), "the drag outlived the client that asked for it");
+			Point at = output->canvas_to_local(before + 100, layer->canvas_box->y + 50);
+			for (int i = 1; i <= 10; i++) {
+				move_to(at.x - 6 * i, at.y - 4 * i);
+			}
+			button(BTN_LEFT, false);
+			double zoom = output->camera.current().zoom;
+			check(!server->input.grab.active()
+					&& std::abs(layer->canvas_box->x - (before - 60 / zoom)) <= 1,
+				std::format("the release ended the drag after the surface followed it ({} to {})",
+					before, layer->canvas_box->x));
+		}
+		return 300;
+	}
+	case 56: // a `capture.pick` whose client leaves while the picker is up
+		pending_pid = fork_hangup(R"({"id":1,"method":"capture.pick","params":{"what":"window"}})",
+			1000);
+		return 500;
+	case 57: {
+		check(server->capture_ui.picking(), "the picker opened for the client's pick");
+		if (!child_exited(pending_pid) && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		return 400;
+	}
+	case 58: { // the picker stays up for the user; cancelling it answers nobody
+		check(server->capture_ui.picking(), "the picker outlived the client that asked for it");
+		tap(KEY_ESC);
+		check(!server->capture_ui.picking(), "Escape closed the picker with its client gone");
+		return 300;
+	}
+	case 59: // a `shortcut.capture` whose client leaves while the capture waits
+		pending_pid = fork_hangup(R"({"id":1,"method":"shortcut.capture","params":{}})", 1000);
+		return 500;
+	case 60: {
+		if (!child_exited(pending_pid) && retries++ < 100) {
+			return -100;
+		}
+		retries = 0;
+		return 400;
+	}
+	case 61: { // the capture ended with its client: keys act again
+		constexpr uint32_t SUPER[] = {KEY_LEFTMETA};
+		key(SUPER[0], true);
+		tap(KEY_SPACE);
+		key(SUPER[0], false);
+		check(server->launcher.is_open(),
+			"Super+Space opened the launcher: no capture swallowed it for a dead client");
+		return 300;
+	}
+	case 62: {
+		tap(KEY_ESC);
+		check(!server->launcher.is_open(), "Escape closed the launcher again");
+		run_client("state", "", "pending-alive");
+		return 400;
+	}
+	case 63: { // the socket still answers; the plugin's surface goes with its client
+		if (!client_done("pending-alive") && retries++ < 50) {
+			return -100;
+		}
+		retries = 0;
+		check(client_code("pending-alive") == 0 && !client_out("pending-alive").empty(),
+			"the control socket still answers after three clients left calls pending");
+		if (layer_pid > 0) {
+			kill(layer_pid, SIGTERM);
+		}
+		step = 74; // on to the window list
+		return 300;
 	}
 	case 75: { // the state lists the open window, and a jump goes to it
 		if (!client_done("state-windows") && retries++ < 50) {
@@ -1140,8 +1338,10 @@ int handle_timer() {
 } // namespace
 
 int main() {
-	if (std::getenv("WAYLAND_CANVAS_BIN") == nullptr) {
-		std::fprintf(stderr, "ipc: $WAYLAND_CANVAS_BIN is not set (meson passes it)\n");
+	if (std::getenv("WAYLAND_CANVAS_BIN") == nullptr
+			|| std::getenv("CANVAS_LAYER_CLIENT") == nullptr) {
+		std::fprintf(stderr, "ipc: $WAYLAND_CANVAS_BIN or $CANVAS_LAYER_CLIENT is not set"
+			" (meson passes them)\n");
 		return 2;
 	}
 	const char *env = std::getenv("CANVAS_TMP");
@@ -1171,6 +1371,7 @@ int main() {
 	}
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
+	wlr_keyboard_finish(&kbd);
 	server.reset(); // releases the control socket
 	check(access(socket_path.c_str(), F_OK) != 0,
 		"the control socket was removed when the compositor exited");

@@ -1,0 +1,10 @@
+# LeakSanitizer suppressions for tools/check.sh --sanitize.
+# Each pattern names a third-party library; it matches the leaks that library
+# allocated, whoever called it. Nothing of the compositor's own is listed.
+
+# fontconfig's configuration and pattern caches live until exit and are
+# never released by pango, which owns the default font map.
+leak:libfontconfig.so
+
+# mesa's EGL display state, created by eglInitialize and kept by the driver.
+leak:libEGL_mesa.so

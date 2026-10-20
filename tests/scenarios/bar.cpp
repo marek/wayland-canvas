@@ -2804,9 +2804,9 @@ std::vector<JsonObject *> collector_providers() {
 	if (list == nullptr || json_node_get_node_type(list) != JSON_NODE_ARRAY) {
 		return providers;
 	}
-	for (GList *it = json_array_get_elements(json_node_get_array(list));
-			it != nullptr; it = it->next) {
-		JsonNode *element = static_cast<JsonNode *>(it->data);
+	JsonArray *array = json_node_get_array(list);
+	for (guint i = 0; i < json_array_get_length(array); i++) {
+		JsonNode *element = json_array_get_element(array, i);
 		if (json_node_get_node_type(element) == JSON_NODE_OBJECT) {
 			providers.push_back(json_node_get_object(element));
 		}

@@ -643,13 +643,14 @@ FileEntry scan_opencode_db(const std::string &db) {
 		long long row = 0;
 		while (sqlite3_step(statement) == SQLITE_ROW) {
 			row++;
+			const char *session_text = reinterpret_cast<const char *>(
+				sqlite3_column_text(statement, 0));
 			const char *raw = reinterpret_cast<const char *>(
 				sqlite3_column_text(statement, 1));
-			std::string session = reinterpret_cast<const char *>(
-				sqlite3_column_text(statement, 0));
-			if (raw == nullptr) {
+			if (session_text == nullptr || raw == nullptr) {
 				continue;
 			}
+			std::string session = session_text;
 			ParserPtr parser = parse_json(raw);
 			JsonObject *message = root_object(parser);
 			if (message == nullptr
@@ -791,10 +792,9 @@ void cache_load_file(JsonObject *, const char *name, JsonNode *node,
 		(*context->files)[name] = std::move(entry);
 		return;
 	}
-	for (GList *it = json_array_get_elements(
-			json_node_get_array(messages_node)); it != nullptr;
-			it = it->next) {
-		JsonNode *message = static_cast<JsonNode *>(it->data);
+	JsonArray *messages = json_node_get_array(messages_node);
+	for (guint i = 0; i < json_array_get_length(messages); i++) {
+		JsonNode *message = json_array_get_element(messages, i);
 		if (json_node_get_node_type(message) == JSON_NODE_OBJECT) {
 			entry.messages.push_back(counted_from_json(
 				json_node_get_object(message)));
@@ -1488,10 +1488,9 @@ std::optional<LimitsCache> read_limits_cache(const std::string &path) {
 			|| json_node_get_node_type(limits_node) != JSON_NODE_ARRAY) {
 		return std::nullopt;
 	}
-	for (GList *it = json_array_get_elements(
-			json_node_get_array(limits_node)); it != nullptr;
-			it = it->next) {
-		JsonNode *entry = static_cast<JsonNode *>(it->data);
+	JsonArray *limits = json_node_get_array(limits_node);
+	for (guint i = 0; i < json_array_get_length(limits); i++) {
+		JsonNode *entry = json_array_get_element(limits, i);
 		if (json_node_get_node_type(entry) == JSON_NODE_OBJECT) {
 			cache.limits.push_back(limit_from_json(json_node_get_object(entry)));
 		}

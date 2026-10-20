@@ -278,7 +278,7 @@ Each split adds its new subsystems to cpp-standards.md's
 
 ### 3. Every other crash
 
-- [ ] A sanitizer run of every suite
+- [x] A sanitizer run of every suite
   - Configure a second build:
     `meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false`.
     It goes beside `build/` and is git-ignored like it; add it to
@@ -293,7 +293,23 @@ Each split adds its new subsystems to cpp-standards.md's
   - Afterwards, `tools/check.sh` gains a `--sanitize` switch that runs
     this build, so the run can be repeated.
   - Acceptance: both suites run clean under the sanitizers.
-- [ ] The usage collector survives a NULL `session_id`
+- [x] The server releases its SIGINT and SIGTERM sources
+  - server.cpp:491-492 (`Server::init`), hit by every scenario at exit:
+    `wl_event_loop_add_signal` sources were never removed.
+  - The fix: `sigint_source_` and `sigterm_source_` are `EventSourcePtr`
+    members, dropped first in `~Server`.
+- [x] The `GList` that `json_array_get_elements` returns is freed or not made
+  - agent_usage.cpp `cache_load_file` and `read_limits_cache`, and
+    tests/scenarios/bar.cpp:2807 (`collector_providers`, hit by the bar
+    scenario's usage steps) leaked it.
+  - The fix: walk the array with `json_array_get_length` and
+    `json_array_get_element`.
+- [x] The scenario clients free what they allocate
+  - tests/scenarios/capture.cpp:920 (the thumbnail-click step) dropped the
+    surface `load_newest_shot` returns; the x11-client never freed its
+    two atom replies (xwayland scenario).
+  - The fix: the surface is destroyed; the replies are freed.
+- [x] The usage collector survives a NULL `session_id`
   - The problem: agent_usage.cpp:648-649 builds a `std::string` from
     `sqlite3_column_text(statement, 0)` before any null check. A NULL
     column crashes the collector instead of skipping the row, as the
@@ -302,7 +318,7 @@ Each split adds its new subsystems to cpp-standards.md's
   - Acceptance: `tests/test_agent_usage.cpp` gains an opencode fixture
     database with a NULL `session_id` row; the row is skipped and the
     rest count.
-- [ ] An IPC client is destroyed the way every owned object is
+- [x] An IPC client is destroyed the way every owned object is
   - The problem: `Ipc::close_client` (ipc.cpp:1590-1597) and `reap`
     (1599-1600) erase the `unique_ptr` in place. The Client's destructor
     therefore runs while `clients_` is mid-erase, and `~Client` answers
@@ -314,7 +330,7 @@ Each split adds its new subsystems to cpp-standards.md's
     call pending (capture.pick, shortcut.capture, surface.move), then
     finishes the pick, capture or drag. The run is clean under the
     sanitizer build.
-- [ ] A window that goes is forgotten by everything that keeps a pointer
+- [x] A window that goes is forgotten by everything that keeps a pointer
   to it
   - The problem: cpp-standards says the one subsystem holding a view
     pointer is told when the view goes. Today `Input::forget` passes a
@@ -333,6 +349,16 @@ Each split adds its new subsystems to cpp-standards.md's
   - Acceptance: a scenario closes a window during each hold (a move grab,
     a capture pick hovering it, a window cast, a fullscreen desktop) and
     runs clean under the sanitizer build.
+  - Done: the `View *` holders are the grab states (move, resize, title
+    button, an overview press's window or shelf target), the capture UI
+    (hover, a shot waiting on a window), window casts and
+    `Input::last_title_view`. Gestures, surface drags, launches and
+    overview targets hold none; fullscreen desktops hold a session id and
+    reconcile each frame. `Server::view_gone` tells the four from
+    `handle_unmap` and `handle_destroy`; casts end there too, no longer
+    on the surface's own signals. The `viewgone` scenario closes a window
+    during a move grab, a capture pick, a window cast and a fullscreen
+    desktop, clean under `tools/check.sh --sanitize`.
 
 ### 4. Screenshots and recordings
 

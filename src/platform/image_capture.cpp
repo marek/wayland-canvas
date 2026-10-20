@@ -21,7 +21,7 @@ struct ImageCapture::ToplevelSource {
 	Handle<wlr_buffer, wlr_buffer_drop> buffer{};
 	timespec when{}; // the stamp given to the last pushed frame
 
-	Listener commit_, unmap_, destroy_;
+	Listener commit_;
 
 	bool started = false;
 	// The last render failed (no buffer of that size, or the pass): its
@@ -33,10 +33,6 @@ struct ImageCapture::ToplevelSource {
 	}
 
 	void handle_commit();
-
-	void handle_unmap() { detach(); }
-	void handle_destroy() { detach(); }
-	void detach() { destroy_owned(owner->sources_, this); }
 };
 // The source's owner: our ToplevelSource keeps the protocol object as its
 // first member (what wl_container_of would compute, without its offsetof).
@@ -162,6 +158,18 @@ void ImageCapture::finish() {
 	sources_.clear(); // each finish()es its protocol object first
 }
 
+void ImageCapture::forget(const View &view) {
+	std::vector<ToplevelSource *> gone;
+	for (const std::unique_ptr<ToplevelSource> &source : sources_) {
+		if (source->view == &view) {
+			gone.push_back(source.get());
+		}
+	}
+	for (ToplevelSource *source : gone) {
+		destroy_owned(sources_, source); // out of the vector first, then destroyed
+	}
+}
+
 void ImageCapture::handle_new_request(
 		wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request *request) {
 	View *view = static_cast<View *>(request->toplevel_handle->data);
@@ -185,10 +193,6 @@ void ImageCapture::handle_new_request(
 	ToplevelSource *s = source.get();
 	s->commit_.connect<&ToplevelSource::handle_commit>(
 		view->surface()->events.commit, s);
-	s->unmap_.connect<&ToplevelSource::handle_unmap>(
-		view->surface()->events.unmap, s);
-	s->destroy_.connect<&ToplevelSource::handle_destroy>(
-		view->surface()->events.destroy, s);
 	sources_.push_back(std::move(source));
 	wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(request, &s->base);
 }

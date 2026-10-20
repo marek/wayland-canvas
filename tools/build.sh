@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
-# build.sh [--wipe] [--release] [build-dir] — configure and compile the
-# compositor: the one command a clean checkout needs. Takes meson and ninja
-# from PATH when they run there, else from the repo's .venv (tools/venv.sh),
-# configures through toolchain/llvm.ini and sets the build dir up again when
-# it was configured with another compiler or was not set up by meson for this
-# checkout. tools/check.sh and tools/package.sh build through this.
+# build.sh [--wipe] [--release] [--sanitize] [build-dir] — configure and
+# compile the compositor: the one command a clean checkout needs. Takes meson
+# and ninja from PATH when they run there, else from the repo's .venv
+# (tools/venv.sh), configures through toolchain/llvm.ini and sets the build
+# dir up again when it was configured with another compiler or was not set up
+# by meson for this checkout. --sanitize builds build-asan/ with
+# AddressSanitizer and UndefinedBehaviorSanitizer, wlroots included.
+# tools/check.sh and tools/package.sh build through this.
 set -euo pipefail
 
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$repo"
 
 wipe=0
-buildtype=()
-build=build
+sanitize=0
+options=()
+build=
 while [ $# -gt 0 ]; do
 	case $1 in
 		--wipe) wipe=1 ;;
-		--release) buildtype=(-Dbuildtype=release) ;;
+		--release) options+=(-Dbuildtype=release) ;;
+		--sanitize) sanitize=1 ;;
 		-h | --help)
-			echo "usage: tools/build.sh [--wipe] [--release] [build-dir]"
+			echo "usage: tools/build.sh [--wipe] [--release] [--sanitize] [build-dir]"
 			exit 0
 			;;
 		-*)
@@ -29,6 +33,14 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+if [ "$sanitize" -eq 1 ]; then
+	# b_lundef=false: the sanitizer runtimes resolve at load time, which the
+	# linker's default --no-undefined refuses
+	options+=(-Db_sanitize=address,undefined -Db_lundef=false)
+	build=${build:-build-asan}
+fi
+build=${build:-build}
 
 bin=$(tools/venv.sh --if-needed)
 if [ -n "$bin" ]; then
@@ -54,22 +66,22 @@ fi
 
 native=(--native-file toolchain/llvm.ini)
 if [ ! -d "$build" ]; then
-	echo "build.sh: meson setup $build ${native[*]} ${buildtype[*]}"
-	meson setup "$build" "${native[@]}" "${buildtype[@]}"
+	echo "build.sh: meson setup $build ${native[*]} ${options[*]}"
+	meson setup "$build" "${native[@]}" "${options[@]}"
 elif [ "$wipe" -eq 1 ]; then
-	echo "build.sh: meson setup --wipe $build ${native[*]} ${buildtype[*]}"
-	meson setup --wipe "$build" "${native[@]}" "${buildtype[@]}"
+	echo "build.sh: meson setup --wipe $build ${native[*]} ${options[*]}"
+	meson setup --wipe "$build" "${native[@]}" "${options[@]}"
 elif set_up_by=$(sed -n 's/.*"meson_version": {"full": "\([^"]*\)".*/\1/p' "$build/meson-info/meson-info.json") &&
 		[ "$set_up_by" != "$(meson --version)" ]; then
 	# the venv takes the latest meson, and meson loads no build dir another
 	# version set up until it is reconfigured
 	echo "build.sh: $build/ was set up by meson $set_up_by; meson setup --reconfigure"
-	meson setup --reconfigure "$build" "${buildtype[@]}"
+	meson setup --reconfigure "$build" "${options[@]}"
 elif meson introspect "$build" --compilers 2>/dev/null | grep -q '"id": "gcc"'; then
 	echo "build.sh: $build/ was configured with GCC; meson setup --wipe"
-	meson setup --wipe "$build" "${native[@]}" "${buildtype[@]}"
-elif [ "${#buildtype[@]}" -gt 0 ]; then
-	meson configure "$build" "${buildtype[@]}"
+	meson setup --wipe "$build" "${native[@]}" "${options[@]}"
+elif [ "${#options[@]}" -gt 0 ]; then
+	meson configure "$build" "${options[@]}"
 fi
 
 echo "build.sh: meson compile -C $build"

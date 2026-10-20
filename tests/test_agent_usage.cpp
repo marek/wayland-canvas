@@ -656,6 +656,49 @@ void test_midnight_buckets() {
 	}
 }
 
+// An opencode row whose session_id or data column is NULL is skipped by
+// itself; the rows around it count.
+void test_opencode_null_columns() {
+	std::string db_path = root + "/opencode-null/opencode.db";
+	std::filesystem::create_directories(
+		std::filesystem::path(db_path).parent_path());
+	std::filesystem::remove(db_path);
+	sqlite3 *db = nullptr;
+	sqlite3_open(db_path.c_str(), &db);
+	std::string message = R"({"role":"assistant","providerID":"anthropic",)"
+		R"("modelID":"claude-opus-5-5","tokens":{"input":)";
+	char *error = nullptr;
+	std::string sql = "CREATE TABLE message (session_id TEXT, data TEXT);"
+		"INSERT INTO message VALUES ('s1', '" + message + "7,\"output\":3}}');"
+		"INSERT INTO message VALUES (NULL, '" + message
+			+ "100,\"output\":100}}');"
+		"INSERT INTO message VALUES ('s2', NULL);"
+		"INSERT INTO message VALUES (NULL, NULL);"
+		"INSERT INTO message VALUES ('s3', '" + message + "20,\"output\":5}}');";
+	sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &error);
+	if (error != nullptr) {
+		std::println("FAIL: opencode NULL fixture: {}", error);
+		failures++;
+		sqlite3_free(error);
+	}
+	sqlite3_close(db);
+	Paths paths{.claude_dir = root + "/none",
+		.codex_home = root + "/none",
+		.pi_sessions = root + "/none",
+		.omp_sessions = root + "/none",
+		.opencode_db = db_path,
+		.cache_file = root + "/opencode-null-cache.json"};
+	Record record = collect(paths, {});
+	const ProviderRecord *claude = find_provider(record, "claude");
+	check(claude != nullptr, "the rows around a NULL row produce a provider");
+	if (claude != nullptr) {
+		long long today = day_tokens(*claude, 0);
+		check(today == 7 + 3 + 20 + 5,
+			std::format("rows with a NULL session_id or data are skipped "
+				"and the rest count ({})", today));
+	}
+}
+
 void test_record_json() {
 	Fixture fixture = make_fixture();
 	std::string json = record_json(collect_fixture(fixture));
@@ -711,6 +754,7 @@ int main() {
 	test_collection();
 	test_cache_reuse();
 	test_midnight_buckets();
+	test_opencode_null_columns();
 	test_record_json();
 
 	std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED",

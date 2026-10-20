@@ -7,18 +7,27 @@
 # time; when those programs are missing, meson registers no scenario tests
 # and the scenarios step is a no-op.
 #
-# Usage: tools/check.sh [--unit]   (--unit: stop after the unit suite)
+# --sanitize builds build-asan/ with AddressSanitizer and
+# UndefinedBehaviorSanitizer and runs its unit and scenarios suites there:
+# any report, a leak included, aborts the run. The packaging suite runs
+# nothing compiled, so it is left out. tests/lsan.supp names the leaks of
+# third-party code that are ignored.
+#
+# Usage: tools/check.sh [--unit] [--sanitize]   (--unit: stop after the unit suite)
 set -euo pipefail
 
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$repo"
 
 unit_only=0
+sanitize=0
 for arg in "$@"; do
 	if [[ "$arg" == "--unit" ]]; then
 		unit_only=1
+	elif [[ "$arg" == "--sanitize" ]]; then
+		sanitize=1
 	elif [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
-		echo "usage: tools/check.sh [--unit]"
+		echo "usage: tools/check.sh [--unit] [--sanitize]"
 		exit 0
 	else
 		echo "tools/check.sh: unknown argument: $arg" >&2
@@ -26,8 +35,21 @@ for arg in "$@"; do
 	fi
 done
 
-echo "check.sh: tools/build.sh"
-tools/build.sh
+build=build
+build_args=()
+test_args=(--print-errorlogs)
+if [[ "$sanitize" -eq 1 ]]; then
+	build=build-asan
+	build_args=(--sanitize)
+	# the instrumented compositor runs several times slower
+	test_args+=(--timeout-multiplier 4)
+	export ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
+	export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+	export LSAN_OPTIONS=suppressions=$repo/tests/lsan.supp
+fi
+
+echo "check.sh: tools/build.sh ${build_args[*]}"
+tools/build.sh "${build_args[@]}"
 
 # the suites run through meson, from the build dir build.sh just made
 bin=$(tools/venv.sh --if-needed)
@@ -35,8 +57,8 @@ if [ -n "$bin" ]; then
 	export PATH="$bin:$PATH"
 fi
 
-echo "check.sh: meson test -C build --suite unit --print-errorlogs"
-meson test -C build --suite unit --print-errorlogs
+echo "check.sh: meson test -C $build --suite unit ${test_args[*]}"
+meson test -C "$build" --suite unit "${test_args[@]}"
 echo "check.sh: unit suite passed"
 
 if [[ "$unit_only" -eq 1 ]]; then
@@ -44,11 +66,17 @@ if [[ "$unit_only" -eq 1 ]]; then
 	exit 0
 fi
 
-echo "check.sh: meson test -C build --suite packaging --print-errorlogs"
-meson test -C build --suite packaging --print-errorlogs
-echo "check.sh: packaging suite passed"
+if [[ "$sanitize" -eq 0 ]]; then
+	echo "check.sh: meson test -C $build --suite packaging ${test_args[*]}"
+	meson test -C "$build" --suite packaging "${test_args[@]}"
+	echo "check.sh: packaging suite passed"
+fi
 
-echo "check.sh: meson test -C build --suite scenarios --print-errorlogs"
-meson test -C build --suite scenarios --print-errorlogs
+echo "check.sh: meson test -C $build --suite scenarios ${test_args[*]}"
+meson test -C "$build" --suite scenarios "${test_args[@]}"
 echo "check.sh: scenarios suite passed"
-echo "check.sh: done (unit + packaging + scenarios)"
+if [[ "$sanitize" -eq 1 ]]; then
+	echo "check.sh: done (unit + scenarios, sanitized)"
+else
+	echo "check.sh: done (unit + packaging + scenarios)"
+fi

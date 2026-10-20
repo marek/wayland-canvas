@@ -26,6 +26,7 @@ public:
 
 	void init(); // creates the protocol globals
 	void finish(); // drops the window sources before the display goes
+	void forget(const View &view); // a window went: its casts end
 
 	wlr_ext_foreign_toplevel_list_v1 *list = nullptr; // views' handles go here
 

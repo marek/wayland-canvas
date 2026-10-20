@@ -917,7 +917,9 @@ int run_step() {
 	}
 	case 24: {
 		std::string path;
-		load_newest_shot(&path);
+		if (cairo_surface_t *newest = load_newest_shot(&path); newest != nullptr) {
+			cairo_surface_destroy(newest);
+		}
 		std::string opened = read_file(shot_dir + "/xdg-open.args");
 		check(opened == path,
 			std::format("a click on the thumbnail opened the shot ({})", opened));

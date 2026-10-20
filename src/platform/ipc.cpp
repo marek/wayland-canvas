@@ -8,6 +8,7 @@
 #include <expected>
 #include <format>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1588,16 +1589,16 @@ void Ipc::drop(Client &client, const char *reason) {
 }
 
 void Ipc::close_client(const Client &client) {
-	auto it = std::ranges::find_if(clients_, [&client](const std::unique_ptr<Client> &p) {
-		return p.get() == &client;
-	});
-	if (it != clients_.end()) {
-		clients_.erase(it);
-	}
+	destroy_owned(clients_, &client);
 }
 
 void Ipc::reap() {
-	std::erase_if(clients_, [](const std::unique_ptr<Client> &p) { return p->doomed; });
+	// Taken out first: a destructor never runs while the vector is mid-erase.
+	auto first_doomed = std::ranges::stable_partition(clients_,
+		[](const std::unique_ptr<Client> &p) { return !p->doomed; }).begin();
+	std::vector<std::unique_ptr<Client>> doomed(std::make_move_iterator(first_doomed),
+		std::make_move_iterator(clients_.end()));
+	clients_.erase(first_doomed, clients_.end());
 }
 
 // ---------------------------------------------------------------- events

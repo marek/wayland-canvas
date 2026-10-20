@@ -799,7 +799,6 @@ void Input::forget(const View &view) {
 		last_title_view = nullptr;
 	}
 	grab.forget(view);
-	server_.capture_ui.forget(view);
 }
 
 // ---- pointer motion ----

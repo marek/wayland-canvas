@@ -416,6 +416,8 @@ Server::Server()
 }
 
 Server::~Server() {
+	sigint_source_.reset();
+	sigterm_source_.reset();
 	conf_inotify_source_.reset();
 	if (conf_inotify_fd_ >= 0) {
 		close(conf_inotify_fd_);
@@ -488,8 +490,8 @@ bool Server::init(const Options &options) {
 		inherited_sigpipe = previous == SIG_IGN ? SIG_IGN : SIG_DFL;
 		sigpipe_recorded = true;
 	}
-	wl_event_loop_add_signal(loop, SIGINT, handle_terminate_signal, this);
-	wl_event_loop_add_signal(loop, SIGTERM, handle_terminate_signal, this);
+	sigint_source_.reset(wl_event_loop_add_signal(loop, SIGINT, handle_terminate_signal, this));
+	sigterm_source_.reset(wl_event_loop_add_signal(loop, SIGTERM, handle_terminate_signal, this));
 
 	backend = wlr_backend_autocreate(loop, &session);
 	if (backend == nullptr) {

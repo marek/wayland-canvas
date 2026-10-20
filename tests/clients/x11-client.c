@@ -114,6 +114,7 @@ int main(int argc, char **argv) {
 		xcb_change_property(connection, XCB_PROP_MODE_REPLACE, window,
 			protocols->atom, XCB_ATOM_ATOM, 32, 1, &delete_window->atom);
 	}
+	free(protocols);
 
 	xcb_map_window(connection, window);
 	xcb_flush(connection);
@@ -168,6 +169,7 @@ int main(int argc, char **argv) {
 			xcb_flush(connection);
 			poll(&pfd, 1, 250);
 			if (xcb_connection_has_error(connection)) {
+				free(delete_window);
 				return 0;
 			}
 			if (asserts > 0 && asked == 0) {
@@ -316,6 +318,7 @@ int main(int argc, char **argv) {
 					&& message->data.data32[0] == delete_window->atom) {
 				say("CLOSING\n");
 				free(event);
+				free(delete_window);
 				xcb_disconnect(connection);
 				return 0;
 			}

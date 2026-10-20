@@ -98,7 +98,11 @@ foreach xml : [
 	wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
 	wl_protocol_dir / 'stable/tablet/tablet-v2.xml',
 	wl_protocol_dir / 'unstable/xdg-decoration/xdg-decoration-unstable-v1.xml',
+	wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
+	wl_protocol_dir / 'staging/ext-image-capture-source/ext-image-capture-source-v1.xml',
+	wl_protocol_dir / 'staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml',
 	'protocols/wlr-gamma-control-unstable-v1.xml',
+	'protocols/wlr-layer-shell-unstable-v1.xml',
 ]
 	client_protocols += custom_target(
 		xml.underscorify() + '_client_h',
@@ -412,6 +416,27 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [wayland_client],
 	)
 	scenario_env.set('CANVAS_GAMMA_CLIENT', gamma_client.full_path())
+	# A layer-shell client of the scenarios' own: a plugin's surface on the
+	# canvas, mapped and pressed without the shell.
+	layer_client = executable(
+		'layer-client',
+		'tests/clients/layer-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_LAYER_CLIENT', layer_client.full_path())
+	# A window-cast client of the scenarios' own: it holds an
+	# ext-image-copy-capture session of one window and copies its frames
+	# until the compositor ends the session.
+	cast_client = executable(
+		'cast-client',
+		'tests/clients/cast-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_CAST_CLIENT', cast_client.full_path())
 	# A touch, pointer and tablet-tool client of the scenarios' own:
 	# what the compositor forwards of a touchscreen or pen is asserted
 	# from its own stdout.
@@ -424,7 +449,7 @@ if foot_prog.found() and grim_prog.found()
 	)
 	scenario_env.set('CANVAS_TOUCH_CLIENT', touch_client.full_path())
 	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
-		'nightlight', 'touch']
+		'nightlight', 'touch', 'viewgone']
 	# An X11 client of the scenarios' own: this machine has no xterm or
 	# xeyes, and the X11 half must be proven by a real X client.
 	if xcb.found()

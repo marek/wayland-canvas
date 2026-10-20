@@ -670,8 +670,14 @@ void View::handle_map() {
 	damage();
 }
 
+void Server::view_gone(View &view) {
+	input.forget(view);
+	capture_ui.forget(view);
+	image_capture.forget(view);
+}
+
 void View::handle_unmap() {
-	server.input.forget(*this);
+	server.view_gone(*this);
 	mapped = false;
 	std::erase(server.views, this);
 	destroy_foreign();
@@ -726,7 +732,7 @@ void View::handle_commit() {
 }
 
 void View::handle_destroy() {
-	server.input.forget(*this);
+	server.view_gone(*this);
 	if (server.focused_view == this) {
 		server.focused_view = nullptr;
 	}
