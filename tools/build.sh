@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: tools/build.sh [--wipe] [--release] [--sanitize | --no-xwayland] [build-dir]
+# usage: tools/build.sh [--wipe] [--release] [--sanitize] [build-dir]
 #
 # Configure and compile the compositor: the one command a clean checkout
 # needs. Takes meson and ninja from PATH when they run there, else from the
@@ -7,8 +7,6 @@
 # the build dir up again when it was configured with another compiler or was
 # not set up by meson for this checkout. --sanitize builds build-asan/ with
 # AddressSanitizer and UndefinedBehaviorSanitizer, wlroots included.
-# --no-xwayland builds build-no-xwayland/ with wlroots' Xwayland support off,
-# the build of a machine whose wlroots lacks it.
 # tools/check.sh and tools/package.sh build through this.
 set -euo pipefail
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -18,7 +16,6 @@ cd "$repo"
 
 wipe=0
 sanitize=0
-no_xwayland=0
 options=()
 build=
 while [ $# -gt 0 ]; do
@@ -26,7 +23,6 @@ while [ $# -gt 0 ]; do
 		--wipe) wipe=1 ;;
 		--release) options+=(-Dbuildtype=release) ;;
 		--sanitize) sanitize=1 ;;
-		--no-xwayland) no_xwayland=1 ;;
 		-h | --help)
 			usage_from_header
 			exit 0
@@ -37,18 +33,11 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-if [ "$sanitize" -eq 1 ] && [ "$no_xwayland" -eq 1 ]; then
-	die "--sanitize and --no-xwayland are separate builds"
-fi
 if [ "$sanitize" -eq 1 ]; then
 	# b_lundef=false: the sanitizer runtimes resolve at load time, which the
 	# linker's default --no-undefined refuses
 	options+=(-Db_sanitize=address,undefined -Db_lundef=false)
 	build=${build:-build-asan}
-fi
-if [ "$no_xwayland" -eq 1 ]; then
-	options+=(-Dwlroots:xwayland=disabled)
-	build=${build:-build-no-xwayland}
 fi
 build=${build:-build}
 

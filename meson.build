@@ -70,18 +70,15 @@ add_project_arguments(
 	'-DCANVAS_HAVE_LOGIND=' + (libsystemd.found() ? '1' : '0'),
 	language: 'cpp',
 )
-# X11 applications through Xwayland: wlroots decides whether it has the X11
-# window manager (its own have_xwayland), whatever xcb libraries are installed;
-# xcb is what this code needs on top of it.
-have_xwayland = wlroots.get_variable(
+# X11 applications through Xwayland: the X11 window manager is wlroots' own
+# (its have_xwayland), and xcb is what this code needs on top of it.
+if wlroots.get_variable(
 	pkgconfig: 'have_xwayland',
 	internal: 'have_xwayland',
-) == 'true'
-xcb = dependency('xcb', required: have_xwayland, include_type: 'system')
-add_project_arguments(
-	'-DCANVAS_HAVE_XWAYLAND=' + (have_xwayland ? '1' : '0'),
-	language: 'cpp',
-)
+) != 'true'
+	error('wayland-canvas needs a wlroots built with Xwayland: install one that has it, or build the wlroots subproject with -Dwlroots:xwayland=enabled')
+endif
+xcb = dependency('xcb', include_type: 'system')
 
 protocol_headers = []
 foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
@@ -574,16 +571,14 @@ if foot_prog.found() and grim_prog.found()
 		'nightlight', 'touch', 'viewgone']
 	# An X11 client of the scenarios' own: this machine has no xterm or
 	# xeyes, and the X11 half must be proven by a real X client.
-	if have_xwayland
-		x11_client = executable(
-			'x11-client',
-			'tests/clients/x11-client.c',
-			c_args: ['-Wno-unused-parameter'],
-			dependencies: [xcb],
-		)
-		scenario_env.set('CANVAS_X11_CLIENT', x11_client.full_path())
-		scenarios += ['xwayland']
-	endif
+	x11_client = executable(
+		'x11-client',
+		'tests/clients/x11-client.c',
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [xcb],
+	)
+	scenario_env.set('CANVAS_X11_CLIENT', x11_client.full_path())
+	scenarios += ['xwayland']
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.
 	scenarios += ['sharing']

@@ -7,9 +7,7 @@
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
-#if CANVAS_HAVE_XWAYLAND
 #include "windows/view_x11.h"
-#endif
 #include "windows/view_xdg.h"
 
 namespace {
@@ -501,11 +499,7 @@ View *View::from_surface(wlr_surface *surface) {
 	if (XdgView *view = XdgView::from_surface(surface)) {
 		return view;
 	}
-#if CANVAS_HAVE_XWAYLAND
 	return X11View::from_surface(surface);
-#else
-	return nullptr;
-#endif
 }
 
 // ---- foreign toplevel handle ----

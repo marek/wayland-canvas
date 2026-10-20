@@ -2,10 +2,8 @@
 # usage: tools/check.sh [--unit] [--sanitize]   (--unit: stop after the unit suites)
 #
 # Build (tools/build.sh) and run the test strands in order:
-# `meson test --suite unit`, then the same suite on a second tree built
-# without Xwayland (build-no-xwayland/, what a wlroots lacking it gets), then
-# `meson test --suite packaging`, then `meson test --suite scenarios`. Exits
-# non-zero on the first failure.
+# `meson test --suite unit`, then `meson test --suite packaging`, then
+# `meson test --suite scenarios`. Exits non-zero on the first failure.
 #
 # The scenarios need `foot` and `grim` on PATH and a GPU render node at run
 # time; when those programs are missing, meson registers no scenario tests
@@ -14,7 +12,7 @@
 # --sanitize builds build-asan/ with AddressSanitizer and
 # UndefinedBehaviorSanitizer and runs its unit and scenarios suites there:
 # any report, a leak included, aborts the run. The packaging suite runs
-# nothing compiled, so it is left out, and so is the tree without Xwayland.
+# nothing compiled, so it is left out.
 # tests/lsan.supp names the leaks of third-party code that are ignored.
 set -euo pipefail
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
@@ -59,14 +57,6 @@ echo "check.sh: meson test -C $build --suite unit ${test_args[*]}"
 meson test -C "$build" --suite unit "${test_args[@]}"
 echo "check.sh: unit suite passed"
 
-if [[ "$sanitize" -eq 0 ]]; then
-	echo "check.sh: tools/build.sh --no-xwayland"
-	tools/build.sh --no-xwayland
-	echo "check.sh: meson test -C build-no-xwayland --suite unit ${test_args[*]}"
-	meson test -C build-no-xwayland --suite unit "${test_args[@]}"
-	echo "check.sh: no-Xwayland unit suite passed"
-fi
-
 if [[ "$unit_only" -eq 1 ]]; then
 	echo "check.sh: done (unit only)"
 	exit 0
@@ -84,5 +74,5 @@ echo "check.sh: scenarios suite passed"
 if [[ "$sanitize" -eq 1 ]]; then
 	echo "check.sh: done (unit + scenarios, sanitized)"
 else
-	echo "check.sh: done (unit + no-Xwayland unit + packaging + scenarios)"
+	echo "check.sh: done (unit + packaging + scenarios)"
 fi

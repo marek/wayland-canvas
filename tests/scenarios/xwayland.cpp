@@ -659,7 +659,7 @@ int run_step() {
 		// and on its own display, so this run's X server is untouched.
 		check(server->xwayland != nullptr,
 			"this run has an X server, its binary being there");
-		std::string log = shot_dir + "/no-xwayland.log";
+		std::string log = shot_dir + "/xwayland-missing.log";
 		spawn(std::format(
 			"env WLR_BACKENDS=headless WLR_RENDERER=gles2 "
 			"WLR_XWAYLAND='{}/not-an-xwayland' WAYLAND_DISPLAY= "
@@ -670,7 +670,7 @@ int run_step() {
 		return 2000;
 	}
 	case 18: {
-		std::string log = read_text(shot_dir + "/no-xwayland.log");
+		std::string log = read_text(shot_dir + "/xwayland-missing.log");
 		if (log.find("done") == std::string::npos && retries++ < 100) {
 			return -300;
 		}

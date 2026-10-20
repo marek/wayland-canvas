@@ -2035,17 +2035,8 @@ Tests:
     - Network.qml's unread `networks` (20-21).
   - Acceptance: grep finds none of these names, `-Wunused` is clean, and
     the suites are green.
-- [x] The build without Xwayland builds
-  - The problem: view_x11.cpp's `#else` branch (480-502) provides none of
-    the members the rest calls, so `CANVAS_HAVE_XWAYLAND=0` cannot
-    compile. meson.build:43 always builds the subproject with Xwayland,
-    but a system wlroots may lack it (phase 8's `have_xwayland`).
-  - The fix:
-    - Without Xwayland, `X11View` and `Xwm` are not built, and
-      `as_x11()` is never true.
-    - `tools/check.sh` also builds a second tree with
-      `-Dwlroots:xwayland=disabled`.
-  - Acceptance: that build compiles, and its unit suite passes.
+- [x] Every build has Xwayland; configure fails without it
+  - The compile-time variant without Xwayland, its second build tree and the build script's option for it are gone: X11 apps are always supported, the packages bundle wlroots with Xwayland, and a missing Xwayland program is the runtime case.
 
 ### 12. Comments
 

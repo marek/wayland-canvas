@@ -147,7 +147,7 @@ pictures no longer show it, `tools/media.py` remakes them;
 
 | Venue | Command | When |
 |---|---|---|
-| **Everything** | `tools/check.sh` | Once per batch of work — before a push, a pause, or handing a branch over to be merged — not before every commit. Builds and runs the `unit`, `packaging` and `scenarios` meson suites: the default-session tool and the plan and agent tooling against fake roots, then the real compositor on the headless backend with real foot clients, screenshots with grim, keyboard and pointer driven through fake devices. It also compiles a second tree without Xwayland and runs its unit suite. |
+| **Everything** | `tools/check.sh` | Once per batch of work — before a push, a pause, or handing a branch over to be merged — not before every commit. Builds and runs the `unit`, `packaging` and `scenarios` meson suites: the default-session tool and the plan and agent tooling against fake roots, then the real compositor on the headless backend with real foot clients, screenshots with grim, keyboard and pointer driven through fake devices. |
 | **Per commit** | `meson test -C build <name> ...` | Before each commit of code: the build, plus the unit tests and the scenarios that cover the files the commit changed. A run is repeated only when something it covers changed. |
 | **Sanitizers** | `tools/check.sh --sanitize` | A change to ownership, lifetimes or buffers (who frees what, a listener's life, a pointer kept past a call). Not routine. |
 | **Unit** | `meson test -C build --suite unit` | The pure canvas math (direction choice, tiling, zoom paths) and desktop-entry parsing. |

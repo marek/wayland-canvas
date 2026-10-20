@@ -1,6 +1,5 @@
 /build/
 /build-asan/
-/build-no-xwayland/
 /dist/
 /.venv/
 /subprojects/*

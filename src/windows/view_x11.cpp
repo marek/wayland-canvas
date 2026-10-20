@@ -12,13 +12,10 @@
 #include <span>
 #include <string_view>
 #include <vector>
+#include <xcb/xcbext.h>
 #include "core/config.h"
 #include "core/server.h"
 #include "platform/output.h"
-
-#if CANVAS_HAVE_XWAYLAND
-
-#include <xcb/xcbext.h>
 #include "windows/view_x11.h"
 
 namespace {
@@ -592,25 +589,3 @@ void Server::x11_give_up() {
 bool Server::on_x11_window(wlr_surface *surface) {
 	return surface != nullptr && X11View::from_surface(surface) != nullptr;
 }
-
-#else // CANVAS_HAVE_XWAYLAND
-
-// Built without Xwayland: no X11View and no X window manager exist, and
-// View::as_x11() is never non-null (docs/intents/windows/x11.md).
-void Server::init_xwayland() {
-	wlr_log(WLR_INFO, "built without Xwayland: this session has no X11");
-}
-
-void Server::finish_xwayland() {}
-void Server::sync_x11() {}
-void Server::x11_follow_pointer() {}
-bool Server::x11_settled() {
-	return true;
-}
-void Server::x11_give_up() {}
-
-bool Server::on_x11_window(wlr_surface *) {
-	return false;
-}
-
-#endif

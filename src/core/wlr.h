@@ -31,9 +31,7 @@
 #include <wayland-protocols/xdg-shell-enum.h>
 #include <wayland-server.h>
 #include <xkbcommon/xkbcommon.h>
-#if CANVAS_HAVE_XWAYLAND
 #include <xcb/xcb.h>
-#endif
 
 extern "C" {
 #pragma clang diagnostic push
@@ -104,13 +102,11 @@ extern "C" {
 #include <wlr/util/log.h>
 #include <wlr/util/transform.h>
 #include <wlr/xcursor.h>
-#if CANVAS_HAVE_XWAYLAND
 // xwayland.h names a member `class`, as the layer shell names one
 // `namespace`: the same trick, undone immediately after.
 #define class class_
 #include <wlr/xwayland.h>
 #undef class
-#endif
 #undef namespace
 #undef static
 #pragma clang diagnostic pop
