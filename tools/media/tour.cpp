@@ -51,6 +51,10 @@ constexpr double screen_scale = 2;
 constexpr int record_fps = 30;
 // The walkthrough is encoded at the panel's logical size.
 constexpr int video_w = screen_w, video_h = screen_h;
+// What the tour leaves in its out/ folder besides the stills; tools/media.py
+// learns these names, the size above and the stills taken from manifest.json.
+constexpr const char *walkthrough_file = "walkthrough-raw.mp4";
+constexpr const char *captions_file = "captions.tsv";
 
 // Desktop 1 (code) is the compositor's own, at the output's box. Writing
 // sits beside it; the table, at half scale, under both.
@@ -126,7 +130,9 @@ std::optional<Server> server;
 wl_event_source *timer = nullptr;
 bool failed = false;
 bool stills_only = false, devices = false;
+bool walkthrough_taken = false;
 std::string work, assets, source, out_dir, tools_dir;
+std::vector<std::string> stills_taken;
 wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "media-pointer"};
 wlr_keyboard kbd{};
@@ -779,6 +785,10 @@ const LayerSurface *layer_named(const char *ns) {
 
 // ---------------------------------------------------------------- capture
 
+std::string still_file(std::string_view name) {
+	return std::format("{}.png", name);
+}
+
 bool still(const char *name) {
 	Output *o = out();
 	CairoSurfacePtr shot = capture_output(*o, wlr_box{0, 0, o->width, o->height});
@@ -786,11 +796,12 @@ bool still(const char *name) {
 		fail(std::format("the {} still could not be captured", name));
 		return false;
 	}
-	std::string path = std::format("{}/{}.png", out_dir, name);
+	std::string path = std::format("{}/{}", out_dir, still_file(name));
 	if (cairo_surface_write_to_png(shot.get(), path.c_str()) != CAIRO_STATUS_SUCCESS) {
 		fail(std::format("cannot write {}", path));
 		return false;
 	}
+	stills_taken.emplace_back(name);
 	std::println("media: still {}", path);
 	return true;
 }
@@ -905,7 +916,7 @@ bool start_recording() {
 	Output *o = out();
 	rec.width = static_cast<int>(std::lround(o->width * screen_scale));
 	rec.height = static_cast<int>(std::lround(o->height * screen_scale));
-	std::string path = out_dir + "/walkthrough-raw.mp4";
+	std::string path = std::format("{}/{}", out_dir, walkthrough_file);
 	int fds[2];
 	if (pipe2(fds, O_CLOEXEC) != 0) {
 		return false;
@@ -959,8 +970,27 @@ void stop_recording() {
 	for (const Caption &c : captions) {
 		text += std::format("{:.0f}\t{:.0f}\t{}\n", c.from, c.to, c.text);
 	}
-	write_file(out_dir + "/captions.tsv", text);
-	std::println("media: walkthrough {}/walkthrough-raw.mp4, {} frames", out_dir, rec.frames);
+	write_file(std::format("{}/{}", out_dir, captions_file), text);
+	walkthrough_taken = true;
+	std::println("media: walkthrough {}/{}, {} frames", out_dir, walkthrough_file, rec.frames);
+}
+
+// What tools/media.py encodes: the size of the video, the stills taken and,
+// unless the run was stills-only, the walkthrough and its captions.
+void write_manifest() {
+	std::string stills_json;
+	for (const std::string &name : stills_taken) {
+		stills_json += std::format("{}{{\"name\": \"{}\", \"file\": \"{}\"}}",
+			stills_json.empty() ? "" : ", ", name, still_file(name));
+	}
+	std::string walkthrough_json;
+	if (walkthrough_taken) {
+		walkthrough_json = std::format(",\n  \"walkthrough\": {{\"video\": \"{}\", \"captions\": \"{}\"}}",
+			walkthrough_file, captions_file);
+	}
+	write_file(out_dir + "/manifest.json", std::format(
+		"{{\n  \"video\": {{\"width\": {}, \"height\": {}}},\n  \"stills\": [{}]{}\n}}\n",
+		video_w, video_h, stills_json, walkthrough_json));
 }
 
 // ----------------------------------------------------------------- script
@@ -1464,6 +1494,9 @@ int main() {
 	wl_display_run(server->display);
 
 	bool done = !failed && step >= steps.size();
+	if (done) {
+		write_manifest();
+	}
 	if (rec.fd >= 0) {
 		close(rec.fd);
 		waitpid(rec.pid, nullptr, 0);

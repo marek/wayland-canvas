@@ -41,8 +41,9 @@ root=
 user=
 cmd=
 
+# the leading comment block; it ships standalone, so it cannot use tools/lib.sh
 usage() {
-	sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+	awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
 }
 
 die() {

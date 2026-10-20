@@ -5,29 +5,19 @@
 // scratch under the repo's tmp/ before any GSettings use.
 // Run via `meson test` (test 'theme-prefs').
 
-#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
-#include <source_location>
 #include <string>
-#include <cstdlib>
 
 #include <gio/gio.h>
 
+#include "check.h"
 #include "core/theme_prefs.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, const char *what,
-	std::source_location location = std::source_location::current()) {
-	if (!condition) {
-		++failures;
-		std::printf("FAIL %s:%u: %s\n", location.file_name(),
-			static_cast<unsigned>(location.line()), what);
-	}
-}
+using unit::check;
 
 } // namespace
 
@@ -75,10 +65,5 @@ int main() {
 		g_settings_schema_unref(schema);
 	}
 
-	if (failures == 0) {
-		std::printf("ALL PASSED\n");
-		return 0;
-	}
-	std::printf("%d failure(s)\n", failures);
-	return 1;
+	return unit::summary();
 }

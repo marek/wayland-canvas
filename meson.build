@@ -70,11 +70,16 @@ add_project_arguments(
 	'-DCANVAS_HAVE_LOGIND=' + (libsystemd.found() ? '1' : '0'),
 	language: 'cpp',
 )
-# X11 applications through Xwayland: the wlroots subproject builds its own
-# X11 window manager, and xcb is what it needs here.
-xcb = dependency('xcb', required: false, include_type: 'system')
+# X11 applications through Xwayland: wlroots decides whether it has the X11
+# window manager (its own have_xwayland), whatever xcb libraries are installed;
+# xcb is what this code needs on top of it.
+have_xwayland = wlroots.get_variable(
+	pkgconfig: 'have_xwayland',
+	internal: 'have_xwayland',
+) == 'true'
+xcb = dependency('xcb', required: have_xwayland, include_type: 'system')
 add_project_arguments(
-	'-DCANVAS_HAVE_XWAYLAND=' + (xcb.found() ? '1' : '0'),
+	'-DCANVAS_HAVE_XWAYLAND=' + (have_xwayland ? '1' : '0'),
 	language: 'cpp',
 )
 
@@ -523,7 +528,7 @@ if foot_prog.found() and grim_prog.found()
 		'nightlight', 'touch', 'viewgone']
 	# An X11 client of the scenarios' own: this machine has no xterm or
 	# xeyes, and the X11 half must be proven by a real X client.
-	if xcb.found()
+	if have_xwayland
 		x11_client = executable(
 			'x11-client',
 			'tests/clients/x11-client.c',

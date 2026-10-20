@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# package.sh [--arch] [--deb] [--here] [--dist <name>] [out-dir]
+# usage: tools/package.sh [--arch] [--deb] [--here] [--dist <name>] [out-dir]
+#
 # One command for the distribution packages: with no format given it builds
 # both. Artifacts land in <out-dir>, dist/ at the repo root by default.
 #
@@ -11,10 +12,13 @@
 # the current system already *is* that environment — an archlinux or
 # debian:sid container in .github/workflows/packages.yml — so no root
 # filesystem is downloaded and the in-root build script runs directly.
+#
+# The builds' output goes through, and the last lines name what was built:
+# one `package.sh: built <path>` for each package. tools/install.sh reads them.
 set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-T=$(cd "$(dirname "$0")" && pwd -P)
-REPO=$(dirname "$T")
+REPO=$(repo_root)
 
 want_arch=0
 want_deb=0
@@ -27,22 +31,16 @@ while [ $# -gt 0 ]; do
 		--deb) want_deb=1 ;;
 		--here) here=1 ;;
 		--dist)
-			[ $# -ge 2 ] || {
-				echo "package.sh: --dist needs a name" >&2
-				exit 2
-			}
+			[ $# -ge 2 ] || die "--dist needs a name"
 			dist=(--dist "$2")
 			shift
 			;;
 		--dist=*) dist=(--dist "${1#*=}") ;;
 		-h | --help)
-			sed -n '2,5p' "$0" | sed 's/^# \?//'
+			usage_from_header
 			exit 0
 			;;
-		-*)
-			echo "package.sh: unknown option: $1" >&2
-			exit 2
-			;;
+		-*) die "unknown option: $1 (try --help)" ;;
 		*) out=$1 ;;
 	esac
 	shift
@@ -55,35 +53,38 @@ fi
 # the build environment; a root build on a contributor's machine writes root's
 # files into their checkout and their caches.
 if [ "$(id -u)" -eq 0 ] && [ "$here" -eq 0 ]; then
-	echo "package.sh: refusing to build as root; run it as yourself (--here is for the release container)" >&2
-	exit 2
+	die "refusing to build as root; run it as yourself (--here is for the release container)"
 fi
 out=$(realpath -m "$out")
 mkdir -p "$out"
 
-version=$("$T/version.sh")
+version=$("$tools_dir/version.sh")
+scratch=${CANVAS_TMP:-$REPO/tmp}
+mkdir -p "$scratch"
+log=$(mktemp "$scratch/package-output.XXXXXX")
+trap 'rm -f "$log"' EXIT
 
 build_arch() {
-	command -v makepkg >/dev/null 2>&1 || {
-		echo "package.sh: --arch needs makepkg (an Arch system or container)" >&2
-		exit 2
-	}
+	command -v makepkg >/dev/null 2>&1 ||
+		die "--arch needs makepkg (an Arch system or container)"
 	# makepkg refuses to run as root, and in the release container root is
 	# all there is: drop to the image's own unprivileged nobody, with a
 	# scratch tree and a HOME it can write. No account is created or
 	# changed, and the checkout keeps its owner.
 	local exec_as=()
 	if [ "$(id -u)" -eq 0 ]; then
-		local scratch=${CANVAS_TMP:-$REPO/tmp}
 		local home=$scratch/makepkg-home
 		mkdir -p "$home" "$scratch/packaging-arch" "$out"
+		# nobody cannot write into the root-owned checkout, so the wlroots
+		# source the tarball needs is fetched here (a no-op when it is there)
+		"$tools_dir/fetch-wlroots.sh"
 		chown nobody "$scratch"
 		chown -R nobody "$scratch/packaging-arch" "$out" "$home"
 		echo "package.sh: makepkg as nobody (root cannot run it)"
 		exec_as=(setpriv --reuid nobody --regid nobody --clear-groups
 			env "HOME=$home" "CANVAS_TMP=$scratch")
 	fi
-	"${exec_as[@]}" "$T/package-arch.sh" "$out"
+	"${exec_as[@]}" "$tools_dir/package-arch.sh" "$out" | tee -a "$log"
 }
 
 build_deb() {
@@ -91,7 +92,7 @@ build_deb() {
 	if [ "$here" -eq 1 ]; then
 		mode=(--here)
 	fi
-	"$T/package-deb.sh" "${mode[@]}" "${dist[@]}" "$out"
+	"$tools_dir/package-deb.sh" "${mode[@]}" "${dist[@]}" "$out" | tee -a "$log"
 }
 
 if [ "$want_arch" -eq 1 ]; then
@@ -102,4 +103,4 @@ if [ "$want_deb" -eq 1 ]; then
 fi
 
 echo "package.sh: wayland-canvas $version"
-ls -1 "$out"
+sed -n 's/^package-[a-z]*\.sh: built /package.sh: built /p' "$log"

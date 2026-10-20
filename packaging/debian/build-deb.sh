@@ -26,7 +26,9 @@ apt-get install -y --no-install-recommends \
 
 # std::function_ref, std::inplace_vector and std::print must all link and
 # run; fail here rather than partway through a long build.
-cat >/tmp/cxx26-probe.cc <<'EOF'
+probe=$(mktemp -d)
+trap 'rm -rf "$probe"' EXIT
+cat >"$probe/probe.cc" <<'EOF'
 #include <functional>
 #include <inplace_vector>
 #include <print>
@@ -39,21 +41,22 @@ int main() {
 	std::print("probe {}", v[0] + fr());
 }
 EOF
-clang++ -std=c++26 -fno-exceptions -fno-rtti /tmp/cxx26-probe.cc -o /tmp/cxx26-probe
-/tmp/cxx26-probe
-rm -f /tmp/cxx26-probe /tmp/cxx26-probe.cc
+clang++ -std=c++26 -fno-exceptions -fno-rtti "$probe/probe.cc" -o "$probe/probe"
+"$probe/probe"
 
 echo "deb-build: meson + ninja"
 cd "$S"
 tar -xJf "wayland-canvas-$version.tar.xz" --no-same-owner
 cd "wayland-canvas-$version"
-meson setup build --prefix=/usr --native-file toolchain/llvm.ini -Dbuildtype=release
+meson setup build --prefix=/usr --native-file toolchain/llvm.ini -Dbuildtype=release \
+	--force-fallback-for=wlroots
 ninja -C build
 
 echo "deb-build: assembling the package"
 pkg=$S/pkg
 rm -rf "$pkg"
-# wlroots is linked in statically; its own install artifacts stay out
+# wlroots is linked in statically (--force-fallback-for above, whatever the
+# machine has installed); its own install artifacts stay out
 DESTDIR="$pkg" meson install -C build --skip-subprojects=wlroots
 packaging/check-lock-pam.sh "$pkg"
 install -d "$pkg/usr/share/doc/wayland-canvas"

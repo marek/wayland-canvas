@@ -11,10 +11,8 @@
 //
 // SIGTERM ends it.
 #define _GNU_SOURCE
-#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +20,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include "client-common.h"
 #include "ext-foreign-toplevel-list-v1-client-protocol.h"
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
@@ -46,14 +45,6 @@ static const uint32_t *pixels; // the buffer's memory, read back after each fram
 static size_t pixels_size;
 #define SHARE_FRAMES 3
 
-static void say(const char *text, ...) {
-	va_list args;
-	va_start(args, text);
-	vprintf(text, args);
-	va_end(args);
-	fflush(stdout);
-}
-
 static void say_share(uint32_t n) {
 	uint64_t hits = 0, total = (uint64_t)width * height;
 	for (uint64_t i = 0; i < total; i++) {
@@ -66,19 +57,16 @@ static void say_share(uint32_t n) {
 static int make_buffer(void) {
 	size_t stride = (size_t)width * 4;
 	size_t size = stride * height;
-	int fd = memfd_create("cast-client", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
+	void *mapped;
+	int fd = shm_file(size, &mapped);
+	if (fd < 0) {
 		return -1;
 	}
 	if (pixels != NULL) {
 		munmap((void *)pixels, pixels_size);
-		pixels = NULL;
 	}
-	void *mapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
-	if (mapped != MAP_FAILED) {
-		pixels = mapped;
-		pixels_size = size;
-	}
+	pixels = mapped;
+	pixels_size = size;
 	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
 	if (buffer != NULL) {
 		wl_buffer_destroy(buffer);

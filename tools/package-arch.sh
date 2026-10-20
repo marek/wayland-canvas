@@ -1,31 +1,37 @@
 #!/usr/bin/env bash
+# usage: tools/package-arch.sh [out-dir]
+#
 # Build the Arch package (.pkg.tar.zst) with makepkg from the local source
 # tree. Usually reached through tools/package.sh or the meson run target
 # `package-arch` (ninja -C build package-arch).
 # The artifact lands in <out-dir> (default dist/); scratch under $CANVAS_TMP.
+# The last line is `package-arch.sh: built <path>`.
 set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-T=$(cd "$(dirname "$0")" && pwd -P)
-REPO=$(dirname "$T")
+REPO=$(repo_root)
 P=$REPO/packaging
 S=${CANVAS_TMP:-$REPO/tmp}/packaging-arch
 
+case ${1:-} in
+	-h | --help)
+		usage_from_header
+		exit 0
+		;;
+	-*) die "unknown option: $1 (try --help)" ;;
+esac
 out=${1:-$REPO/dist}
 out=$(realpath -m "$out")
 
-# meson/ninja from PATH when they run there, else from the repo's .venv
-bin=$("$REPO/tools/venv.sh" --if-needed)
-if [ -n "$bin" ]; then
-	export PATH="$bin:$PATH"
-fi
+use_venv
 
-export PACKAGER='Marek Kudlacz <marek@kudlacz.com>'
+export PACKAGER=${PACKAGER:-'Marek Kudlacz <marek@kudlacz.com>'}
 
 stage=$S/stage
 rm -rf "$S"
 mkdir -p "$stage" "$out"
 
-version=$("$REPO/tools/version.sh")
+version=$("$tools_dir/version.sh")
 "$P/make-source-tarball.sh" "$stage/wayland-canvas-$version.tar.xz"
 cp "$P/PKGBUILD" "$P/wayland-canvas.install" "$stage/"
 sed -i "s/^pkgver=.*/pkgver=$version/" "$stage/PKGBUILD"
@@ -43,17 +49,13 @@ cd "$stage"
 		fi
 	done
 	if [ "${#missing[@]}" -gt 0 ]; then
-		echo "package-arch.sh: missing build dependencies: ${missing[*]}" >&2
-		exit 2
+		die "missing build dependencies: ${missing[*]}"
 	fi
 )
 
 makepkg -f --nodeps
 
 pkg=$(find . -maxdepth 1 -name '*.pkg.tar.zst' | head -1)
-[ -n "$pkg" ] || {
-	echo "package-arch.sh: makepkg produced no .pkg.tar.zst" >&2
-	exit 2
-}
+[ -n "$pkg" ] || die "makepkg produced no .pkg.tar.zst"
 cp "$pkg" "$out/"
-echo "package-arch.sh: $out/${pkg#./}"
+echo "package-arch.sh: built $out/${pkg#./}"

@@ -1,31 +1,22 @@
 // Unit tests for src/apps/desktop_entry.cpp. Self-contained: no framework, links
 // only desktop_entry.cpp. Run via `meson test` (test 'desktop-entry').
 
-#include <cstdio>
+#include <format>
 #include <optional>
 #include <source_location>
 #include <string>
 #include <string_view>
 #include "apps/desktop_entry.h"
+#include "check.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool cond, std::source_location loc = std::source_location::current()) {
-	if (!cond) {
-		failures++;
-		std::printf("FAIL %s:%u: %s\n", loc.file_name(), loc.line(),
-			loc.function_name());
-	}
-}
+using unit::check;
 
 void check_str(std::string_view got, std::string_view want,
 	std::source_location loc = std::source_location::current()) {
 	if (got != want) {
-		failures++;
-		std::printf("FAIL %s:%u: \"%s\", expected \"%s\"\n", loc.file_name(),
-			loc.line(), std::string(got).c_str(), std::string(want).c_str());
+		check(false, std::format("\"{}\", expected \"{}\"", got, want), loc);
 	}
 }
 
@@ -296,10 +287,5 @@ int main() {
 	test_exec_clean();
 	test_match();
 
-	if (failures == 0) {
-		std::printf("all desktop-entry tests passed\n");
-	} else {
-		std::printf("%d desktop-entry test failure(s)\n", failures);
-	}
-	return failures != 0;
+	return unit::summary();
 }

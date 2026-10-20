@@ -10,17 +10,15 @@
 // SIGUSR1 unlocks and exits; --inhibit-idle also holds an idle inhibitor,
 // so the idle lock can be proven to stand down while one is alive.
 #define _GNU_SOURCE
-#include <fcntl.h>
-#include <stdarg.h>
-#include <sys/mman.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include "client-common.h"
 #include "ext-session-lock-v1-client-protocol.h"
 #include "idle-inhibit-unstable-v1-client-protocol.h"
 
@@ -45,39 +43,6 @@ struct output {
 	int width, height;
 };
 
-static void say(const char *format, ...) {
-	va_list args;
-	va_start(args, format);
-	vprintf(format, args);
-	va_end(args);
-	fflush(stdout);
-}
-
-// One shm buffer of a solid colour.
-static struct wl_buffer *solid_buffer(int width, int height) {
-	int stride = width * 4;
-	int size = stride * height;
-	int fd = memfd_create("lock-client", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, size) < 0) {
-		return NULL;
-	}
-	uint32_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (data == MAP_FAILED) {
-		close(fd);
-		return NULL;
-	}
-	for (int i = 0; i < width * height; i++) {
-		data[i] = fill;
-	}
-	munmap(data, size);
-	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
-	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, width, height,
-		stride, WL_SHM_FORMAT_ARGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-	return buffer;
-}
-
 static void surface_configure(void *data,
 		struct ext_session_lock_surface_v1 *lock_surface, uint32_t serial,
 		uint32_t width, uint32_t height) {
@@ -85,13 +50,9 @@ static void surface_configure(void *data,
 	ext_session_lock_surface_v1_ack_configure(lock_surface, serial);
 	output->width = (int)width;
 	output->height = (int)height;
-	struct wl_buffer *buffer = solid_buffer(output->width, output->height);
-	if (buffer == NULL) {
+	if (draw_solid(shm, output->surface, output->width, output->height, fill) < 0) {
 		return;
 	}
-	wl_surface_attach(output->surface, buffer, 0, 0);
-	wl_surface_damage_buffer(output->surface, 0, 0, output->width, output->height);
-	wl_surface_commit(output->surface);
 	drawn++;
 	say("DRAWN %d\n", drawn);
 }

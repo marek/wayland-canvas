@@ -64,6 +64,10 @@ same_tree() {
 	diff -r "$1" "$2"
 }
 
+fails_with() { # fails_with <cmd...>: succeeds when the command fails
+	! "$@"
+}
+
 has_line() { # has_line <file> <regex>
 	grep -q "$2" "$1"
 }
@@ -476,18 +480,22 @@ check "unknown display manager created no state" test ! -e "$r/var/lib"
 I=$S/install
 export CANVAS_IT=$I
 mkdir -p "$I/bin" "$I/repo/tools" "$I/repo/dist"
-cp "$REPO/tools/install.sh" "$I/repo/tools/install.sh"
+cp "$REPO/tools/install.sh" "$REPO/tools/lib.sh" "$I/repo/tools/"
 
-# package.sh here records the format it was asked for and leaves an artifact
-# of it in dist/: no check in this file builds anything
+# package.sh here records the format it was asked for, leaves an artifact of
+# it in dist/ and says so as the real one does: no check in this file builds
+# anything
 cat >"$I/repo/tools/package.sh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$CANVAS_IT/built"
 d=$(cd "$(dirname "$0")/../dist" && pwd -P)
+echo "build chatter that is not a package"
 case $* in
-	*--deb*) : >"$d/wayland-canvas_9.9.9_amd64.deb" ;;
-	*) : >"$d/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst" ;;
+	*--deb*) f=$d/wayland-canvas_9.9.9_amd64.deb ;;
+	*) f=$d/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst ;;
 esac
+: >"$f"
+echo "package.sh: built $f"
 STUB
 
 # sudo here records the root copy's command line and runs nothing
@@ -561,27 +569,36 @@ env PATH="$I/rootbin:$I/bin:$PATH" OS_RELEASE="$I/arch-release" \
 check "a root run without a package refuses" grep -q 'run install.sh as yourself' "$I/out"
 check "a root run without a package builds nothing" test ! -s "$I/built"
 
-# dist/ holding both formats: this distro's one is taken
-rm -f "$I/repo/dist"/*
-: >"$I/repo/dist/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst"
-: >"$I/repo/dist/wayland-canvas_9.9.9_amd64.deb"
+# dist/ holding newer packages of both formats: the one package.sh reports is
+# taken, not a guess by format or age
+for f in debian:--deb:'\.deb' arch:--arch:'\.pkg\.tar\.zst'; do
+	IFS=: read -r distro flag suffix <<<"$f"
+	rm -f "$I/repo/dist"/*
+	: >"$I/repo/dist/stale-9.0.0-1-x86_64.pkg.tar.zst"
+	: >"$I/repo/dist/stale_9.0.0_amd64.deb"
+	touch -d '+1 hour' "$I/repo/dist"/stale*
+	: >"$I/sudo"
+	env PATH="$I/bin:$PATH" OS_RELEASE="$I/$distro-release" \
+		"$I/repo/tools/install.sh" >"$I/out" 2>&1
+	check "a $distro install takes what package.sh built" grep -q -- "--package $I/repo/dist/wayland-canvas.*9\.9\.9.*$suffix\$" "$I/sudo"
+	check "a $distro install builds with $flag" grep -qx -- "$flag" "$I/built"
+done
+
+# a package.sh that reports nothing is an error, not a search of dist/
+cat >"$I/repo/tools/package.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "built nothing worth reporting"
+STUB
 : >"$I/sudo"
-env PATH="$I/bin:$PATH" OS_RELEASE="$I/debian-release" \
-	"$I/repo/tools/install.sh" >"$I/out" 2>&1
-check "a Debian install takes the .deb" grep -q -- '--package .*\.deb$' "$I/sudo"
-: >"$I/sudo"
-rm -f "$I/repo/dist"/*
-: >"$I/repo/dist/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst"
-: >"$I/repo/dist/wayland-canvas_9.9.9_amd64.deb"
-env PATH="$I/bin:$PATH" OS_RELEASE="$I/arch-release" \
-	"$I/repo/tools/install.sh" >"$I/out" 2>&1
-check "an Arch install takes the .pkg.tar.zst" grep -q -- '--package .*\.pkg\.tar\.zst$' "$I/sudo"
+run_check "a package.sh that reports no package fails the install" 'reported no package' \
+	fails_with env PATH="$I/bin:$PATH" OS_RELEASE="$I/arch-release" "$I/repo/tools/install.sh"
+check "and nothing reaches the root copy" test ! -s "$I/sudo"
 
 # --- package.sh refuses to build as root ---------------------------------------
 
 P=$S/package
 mkdir -p "$P/repo/tools"
-cp "$REPO/tools/package.sh" "$P/repo/tools/"
+cp "$REPO/tools/package.sh" "$REPO/tools/lib.sh" "$P/repo/tools/"
 cat >"$P/repo/tools/package-arch.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'built\n' >>"$CANVAS_IT/built-as-root"
@@ -595,20 +612,59 @@ run_check "package.sh as root without --here refuses" 'refusing to build as root
 check "package.sh as root built nothing" test ! -e "$I/built-as-root"
 check "package.sh as root left the checkout as it was" same_tree "$P/repo" "$P/pristine"
 
+# package.sh passes the builds' output through and ends with a line for each
+# package they say they built
+B=$S/built
+mkdir -p "$B/repo/tools" "$B/bin"
+cp "$REPO/tools/package.sh" "$REPO/tools/lib.sh" "$REPO/tools/version.sh" "$B/repo/tools/"
+printf '9.9.9\n' >"$B/repo/VERSION"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$B/bin/makepkg"
+cat >"$B/repo/tools/package-arch.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "arch build chatter"
+echo "package-arch.sh: built $1/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst"
+STUB
+cat >"$B/repo/tools/package-deb.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "deb build chatter"
+echo "package-deb.sh: built ${*: -1}/wayland-canvas_9.9.9_amd64.deb"
+STUB
+chmod +x "$B/bin/makepkg" "$B/repo/tools"/*.sh
+run_check "package.sh names the package of each format it built" \
+	"^package.sh: built $B/out/wayland-canvas-9.9.9-1-x86_64.pkg.tar.zst\$" \
+	env PATH="$B/bin:$PATH" CANVAS_TMP="$B/tmp" "$B/repo/tools/package.sh" "$B/out"
+check "and the .deb" grep -q "^package.sh: built $B/out/wayland-canvas_9.9.9_amd64.deb\$" "$S/out"
+check "and the builds' own output went through" grep -q '^arch build chatter$' "$S/out"
+check "and nothing but the lines of the packages follows the version" \
+	test "$(sed -n '/^package.sh: wayland-canvas /,$p' "$S/out" | grep -vc '^package.sh: ')" = 0
+check "and its scratch log is gone" test -z "$(find "$B/tmp" -name 'package-output.*')"
+printf '#!/usr/bin/env bash\necho "arch build chatter"\nexit 3\n' >"$B/repo/tools/package-arch.sh"
+run_check "a failed build fails package.sh and names no package" '^arch build chatter$' \
+	fails_with env PATH="$B/bin:$PATH" CANVAS_TMP="$B/tmp" "$B/repo/tools/package.sh" --arch "$B/out"
+check "package.sh reported nothing built after the failure" bash -c '! grep -q "built" "$1"' shell "$S/out"
+
+# --- every tool's --help is its header and nothing else ------------------------
+
+header_of() { # header_of <script> — the leading comment block, without its #
+	sed -n '2,${/^#/!q;s/^# \{0,1\}//;p}' "$1"
+}
+for tool in "$REPO"/tools/*.sh "$TOOL"; do
+	[ "$(basename "$tool")" = lib.sh ] && continue
+	check "$(basename "$tool") --help prints its header" bash -c '
+		out=$("$1" --help) && [ "$out" = "$2" ] && ! grep -q "pipefail" <<<"$out"' shell "$tool" "$(header_of "$tool")"
+done
+
 # --- version.sh: the version is the git tag ------------------------------------
 
 V=$S/version
 mkdir -p "$V/repo/tools" "$V/tarball/tools"
-cp "$REPO/tools/version.sh" "$V/repo/tools/"
-cp "$REPO/tools/version.sh" "$V/tarball/tools/"
+cp "$REPO/tools/version.sh" "$REPO/tools/lib.sh" "$V/repo/tools/"
+cp "$REPO/tools/version.sh" "$REPO/tools/lib.sh" "$V/tarball/tools/"
 vgit() {
 	git -C "$V/repo" -c user.name=scratch -c user.email=scratch@invalid \
 		-c commit.gpgsign=false -c tag.gpgsign=false "$@"
 }
 vhash() { git -C "$V/repo" rev-parse --short=7 HEAD; }
-fails_with() { # fails_with <cmd...>: succeeds when the command fails
-	! "$@"
-}
 vgit init -q
 vgit commit -q --allow-empty -m one
 run_check "version.sh: no tag behind the commit" "^0\.0\.0\.r1\.g$(vhash)\$" "$V/repo/tools/version.sh"

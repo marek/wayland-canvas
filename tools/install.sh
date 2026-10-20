@@ -13,20 +13,12 @@
 # pointing at a session that no longer exists.
 #
 # The package is built by the user's own copy; root is asked for only to
-# install or remove it, and the root copy is handed the step to do.
+# install or remove it, and the root copy is handed the step to do. The
+# package is the one tools/package.sh reports having built.
 set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-T=$(cd "$(dirname "$0")" && pwd -P)
-REPO=$(dirname "$T")
-
-usage() {
-	sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
-}
-
-die() {
-	echo "install.sh: $*" >&2
-	exit 2
-}
+REPO=$(repo_root)
 
 uninstall=0
 package=
@@ -39,24 +31,40 @@ while [ $# -gt 0 ]; do
 			shift 2
 			;;
 		--package=*) package=${1#*=}; shift ;;
-		-h | --help) usage; exit 0 ;;
+		-h | --help) usage_from_header; exit 0 ;;
 		*) die "unknown argument: $1 (try --help)" ;;
 	esac
 done
 
-family() { # which package format this distro takes
+# select_format — every fact that depends on the package format this distro
+# takes, set once: build_flag for package.sh, and the package manager's
+# package_installed, install_package <artifact> and remove_package
+select_format() {
+	local ID= ID_LIKE= id
 	. "${OS_RELEASE:-/etc/os-release}"
-	case "${ID:-}" in
-		arch) echo arch; return 0 ;;
-		debian | ubuntu) echo debian; return 0 ;;
-	esac
-	for id in ${ID_LIKE:-}; do
+	for id in "$ID" $ID_LIKE; do
 		case $id in
-			arch) echo arch; return 0 ;;
-			debian | ubuntu) echo debian; return 0 ;;
+			arch)
+				build_flag=--arch
+				package_installed() { pacman -Qi wayland-canvas >/dev/null 2>&1; }
+				install_package() { pacman -U "$1"; }
+				remove_package() { pacman -R wayland-canvas; }
+				return 0
+				;;
+			debian | ubuntu)
+				build_flag=--deb
+				package_installed() {
+					dpkg-query -W -f='${Status}' wayland-canvas 2>/dev/null | grep -q ' installed'
+				}
+				# apt/dpkg may drain stdin even with -y: keep it away from the
+				# terminal the default-session question reads from
+				install_package() { apt-get install -y "$1" </dev/null; }
+				remove_package() { apt-get remove -y wayland-canvas </dev/null; }
+				return 0
+				;;
 		esac
 	done
-	echo unknown
+	die "unsupported distro: build from source instead (see docs/guide/install.md), or package it yourself"
 }
 
 # require_root <step...> — re-runs this script through sudo with the step the
@@ -70,32 +78,9 @@ require_root() {
 	fi
 }
 
-newest() { # newest <dir> <name pattern> — the newest matching file, if any
-	find "$1" -maxdepth 1 -name "$2" -printf '%T@ %p\n' 2>/dev/null |
-		sort -nr | head -1 | cut -d' ' -f2-
-}
-
-installed() {
-	case "$(family)" in
-		arch) pacman -Qi wayland-canvas >/dev/null 2>&1 ;;
-		debian) dpkg-query -W -f='${Status}' wayland-canvas 2>/dev/null | grep -q ' installed' ;;
-		*) return 1 ;;
-	esac
-}
-
 cmd_install() {
-	local f artifact
-	f=$(family)
-	case $f in
-		arch | debian) ;;
-		*) die "unsupported distro: build from source instead (see docs/guide/install.md), or package it yourself" ;;
-	esac
-
-	local pattern
-	case $f in
-		arch) pattern='*.pkg.tar.zst' ;;
-		debian) pattern='*.deb' ;;
-	esac
+	local artifact built
+	select_format
 
 	if [ -n "$package" ]; then
 		artifact=$(realpath "$package")
@@ -103,22 +88,14 @@ cmd_install() {
 	else
 		[ "$(id -u)" -ne 0 ] || die "run install.sh as yourself: it builds the package and asks for root only to install it (or pass --package <artifact>)"
 		echo "install.sh: building the package"
-		case $f in
-			arch) "$REPO/tools/package.sh" --arch >/dev/null ;;
-			debian) "$REPO/tools/package.sh" --deb >/dev/null ;;
-		esac
-		artifact=$(newest "$REPO/dist" "$pattern")
+		built=$("$REPO/tools/package.sh" "$build_flag")
+		artifact=$(sed -n 's/^package.sh: built //p' <<<"$built" | tail -n 1)
 	fi
-	[ -n "$artifact" ] || die "no package artifact found"
+	[ -n "$artifact" ] || die "package.sh reported no package"
 
 	require_root --package "$artifact"
 	echo "install.sh: installing $artifact"
-	case $f in
-		arch) pacman -U "$artifact" ;;
-		# apt/dpkg may drain stdin even with -y: keep it away from the
-		# terminal the default-session question reads from
-		debian) apt-get install -y "$artifact" </dev/null ;;
-	esac
+	install_package "$artifact"
 
 	if ask_default; then
 		if [ -n "${SUDO_USER:-}" ]; then
@@ -149,13 +126,8 @@ ask_default() {
 }
 
 cmd_uninstall() {
-	local f
-	f=$(family)
-	case $f in
-		arch | debian) ;;
-		*) die "unsupported distro" ;;
-	esac
-	if ! installed; then
+	select_format
+	if ! package_installed; then
 		echo "install.sh: wayland-canvas is not installed"
 		return 0
 	fi
@@ -166,10 +138,7 @@ cmd_uninstall() {
 		wayland-canvas-session restore || true
 	fi
 	echo "install.sh: removing the package"
-	case $f in
-		arch) pacman -R wayland-canvas ;;
-		debian) apt-get remove -y wayland-canvas </dev/null ;;
-	esac
+	remove_package
 	echo "install.sh: done — the login points at its previous default again"
 }
 

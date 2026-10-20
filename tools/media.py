@@ -6,10 +6,11 @@ into scratch and checked by hash; the web pages it shows (tools/media/
 pages.tsv) are captured once as pictures of the rendered page and replayed
 from scratch on every later run, so the pictures keep the day of capture.
 build/media-tour then runs the compositor on the headless backend with
-Chrome, Krita, foot, Neovim, imv and mpv in scratch profiles, and what it
-captured is encoded: the stills as WebP into docs/media/, the walkthrough
-as an MP4 with its captions burnt in into tmp/media/walkthrough.mp4, for
-uploading as a GitHub attachment the README links.
+Chrome, Krita, foot, Neovim, imv and mpv in scratch profiles and says in
+manifest.json what it captured; that is encoded: the stills as WebP into
+docs/media/, the walkthrough as an MP4 with its captions burnt in into
+tmp/media/walkthrough.mp4, for uploading as a GitHub attachment the README
+links.
 
 --stills skips the walkthrough; --keep keeps the run's scratch folder (the
 apps' profiles, the raw captures) for a look; --record records every page
@@ -18,6 +19,7 @@ again. Scratch lives in tmp/media/ ($CANVAS_TMP overrides tmp/).
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -27,7 +29,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MEDIA = ROOT / "docs/media"
-STILLS = ("hero", "tiling", "writing", "table")
 PROGRAMS = ("ffmpeg", "curl", "google-chrome-stable", "krita", "imv", "mpv",
             "foot", "nvim", "qs", "dbus-daemon", "openssl")
 # the most a video attachment on GitHub may weigh on a free plan is 10 MB
@@ -117,17 +118,22 @@ def record_pages(folder, profile, rerecord):
 
 
 def bar_standins():
-    """The bar's stand-in services, as the bar scenario has them; without
-    them the bar shows only the widgets that need no service."""
-    proc = subprocess.run(["tests/scenarios/ensure-bar-standins.sh"],
-                          cwd=ROOT, capture_output=True)
-    if proc.returncode != 0:
-        return {}
-    lines = proc.stdout.decode().rstrip("\n").splitlines()
-    if not lines or not lines[-1]:
-        return {}
-    return {"CANVAS_BAR_STANDIN_PY": lines[-1],
-            "CANVAS_BAR_STANDINS": str(ROOT / "tests/scenarios/bar-standins.py")}
+    """The bar's stand-in services, in the environment meson configured for
+    the bar scenario; without them the bar shows only the widgets that need
+    no service."""
+    tests = json.loads(
+        (ROOT / "build/meson-info/intro-tests.json").read_text())
+    for test in tests:
+        if test["name"] == "bar":
+            return {name: value for name, value in test["env"].items()
+                    if name.startswith("CANVAS_BAR_STANDIN")}
+    return {}
+
+
+def read_manifest(run_out):
+    """What the tour says it captured: the video's size, the stills taken
+    and, unless it ran stills-only, the walkthrough and its captions."""
+    return json.loads((run_out / "manifest.json").read_text())
 
 
 def run_tour(run_dir, log_path, env):
@@ -149,12 +155,14 @@ def ass_stamp(ms):
             f"{ms // 1000 % 60:02d}.{ms // 10 % 100:02d}")
 
 
-def write_captions(run_out):
+def write_captions(run_out, manifest):
     """The captions the tour timed, as an ASS script: a translucent box at
     the foot of the frame, the text centred 120 px up, 250 ms fades."""
     head = [
-        "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1600",
-        "PlayResY: 1000", "ScaledBorderAndShadow: yes", "",
+        "[Script Info]", "ScriptType: v4.00+",
+        f"PlayResX: {manifest['video']['width']}",
+        f"PlayResY: {manifest['video']['height']}",
+        "ScaledBorderAndShadow: yes", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
@@ -167,7 +175,8 @@ def write_captions(run_out):
         "Effect, Text",
     ]
     dialogues = []
-    for row in (run_out / "captions.tsv").read_text().splitlines():
+    captions = run_out / manifest["walkthrough"]["captions"]
+    for row in captions.read_text().splitlines():
         if not row:
             continue
         start, end, text = row.split("\t", 2)
@@ -178,25 +187,26 @@ def write_captions(run_out):
                                          encoding="utf-8")
 
 
-def encode(run_out, out_dir, video, stills_only):
-    """The tour's captures in run_out encoded: the four stills as 1920-px
-    WebP into out_dir, and unless stills-only the walkthrough with its
-    captions burnt in as the MP4 `video`."""
+def encode(run_out, out_dir, video):
+    """The tour's captures in run_out encoded as its manifest lists them:
+    each still as 1920-px WebP into out_dir, and when the tour recorded a
+    walkthrough, that with its captions burnt in as the MP4 `video`."""
+    manifest = read_manifest(run_out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name in STILLS:
-        target = out_dir / f"{name}.webp"
+    for still in manifest["stills"]:
+        target = out_dir / f"{still['name']}.webp"
         run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-             "-i", str(run_out / f"{name}.png"),
+             "-i", str(run_out / still["file"]),
              "-vf", "scale=1920:-1:flags=lanczos", "-c:v", "libwebp",
              "-quality", "88", str(target)])
         print(f"media.py: {target} ({human(target)})")
-    if stills_only:
+    if "walkthrough" not in manifest:
         return
-    write_captions(run_out)
+    write_captions(run_out, manifest)
     # the crf is raised until the video fits the attachment budget
     for crf in (24, 26, 28):
         run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-             "-i", "walkthrough-raw.mp4", "-vf", "ass=captions.ass",
+             "-i", manifest["walkthrough"]["video"], "-vf", "ass=captions.ass",
              "-c:v", "libx264", "-preset", "slow", "-crf", str(crf),
              "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an",
              str(video)], cwd=run_out)
@@ -212,7 +222,7 @@ def main():
                     "walkthrough in tmp/media/walkthrough.mp4 ($CANVAS_TMP "
                     "overrides tmp/).")
     parser.add_argument("--stills", action="store_true",
-                        help="remake only the four stills, not the walkthrough")
+                        help="remake only the stills, not the walkthrough")
     parser.add_argument("--keep", action="store_true",
                         help="keep the run's scratch folder (the apps' "
                              "profiles, the raw captures)")
@@ -258,7 +268,7 @@ def main():
     finally:
         server.close()
 
-    encode(run_dir / "out", MEDIA, scratch / "walkthrough.mp4", args.stills)
+    encode(run_dir / "out", MEDIA, scratch / "walkthrough.mp4")
     if not args.keep:
         shutil.rmtree(run_dir, ignore_errors=True)
 

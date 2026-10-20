@@ -3,27 +3,17 @@
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <format>
-#include <source_location>
 #include <string>
 #include <vector>
 
+#include "check.h"
 #include "core/settings.h"
 #include "platform/night_light_ramp.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, const std::string &what,
-	std::source_location location = std::source_location::current()) {
-	if (!condition) {
-		++failures;
-		std::printf("FAIL %s:%u: %s\n", location.file_name(),
-			static_cast<unsigned>(location.line()), what.c_str());
-	}
-}
+using unit::check;
 
 constexpr std::size_t ramp = 256;
 
@@ -125,10 +115,5 @@ int main() {
 	any_ramp_size();
 	out_of_range_temperatures_clamp();
 
-	if (failures == 0) {
-		std::printf("ALL PASSED\n");
-		return 0;
-	}
-	std::printf("%d failure(s)\n", failures);
-	return 1;
+	return unit::summary();
 }

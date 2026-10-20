@@ -17,13 +17,14 @@
 //
 // so the compositor's X11 half can be proven without installing an X11
 // application.
+#define _GNU_SOURCE
 #include <poll.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <xcb/xcb.h>
+#include "client-common.h"
 
 // The atom of a name, interned once.
 static xcb_atom_t intern(xcb_connection_t *connection, const char *name) {
@@ -32,14 +33,6 @@ static xcb_atom_t intern(xcb_connection_t *connection, const char *name) {
 	xcb_atom_t atom = reply != NULL ? reply->atom : XCB_ATOM_NONE;
 	free(reply);
 	return atom;
-}
-
-static void say(const char *format, ...) {
-	va_list args;
-	va_start(args, format);
-	vprintf(format, args);
-	va_end(args);
-	fflush(stdout);
 }
 
 int main(int argc, char **argv) {

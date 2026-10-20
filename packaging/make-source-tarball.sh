@@ -15,6 +15,7 @@ stage=$(mktemp -d "$(dirname "$out")/.tarball.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 
 version=$("$REPO/tools/version.sh")
+"$REPO/tools/fetch-wlroots.sh" >&2
 
 mkdir -p "$stage/wayland-canvas-$version"
 tar -C "$REPO" -cf - -h \

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# version.sh — the project version, from the git tag
-# (docs/intents/workspace/packaging.md). meson, the source tarball and both
-# package builds read it here and nowhere else:
+# usage: tools/version.sh
+#
+# The project version, from the git tag (docs/intents/workspace/packaging.md).
+# meson, the source tarball and both package builds read it here and nowhere
+# else:
 #
 #   a commit tagged v<version>      <version>, the highest of several tags
 #   past the last tag               <version>.r<commits since>.g<short hash>
@@ -11,9 +13,17 @@
 # A version pacman or dpkg cannot take (a hyphen, an underscore) fails here
 # rather than in the middle of a package build.
 set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-T=$(cd "$(dirname "$0")" && pwd -P)
-REPO=$(dirname "$T")
+REPO=$(repo_root)
+
+case ${1:-} in
+	-h | --help)
+		usage_from_header
+		exit 0
+		;;
+	?*) die "unknown argument: $1 (try --help)" ;;
+esac
 
 git_() { git -C "$REPO" "$@"; }
 
@@ -40,12 +50,10 @@ if [ "$(git_ rev-parse --show-toplevel 2>/dev/null)" = "$REPO" ]; then
 elif [ -f "$REPO/VERSION" ]; then
 	version=$(head -n 1 "$REPO/VERSION")
 else
-	echo "version.sh: $REPO is no git checkout and has no VERSION file" >&2
-	exit 2
+	die "$REPO is no git checkout and has no VERSION file"
 fi
 
 if [[ ! $version =~ ^[0-9][0-9A-Za-z.+~]*$ ]]; then
-	echo "version.sh: '$version' is not a version pacman and dpkg both take: a digit first, then only letters, digits, '.', '+' and '~'" >&2
-	exit 2
+	die "'$version' is not a version pacman and dpkg both take: a digit first, then only letters, digits, '.', '+' and '~'"
 fi
 printf '%s\n' "$version"

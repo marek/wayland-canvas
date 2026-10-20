@@ -1576,13 +1576,13 @@ Tests:
   - Port `tools/media/tour.cpp` (its copies of the startup and bus code
     match session.cpp:171-191 and bar.cpp:363-376).
   - Acceptance: `tools/media.py` still renders the stills.
-- [ ] The unit tests share one `tests/check.h`
+- [x] The unit tests share one `tests/check.h`
   - Today seven `check` functions come in five shapes.
     test_settings.cpp:19-31 is nearly test_theme_prefs.cpp:22-29.
     test_geometry prints only the location, test_session_bus the
     function, and test_session_services neither.
   - `tests/check.h` provides `check`, `check_near` and the summary line.
-- [ ] The test clients share their Wayland boilerplate
+- [x] The test clients share their Wayland boilerplate
   - `say()` (gamma-client.c:40, lock-client.c:48, touch-client.c:78,
     x11-client.c:34) and the memfd shm buffer (lock-client.c:60,
     touch-client.c:95) move into `tests/clients/client-common.h`.
@@ -1601,7 +1601,7 @@ Tests:
       did not run.
   - Acceptance: `meson test -C build --list` shows every scenario, and
     without qs the bar scenario shows SKIP with the reason.
-- [ ] The packages match their binary
+- [x] The packages match their binary
   - PKGBUILD:79 and build-deb.sh:56 say wlroots is linked statically.
     That holds only when meson falls back to the subproject. Pass
     `--force-fallback-for=wlroots` in both builds (package-arch.sh,
@@ -1614,7 +1614,14 @@ Tests:
   - package-arch.sh:22 sets `PACKAGER` only when it is unset.
   - Acceptance: `tools/package.sh` builds both packages here, and `ldd`
     on each packaged binary shows no libwlroots.
-- [ ] The tools share one preamble
+- [x] Both package builds run to the end on this machine
+  - Found by running `tools/package.sh` for the box above: makepkg's
+    `-fexceptions` made `core/wlr.h` compile pthread.h (via xwayland.h's
+    xcb.h) under `#define class class_`, so the Arch build failed; the
+    Debian root filesystem has no `/dev/fd`, which `check-lock-pam.sh`'s
+    process substitution needs. `wlr.h` includes xcb.h first and the script
+    reads `find` into a variable.
+- [x] The tools share one preamble
   - Add `tools/lib.sh` with `repo_root`, `use_venv`, `die` and
     `usage_from_header`.
   - Today's copies:
@@ -1636,7 +1643,11 @@ Tests:
     tool.
   - Acceptance: `tests/test_packaging.sh` is green, and each tool's
     `--help` prints its header and nothing else.
-- [ ] media.py and the tour share one manifest
+  - Run here: `tools/lib.sh` is sourced by every shell tool; `package.sh`
+    ends with `package.sh: built <path>` lines and install.sh reads them;
+    the packaging suite copies lib.sh beside the tools it copies and checks
+    every tool's `--help` against its header.
+- [x] media.py and the tour share one manifest
   - Today `STILLS` (media.py:30) repeats tour.cpp:1170-1189, along with
     the 1600×1000 size (media.py:156-157, tour.cpp:49, 53) and the
     output names. media.py:119-130 also re-implements the stand-in
@@ -1644,6 +1655,8 @@ Tests:
   - The fix: the tour writes `out/manifest.json`, and media.py reads it.
   - Acceptance: `tools/media.py` runs end to end, with the stills
     unchanged.
+  - Run here: the stills came out at the same 1920×1200 and look the same
+    (SSIM 0.978-0.999 against the committed ones); the WebP bytes differ.
 
 ### 9. Single responsibility: the compositor
 

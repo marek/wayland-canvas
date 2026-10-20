@@ -1,20 +1,12 @@
 // Unit tests for src/platform/session_bus.cpp. Self-contained: no framework,
 // links only session_bus.cpp. Run via `meson test` (test 'session-bus').
 
-#include <cstdio>
-#include <source_location>
+#include "check.h"
 #include "platform/session_bus.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool cond, std::source_location loc = std::source_location::current()) {
-	if (!cond) {
-		failures++;
-		std::printf("FAIL %s:%u: %s\n", loc.file_name(), loc.line(), loc.function_name());
-	}
-}
+using unit::check;
 
 using session_bus::Handed;
 using session_bus::HandOver;
@@ -97,10 +89,5 @@ int main() {
 	test_no_bus();
 	test_handed_in();
 	test_hand_back();
-	if (failures != 0) {
-		std::printf("%d session-bus test failure(s)\n", failures);
-		return 1;
-	}
-	std::printf("all session-bus tests passed\n");
-	return 0;
+	return unit::summary();
 }

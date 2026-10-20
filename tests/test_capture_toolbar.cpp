@@ -2,22 +2,13 @@
 // boxes and its hit-test. Self-contained: no framework. Run via `meson test`
 // (test 'capture-toolbar').
 
-#include <cstdio>
-#include <source_location>
-
 #include "apps/capture_toolbar_layout.h"
+#include "check.h"
 #include "core/config.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, std::source_location location = std::source_location::current()) {
-	if (!condition) {
-		++failures;
-		std::printf("FAIL %s:%u\n", location.file_name(), static_cast<unsigned>(location.line()));
-	}
-}
+using unit::check;
 
 bool same(const wlr_box &a, const wlr_box &b) {
 	return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
@@ -148,10 +139,5 @@ int main() {
 	test_narrow_output();
 	test_tiny_output();
 	test_hit();
-	if (failures != 0) {
-		std::printf("%d check(s) failed\n", failures);
-		return 1;
-	}
-	std::printf("all checks passed\n");
-	return 0;
+	return unit::summary();
 }

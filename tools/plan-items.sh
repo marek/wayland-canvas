@@ -1,11 +1,25 @@
-#!/bin/bash
-# lists the open boxes of the given plans, one line each: file:line, kind, title (tab separated)
-# usage: plan-items.sh <plan.md>...
-# The title is the box's first line and its wrapped lines, joined by single spaces.
-# kind says what the box waits for:
-#   user   the title ends with the marker (the user) or (the user to decide): a person, not work
-#   stray  a note about the user or about waiting in any other wording: check-plans.sh fails it
+#!/usr/bin/env bash
+# usage: tools/plan-items.sh <plan.md>...
+#
+# Lists the open boxes of the given plans, one line each: file:line, kind,
+# title (tab separated). The title is the box's first line and its wrapped
+# lines, joined by single spaces. kind says what the box waits for:
+#   user   the title ends with the marker (the user) or (the user to decide):
+#          a person, not work
+#   stray  a note about the user or about waiting in any other wording:
+#          check-plans.sh fails it
 #   work   anything else
+set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+
+case ${1:-} in
+	-h | --help)
+		usage_from_header
+		exit 0
+		;;
+	"") die "no plan given (try --help)" ;;
+esac
+
 awk '
 	function flush(   rest, kind) {
 		if (!inbox) return

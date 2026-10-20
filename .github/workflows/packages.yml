@@ -45,9 +45,6 @@ jobs:
           source packaging/PKGBUILD
           pacman -S --noconfirm --needed "${makedepends[@]}"
 
-      - name: wlroots source
-        run: tools/fetch-wlroots.sh
-
       - name: package
         run: tools/package.sh --arch --here
 
@@ -74,9 +71,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: wlroots source
-        run: tools/fetch-wlroots.sh
 
       - name: package
         run: tools/package.sh --deb --here

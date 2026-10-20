@@ -3,32 +3,17 @@
 // rules; the first-run template; the in-place edits settings.set makes.
 // Run via `meson test` (test 'settings').
 
-#include <cstdio>
 #include <format>
-#include <source_location>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "check.h"
 #include "core/settings.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, const char *what,
-	std::source_location location = std::source_location::current()) {
-	if (!condition) {
-		++failures;
-		std::printf("FAIL %s:%u: %s\n", location.file_name(),
-			static_cast<unsigned>(location.line()), what);
-	}
-}
-
-void check(bool condition, const std::string &what,
-	std::source_location location = std::source_location::current()) {
-	check(condition, what.c_str(), location);
-}
+using unit::check;
 
 settings::Chord chord(std::string_view text,
 	settings::Scope scope = settings::Scope::global) {
@@ -594,10 +579,5 @@ int main() {
 	edit_errors();
 	overview_resolution();
 
-	if (failures == 0) {
-		std::printf("ALL PASSED\n");
-		return 0;
-	}
-	std::printf("%d failure(s)\n", failures);
-	return 1;
+	return unit::summary();
 }

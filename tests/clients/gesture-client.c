@@ -20,14 +20,13 @@
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include "client-common.h"
 #include "pointer-gestures-unstable-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -45,55 +44,10 @@ static int mapped;
 static int closed;
 static volatile sig_atomic_t quit_now;
 
-static void say(const char *format, ...) {
-	va_list args;
-	va_start(args, format);
-	vprintf(format, args);
-	va_end(args);
-	fflush(stdout);
-}
-
-static void buffer_release(void *data, struct wl_buffer *buffer) {
-	wl_buffer_destroy(buffer);
-}
-
-static const struct wl_buffer_listener buffer_listener = {
-	.release = buffer_release,
-};
-
-// A buffer of side x side in the one colour, attached and committed.
-static int draw(void) {
-	size_t stride = (size_t)side * 4;
-	size_t size = stride * (size_t)side;
-	int fd = memfd_create("gesture-client", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
-		return -1;
-	}
-	uint32_t *pixels = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (pixels == MAP_FAILED) {
-		close(fd);
-		return -1;
-	}
-	for (size_t i = 0; i < size / 4; i++) {
-		pixels[i] = colour;
-	}
-	munmap(pixels, size);
-	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
-	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, side, side,
-		(int32_t)stride, WL_SHM_FORMAT_ARGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-	wl_buffer_add_listener(buffer, &buffer_listener, NULL);
-	wl_surface_attach(surface, buffer, 0, 0);
-	wl_surface_damage_buffer(surface, 0, 0, side, side);
-	wl_surface_commit(surface);
-	return 0;
-}
-
 static void layer_configure(void *data, struct zwlr_layer_surface_v1 *layer,
 		uint32_t serial, uint32_t width, uint32_t height) {
 	zwlr_layer_surface_v1_ack_configure(layer, serial);
-	if (draw() == 0 && !mapped) {
+	if (draw_solid(shm, surface, side, side, colour) == 0 && !mapped) {
 		mapped = 1;
 		say("MAPPED\n");
 	}

@@ -70,13 +70,15 @@ sha256sums=('SKIP')
 
 build() {
 	cd "$pkgname-$pkgver"
-	meson setup build --prefix=/usr --native-file toolchain/llvm.ini -Dbuildtype=release
+	meson setup build --prefix=/usr --native-file toolchain/llvm.ini -Dbuildtype=release \
+		--force-fallback-for=wlroots
 	ninja -C build
 }
 
 package() {
 	cd "$pkgname-$pkgver"
-	# wlroots is linked in statically; its own install artifacts stay out
+	# wlroots is linked in statically (--force-fallback-for in build(), whatever
+	# the machine has installed); its own install artifacts stay out
 	DESTDIR="$pkgdir" meson install -C build --skip-subprojects=wlroots
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 	packaging/check-lock-pam.sh "$pkgdir"

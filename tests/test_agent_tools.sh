@@ -132,7 +132,7 @@ check "check-plans: the marker in place, the run passes" "$REPO/tools/check-plan
 H=$S/hook
 mkdir -p "$H/tools/hooks" "$H/docs/plans" "$H/.claude"
 cp "$REPO/tools/hooks/autopilot-stop.sh" "$H/tools/hooks/"
-cp "$REPO/tools/plan-items.sh" "$H/tools/"
+cp "$REPO/tools/plan-items.sh" "$REPO/tools/lib.sh" "$H/tools/"
 printf '# Demo\n\nDate: 2026-01-01 00:00 UTC\n\n- [ ] Work named for the user guide, waiting on nothing\n- [ ] Second piece of work\n- [ ] On screen (the user)\n- [ ] Choose (the user to decide)\n' \
 	>"$H/docs/plans/2026-01-01-0000-user-guide.md"
 touch "$H/.claude/autopilot.on"
@@ -142,11 +142,14 @@ check "hook: names none of the boxes that wait for a person" bash -c '! grep -q 
 printf '# Demo\n\nDate: 2026-01-01 00:00 UTC\n\n- [x] Done\n- [ ] On screen (the user)\n- [ ] Choose (the user to decide)\n' \
 	>"$H/docs/plans/2026-01-01-0000-user-guide.md"
 check "hook: only boxes for a person left, the turn may end" bash -c 'test -z "$("$1")"' shell "$H/tools/hooks/autopilot-stop.sh"
+check "hook: and it exits 0 doing so" "$H/tools/hooks/autopilot-stop.sh"
 printf -- '- [ ] Work again\n' >>"$H/docs/plans/2026-01-01-0000-user-guide.md"
 touch "$H/.claude/autopilot.pause"
 check "hook: a pause lets the turn end" bash -c 'test -z "$("$1")"' shell "$H/tools/hooks/autopilot-stop.sh"
 rm "$H/.claude/autopilot.pause" "$H/.claude/autopilot.on"
 check "hook: autopilot off, the turn may end" bash -c 'test -z "$("$1")"' shell "$H/tools/hooks/autopilot-stop.sh"
+rm "$H/docs/plans"/*.md
+check "hook: no plans at all, the turn may end" bash -c 'touch "$2/.claude/autopilot.on"; test -z "$("$1")" && "$1"' shell "$H/tools/hooks/autopilot-stop.sh" "$H"
 
 # hooks are wired once, in the tracked .claude/settings.json
 

@@ -6,6 +6,7 @@
 // the incremental cache (a file whose bytes change behind an unchanged
 // stat keeps its counted contribution — proof a refresh reparses only
 // what changed).
+#include "check.h"
 #include "shell/agent_usage.h"
 
 #include <fcntl.h>
@@ -22,8 +23,6 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <print>
-#include <source_location>
 #include <string>
 #include <sys/time.h>
 #include <ctime>
@@ -33,16 +32,7 @@ namespace {
 
 using namespace agent_usage;
 
-int failures = 0;
-
-void check(bool condition, std::string_view note,
-	std::source_location where = std::source_location::current()) {
-	std::println("{}: {} ({}:{})", condition ? "PASS" : "FAIL", note,
-		where.file_name(), where.line());
-	if (!condition) {
-		failures++;
-	}
-}
+using unit::check;
 
 std::string root; // $CANVAS_TMP/agent-usage-unit
 
@@ -52,8 +42,7 @@ void write_file(const std::string &path, std::string_view text) {
 	std::filesystem::create_directories(target.parent_path(), ec);
 	FILE *f = std::fopen(path.c_str(), "w");
 	if (f == nullptr) {
-		std::println("FAIL: cannot write {}", path);
-		failures++;
+		check(false, std::format("cannot write {}", path));
 		return;
 	}
 	std::fwrite(text.data(), 1, text.size(), f);
@@ -259,8 +248,7 @@ Fixture make_fixture() {
 			R"("output":5}})");
 		insert("s4", R"({"role":"user","providerID":"anthropic"})");
 		if (error != nullptr) {
-			std::println("FAIL: opencode fixture: {}", error);
-			failures++;
+			check(false, std::format("opencode fixture: {}", error));
 			sqlite3_free(error);
 		}
 		sqlite3_close(db);
@@ -677,8 +665,7 @@ void test_opencode_null_columns() {
 		"INSERT INTO message VALUES ('s3', '" + message + "20,\"output\":5}}');";
 	sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &error);
 	if (error != nullptr) {
-		std::println("FAIL: opencode NULL fixture: {}", error);
-		failures++;
+		check(false, std::format("opencode NULL fixture: {}", error));
 		sqlite3_free(error);
 	}
 	sqlite3_close(db);
@@ -757,7 +744,5 @@ int main() {
 	test_opencode_null_columns();
 	test_record_json();
 
-	std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED",
-		failures);
-	return failures != 0;
+	return unit::summary();
 }

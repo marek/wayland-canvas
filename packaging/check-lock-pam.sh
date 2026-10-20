@@ -8,12 +8,15 @@ root=${1:?usage: check-lock-pam.sh <package-root>}
 # the package ships the plugins folder under its own prefix, whichever it is
 plugin_manifest=plugins/canvas.lock/plugin.json
 
-mapfile -t found < <(find "$root" -type f -path "*/$plugin_manifest")
-if [ "${#found[@]}" -ne 1 ]; then
-	echo "check-lock-pam.sh: expected one $plugin_manifest in the package, found ${#found[@]}${found[*]:+: ${found[*]}}" >&2
+# no process substitution: the Debian root filesystem this runs in has no /dev/fd
+found=$(find "$root" -type f -path "*/$plugin_manifest")
+count=0
+[ -z "$found" ] || count=$(printf '%s\n' "$found" | wc -l)
+if [ "$count" -ne 1 ]; then
+	echo "check-lock-pam.sh: expected one $plugin_manifest in the package, found $count${found:+: ${found//$'\n'/ }}" >&2
 	exit 1
 fi
-manifest=${found[0]}
+manifest=$found
 
 # the setting names are the lock plugin's own, read by Lock.qml: a rename must stop the build
 service=$(python3 -c '

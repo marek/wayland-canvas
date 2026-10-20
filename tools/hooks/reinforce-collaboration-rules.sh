@@ -1,6 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # UserPromptSubmit hook: repeats the collaboration rules (full detail in CLAUDE.md) with every user message,
 # rather than relying on the file being read once at session start. Needs jq.
+set -euo pipefail
 jq -n '{
   hookSpecificOutput: {
     hookEventName: "UserPromptSubmit",

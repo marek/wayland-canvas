@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
+# usage: tools/package-deb.sh [--here] [--dist <name>] [out-dir]
+#
 # Build the Debian package (.deb) inside a rootless Debian root filesystem,
 # downloaded once from the official image registry and cached under
 # $CANVAS_TMP/dl/. Everything inside the root filesystem runs through user
 # namespaces (unshare --map-root-user --map-auto), so no root, sudo or
 # docker is needed. Usually reached through tools/package.sh or the meson run
 # target `package-deb` (ninja -C build package-deb).
-# The artifact lands in <out-dir> (default dist/).
+# The artifact lands in <out-dir> (default dist/); the last line is
+# `package-deb.sh: built <path>`.
 #
 # --here says the current root filesystem already is that environment — the
 # debian:sid container of .github/workflows/packages.yml — so nothing is
@@ -21,9 +24,9 @@
 # variable from curl or python3 fails explicitly instead of quietly
 # continuing with an empty one.
 set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-T=$(cd "$(dirname "$0")" && pwd -P)
-REPO=$(dirname "$T")
+REPO=$(repo_root)
 P=$REPO/packaging
 S=${CANVAS_TMP:-$REPO/tmp}
 DL=$S/dl
@@ -37,11 +40,12 @@ while [ $# -gt 0 ]; do
 			here=1
 			shift
 			;;
+		-h | --help)
+			usage_from_header
+			exit 0
+			;;
 		--dist)
-			[ $# -ge 2 ] || {
-				echo "package-deb.sh: --dist needs a name" >&2
-				exit 2
-			}
+			[ $# -ge 2 ] || die "--dist needs a name"
 			dist=$2
 			shift 2
 			;;
@@ -49,10 +53,7 @@ while [ $# -gt 0 ]; do
 			dist=${1#*=}
 			shift
 			;;
-		-* | --*)
-			echo "package-deb.sh: unknown option: $1" >&2
-			exit 2
-			;;
+		-*) die "unknown option: $1 (try --help)" ;;
 		*)
 			out=$1
 			shift
@@ -78,17 +79,13 @@ fetch_rootfs() { # sets rootfs_dir; caches under $DL
 
 	local token
 	token=$(curl -fsS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" |
-		python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') || {
-		echo "package-deb.sh: could not get a registry token for $repo" >&2
-		return 2
-	}
+		python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])') ||
+		die "could not get a registry token for $repo"
 	local accept='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'
 	local manifest
 	manifest=$(curl -fsS -H "Authorization: Bearer $token" -H "Accept: $accept" \
-		"https://registry-1.docker.io/v2/$repo/manifests/$ref") || {
-		echo "package-deb.sh: no manifest for $repo:$ref" >&2
-		return 2
-	}
+		"https://registry-1.docker.io/v2/$repo/manifests/$ref") ||
+		die "no manifest for $repo:$ref"
 
 	# a multi-arch index: pick the linux/amd64 manifest (newer indexes carry
 	# the arch only as a bashbrew annotation)
@@ -106,16 +103,12 @@ if "manifests" in m:
             break
     else:
         sys.exit("no linux/amd64 manifest")
-') || {
-		echo "package-deb.sh: could not pick an amd64 manifest for $repo:$ref" >&2
-		return 2
-	}
+') ||
+		die "could not pick an amd64 manifest for $repo:$ref"
 	if [ -n "$digest" ]; then
 		manifest=$(curl -fsS -H "Authorization: Bearer $token" -H "Accept: $accept" \
-			"https://registry-1.docker.io/v2/$repo/manifests/$digest") || {
-			echo "package-deb.sh: no $dist amd64 manifest" >&2
-			return 2
-		}
+			"https://registry-1.docker.io/v2/$repo/manifests/$digest") ||
+			die "no $dist amd64 manifest"
 	fi
 
 	local layer n=0
@@ -140,10 +133,8 @@ if "manifests" in m:
 		rm "$dir/layer.tar"
 	done < <(printf '%s' "$manifest" |
 		python3 -c 'import json,sys; print("\n".join(l["digest"] for l in json.load(sys.stdin)["layers"]))')
-	[ -d "$dir/etc" ] || {
-		echo "package-deb.sh: $dist extracted to no /etc — the manifest was not an image" >&2
-		return 2
-	}
+	[ -d "$dir/etc" ] ||
+		die "$dist extracted to no /etc — the manifest was not an image"
 	touch "$dir/.done"
 	rootfs_dir=$dir
 }
@@ -159,7 +150,7 @@ setup_rootfs() { # $1 rootfs dir — DNS resolution for apt
 
 stage_into() { # $1 stage dir; sets staged_version
 	local stage=$1
-	staged_version=$("$REPO/tools/version.sh")
+	staged_version=$("$tools_dir/version.sh")
 	mkdir -p "$stage/packages"
 	"$P/make-source-tarball.sh" "$stage/wayland-canvas-$staged_version.tar.xz"
 	cp "$P/debian/control" "$P/debian/prerm" "$P/debian/postrm" "$P/debian/build-deb.sh" "$stage/"
@@ -177,10 +168,8 @@ run_in_rootfs() { # $1 rootfs dir, rest: arguments for /stage/build-deb.sh
 }
 
 if [ "$here" -eq 1 ]; then
-	[ "$(id -u)" -eq 0 ] || {
-		echo "package-deb.sh: --here needs root (apt installs the build dependencies); without it this script builds in a rootless Debian root filesystem instead" >&2
-		exit 2
-	}
+	[ "$(id -u)" -eq 0 ] ||
+		die "--here needs root (apt installs the build dependencies); without it this script builds in a rootless Debian root filesystem instead"
 	stage=$S/deb-stage
 	rm -rf "$stage"
 	stage_into "$stage"
@@ -196,9 +185,6 @@ else
 fi
 
 deb=$(find "$stage/packages" -name '*.deb' | head -1)
-[ -n "$deb" ] || {
-	echo "package-deb.sh: the build produced no .deb" >&2
-	exit 2
-}
+[ -n "$deb" ] || die "the build produced no .deb"
 cp "$deb" "$out/"
-echo "package-deb.sh: $out/$(basename "$deb")"
+echo "package-deb.sh: built $out/$(basename "$deb")"

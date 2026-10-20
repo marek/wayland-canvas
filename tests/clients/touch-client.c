@@ -30,17 +30,15 @@
 // connected later), so the wl_touch is taken when the capability shows up
 // and released when it goes.
 #define _GNU_SOURCE
-#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include "client-common.h"
 #include "xdg-shell-client-protocol.h"
 #include "tablet-v2-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
@@ -75,14 +73,6 @@ struct tool {
 	int have_tilt;
 };
 
-static void say(const char *format, ...) {
-	va_list args;
-	va_start(args, format);
-	vprintf(format, args);
-	va_end(args);
-	fflush(stdout);
-}
-
 static int iround(double value) {
 	return (int)(value < 0 ? value - 0.5 : value + 0.5);
 }
@@ -90,27 +80,7 @@ static int iround(double value) {
 // One shm buffer of a solid colour, made once: the window keeps its
 // requested size through every configure.
 static struct wl_buffer *make_buffer(void) {
-	int stride = width * 4;
-	int size = stride * height;
-	int fd = memfd_create("touch-client", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, size) < 0) {
-		return NULL;
-	}
-	uint32_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (data == MAP_FAILED) {
-		close(fd);
-		return NULL;
-	}
-	for (int i = 0; i < width * height; i++) {
-		data[i] = fill;
-	}
-	munmap(data, size);
-	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
-	struct wl_buffer *made = wl_shm_pool_create_buffer(pool, 0, width, height,
-		stride, WL_SHM_FORMAT_ARGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-	return made;
+	return solid_buffer(shm, width, height, fill);
 }
 
 static void surface_configure(void *data, struct xdg_surface *xdg,

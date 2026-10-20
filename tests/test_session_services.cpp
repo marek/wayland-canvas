@@ -1,20 +1,13 @@
 // The rules for the session's own services: who manages them, and what a
 // login runs to start and stop them. Pure strings and decisions — nothing
 // here speaks to a systemd manager.
-#include <print>
 #include <string>
+#include "check.h"
 #include "platform/session_services.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool cond, const char *note) {
-	std::println("{}: {}", cond ? "PASS" : "FAIL", note);
-	if (!cond) {
-		failures++;
-	}
-}
+using unit::check;
 
 } // namespace
 
@@ -40,5 +33,5 @@ int main() {
 	check(stop == std::string("systemctl --user stop ")
 			+ session_services::target,
 		"the stop command stops exactly that target");
-	return failures != 0;
+	return unit::summary();
 }

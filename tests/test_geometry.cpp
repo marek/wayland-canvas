@@ -1,32 +1,15 @@
 // Unit tests for src/core/geometry.cpp. Self-contained: no framework, links only
 // geometry.cpp. Run via `meson test` (test 'geometry').
 
-#include <cmath>
-#include <cstdio>
 #include <optional>
-#include <source_location>
 
+#include "check.h"
 #include "core/geometry.h"
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, std::source_location location = std::source_location::current()) {
-	if (!condition) {
-		++failures;
-		std::printf("FAIL %s:%u\n", location.file_name(), static_cast<unsigned>(location.line()));
-	}
-}
-
-void check_near(double got, double expected, double tol,
-	std::source_location location = std::source_location::current()) {
-	if (!(std::fabs(got - expected) <= tol)) {
-		++failures;
-		std::printf("FAIL %s:%u: %.17g, expected %.17g (tol %.17g)\n",
-			location.file_name(), static_cast<unsigned>(location.line()), got, expected, tol);
-	}
-}
+using unit::check;
+using unit::check_near;
 
 // ---- nav_pick_direction ----
 
@@ -424,10 +407,5 @@ int main() {
 	test_canvas_units_covered();
 	test_basics();
 
-	if (failures == 0) {
-		std::printf("all geometry tests passed\n");
-	} else {
-		std::printf("%d geometry test failure(s)\n", failures);
-	}
-	return failures != 0;
+	return unit::summary();
 }

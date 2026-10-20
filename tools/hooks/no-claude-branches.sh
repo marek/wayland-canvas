@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Refuses git commands that create or push a claude/ branch, and any branch
 # created under a name other than <first name>/<short-description>, where
 # <first name> is the lowercased first word of git config user.name
 # (Marek Kudlacz -> marek/foo). Work is attributed to the humans who
 # direct it, never to an AI tool. Reads the command from stdin.
+set -euo pipefail
 
 CMD=$(cat)
 
-if printf '%s' "$CMD" | grep -qE 'git[^"]*(push|checkout|switch|branch)[^"]*claude/'; then
+claude_branch='git[^"]*(push|checkout|switch|branch)[^"]*claude/'
+if [[ $CMD =~ $claude_branch ]]; then
   echo "Branches are named <first name>/<short-description>, never claude/...: work is attributed to the humans who direct it, not to an AI tool." >&2
   exit 2
 fi
@@ -27,7 +29,7 @@ case $CMD in
 esac
 [ -n "$BRANCH" ] || exit 0
 
-NAME=$(git config user.name 2>/dev/null)
+NAME=$(git config user.name 2>/dev/null || true)
 if [ -z "$NAME" ]; then
   echo "git config user.name is not set; set it to your name so branches can be named <first name>/<short-description>." >&2
   exit 2

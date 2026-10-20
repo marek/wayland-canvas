@@ -51,13 +51,14 @@ signed in it borrows its token for the renderer's higher rate limit.
 The pictures in `docs/media/` and the walkthrough video are real captures.
 `tools/media.py` fetches the tour's public-domain assets, builds the
 compositor and runs `build/media-tour` — the headless backend with real
-apps — then encodes the stills into `docs/media/` and the video into
+apps, which lists what it captured in `manifest.json` — then encodes the
+stills into `docs/media/` and the video into
 `tmp/media/walkthrough.mp4`. The video is a GitHub attachment: upload it
 by dragging it into any issue or comment box on GitHub, and put the link
 GitHub gives it on its own line under Walkthrough in `README.md`. It
 needs ffmpeg, curl, Chrome, Krita, imv, mpv, foot, Neovim, Quickshell,
-dbus-daemon and openssl. `--stills` remakes only the four stills; `--keep` keeps the run's
-scratch folder for a look; `--record` captures the web pages again.
+dbus-daemon and openssl. `--stills` remakes only the stills; `--keep` keeps
+the run's scratch folder for a look; `--record` captures the web pages again.
 Scratch lives under `tmp/media/` (`$CANVAS_TMP` overrides `tmp/`): the
 fetched assets, the tour's run folder, and `pages/`, the captured web pages
 (`tools/media/pages.tsv` lists them). A page is captured once and replayed

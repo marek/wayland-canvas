@@ -10,17 +10,15 @@
 // SIGUSR1 lets every table go and exits. --blue dims red instead of blue,
 // so the frame's change is unmistakable.
 #define _GNU_SOURCE
-#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdarg.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include "client-common.h"
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 
 static struct zwlr_gamma_control_manager_v1 *manager;
@@ -37,14 +35,6 @@ struct output {
 	int written;
 };
 
-static void say(const char *format, ...) {
-	va_list args;
-	va_start(args, format);
-	vprintf(format, args);
-	va_end(args);
-	fflush(stdout);
-}
-
 // One ramp per channel, each scaled by its own factor.
 static void write_table(struct output *output) {
 	if (output->ramp_size == 0 || output->written) {
@@ -52,15 +42,12 @@ static void write_table(struct output *output) {
 	}
 	size_t count = output->ramp_size;
 	size_t size = count * 3 * sizeof(uint16_t);
-	int fd = memfd_create("gamma-client", MFD_CLOEXEC);
-	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
+	void *mapped;
+	int fd = shm_file(size, &mapped);
+	if (fd < 0) {
 		return;
 	}
-	uint16_t *table = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (table == MAP_FAILED) {
-		close(fd);
-		return;
-	}
+	uint16_t *table = mapped;
 	for (size_t i = 0; i < count; i++) {
 		double value = (double)i / (double)(count - 1) * 65535.0;
 		table[i] = (uint16_t)(value * red_scale);

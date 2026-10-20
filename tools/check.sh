@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# usage: tools/check.sh [--unit] [--sanitize]   (--unit: stop after the unit suite)
+#
 # Build (tools/build.sh) and run the test strands in order:
 # `meson test --suite unit`, then `meson test --suite packaging`, then
 # `meson test --suite scenarios`. Exits non-zero on the first failure.
@@ -12,27 +14,24 @@
 # any report, a leak included, aborts the run. The packaging suite runs
 # nothing compiled, so it is left out. tests/lsan.supp names the leaks of
 # third-party code that are ignored.
-#
-# Usage: tools/check.sh [--unit] [--sanitize]   (--unit: stop after the unit suite)
 set -euo pipefail
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
-repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+repo=$(repo_root)
 cd "$repo"
 
 unit_only=0
 sanitize=0
 for arg in "$@"; do
-	if [[ "$arg" == "--unit" ]]; then
-		unit_only=1
-	elif [[ "$arg" == "--sanitize" ]]; then
-		sanitize=1
-	elif [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
-		echo "usage: tools/check.sh [--unit] [--sanitize]"
-		exit 0
-	else
-		echo "tools/check.sh: unknown argument: $arg" >&2
-		exit 2
-	fi
+	case $arg in
+		--unit) unit_only=1 ;;
+		--sanitize) sanitize=1 ;;
+		-h | --help)
+			usage_from_header
+			exit 0
+			;;
+		*) die "unknown argument: $arg (try --help)" ;;
+	esac
 done
 
 build=build
@@ -52,10 +51,7 @@ echo "check.sh: tools/build.sh ${build_args[*]}"
 tools/build.sh "${build_args[@]}"
 
 # the suites run through meson, from the build dir build.sh just made
-bin=$(tools/venv.sh --if-needed)
-if [ -n "$bin" ]; then
-	export PATH="$bin:$PATH"
-fi
+use_venv
 
 echo "check.sh: meson test -C $build --suite unit ${test_args[*]}"
 meson test -C "$build" --suite unit "${test_args[@]}"
