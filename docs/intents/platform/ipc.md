@@ -79,7 +79,7 @@ request; responses come in request order.
 | `capture.pick` | `what`: `region`, `window`, `output` or `any`; `output` (optional, as above) | The pick, when the user finishes it: a region `{"output", "x", "y", "w", "h"}` (output-local logical), a window `{"window" (session id), "identifier" (ext-foreign-toplevel)}`, an output `{"output"}` — [../apps/capture.md](../apps/capture.md) |
 | `capture.stop` | — | `true`; an error (`not recording`) with nothing running |
 | `settings.get` | — | The settings (below) |
-| `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); `swipes` (a preset); `pinchScale` (a boolean); `mouseScroll`, `touchpadScroll` or `pan` (`natural` or `traditional`); `overviewSwipe` (`up` or `down`); `hopSwipe` (`toward` or `away`); `lockIdleMinutes` (0 for never); `nightLight` (a boolean); `nightLightTemperature` (kelvin) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action, preset or direction, a chord that does not parse or is not allowed there, a number outside its range, the file unwritable |
+| `settings.set` | Exactly one of: `scope` (`global` or `overview`), `action` and `keys` (chords; `[]` for none, `null` for the defaults); `commands` (a list of `{"keys", "command"}` replacing the file's commands); or one setting of `gestures` or `session`, by its param in `settings.get`'s `fields` (a choice's name, a boolean for a switch, a whole number for an integer, 0 for `off` where the setting has it) | The settings, with `moved`: the chords taken from other actions or commands, each `{"scope", "action", "keys"}`. Errors name the reason: an unknown scope, action or choice, a chord that does not parse or is not allowed there, a value outside what its setting takes, the file unwritable. Params that name none or several of the above are answered with a usage that lists every param |
 | `shortcut.capture` | `scope`: `global` (the default) or `overview` | `{"keys": "Super+Shift+K"}` once the user presses a chord — `Super` for a tap, `Super Super` for a double tap — `{"keys": null}` when cancelled |
 | `shortcut.cancel` | — | `true`; a capture under way answers `{"keys": null}` |
 
@@ -116,6 +116,7 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `commands` | `{"keys", "command"}` each |
 | `gestures` | `swipes` (the preset), `pinchScale`, `mouseScroll`, `touchpadScroll` and `pan` (`natural` or `traditional`), `overviewSwipe` (`up` or `down`), `hopSwipe` (`toward` or `away`) ([../input/gestures.md](../input/gestures.md)) |
 | `session` | `lockIdleMinutes` (0 for never), `nightLight`, `nightLightTemperature` |
+| `fields` | One entry per `gestures` and `session` param: `section` and `key` (as the file writes them), `kind` (`choice`, `toggle` or `integer`), `default`, and what it takes: a choice's `choices`, an integer's `unit`, `min` and `max` (`min` is 0 where the setting takes `off`). A client draws its controls and checks its input from these, never from a copy of a bound |
 
 
 ### State

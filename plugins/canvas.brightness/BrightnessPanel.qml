@@ -30,58 +30,37 @@ PanelCard {
 	// compositor owns it; the panel only reads and writes its settings.
 	PanelSeparator {}
 
-	PanelRow {
-		label: "Night light"
-		detail: root.nightLight ? root.temperature + " K" : "Off"
-		clickable: false
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.nightLight
-			onToggled: root.setNightLight(!root.nightLight)
-		}
+	NightLightControl {
+		settings: root.settings
+		onChose: function(param, value) { root.setSetting(param, value) }
 	}
 
-	PanelSlider {
-		enabled: root.nightLight
-		value: (root.temperature - 1000) / 5500
-		onMoved: function(v) {
-			root.setTemperature(Math.round(1000 + v * 5500))
-		}
-	}
+	// The settings.get answer the night light's control reads, null until
+	// it arrives.
+	property var settings: null
 
-	property bool nightLight: false
-	property int temperature: 4000
-
-	function readSession() {
+	function readSettings() {
 		api.compositor.call("settings.get", undefined, function(result, error) {
-			if (result == null || result.session === undefined) {
-				return
+			if (result != null) {
+				settings = result
 			}
-			nightLight = result.session.nightLight === true
-			temperature = result.session.nightLightTemperature
 		})
 	}
 
-	function setNightLight(on) {
-		api.compositor.call("settings.set", {nightLight: on},
-			function(result, error) { readSession() })
+	function setSetting(param, value) {
+		var params = {}
+		params[param] = value
+		api.compositor.call("settings.set", params,
+			function(result, error) { readSettings() })
 	}
 
-	function setTemperature(kelvin) {
-		api.compositor.call("settings.set", {nightLightTemperature: kelvin},
-			function(result, error) { readSession() })
-	}
-
-	Component.onCompleted: readSession()
+	Component.onCompleted: readSettings()
 
 	Connections {
 		target: api.compositor
 		function onEvent(name, params) {
 			if (name === "settings") {
-				root.readSession()
+				root.readSettings()
 			}
 		}
 	}

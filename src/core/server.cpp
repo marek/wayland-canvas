@@ -117,26 +117,14 @@ std::string config_home() {
 	return {};
 }
 
-// The gesture code's own options from the settings' own preset enum: the
-// settings library links no wlroots, so it carries its own (the values
-// match one for one).
+// The gesture code's own options from the settings in force.
 GestureOptions gesture_options(const settings::Resolved &conf) {
-	GestureOptions options;
-	switch (conf.swipes) {
-	case settings::SwipePreset::three_finger_hops:
-		options.swipes = SwipePreset::three_finger_hops;
-		break;
-	case settings::SwipePreset::four_finger_hops:
-		options.swipes = SwipePreset::four_finger_hops;
-		break;
-	case settings::SwipePreset::off:
-		options.swipes = SwipePreset::off;
-		break;
-	}
-	options.pinch_scale = conf.pinch_scale;
-	options.overview_down = conf.overview_down;
-	options.hops_away = conf.hops_away;
-	return options;
+	return {
+		.swipes = conf.swipes,
+		.pinch_scale = conf.pinch_scale,
+		.overview_down = conf.overview_down,
+		.hops_away = conf.hops_away,
+	};
 }
 
 // Keeps the idle notifier inhibited while at least one inhibitor is alive;

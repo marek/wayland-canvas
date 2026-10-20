@@ -82,6 +82,11 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
   launcher, the terminal and the `[commands]` chords; every other key does
   nothing there. The capture chords also work while the capture UI holds
   the keyboard, so the chord that opened it closes it.
+- An action says where its chords apply (the capture actions' before all
+  else, the launcher's and the terminal's also in the overview); the group
+  the settings window files it under decides nothing about a key. Every
+  action in the registry has something to run, so no bound key passes to
+  the client instead.
 - While the launcher is open, its own keys close it.
 - A lone Super tap runs whichever action holds `Super`, in the normal view
   and in the overview. Two lone taps within a compile-time interval

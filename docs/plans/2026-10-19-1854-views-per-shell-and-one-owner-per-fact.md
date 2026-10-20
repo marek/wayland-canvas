@@ -1292,7 +1292,7 @@ Tests:
     app-bar.md say so). No scenario puts the app bar on the bottom edge,
     so that clearance is not exercised. ipc.cpp's messages build "1 MiB"
     and "64 KiB" from the two config constants.
-- [ ] One settings table for every `[gestures]` and `[session]` key
+- [x] One settings table for every `[gestures]` and `[session]` key
   - Today each key is written out separately in each of these places:
     - settings.cpp: parse 550-611, resolve 674-703, setters 1015-1054,
       and the template 747-763, which restates settings.h:101-113;
@@ -1335,7 +1335,7 @@ Tests:
       green.
     - `git grep -nE '5500|6500' -- plugins/canvas.settings plugins/canvas.brightness`
       finds no night-light bound.
-- [ ] An action and its runner cannot drift apart
+- [x] An action and its runner cannot drift apart
   - The problem:
     - A registry row (settings.cpp:180-293) is joined to its runner in
       bindings.cpp (417-484, 582-595) by name, on every key press. A row
@@ -1404,7 +1404,7 @@ Tests:
     `g_free`, not `std::free`.
   - Acceptance: each is defined once, and the unit suite plus the ipc and
     capture scenarios are green.
-- [ ] The control socket answers late calls one way
+- [x] The control socket answers late calls one way
   - The capture UI stops writing wire JSON (capture_ui.cpp:416-431, and
     the `PickUse::ipc` mode at 353-356) and hands Ipc a typed pick
     result.

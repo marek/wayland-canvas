@@ -4,6 +4,7 @@ singleton StripLayout StripLayout.qml
 BarButton BarButton.qml
 ChoiceRow ChoiceRow.qml
 KeyChip KeyChip.qml
+NightLightControl NightLightControl.qml
 PanelCard PanelCard.qml
 PanelField PanelField.qml
 PanelHero PanelHero.qml

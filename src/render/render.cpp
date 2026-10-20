@@ -714,15 +714,15 @@ void send_surface_feedback(const RenderCtx &ctx) {
 // gestures and the pointer and key hints, or only those under `off`.
 const char *overview_help_text(const GestureOptions &options) {
 	switch (options.swipes) {
-	case SwipePreset::three_finger_hops:
+	case settings::SwipePreset::three_finger_hops:
 		return "3 fingers: jump to desktop  ·  4 down: go there  ·  "
 			"4 sideways: abandon  ·  3-finger pinch out / in: tile / combine  ·  "
 			"drag frames over windows  ·  right-click: new desktop  ·  Esc: back";
-	case SwipePreset::four_finger_hops:
+	case settings::SwipePreset::four_finger_hops:
 		return "4 fingers: jump to desktop  ·  3 down: go there  ·  "
 			"3 sideways: abandon  ·  4-finger pinch out / in: tile / combine  ·  "
 			"drag frames over windows  ·  right-click: new desktop  ·  Esc: back";
-	case SwipePreset::off:
+	case settings::SwipePreset::off:
 		return "drag frames over windows  ·  right-click: new desktop  ·  Esc: back";
 	}
 	return "";

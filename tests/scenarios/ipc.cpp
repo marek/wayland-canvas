@@ -126,6 +126,9 @@ bool file_exists(const std::string &path) {
 // captured under `name` (.out, .err, .code). Params, when given, are
 // single-quoted for the shell.
 void run_client(std::string_view method, std::string_view params, const char *name) {
+	// An earlier run's answer under this name is not this one's.
+	std::error_code stale;
+	std::filesystem::remove(std::format("{}/{}.code", shot_dir, name), stale);
 	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
 	std::string cmd = std::format("\"{}\" msg {}", bin, method);
 	if (!params.empty()) {
@@ -557,6 +560,108 @@ std::optional<WindowEntry> parse_state_window(const std::string &text,
 		}
 	}
 	g_object_unref(parser);
+	return out;
+}
+
+// The first way a `settings.get` answer fails to describe the settings
+// table, or empty when its `fields` give every row its section, key, kind,
+// bounds or names, and default, and its sections hold a value for each.
+std::string settings_get_problem(const std::string &text) {
+	JsonParser *parser = json_parser_new();
+	std::string problem;
+	if (!json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)) {
+		problem = "the answer is not JSON";
+	}
+	JsonNode *root = problem.empty() ? json_parser_get_root(parser) : nullptr;
+	JsonObject *answer = root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
+		? json_node_get_object(root) : nullptr;
+	JsonObject *fields = answer != nullptr && json_object_has_member(answer, "fields")
+		? json_object_get_object_member(answer, "fields") : nullptr;
+	if (problem.empty() && fields == nullptr) {
+		problem = "the answer has no fields";
+	}
+	for (const settings::Field &field : settings::fields) {
+		if (!problem.empty()) {
+			break;
+		}
+		std::string param{field.param};
+		JsonObject *section = json_object_has_member(answer, std::string{field.section}.c_str())
+			? json_object_get_object_member(answer, std::string{field.section}.c_str())
+			: nullptr;
+		JsonObject *row = json_object_has_member(fields, param.c_str())
+			? json_object_get_object_member(fields, param.c_str()) : nullptr;
+		if (section == nullptr || !json_object_has_member(section, param.c_str())) {
+			problem = std::format("{} has no value in [{}]", param, field.section);
+		} else if (row == nullptr) {
+			problem = std::format("{} has no row in fields", param);
+		} else if (member_string(row, "section") != field.section
+				|| member_string(row, "key") != field.key) {
+			problem = std::format("{} is not given its section and key", param);
+		} else if (field.kind == settings::Kind::integer) {
+			std::optional<long long> low = member_int(row, "min");
+			std::optional<long long> high = member_int(row, "max");
+			std::optional<long long> fallback = member_int(row, "default");
+			if (member_string(row, "kind") != "integer"
+					|| low != (field.off ? 0 : field.min) || high != field.max
+					|| fallback != field.fallback) {
+				problem = std::format("{} does not report its bounds and default", param);
+			}
+		} else if (field.kind == settings::Kind::toggle) {
+			if (member_string(row, "kind") != "toggle"
+					|| !json_object_has_member(row, "default")
+					|| (json_object_get_boolean_member(row, "default") != FALSE)
+						!= (field.fallback != 0)) {
+				problem = std::format("{} does not report its default", param);
+			}
+		} else {
+			JsonArray *choices = json_object_has_member(row, "choices")
+				? json_object_get_array_member(row, "choices") : nullptr;
+			bool names = choices != nullptr
+				&& json_array_get_length(choices) == field.values().size();
+			for (guint i = 0; names && i < json_array_get_length(choices); i++) {
+				names = json_array_get_string_element(choices, i) == field.values()[i];
+			}
+			if (member_string(row, "kind") != "choice" || !names
+					|| member_string(row, "default") != field.values()[field.fallback]) {
+				problem = std::format("{} does not report its names and default", param);
+			}
+		}
+	}
+	g_object_unref(parser);
+	return problem;
+}
+
+// A settings.set the table says must fail, named for its client's files.
+struct Refusal {
+	std::string name, params;
+	const settings::Field *field;
+};
+
+// For every setting, the values it does not take: a name no choice has, a
+// string for a switch, a number past each end of an integer's bounds.
+std::vector<Refusal> refusals() {
+	std::vector<Refusal> out;
+	for (const settings::Field &field : settings::fields) {
+		std::vector<std::string> bad;
+		switch (field.kind) {
+		case settings::Kind::choice:
+			bad = {"\"sideways\""};
+			break;
+		case settings::Kind::toggle:
+			bad = {"\"yes\""};
+			break;
+		case settings::Kind::integer:
+			bad = {std::to_string(static_cast<long long>(field.max) + 1),
+				field.off ? "-1" : std::to_string(field.min - 1)};
+			break;
+		}
+		for (const std::string &value : bad) {
+			out.push_back({.name = std::format("refuse-{}-{}", field.param, out.size()),
+				.params = std::format("{{\"{}\":{}}}", field.param, value),
+				.field = &field});
+		}
+	}
 	return out;
 }
 
@@ -1332,8 +1437,8 @@ int run_step() {
 			std::format("`settings.set` of a temperature past an int is an error ({})",
 				client_err("temperature-wraps")));
 		check(server->conf_text == conf_before
-				&& server->conf.lock_idle_minutes == settings::default_lock_idle_minutes
-				&& server->conf.night_light_k == settings::default_night_light_k,
+				&& server->conf.lock_idle_minutes == settings::lock_idle.fallback
+				&& server->conf.night_light_k == settings::night_light_temperature.fallback,
 			"canvas.conf and the settings in force are unchanged");
 		run_client("settings.set", R"({"lockIdleMinutes":7})", "idle-seven");
 		return 400;
@@ -1345,6 +1450,44 @@ int run_step() {
 		}
 		check(client_code("idle-seven") == 0 && server->conf.lock_idle_minutes == 7,
 			"a lockIdleMinutes in range is still written");
+		// The settings table, end to end: what settings.get reports of every
+		// row, what settings.set refuses of each, and the usage naming all.
+		conf_before = server->conf_text;
+		run_client("settings.get", "", "settings-get");
+		run_client("settings.set", "", "settings-usage");
+		for (const Refusal &refusal : refusals()) {
+			run_client("settings.set", refusal.params, refusal.name.c_str());
+		}
+		return 600;
+	}
+	case 81: {
+		std::vector<Refusal> asked = refusals();
+		bool done = client_done("settings-get") && client_done("settings-usage");
+		for (const Refusal &refusal : asked) {
+			done = done && client_done(refusal.name.c_str());
+		}
+		if (!done && retries++ < 100) {
+			return -100;
+		}
+		std::string problem = settings_get_problem(client_out("settings-get"));
+		check(client_code("settings-get") == 0 && problem.empty(),
+			std::format("`settings.get` describes every row of the settings table ({})",
+				problem));
+		bool names_all = client_code("settings-usage") == 1;
+		for (const settings::Field &field : settings::fields) {
+			names_all = names_all
+				&& client_err("settings-usage").find(field.param) != std::string::npos;
+		}
+		check(names_all, std::format("`settings.set` with no params names every setting "
+			"in its usage ({})", client_err("settings-usage")));
+		for (const Refusal &refusal : asked) {
+			check(client_code(refusal.name.c_str()) == 1
+					&& client_err(refusal.name.c_str()).find(refusal.field->param)
+						!= std::string::npos,
+				std::format("`settings.set` {} is refused naming the setting ({})",
+					refusal.params, client_err(refusal.name.c_str())));
+		}
+		check(server->conf_text == conf_before, "no refused settings.set changed canvas.conf");
 		finished = true; // the quit is the run's end
 		run_client("quit", "", "quit");
 		return 300;

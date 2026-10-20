@@ -28,9 +28,10 @@ void night_light_multipliers(int kelvin, float out[3]) {
 	// the approximation is not white at 6500 K, so each channel is taken
 	// relative to its value there: daylight changes nothing
 	static const std::array<double, 3> daylight =
-		black_body(settings::night_light_max_k / 100.0);
-	std::array<double, 3> warm = black_body(std::clamp(kelvin, settings::night_light_min_k,
-		settings::night_light_max_k) / 100.0);
+		black_body(settings::night_light_temperature.max / 100.0);
+	std::array<double, 3> warm = black_body(std::clamp(kelvin,
+		settings::night_light_temperature.min,
+		settings::night_light_temperature.max) / 100.0);
 	for (int i = 0; i < 3; i++) {
 		out[i] = static_cast<float>(std::clamp(warm[i] / daylight[i], 0.0, 1.0));
 	}

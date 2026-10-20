@@ -1798,8 +1798,8 @@ int run_step() {
 			return -100;
 		}
 		server->gestures.set_options(
-			{.swipes = SwipePreset::four_finger_hops, .pinch_scale = true});
-		check(server->gestures.options().swipes == SwipePreset::four_finger_hops,
+			{.swipes = settings::SwipePreset::four_finger_hops, .pinch_scale = true});
+		check(server->gestures.options().swipes == settings::SwipePreset::four_finger_hops,
 			"set_options installed the four-finger-hops preset");
 		check(help_names("4 fingers") && help_names("3 down")
 				&& help_names("4-finger pinch"),
@@ -1931,7 +1931,8 @@ int run_step() {
 				"back on B in the normal view");
 			// `off`: no 3- or 4-finger compositor gesture; the client under the
 			// pointer gets them, like 2-finger ones.
-			server->gestures.set_options({.swipes = SwipePreset::off, .pinch_scale = true});
+			server->gestures.set_options(
+				{.swipes = settings::SwipePreset::off, .pinch_scale = true});
 			check(!help_names("finger"),
 				"with the preset off the help line names only keys");
 			Camera before = o->camera.current();
@@ -2011,7 +2012,7 @@ int run_step() {
 			check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
 					&& o->interactive(), "back on B for the pinch-scale switch");
 			server->gestures.set_options(
-				{.swipes = SwipePreset::three_finger_hops, .pinch_scale = false});
+				{.swipes = settings::SwipePreset::three_finger_hops, .pinch_scale = false});
 			Camera before = o->camera.current();
 			double scale_before = desk(hop_b)->scale();
 			park_on_reporter();
@@ -2071,7 +2072,7 @@ int run_step() {
 		// The defaults restored: 3 and 4 back in their own roles.
 		o->overview.exit();
 		server->gestures.set_options(GestureOptions{});
-		check(server->gestures.options().swipes == SwipePreset::three_finger_hops
+		check(server->gestures.options().swipes == settings::SwipePreset::three_finger_hops
 				&& server->gestures.options().pinch_scale,
 			"the default options restored");
 		check(help_names("3 fingers") && help_names("4 down")
@@ -2099,7 +2100,7 @@ int run_step() {
 		shot("35-default-restored");
 		// hop-swipe away: the same swipe hops the other way
 		// (docs/intents/input/gestures.md).
-		server->gestures.set_options({.swipes = SwipePreset::three_finger_hops,
+		server->gestures.set_options({.swipes = settings::SwipePreset::three_finger_hops,
 			.pinch_scale = true, .hops_away = true});
 		swipe(3, 200, 0, 8); // 3 fingers right, hopping away: back onto B
 		return 900;

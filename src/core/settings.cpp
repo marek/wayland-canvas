@@ -10,6 +10,7 @@
 #include <cstring>
 #include <format>
 #include <map>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,8 +20,6 @@
 #include "core/settings.h"
 
 namespace settings {
-
-namespace {
 
 std::string_view trim(std::string_view text) {
 	while (!text.empty() && (text.front() == ' ' || text.front() == '\t'
@@ -33,6 +32,8 @@ std::string_view trim(std::string_view text) {
 	}
 	return text;
 }
+
+namespace {
 
 char lower(char c) {
 	return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
@@ -126,52 +127,6 @@ bool types_no_character(xkb_keysym_t key) {
 	return false;
 }
 
-// `off` is no idle lock at all, written as 0 minutes.
-std::optional<int> parse_minutes(std::string_view value) {
-	if (value == "off") {
-		return 0;
-	}
-	int out = 0;
-	auto [end, err] = std::from_chars(value.data(), value.data() + value.size(), out);
-	if (err != std::errc{} || end != value.data() + value.size() || out < 1
-			|| out > max_lock_idle_minutes) {
-		return std::nullopt;
-	}
-	return out;
-}
-
-std::optional<int> parse_temperature(std::string_view value) {
-	int out = 0;
-	auto [end, err] = std::from_chars(value.data(), value.data() + value.size(), out);
-	if (err != std::errc{} || end != value.data() + value.size()
-			|| out < night_light_min_k || out > night_light_max_k) {
-		return std::nullopt;
-	}
-	return out;
-}
-
-std::optional<SwipePreset> parse_swipes(std::string_view value) {
-	if (value == "three-finger-hops") {
-		return SwipePreset::three_finger_hops;
-	}
-	if (value == "four-finger-hops") {
-		return SwipePreset::four_finger_hops;
-	}
-	if (value == "off") {
-		return SwipePreset::off;
-	}
-	return std::nullopt;
-}
-
-std::string_view swipes_text(SwipePreset preset) {
-	switch (preset) {
-	case SwipePreset::three_finger_hops: return "three-finger-hops";
-	case SwipePreset::four_finger_hops: return "four-finger-hops";
-	case SwipePreset::off: return "off";
-	}
-	return "three-finger-hops";
-}
-
 } // namespace
 
 // The registry (the settings contract §3): [shortcuts] scope global first,
@@ -182,17 +137,20 @@ const std::vector<ActionDef> &registry() {
 	static const std::vector<ActionDef> table = [] {
 		std::vector<ActionDef> defs;
 		auto add = [&](Scope scope, std::string_view group, std::string_view name,
-				std::string_view label, std::initializer_list<const char *> keys) {
+				std::string_view label, std::initializer_list<const char *> keys,
+				Reach reach = Reach::scope) {
 			std::vector<Chord> chords;
 			for (const char *key : keys) {
 				if (auto chord = parse_chord(key, scope)) {
 					chords.push_back(*chord);
 				}
 			}
-			defs.push_back({scope, name, label, group, std::move(chords)});
+			defs.push_back({scope, name, label, group, std::move(chords), reach});
 		};
-		add(Scope::global, "Apps", "launcher", "App launcher", {"Super+Space"});
-		add(Scope::global, "Apps", "terminal", "Terminal", {"Super+Return"});
+		add(Scope::global, "Apps", "launcher", "App launcher", {"Super+Space"},
+			Reach::overview);
+		add(Scope::global, "Apps", "terminal", "Terminal", {"Super+Return"},
+			Reach::overview);
 		add(Scope::global, "Clipboard", "copy", "Copy", {"Super+C"});
 		add(Scope::global, "Clipboard", "paste", "Paste", {"Super+V"});
 		add(Scope::global, "Windows", "close", "Close the window",
@@ -241,23 +199,24 @@ const std::vector<ActionDef> &registry() {
 		add(Scope::global, "Desktops", "desktop-8", "Desktop 8", {"Super+8"});
 		add(Scope::global, "Desktops", "desktop-9", "Desktop 9", {"Super+9"});
 		add(Scope::global, "Desktops", "zoom-reset", "Back to 100 %", {"Super+0"});
-		add(Scope::global, "Capture", "shot-screen", "Screenshot",
-			{"Super+Shift+3", "Shift+Print"});
-		add(Scope::global, "Capture", "shot-screen-copy",
-			"Screenshot to the clipboard", {"Super+Ctrl+Shift+3", "Ctrl+Shift+Print"});
-		add(Scope::global, "Capture", "capture-pick", "Shot of a region or window",
+		// The capture chords are tried before all else.
+		auto capture = [&](std::string_view name, std::string_view label,
+				std::initializer_list<const char *> keys) {
+			add(Scope::global, "Capture", name, label, keys, Reach::everywhere);
+		};
+		capture("shot-screen", "Screenshot", {"Super+Shift+3", "Shift+Print"});
+		capture("shot-screen-copy", "Screenshot to the clipboard",
+			{"Super+Ctrl+Shift+3", "Ctrl+Shift+Print"});
+		capture("capture-pick", "Shot of a region or window",
 			{"Super+Shift+4", "Print"});
-		add(Scope::global, "Capture", "capture-pick-copy",
-			"Shot of a region or window to the clipboard",
+		capture("capture-pick-copy", "Shot of a region or window to the clipboard",
 			{"Super+Ctrl+Shift+4", "Ctrl+Print"});
-		add(Scope::global, "Capture", "capture-toolbar", "Capture toolbar",
-			{"Super+Shift+5"});
-		add(Scope::global, "Capture", "capture-toolbar-copy",
-			"Capture toolbar, to the clipboard", {"Super+Ctrl+Shift+5"});
-		add(Scope::global, "Capture", "record-stop", "Stop the recording",
-			{"Alt+Print"});
-		add(Scope::global, "Capture", "record-stop-copy",
-			"Stop the recording, to the clipboard", {"Ctrl+Alt+Print"});
+		capture("capture-toolbar", "Capture toolbar", {"Super+Shift+5"});
+		capture("capture-toolbar-copy", "Capture toolbar, to the clipboard",
+			{"Super+Ctrl+Shift+5"});
+		capture("record-stop", "Stop the recording", {"Alt+Print"});
+		capture("record-stop-copy", "Stop the recording, to the clipboard",
+			{"Ctrl+Alt+Print"});
 		add(Scope::global, "Session", "lock", "Lock the screen", {"Super+L"});
 		add(Scope::global, "Session", "notifications-dismiss",
 			"Dismiss the newest notification", {"Super+N"});
@@ -373,6 +332,129 @@ std::expected<Chord, std::string> parse_chord(std::string_view text, Scope scope
 	return chord;
 }
 
+int Field::read(const Resolved &resolved) const {
+	return std::visit([&](auto held) { return static_cast<int>(resolved.*held); }, member);
+}
+
+void Field::write(Resolved &resolved, int value) const {
+	std::visit([&](auto held) {
+		using Held = std::remove_reference_t<decltype(resolved.*held)>;
+		resolved.*held = static_cast<Held>(value);
+	}, member);
+}
+
+Resolved::Resolved() {
+	for (const Field &field : fields) {
+		field.write(*this, field.fallback);
+	}
+}
+
+const Field *find_field(std::string_view section, std::string_view key) {
+	auto it = std::ranges::find_if(fields, [&](const Field &field) {
+		return field.section == section && field.key == key;
+	});
+	return it != fields.end() ? &*it : nullptr;
+}
+
+const Field *find_param(std::string_view param) {
+	auto it = std::ranges::find(fields, param, &Field::param);
+	return it != fields.end() ? &*it : nullptr;
+}
+
+namespace {
+
+bool in_bounds(const Field &field, long long number) {
+	return number >= field.min && number <= field.max;
+}
+
+// `a, b or c`.
+std::string join_or(std::span<const std::string_view> names) {
+	std::string out;
+	for (std::size_t i = 0; i < names.size(); i++) {
+		if (i > 0) {
+			out += i + 1 == names.size() ? " or " : ", ";
+		}
+		out += names[i];
+	}
+	return out;
+}
+
+} // namespace
+
+std::optional<int> parse_value(const Field &field, std::string_view text) {
+	if (field.kind != Kind::integer) {
+		std::span<const std::string_view> names = field.values();
+		auto it = std::ranges::find(names, text);
+		if (it == names.end()) {
+			return std::nullopt;
+		}
+		return static_cast<int>(it - names.begin());
+	}
+	if (field.off && text == "off") {
+		return 0;
+	}
+	long long number = 0;
+	auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), number);
+	if (err != std::errc{} || end != text.data() + text.size() || !in_bounds(field, number)) {
+		return std::nullopt;
+	}
+	return static_cast<int>(number);
+}
+
+std::string value_text(const Field &field, int value) {
+	if (field.kind != Kind::integer) {
+		return std::string{field.values()[static_cast<std::size_t>(value)]};
+	}
+	return value == 0 && field.off ? "off" : std::to_string(value);
+}
+
+bool allows(const Field &field, long long value) {
+	if (field.kind != Kind::integer) {
+		return value >= 0 && value < static_cast<long long>(field.values().size());
+	}
+	return in_bounds(field, value) || (field.off && value == 0);
+}
+
+std::string allowed(const Field &field) {
+	switch (field.kind) {
+	case Kind::choice:
+		return join_or(field.values());
+	case Kind::toggle:
+		return "on or off";
+	case Kind::integer:
+		return std::format("{} to {} {}{}", field.min, field.max, field.unit,
+			field.off ? " or off" : "");
+	}
+	return {};
+}
+
+std::string fields_help() {
+	std::string out;
+	std::string_view section;
+	for (const Field &field : fields) {
+		if (field.section != section) {
+			section = field.section;
+			out += std::format("  [{}]\n", section);
+		}
+		out += std::format("    {} = {}\n        {}; default {}\n", field.key,
+			allowed(field), field.help, value_text(field, field.fallback));
+	}
+	return out;
+}
+
+std::string_view scope_name(Scope scope) {
+	return scope == Scope::global ? "global" : "overview";
+}
+
+std::optional<Scope> parse_scope(std::string_view name) {
+	for (Scope scope : {Scope::global, Scope::overview}) {
+		if (name == scope_name(scope)) {
+			return scope;
+		}
+	}
+	return std::nullopt;
+}
+
 namespace {
 
 const ActionDef *find_action(std::string_view name, Scope scope) {
@@ -386,6 +468,31 @@ const ActionDef *find_action(std::string_view name, Scope scope) {
 
 std::string_view section_name(Scope scope) {
 	return scope == Scope::global ? "shortcuts" : "overview";
+}
+
+// The chords as the file writes them: `Super+Q, Alt+F4`.
+std::string chords_text(const std::vector<Chord> &chords) {
+	std::string out;
+	for (Chord chord : chords) {
+		if (!out.empty()) {
+			out += ", ";
+		}
+		out += chord_text(chord);
+	}
+	return out;
+}
+
+// The error for the first chord `chords` holds twice.
+std::expected<void, std::string> reject_repeats(const std::vector<Chord> &chords) {
+	for (std::size_t i = 0; i < chords.size(); i++) {
+		for (std::size_t j = i + 1; j < chords.size(); j++) {
+			if (chords[i] == chords[j]) {
+				return std::unexpected(std::format("chord '{}' given twice",
+					chord_text(chords[i])));
+			}
+		}
+	}
+	return {};
 }
 
 // One `name = value` line of [shortcuts] or [overview]: the entry's chords,
@@ -473,14 +580,38 @@ std::string_view line_value(std::string_view line) {
 	return eq == std::string_view::npos ? std::string_view{} : trim(text.substr(eq + 1));
 }
 
+bool is_setting_section(std::string_view name) {
+	return std::ranges::any_of(fields, [&](const Field &field) { return field.section == name; });
+}
+
+// One `key = value` line of [gestures] or [session]: the setting, or an
+// error saying what the field takes.
+void parse_setting_line(Parsed &out, int line, std::string_view section,
+		std::string_view key, std::string_view value) {
+	const Field *field = find_field(section, key);
+	if (field == nullptr) {
+		out.errors.push_back({.line = line,
+			.text = std::format("unknown setting '{}'", key)});
+		return;
+	}
+	std::optional<int> parsed = parse_value(*field, value);
+	if (!parsed.has_value()) {
+		out.errors.push_back({.line = line,
+			.text = std::format("{} must be {}", key, allowed(*field))});
+		return;
+	}
+	out.settings.push_back({.line = line, .field = field, .value = *parsed});
+}
+
 } // namespace
 
 // ------------------------------------------------------------- parsing
 
 Parsed parse(std::string_view text) {
 	Parsed out;
-	enum class Section { none, shortcuts, overview, commands, gestures, session, unknown };
+	enum class Section { none, shortcuts, overview, commands, setting, unknown };
 	Section section = Section::none;
+	std::string_view setting_section; // [gestures] or [session], while in one
 	int line_no = 0;
 	for (std::string_view line : split(text, '\n')) {
 		line_no++;
@@ -499,10 +630,9 @@ Parsed parse(std::string_view text) {
 				section = Section::overview;
 			} else if (name == "commands") {
 				section = Section::commands;
-			} else if (name == "gestures") {
-				section = Section::gestures;
-			} else if (name == "session") {
-				section = Section::session;
+			} else if (is_setting_section(name)) {
+				section = Section::setting;
+				setting_section = name;
 			} else {
 				out.errors.push_back({.line = line_no,
 					.text = std::format("unknown section '{}'", name)});
@@ -548,66 +678,8 @@ Parsed parse(std::string_view text) {
 			out.commands.push_back(std::move(entry));
 			break;
 		}
-		case Section::gestures:
-			if (name == "swipes") {
-				if (!parse_swipes(value).has_value()) {
-					out.errors.push_back({.line = line_no, .text =
-						"swipes must be three-finger-hops, four-finger-hops or off"});
-				} else {
-					out.gestures.push_back({.line = line_no, .name = std::string{name},
-						.value = std::string{value}});
-				}
-			} else if (name == "pinch-scale") {
-				if (value != "on" && value != "off") {
-					out.errors.push_back({.line = line_no,
-						.text = std::format("{} must be on or off", name)});
-				} else {
-					out.gestures.push_back({.line = line_no, .name = std::string{name},
-						.value = std::string{value}});
-				}
-			} else if (const Direction *direction = find_direction(name)) {
-				if (value != direction->way && value != direction->other) {
-					out.errors.push_back({.line = line_no, .text = std::format(
-						"{} must be {} or {}", name, direction->way, direction->other)});
-				} else {
-					out.gestures.push_back({.line = line_no, .name = std::string{name},
-						.value = std::string{value}});
-				}
-			} else {
-				out.errors.push_back({.line = line_no,
-					.text = std::format("unknown setting '{}'", name)});
-			}
-			break;
-		case Section::session:
-			if (name == "lock-idle") {
-				if (!parse_minutes(value).has_value()) {
-					out.errors.push_back({.line = line_no, .text = std::format(
-						"lock-idle must be 1 to {} minutes or off", max_lock_idle_minutes)});
-				} else {
-					out.session.push_back({.line = line_no, .name = std::string{name},
-						.value = std::string{value}});
-				}
-			} else if (name == "night-light") {
-				if (value != "on" && value != "off") {
-					out.errors.push_back({.line = line_no,
-						.text = "night-light must be on or off"});
-				} else {
-					out.session.push_back({.line = line_no, .name = std::string{name},
-						.value = std::string{value}});
-				}
-			} else if (name == "night-light-temperature") {
-				if (!parse_temperature(value).has_value()) {
-					out.errors.push_back({.line = line_no, .text = std::format(
-						"night-light-temperature must be {} to {} K",
-						night_light_min_k, night_light_max_k)});
-				} else {
-					out.session.push_back({.line = line_no, .name = std::string{name},
-						.value = std::string{value}});
-				}
-			} else {
-				out.errors.push_back({.line = line_no,
-					.text = std::format("unknown setting '{}'", name)});
-			}
+		case Section::setting:
+			parse_setting_line(out, line_no, setting_section, name, value);
 			break;
 		}
 	}
@@ -672,34 +744,13 @@ Resolved resolve(const Parsed &parsed) {
 			out.commands.push_back({.chord = cmd.chords.front(), .command = cmd.value});
 		}
 	}
-	bool idle_set = false, night_set = false, temp_set = false;
-	for (const Entry &entry : parsed.session) {
-		if (entry.name == "lock-idle" && !idle_set) {
-			out.lock_idle_minutes = *parse_minutes(entry.value);
-			idle_set = true;
-		} else if (entry.name == "night-light" && !night_set) {
-			out.night_light = entry.value == "on";
-			night_set = true;
-		} else if (entry.name == "night-light-temperature" && !temp_set) {
-			out.night_light_k = *parse_temperature(entry.value);
-			temp_set = true;
-		}
-	}
-	bool swipes_set = false, pinch_set = false;
-	std::array<bool, directions.size()> direction_set{};
-	for (const Entry &entry : parsed.gestures) {
-		if (entry.name == "swipes" && !swipes_set) {
-			out.swipes = *parse_swipes(entry.value);
-			swipes_set = true;
-		} else if (entry.name == "pinch-scale" && !pinch_set) {
-			out.pinch_scale = entry.value == "on";
-			pinch_set = true;
-		}
-		for (std::size_t i = 0; i < directions.size(); i++) {
-			if (entry.name == directions[i].key && !direction_set[i]) {
-				out.*directions[i].turned = entry.value == directions[i].other;
-				direction_set[i] = true;
-			}
+	// A setting is its first line's.
+	std::array<bool, fields.size()> seen{};
+	for (const Setting &setting : parsed.settings) {
+		std::size_t index = static_cast<std::size_t>(setting.field - fields.data());
+		if (!seen[index]) {
+			setting.field->write(out, setting.value);
+			seen[index] = true;
 		}
 	}
 	return out;
@@ -732,38 +783,22 @@ std::string template_text() {
 			group = def.group;
 			out += std::format("# {}\n", group);
 		}
-		std::string keys;
-		for (Chord chord : def.defaults) {
-			if (!keys.empty()) {
-				keys += ", ";
-			}
-			keys += chord_text(chord);
-		}
-		out += std::format("{} = {}\n", def.name, keys.empty() ? "none" : keys);
+		out += std::format("{} = {}\n", def.name,
+			def.defaults.empty() ? "none" : chords_text(def.defaults));
 	}
 	out += "\n[commands]\n"
 		"# A chord here runs its command through /bin/sh -c, started from\n"
 		"# the overview like the terminal action. Example:\n"
 		"# Super+B = firefox\n";
-	out += "\n[gestures]\n"
-		"# swipes = three-finger-hops | four-finger-hops | off\n"
-		"swipes = three-finger-hops\n"
-		"# pinch-scale = on | off\n"
-		"pinch-scale = on\n"
-		"# Which way each moves: the mouse wheel and the touchpad in apps, Super +\n"
-		"# scroll looking away, the swipe that opens the overview, the hops.\n";
-	for (const Direction &direction : directions) {
-		out += std::format("# {} = {} | {}\n{} = {}\n", direction.key, direction.way,
-			direction.other, direction.key, direction.way);
+	std::string_view section;
+	for (const Field &field : fields) {
+		if (field.section != section) {
+			section = field.section;
+			out += std::format("\n[{}]\n", section);
+		}
+		out += std::format("# {}\n# {} = {}\n{} = {}\n", field.help, field.key,
+			allowed(field), field.key, value_text(field, field.fallback));
 	}
-	out += std::format("\n[session]\n"
-		"# lock-idle = minutes of idleness before the screen locks, or off\n"
-		"lock-idle = {}\n"
-		"# night-light = on | off, its temperature {} to {} K\n"
-		"night-light = off\n"
-		"night-light-temperature = {}\n",
-		default_lock_idle_minutes, night_light_min_k, night_light_max_k,
-		default_night_light_k);
 	return out;
 }
 
@@ -824,29 +859,39 @@ int File::append_after(std::string_view section) const {
 	return last;
 }
 
-void File::write_line(int index, std::string_view name, std::string_view value,
-		bool del_empty) {
-	if (value.empty() && del_empty) {
-		lines_.erase(lines_.begin() + index);
+void File::erase_lines(const std::vector<int> &lines) {
+	for (std::size_t k = lines.size(); k > 0; k--) {
+		lines_.erase(lines_.begin() + lines[k - 1]);
+	}
+}
+
+void File::ensure_section(std::string_view section) {
+	if (section_header(section) >= 0) {
 		return;
 	}
-	lines_[static_cast<std::size_t>(index)] =
-		std::format("{} = {}", name, value.empty() ? "none" : value);
+	if (!lines_.empty() && !trim(lines_.back()).empty()) {
+		lines_.push_back("");
+	}
+	lines_.push_back(std::format("[{}]", section));
 }
 
 void File::append_entry(std::string_view section, std::string_view name,
 		std::string_view value) {
-	std::string line = std::format("{} = {}", name, value.empty() ? "none" : value);
-	if (section_header(section) < 0) {
-		// The section is missing: it is appended at the end of the file.
-		if (!lines_.empty() && !trim(lines_.back()).empty()) {
-			lines_.push_back("");
-		}
-		lines_.push_back(std::format("[{}]", section));
-		lines_.push_back(std::move(line));
+	ensure_section(section);
+	lines_.insert(lines_.begin() + append_after(section) + 1,
+		std::format("{} = {}", name, value.empty() ? "none" : value));
+}
+
+void File::write_entry(std::string_view section, std::string_view name,
+		std::string_view value) {
+	std::vector<int> lines = entry_lines(section, name);
+	if (lines.empty()) {
+		append_entry(section, name, value);
 		return;
 	}
-	lines_.insert(lines_.begin() + append_after(section) + 1, std::move(line));
+	erase_lines(std::vector<int>(lines.begin() + 1, lines.end()));
+	lines_[static_cast<std::size_t>(lines.front())] =
+		std::format("{} = {}", name, value.empty() ? "none" : value);
 }
 
 void File::rejoin() {
@@ -894,17 +939,11 @@ void File::take_from_actions(const std::vector<Chord> &chords, Scope scope,
 				keep.push_back(*chord);
 			}
 		}
-		std::string value;
-		for (Chord chord : keep) {
-			if (!value.empty()) {
-				value += ", ";
-			}
-			value += chord_text(chord);
+		if (keep.empty()) {
+			erase_lines(lines);
+		} else {
+			write_entry(section_name(scope), def.name, chords_text(keep));
 		}
-		for (std::size_t k = lines.size(); k > 1; k--) {
-			lines_.erase(lines_.begin() + lines[k - 1]);
-		}
-		write_line(lines.front(), def.name, value, true);
 	}
 }
 
@@ -925,10 +964,8 @@ void File::take_from_commands(const std::vector<Chord> &chords,
 			}
 		}
 	}
-	std::sort(doomed.begin(), doomed.end(), std::greater{});
-	for (int index : doomed) {
-		lines_.erase(lines_.begin() + index);
-	}
+	std::ranges::sort(doomed);
+	erase_lines(doomed);
 }
 
 std::expected<Edit, std::string> File::set_action(Scope scope,
@@ -939,36 +976,11 @@ std::expected<Edit, std::string> File::set_action(Scope scope,
 	}
 	// What the line gets: the given keys, or the action's defaults (`keys`
 	// null is the reset: its defaults written into its line).
-	std::vector<Chord> write;
-	if (keys.has_value()) {
-		for (std::size_t i = 0; i < keys->size(); i++) {
-			for (std::size_t j = i + 1; j < keys->size(); j++) {
-				if ((*keys)[i] == (*keys)[j]) {
-					return std::unexpected(std::format("chord '{}' given twice",
-						chord_text((*keys)[i])));
-				}
-			}
-		}
-		write = *keys;
-	} else {
-		write = def->defaults;
+	const std::vector<Chord> &write = keys.has_value() ? *keys : def->defaults;
+	if (auto repeat = reject_repeats(write); !repeat.has_value()) {
+		return std::unexpected(repeat.error());
 	}
-	std::string value;
-	for (Chord chord : write) {
-		if (!value.empty()) {
-			value += ", ";
-		}
-		value += chord_text(chord);
-	}
-	std::vector<int> lines = entry_lines(section_name(scope), action);
-	if (lines.empty()) {
-		append_entry(section_name(scope), action, value);
-	} else {
-		for (std::size_t k = lines.size(); k > 1; k--) {
-			lines_.erase(lines_.begin() + lines[k - 1]);
-		}
-		write_line(lines.front(), action, value, false);
-	}
+	write_entry(section_name(scope), action, chords_text(write));
 	std::vector<Moved> moved;
 	take_from_actions(write, scope, action, moved);
 	take_from_commands(write, moved);
@@ -978,31 +990,18 @@ std::expected<Edit, std::string> File::set_action(Scope scope,
 
 std::expected<Edit, std::string> File::set_commands(
 		const std::vector<Command> &commands) {
-	for (std::size_t i = 0; i < commands.size(); i++) {
-		for (std::size_t j = i + 1; j < commands.size(); j++) {
-			if (commands[i].chord == commands[j].chord) {
-				return std::unexpected(std::format("chord '{}' given twice",
-					chord_text(commands[i].chord)));
-			}
-		}
-	}
 	std::vector<Chord> chords;
 	for (const Command &command : commands) {
 		chords.push_back(command.chord);
 	}
+	if (auto repeat = reject_repeats(chords); !repeat.has_value()) {
+		return std::unexpected(repeat.error());
+	}
 	std::vector<Moved> moved;
 	take_from_actions(chords, Scope::global, {}, moved);
 	// The section's entries are replaced; its comments stay.
-	std::vector<int> lines = entry_lines("commands");
-	for (std::size_t k = lines.size(); k > 0; k--) {
-		lines_.erase(lines_.begin() + lines[k - 1]);
-	}
-	if (section_header("commands") < 0) {
-		if (!lines_.empty() && !trim(lines_.back()).empty()) {
-			lines_.push_back("");
-		}
-		lines_.push_back("[commands]");
-	}
+	erase_lines(entry_lines("commands"));
+	ensure_section("commands");
 	int at = append_after("commands");
 	for (const Command &command : commands) {
 		lines_.insert(lines_.begin() + at + 1,
@@ -1013,63 +1012,13 @@ std::expected<Edit, std::string> File::set_commands(
 	return Edit{text_, std::move(moved)};
 }
 
-std::expected<Edit, std::string> File::set_swipes(SwipePreset preset) {
-	return set_gesture("swipes", swipes_text(preset));
-}
-
-std::expected<Edit, std::string> File::set_session(std::string_view name,
-		std::string_view value) {
-	std::vector<int> lines = entry_lines("session", name);
-	if (lines.empty()) {
-		append_entry("session", name, std::string{value});
-	} else {
-		for (std::size_t k = lines.size(); k > 1; k--) {
-			lines_.erase(lines_.begin() + lines[k - 1]);
-		}
-		write_line(lines.front(), name, std::string{value}, false);
+std::expected<Edit, std::string> File::set(const Field &field, long long value) {
+	if (!allows(field, value)) {
+		return std::unexpected(std::format("{} must be {}", field.key, allowed(field)));
 	}
+	write_entry(field.section, field.key, value_text(field, static_cast<int>(value)));
 	rejoin();
 	return Edit{text_, {}};
-}
-
-// The one shape every line of [gestures] is written in: the first line that
-// sets it is rewritten, any later duplicate dropped, and a setting the file
-// does not name is appended to its section.
-std::expected<Edit, std::string> File::set_gesture(std::string_view name,
-		std::string_view value) {
-	std::vector<int> lines = entry_lines("gestures", name);
-	if (lines.empty()) {
-		append_entry("gestures", name, std::string{value});
-	} else {
-		for (std::size_t k = lines.size(); k > 1; k--) {
-			lines_.erase(lines_.begin() + lines[k - 1]);
-		}
-		write_line(lines.front(), name, std::string{value}, false);
-	}
-	rejoin();
-	return Edit{text_, {}};
-}
-
-std::expected<Edit, std::string> File::set_pinch_scale(bool on) {
-	return set_gesture("pinch-scale", on ? "on" : "off");
-}
-
-std::expected<Edit, std::string> File::set_direction(std::string_view key,
-		std::string_view way) {
-	const Direction *direction = find_direction(key);
-	if (direction == nullptr) {
-		return std::unexpected(std::format("unknown direction '{}'", key));
-	}
-	if (way != direction->way && way != direction->other) {
-		return std::unexpected(std::format("{} must be {} or {}", key, direction->way,
-			direction->other));
-	}
-	return set_gesture(key, way);
-}
-
-const Direction *find_direction(std::string_view key) {
-	auto it = std::ranges::find(directions, key, &Direction::key);
-	return it != directions.end() ? &*it : nullptr;
 }
 
 } // namespace settings

@@ -286,10 +286,10 @@ int run_step() {
 			return -100;
 		}
 		check(server->conf.night_light, "the night light is on in canvas.conf");
-		check(server->conf.night_light_k == settings::default_night_light_k,
+		check(server->conf.night_light_k == settings::night_light_temperature.fallback,
 			"at the default temperature");
 		float want[3];
-		night_light_multipliers(settings::default_night_light_k, want);
+		night_light_multipliers(settings::night_light_temperature.fallback, want);
 		check(want[2] < 0.8 && want[0] > 0.99,
 			"4000 K takes blue down and leaves red alone");
 		float warmer[3];

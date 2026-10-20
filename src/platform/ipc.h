@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -42,8 +43,9 @@ public:
 	// is spawned, so clients inherit $WAYLAND_CANVAS_SOCKET.
 	bool init();
 	void finish(); // drops the socket and every client connection
-	// actually changes. Each serializes its part of the state and pushes one
-	// event line to every subscriber.
+	// The `emit_` functions are called when the state they report actually
+	// changes. Each serializes its part of it and pushes one event line to
+	// every subscriber.
 	void emit_overview(const Output &output, bool active);
 	void emit_outputs(); // an output appeared, went, or changed size or scale
 	void emit_desktops(); // a desktop was created, moved, combined or abandoned
@@ -52,14 +54,6 @@ public:
 	void emit_windows();
 	void emit_theme(); // the mode changed
 	void emit_settings(); // the effective settings changed
-	// The user finished (or cancelled) a `capture.pick` request: answers
-	// its client now. `payload` is the result's JSON text, or the plain
-	// error message when `ok` is false. No request pending: a no-op.
-	void answer_pick(bool ok, std::string_view payload);
-	// The user pressed a chord (or cancelled) a `shortcut.capture`
-	// request: answers its client with the chord's text, or null. No
-	// request pending: a no-op.
-	void answer_capture(std::optional<settings::Chord> chord);
 	// A `surface.move` or `surface.resize` drag ended: answers its client
 	// with the rectangle the surface ended at, or an error without one. No
 	// request pending: a no-op.
@@ -86,41 +80,49 @@ private:
 		bool doomed = false; // dropped; freed by reap()
 	};
 
-	// One method of the protocol: `run` returns the result's JSON text or an
-	// error message.
-	using MethodFn = std::expected<std::string, std::string> (Ipc::*)(Client &,
-		JsonObject *params);
-	std::expected<std::string, std::string> dispatch_method(Client &client,
-		std::string_view name, JsonObject *params);
+	// What answers a request: a result's JSON text or an error message.
+	using Answer = std::expected<std::string, std::string>;
+	// The requests whose answer waits for the user, one of each kind at a time:
+	// `capture.pick` for the pick, `shortcut.capture` for the chord, and
+	// `surface.move` and `surface.resize` for the release.
+	enum class Wait { pick, capture, drag };
+	struct Waiting {
+		Client *client = nullptr;
+		std::string id; // the id its response echoes
+	};
+	// What a method hands back: the answer to send now, or the wait that
+	// answers it later.
+	struct Reply {
+		Answer body;
+		std::optional<Wait> wait;
+		Reply(std::string result) : body(std::move(result)) {}
+		Reply(std::unexpected<std::string> error) : body(std::move(error)) {}
+		Reply(Wait kind) : wait(kind) {}
+	};
 
-	std::expected<std::string, std::string> m_state(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_subscribe(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_launcher_toggle(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_overview_toggle(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_quit(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_theme_set(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_window_focus(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_action_run(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_surface_place(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_surface_unplace(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_capture_stop(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_settings_get(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_settings_set(Client &client,
-		JsonObject *params);
-	std::expected<std::string, std::string> m_shortcut_cancel(Client &client,
-		JsonObject *params);
+	// One method of the protocol, a row of dispatch_method's table.
+	Reply dispatch_method(Client &client, std::string_view name, JsonObject *params);
+	Reply m_state(Client &client, JsonObject *params);
+	Reply m_subscribe(Client &client, JsonObject *params);
+	Reply m_launcher_toggle(Client &client, JsonObject *params);
+	Reply m_overview_toggle(Client &client, JsonObject *params);
+	Reply m_quit(Client &client, JsonObject *params);
+	Reply m_theme_set(Client &client, JsonObject *params);
+	Reply m_window_focus(Client &client, JsonObject *params);
+	Reply m_action_run(Client &client, JsonObject *params);
+	Reply m_surface_place(Client &client, JsonObject *params);
+	Reply m_surface_unplace(Client &client, JsonObject *params);
+	Reply m_surface_move(Client &client, JsonObject *params);
+	Reply m_surface_resize(Client &client, JsonObject *params);
+	Reply m_capture_pick(Client &client, JsonObject *params);
+	Reply m_capture_stop(Client &client, JsonObject *params);
+	Reply m_shortcut_capture(Client &client, JsonObject *params);
+	Reply m_shortcut_cancel(Client &client, JsonObject *params);
+	Reply m_settings_get(Client &client, JsonObject *params);
+	Reply m_settings_set(Client &client, JsonObject *params);
+	// Hands the press held on a plugin's surface to a compositor drag; the
+	// release answers.
+	Reply surface_drag(JsonObject *params, bool resize);
 	// An `action` event: `args_json` is a whole JSON object's text.
 	void emit_action(std::string_view name, std::string_view args_json);
 	// An `output` param by name; nullptr when absent and none is under the
@@ -130,19 +132,12 @@ private:
 	static int handle_listen(int fd, uint32_t mask, void *data);
 	static int handle_client(int fd, uint32_t mask, void *data);
 	void handle_line(Client &client, std::string_view line);
-	// `capture.pick` — a method whose answer waits for the user: starts
-	// the picker; the response goes out through answer_pick().
-	void capture_pick(Client &client, std::string_view id_json,
-		JsonObject *params);
-	// `shortcut.capture` — likewise: starts the capture; the response goes
-	// out through answer_capture() once the chord is pressed.
-	void shortcut_capture(Client &client, std::string_view id_json,
-		JsonObject *params);
-	// `surface.move` and `surface.resize` — likewise: hand the press held on
-	// a plugin's surface to a compositor drag; the response goes out through
-	// answer_surface_drag() at the release.
-	void surface_drag(Client &client, std::string_view id_json,
-		JsonObject *params, bool resize);
+	// Sends the answer to the request `id_json` of `client`.
+	void send(Client &client, std::string_view id_json, const Answer &body);
+	// Sends the answer to the request waiting on `kind`: the callbacks the user's
+	// actions end in call it. No request waiting (its client went): a no-op.
+	void answer(Wait kind, const Answer &body);
+	Waiting &slot(Wait kind) { return waiting_[static_cast<std::size_t>(kind)]; }
 	void push_event(std::string_view name, std::string_view params);
 	bool has_subscriber() const; // a live connection that asked for events
 	void queue(Client &client, std::string_view line); // append, flush, cap-check
@@ -157,10 +152,8 @@ private:
 	bool quit_ = false; // `quit` answered: end the session after the flush
 	int listen_fd_ = -1;
 	EventSourcePtr listen_source_;
-	// The pending `capture.pick` request, if any: the client to answer and
-	// the id its response echoes. Cleared in ~Client when that client goes.
-	Client *pick_client_ = nullptr;
-	std::string pick_id_;
+	// The request waiting on each kind of user action, if any.
+	std::array<Waiting, 3> waiting_;
 	// The window list as it was last pushed, and the rows each frame's list
 	// is read into: an identical list is no event. Both keep their rows'
 	// strings between frames, so comparing allocates nothing. Unset while no
@@ -168,12 +161,6 @@ private:
 	// for leaves behind.
 	std::vector<WindowRow> told_rows_, window_rows_;
 	bool windows_told_ = false;
-	// Likewise the pending `shortcut.capture` request.
-	Client *capture_client_ = nullptr;
-	std::string capture_id_;
-	// Likewise the pending `surface.move` or `surface.resize` request.
-	Client *drag_client_ = nullptr;
-	std::string drag_id_;
 	std::vector<std::unique_ptr<Client>> clients_;
 };
 

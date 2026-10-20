@@ -1,7 +1,7 @@
 // bindings.cpp: the actions behind the keyboard shortcuts and how every
 // resolved chord (core/settings.cpp) reaches them — the tables the settings
-// build, the capture chords tried before all else, and the fixed VT
-// switching no chord can take.
+// build, the chords that reach everywhere tried before all else, and the
+// fixed VT switching no chord can take.
 
 #include <array>
 #include <cmath>
@@ -269,7 +269,7 @@ void act_lock(Server &server, Output *, KeyArg) {
 void act_night_light(Server &server, Output *, KeyArg) {
 	settings::File file{server.conf_text};
 	std::expected<settings::Edit, std::string> edit =
-		file.set_session("night-light", server.conf.night_light ? "off" : "on");
+		file.set(settings::night_light, server.conf.night_light ? 0 : 1);
 	if (!edit.has_value() || !server.write_conf(edit->text)) {
 		wlr_log(WLR_ERROR, "the night light could not be written to canvas.conf");
 	}
@@ -406,7 +406,8 @@ void act_ov_leave(Server &, Output *output, KeyArg) {
 // ------------------------------------------------------------ the runners
 
 // What each registry action runs, by scope and name — the same names
-// canvas.conf writes (core/settings.cpp's registry()).
+// canvas.conf writes (core/settings.cpp's registry()). Bindings::apply joins
+// each action to its row once and logs an action without one.
 struct Runner {
 	settings::Scope scope;
 	const char *name;
@@ -486,6 +487,16 @@ constexpr std::array runners = {
 	Runner{settings::Scope::overview, "leave", act_ov_leave, 0},
 };
 
+// The index in `runners` of what a registry action runs, or -1.
+int runner_index(const settings::ActionDef &def) {
+	for (std::size_t i = 0; i < runners.size(); i++) {
+		if (runners[i].scope == def.scope && runners[i].name == def.name) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
 // VT switching is fixed: in no file, and no chord can take it — the way
 // out of a stuck session stays.
 struct VtBind {
@@ -515,55 +526,72 @@ Bindings::Bindings(Server &server)
 	: server_(server) {
 }
 
+bool Bindings::has_runner(const settings::ActionDef &def) {
+	return runner_index(def) >= 0;
+}
+
+Bindings::Table Bindings::table_of(const settings::ActionDef &def) {
+	if (def.reach == settings::Reach::everywhere) {
+		return Table::everywhere;
+	}
+	return def.scope == settings::Scope::overview ? Table::overview : Table::global;
+}
+
 void Bindings::apply(const settings::Resolved &resolved) {
 	global_.clear();
-	capture_.clear();
+	everywhere_.clear();
 	overview_.clear();
 	commands_.clear();
 	command_lines_.clear();
-	launcher_ = -1;
-	terminal_ = -1;
 
 	// Super+Shift+3 is '#' on a US layout, so the digits are matched
 	// through their unshifted level too (input.cpp), and Shift+Print is
 	// Sys_Req on most layouts, so both keysyms are bound.
 	auto add = [](std::vector<Bind> &table, const settings::Chord &chord,
-			int action, int command) {
-		table.push_back({.mods = chord.mods, .key = chord.key, .twice = chord.twice,
-			.action = action, .command = command});
+			Bind bind) {
+		bind.mods = chord.mods;
+		bind.key = chord.key;
+		bind.twice = chord.twice;
+		table.push_back(bind);
 		if (chord.key == XKB_KEY_Print
 				&& (chord.mods & settings::mod_shift) != 0) {
-			table.push_back({.mods = chord.mods, .key = XKB_KEY_Sys_Req,
-				.action = action, .command = command});
+			bind.key = XKB_KEY_Sys_Req;
+			bind.twice = false;
+			table.push_back(bind);
 		}
 	};
 
 	const std::vector<settings::ActionDef> &registry = settings::registry();
 	for (std::size_t i = 0; i < registry.size(); i++) {
 		const settings::ActionDef &def = registry[i];
-		int index = static_cast<int>(i);
-		if (def.scope == settings::Scope::global && def.name == "launcher") {
-			launcher_ = index;
-		} else if (def.scope == settings::Scope::global
-				&& def.name == "terminal") {
-			terminal_ = index;
+		int runner = runner_index(def);
+		if (runner < 0) {
+			wlr_log(WLR_ERROR, "the action %.*s has no runner: its keys do nothing",
+				static_cast<int>(def.name.size()), def.name.data());
+			continue;
+		}
+		std::vector<Bind> *table = &global_;
+		switch (table_of(def)) {
+		case Table::everywhere:
+			table = &everywhere_;
+			break;
+		case Table::overview:
+			table = &overview_;
+			break;
+		case Table::global:
+			break;
 		}
 		for (const settings::Chord &chord : resolved.keys[i]) {
 			// `key` 0 is the Super tap or double tap: handle_tap runs it,
 			// find never matches it.
-			if (def.group == "Capture") {
-				add(capture_, chord, index, -1);
-			} else if (def.scope == settings::Scope::global) {
-				add(global_, chord, index, -1);
-			} else {
-				add(overview_, chord, index, -1);
-			}
+			add(*table, chord, {.runner = runner,
+				.in_overview = def.reach == settings::Reach::overview});
 		}
 	}
 	for (const settings::Command &command : resolved.commands) {
 		command_lines_.push_back(command.command);
-		add(commands_, command.chord, -1,
-			static_cast<int>(command_lines_.size() - 1));
+		add(commands_, command.chord,
+			{.command = static_cast<int>(command_lines_.size() - 1)});
 	}
 }
 
@@ -579,24 +607,27 @@ const Bindings::Bind *Bindings::find(xkb_keysym_t sym, uint32_t mods,
 	return nullptr;
 }
 
-bool Bindings::run(const Bind &bind, Output *output) {
+void Bindings::run(const Bind &bind, Output *output) {
 	if (bind.command >= 0) {
 		act_spawn(server_, output, command_lines_[bind.command].c_str());
-		return true;
+		return;
 	}
-	const settings::ActionDef &def = settings::registry()[bind.action];
-	for (const Runner &runner : runners) {
-		if (runner.scope == def.scope && runner.name == def.name) {
-			runner.fn(server_, output, runner.arg);
-			return true;
-		}
-	}
-	return false;
+	const Runner &runner = runners[bind.runner];
+	runner.fn(server_, output, runner.arg);
 }
 
+bool Bindings::run_found(const std::vector<Bind> &table, xkb_keysym_t sym,
+		uint32_t mods, Output *output) {
+	const Bind *bind = find(sym, mods, table);
+	if (bind == nullptr) {
+		return false;
+	}
+	run(*bind, output);
+	return true;
+}
 
 bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
-	if (handle_capture(sym, mods, output)) {
+	if (handle_everywhere(sym, mods, output)) {
 		return true;
 	}
 	sym = xkb_keysym_to_lower(sym);
@@ -607,13 +638,8 @@ bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 			return true;
 		}
 	}
-	if (const Bind *bind = find(sym, mods, global_)) {
-		return run(*bind, output);
-	}
-	if (const Bind *bind = find(sym, mods, commands_)) {
-		return run(*bind, output);
-	}
-	return false;
+	return run_found(global_, sym, mods, output)
+		|| run_found(commands_, sym, mods, output);
 }
 
 bool Bindings::handle_locked(xkb_keysym_t sym, uint32_t mods, Output *output) {
@@ -629,35 +655,29 @@ bool Bindings::handle_locked(xkb_keysym_t sym, uint32_t mods, Output *output) {
 	return false;
 }
 
-bool Bindings::handle_capture(xkb_keysym_t sym, uint32_t mods, Output *output) {
-	if (const Bind *bind = find(sym, mods, capture_)) {
-		run(*bind, output);
-		return true;
-	}
-	return false;
+bool Bindings::handle_everywhere(xkb_keysym_t sym, uint32_t mods, Output *output) {
+	return run_found(everywhere_, sym, mods, output);
 }
 
 bool Bindings::handle_overview(xkb_keysym_t sym, uint32_t mods, Output &output) {
 	sym = xkb_keysym_to_lower(sym);
 	// The overview's own keys first...
-	if (const Bind *bind = find(sym, mods, overview_)) {
-		return run(*bind, &output);
+	if (run_found(overview_, sym, mods, &output)) {
+		return true;
 	}
-	// ...then the capture chords, the launcher, the terminal and the
-	// [commands] chords. Every other key does nothing there.
-	if (handle_capture(sym, mods, &output)) {
+	// ...then the chords that reach everywhere, the global actions that
+	// reach the overview and the [commands] chords. Every other key does
+	// nothing there.
+	if (handle_everywhere(sym, mods, &output)) {
 		return true;
 	}
 	for (const Bind &bind : global_) {
-		if (bind.key == sym && bind.mods == mods
-				&& (bind.action == launcher_ || bind.action == terminal_)) {
-			return run(bind, &output);
+		if (bind.in_overview && bind.key == sym && bind.mods == mods) {
+			run(bind, &output);
+			return true;
 		}
 	}
-	if (const Bind *bind = find(sym, mods, commands_)) {
-		return run(*bind, &output);
-	}
-	return false;
+	return run_found(commands_, sym, mods, &output);
 }
 
 const Bindings::Bind *Bindings::tap_bind(Output *output, bool twice) const {
@@ -680,7 +700,11 @@ const Bindings::Bind *Bindings::tap_bind(Output *output, bool twice) const {
 
 bool Bindings::handle_tap(Output *output, bool twice) {
 	const Bind *bind = tap_bind(output, twice);
-	return bind != nullptr && run(*bind, output);
+	if (bind == nullptr) {
+		return false;
+	}
+	run(*bind, output);
+	return true;
 }
 
 bool Bindings::has_double_tap(Output *output) const {
@@ -690,7 +714,8 @@ bool Bindings::has_double_tap(Output *output) const {
 bool Bindings::launcher_chord(xkb_keysym_t sym, uint32_t mods) const {
 	for (const Bind &bind : global_) {
 		if (bind.key != 0 && bind.key == xkb_keysym_to_lower(sym)
-				&& bind.mods == mods && bind.action == launcher_) {
+				&& bind.mods == mods && bind.runner >= 0
+				&& runners[bind.runner].fn == act_launcher) {
 			return true;
 		}
 	}

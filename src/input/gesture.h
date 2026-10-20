@@ -5,6 +5,7 @@
 #include <string_view>
 #include "canvas/desktop.h"
 #include "core/geometry.h"
+#include "core/settings.h"
 
 class Output;
 class Server;
@@ -14,10 +15,8 @@ class Server;
 // that opens the overview, or no 3- and 4-finger gestures at all; whether
 // Super + a 2-finger pinch scales a desktop; which way the swipe that opens
 // the overview goes, and which way a swipe hops.
-enum class SwipePreset { three_finger_hops, four_finger_hops, off };
-
 struct GestureOptions {
-	SwipePreset swipes = SwipePreset::three_finger_hops;
+	settings::SwipePreset swipes = settings::SwipePreset::three_finger_hops;
 	bool pinch_scale = true;
 	bool overview_down = false; // the overview opens swiping down, goes in swiping up
 	bool hops_away = false; // a swipe hops away from where the fingers point

@@ -17,13 +17,19 @@ using unit::check;
 
 constexpr std::size_t ramp = 256;
 
+// The night light's lowest and highest temperature and its default, from the
+// settings table.
+constexpr int min_k = settings::night_light_temperature.min;
+constexpr int max_k = settings::night_light_temperature.max;
+constexpr int default_k = settings::night_light_temperature.fallback;
+
 uint16_t at(const std::vector<uint16_t> &table, std::size_t channel, std::size_t i,
 	std::size_t size = ramp) {
 	return table[channel * size + i];
 }
 
 void daylight_leaves_the_screen_alone() {
-	std::vector<uint16_t> table = night_light_table(settings::night_light_max_k, ramp);
+	std::vector<uint16_t> table = night_light_table(max_k, ramp);
 	check(table.size() == 3 * ramp, "three channels of ramp entries each");
 	for (std::size_t channel = 0; channel < 3; channel++) {
 		for (std::size_t i = 0; i < ramp; i++) {
@@ -37,7 +43,7 @@ void daylight_leaves_the_screen_alone() {
 }
 
 void the_endpoints_are_right() {
-	for (int kelvin : {settings::night_light_min_k, 2000, settings::default_night_light_k, 5500}) {
+	for (int kelvin : {min_k, 2000, default_k, 5500}) {
 		std::vector<uint16_t> table = night_light_table(kelvin, ramp);
 		float multiplier[3];
 		night_light_multipliers(kelvin, multiplier);
@@ -54,7 +60,7 @@ void the_endpoints_are_right() {
 }
 
 void the_channels_never_fall() {
-	for (int kelvin = settings::night_light_min_k; kelvin <= settings::night_light_max_k;
+	for (int kelvin = min_k; kelvin <= max_k;
 			kelvin += 250) {
 		std::vector<uint16_t> table = night_light_table(kelvin, ramp);
 		for (std::size_t channel = 0; channel < 3; channel++) {
@@ -67,7 +73,7 @@ void the_channels_never_fall() {
 }
 
 void blue_is_lowest_when_warm() {
-	for (int kelvin = settings::night_light_min_k; kelvin < settings::night_light_max_k;
+	for (int kelvin = min_k; kelvin < max_k;
 			kelvin += 250) {
 		std::vector<uint16_t> table = night_light_table(kelvin, ramp);
 		uint16_t red = at(table, 0, ramp - 1);
@@ -77,7 +83,7 @@ void blue_is_lowest_when_warm() {
 			std::format("{} K: red {} green {} blue {} (blue lowest, red highest)",
 				kelvin, red, green, blue));
 	}
-	std::vector<uint16_t> warm = night_light_table(settings::default_night_light_k, ramp);
+	std::vector<uint16_t> warm = night_light_table(default_k, ramp);
 	check(at(warm, 2, ramp - 1) < at(warm, 0, ramp - 1),
 		"4000 K takes blue strictly below red");
 }
@@ -98,9 +104,9 @@ void any_ramp_size() {
 }
 
 void out_of_range_temperatures_clamp() {
-	check(night_light_table(10, ramp) == night_light_table(settings::night_light_min_k, ramp),
+	check(night_light_table(10, ramp) == night_light_table(min_k, ramp),
 		"below the minimum is the minimum");
-	check(night_light_table(20000, ramp) == night_light_table(settings::night_light_max_k, ramp),
+	check(night_light_table(20000, ramp) == night_light_table(max_k, ramp),
 		"above the maximum is the maximum");
 }
 

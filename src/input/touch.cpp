@@ -165,7 +165,7 @@ bool Touch::join_gesture(Contact &contact, std::size_t fingers, uint32_t time) {
 	// (Input::handle_swipe_begin): the fingers beyond the first are ignored.
 	if ((fingers == 3 || fingers == 4)
 			&& !input_.gestures_blocked()
-			&& server_.gestures.options().swipes != SwipePreset::off) {
+			&& server_.gestures.options().swipes != settings::SwipePreset::off) {
 		contact.role = Role::view;
 		contacts_.push_back(contact);
 		begin_swipe(time, static_cast<uint32_t>(fingers));

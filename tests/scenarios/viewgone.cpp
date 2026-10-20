@@ -34,6 +34,7 @@ std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
 bool finished = false; // the run reached its end; see main()
+bool pick_answered = false, pick_cancelled = false; // what the asked pick was answered with
 uint32_t t = 50000;
 wlr_pointer ptr{};
 wlr_keyboard kbd{};
@@ -185,8 +186,11 @@ int run_step() {
 		}
 		wlr_box f = view->frame_box();
 		move_to(f.x + f.width / 2.0, f.y + f.height / 2.0);
-		check(server->capture_ui.start_pick(output(), PickWhat::window,
-				PickUse::ipc, CaptureOptions{}),
+		check(server->capture_ui.ask_pick(output(), PickWhat::window,
+				[](std::optional<CapturePicker::Pick> pick) {
+					pick_answered = true;
+					pick_cancelled = !pick.has_value();
+				}),
 			"the window picker opened");
 		move_to(f.x + f.width / 2.0 + 4, f.y + f.height / 2.0 + 4);
 		check(picker_outlines_a_window(), "the picker outlines the window under the pointer");
@@ -203,6 +207,7 @@ int run_step() {
 		key(KEY_ESC, true);
 		key(KEY_ESC, false);
 		check(!server->capture_ui.picking(), "Escape closed the picker");
+		check(pick_answered && pick_cancelled, "Escape answered the asked pick with nothing");
 		open_window("cast");
 		return 600;
 	}

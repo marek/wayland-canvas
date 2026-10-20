@@ -1201,11 +1201,11 @@ int run_step() {
 		return 300;
 	}
 	case 73: {
-		if (server->gestures.options().swipes != SwipePreset::four_finger_hops
+		if (server->gestures.options().swipes != settings::SwipePreset::four_finger_hops
 				&& retries++ < 100) {
 			return -100;
 		}
-		check(server->gestures.options().swipes == SwipePreset::four_finger_hops,
+		check(server->gestures.options().swipes == settings::SwipePreset::four_finger_hops,
 			"the file's swipe preset reached the gesture engine");
 		return 300;
 	}

@@ -48,15 +48,12 @@ bool CapturePicker::uses(const Output &output) const {
 	return state_.active && (state_.output == &output || state_.cur_output == &output);
 }
 
-void CapturePicker::start(Output &output, PickWhat what, PickUse use,
-		const CaptureOptions &options) {
+void CapturePicker::start(Output &output, PickWhat what) {
 	state_ = State{
 		.active = true,
 		.output = &output,
 		.what = what,
 		.window_mode = what == PickWhat::window || what == PickWhat::any,
-		.use = use,
-		.options = options,
 	};
 	state_.cur_output = &output;
 	// The picker starts where the pointer already is: the crosshair and the
@@ -69,18 +66,16 @@ void CapturePicker::start(Output &output, PickWhat what, PickUse use,
 	output.damage();
 }
 
-std::optional<PickUse> CapturePicker::close() {
+void CapturePicker::close() {
 	if (!state_.active) {
-		return std::nullopt;
+		return;
 	}
-	PickUse use = state_.use;
 	Output *output = state_.output;
 	state_ = State{};
 	server_.input.set_cursor_image("default");
 	if (output != nullptr) {
 		output->damage();
 	}
-	return use;
 }
 
 bool CapturePicker::toggle_window_mode() {
@@ -203,10 +198,8 @@ void CapturePicker::release(Output &output, double ox, double oy, bool dragged,
 }
 
 void CapturePicker::complete(const Pick &pick, Picked picked) {
-	PickUse use = state_.use;
-	CaptureOptions options = state_.options;
 	close();
-	picked(pick, use, options);
+	picked(pick);
 }
 
 // Everything outside the selection dimmed, a crosshair while a region is

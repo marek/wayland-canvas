@@ -436,6 +436,22 @@ test(
 	suite: 'unit',
 )
 
+# Links the compositor's core: the runners are the code it joins to the
+# registry, so the test builds with what the scenarios build with.
+test(
+	'bindings',
+	executable(
+		'test-bindings',
+		'tests/test_bindings.cpp',
+		protocol_headers,
+		include_directories: src_inc,
+		link_with: core_lib,
+		dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
+			json_glib, libinput, libdrm],
+	),
+	suite: 'unit',
+)
+
 test(
 	'night-light-ramp',
 	executable(

@@ -34,11 +34,11 @@ struct FingerCounts {
 
 FingerCounts fingers_of(const GestureOptions &options) {
 	switch (options.swipes) {
-	case SwipePreset::three_finger_hops:
+	case settings::SwipePreset::three_finger_hops:
 		return {.hop = 3, .overview = 4};
-	case SwipePreset::four_finger_hops:
+	case settings::SwipePreset::four_finger_hops:
 		return {.hop = 4, .overview = 3};
-	case SwipePreset::off:
+	case settings::SwipePreset::off:
 		return {};
 	}
 	return {};

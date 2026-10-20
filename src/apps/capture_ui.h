@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
+#include <variant>
 #include <xkbcommon/xkbcommon.h>
 #include "apps/capture_options.h"
 #include "apps/capture_overlay.h"
@@ -38,11 +40,14 @@ public:
 	// True while the picker overlay is up.
 	bool picking() const { return picker_.active(); }
 
-	// Opens the picker on `output` (the output under the cursor when null);
-	// false when there is no output to pick on or a pick already runs. An
-	// ipc pick answers the pending `capture.pick` request; a shot or record
-	// pick uses the given options.
-	bool start_pick(Output *output, PickWhat what, PickUse use, CaptureOptions options);
+	// What a pick asked for by a caller ends in: the finished pick, or
+	// nothing when it was cancelled. Called once, while the pick closes.
+	using PickAnswer = std::function<void(std::optional<CapturePicker::Pick>)>;
+
+	// Opens the picker on `output` (the output under the cursor when null)
+	// for a caller that wants the pick itself; false when there is no output
+	// to pick on or a pick already runs.
+	bool ask_pick(Output *output, PickWhat what, PickAnswer answer);
 
 	// Opens the capture toolbar on `output` (under the cursor when null);
 	// a second open replaces it. `recording_focus` opens it with the
@@ -118,12 +123,22 @@ private:
 		int seconds_left = 0;
 	};
 
+	// What a finished pick becomes: a shot or a recording of it, with the
+	// options its toolbar chose, or what the caller that asked for the pick
+	// itself makes of it.
+	enum class PickUse { shot, record };
+	struct PickJob {
+		PickUse use = PickUse::shot;
+		CaptureOptions options{};
+	};
+	using PickGoal = std::variant<PickJob, PickAnswer>;
+
 	// One key's symbol, lowercased.
 	void key_sym(xkb_keysym_t sym, uint32_t mods);
-	void cancel_picker(); // close + answer a pending ipc pick "cancelled"
-	void pick_done(const CapturePicker::Pick &pick, PickUse use,
-		const CaptureOptions &options);
-	void answer_ipc(const CapturePicker::Pick &pick); // the pick as `capture.pick` answers
+	// Opens the picker; false when there is no output or a pick already runs.
+	bool open_picker(Output *output, PickWhat what, PickGoal goal);
+	void cancel_picker(); // close; a caller waiting for the pick is answered nothing
+	void pick_done(const CapturePicker::Pick &pick);
 	void toolbar_chose(ToolbarMode mode, Output &output, const CaptureOptions &options);
 
 	void begin_countdown(int seconds); // deferred_ holds the action
@@ -139,6 +154,8 @@ private:
 	Recorder recorder_;
 	CapturePicker picker_;
 	CaptureToolbar toolbar_;
+	// What the picker, while it is up, is for.
+	std::optional<PickGoal> goal_;
 
 	Deferred deferred_;
 	EventSourcePtr countdown_;

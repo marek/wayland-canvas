@@ -39,8 +39,8 @@ no night light, and says so to a client that asks for its gamma.
 |---|---|
 | The switch | `night-light` in `canvas.conf`'s `[session]` section, off by default |
 | The temperature | `night-light-temperature`, 1000 K to 6500 K, 4000 K by default; 6500 K is daylight and changes nothing |
-| Where it is set | the brightness panel's night-light row, the settings window's Session page, and the `night-light` action (Super+Ctrl+N), which writes the file like any other change |
-| Over the IPC | `settings.get` reports `session.nightLight` and `session.nightLightTemperature`; `settings.set` changes either ([../platform/ipc.md](../platform/ipc.md)) |
+| Where it is set | the brightness panel's night-light row, the settings window's Session page, and the `night-light` action (Super+Ctrl+N), which writes the file like any other change. The panel and the page are one control: it takes the temperature's range from `settings.get`, so the range is written in one place |
+| Over the IPC | `settings.get` reports `session.nightLight` and `session.nightLightTemperature`, and the temperature's range and default under `fields`; `settings.set` changes either ([../platform/ipc.md](../platform/ipc.md)) |
 | On an output with a gamma ramp | the transform is committed with the output's state: the display is warm and every capture stays in true colours |
 | On an output without one | the setting is kept and nothing is warmed; the frames are what they were |
 | A gamma-control client | its table replaces whatever the compositor was showing on that output; the built-in filter applies again as soon as the client is gone. An output with no ramp tells the client its request failed |

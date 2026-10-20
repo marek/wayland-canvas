@@ -2,10 +2,8 @@
 
 #include <cstdint>
 #include <functional>
-#include <optional>
 #include <string>
 
-#include "apps/capture_options.h"
 #include "apps/capture_overlay.h"
 #include "core/util.h"
 
@@ -15,8 +13,6 @@ class View;
 
 // What the picker is after; `any` offers windows and outputs alike.
 enum class PickWhat { region, window, output, any };
-// What happens to the finished pick.
-enum class PickUse { ipc, shot, record };
 
 // The picker overlay: a region dragged, or a window or an output clicked.
 // It frames the pick and reports the finished one; what becomes of it is
@@ -32,9 +28,8 @@ public:
 		View *view = nullptr; // window
 	};
 
-	// A pick finished: the picker is already closed. Given the use and the
-	// options the pick was opened with.
-	using Picked = std::function_ref<void(const Pick &, PickUse, const CaptureOptions &)>;
+	// A pick finished: the picker is already closed.
+	using Picked = std::function_ref<void(const Pick &)>;
 
 	explicit CapturePicker(Server &server);
 	CapturePicker(const CapturePicker &) = delete;
@@ -45,9 +40,9 @@ public:
 	bool uses(const Output &output) const;
 
 	// Opens the picker on `output`; the caller checks none is open.
-	void start(Output &output, PickWhat what, PickUse use, const CaptureOptions &options);
-	// Closes the picker: the use of the pick it was open for, if it was.
-	std::optional<PickUse> close();
+	void start(Output &output, PickWhat what);
+	// Closes the picker; a no-op when none is open.
+	void close();
 
 	// Space: windows instead of a region, and back. False when this pick
 	// is not a region pick.
@@ -76,8 +71,6 @@ private:
 		Output *output = nullptr; // where a region is dragged
 		PickWhat what = PickWhat::region;
 		bool window_mode = false; // Space: windows instead of a region
-		PickUse use = PickUse::ipc;
-		CaptureOptions options{};
 		bool pressed = false;
 		bool dragging = false;
 		double press_x = 0, press_y = 0; // output-local logical

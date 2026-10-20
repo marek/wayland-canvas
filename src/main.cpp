@@ -1,14 +1,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unistd.h>
 
 #include "platform/ipc.h"
 #include "core/server.h"
+#include "core/settings.h"
 
 namespace {
 
-constexpr char usage_text[] =
+constexpr char usage_head[] =
 	"usage: wayland-canvas [-s <startup command>] [-S <scale>] [-d] [-B] [-h]\n"
 	"       wayland-canvas msg <method> [<params as JSON>]\n"
 	"\n"
@@ -41,14 +43,9 @@ constexpr char usage_text[] =
 	"    4-finger swipe up    zoom out further\n"
 	"    4-finger swipe sideways  swipe a desktop away (abandon it)\n"
 	"    2-finger pinch     zoom the overview around the cursor\n"
-	"  The [gestures] section of ~/.config/wayland-canvas/canvas.conf picks\n"
-	"  the finger counts: three-finger-hops (above; the default),\n"
-	"  four-finger-hops (every 3 and 4 swapped) or off (no 3- or 4-finger\n"
-	"  compositor gesture; the client's in the normal view, nothing in the\n"
-	"  overview); pinch-scale = off makes a Super + 2-finger pinch a plain\n"
-	"  pinch; mouse-scroll, touchpad-scroll and pan = natural | traditional,\n"
-	"  overview-swipe = up | down and hop-swipe = toward | away each turn\n"
-	"  one direction: apps' scrolling, looking away, the overview, the hops\n"
+	"  canvas.conf's [gestures] and [session] sections hold these settings:\n";
+
+constexpr char usage_tail[] =
 	"\n"
 	"Screen capture:\n"
 	"  Super+Shift+3      screenshot of the whole screen\n"
@@ -79,20 +76,25 @@ constexpr char usage_text[] =
 	"                     has picked. Bare `msg capture.pick` reads the portal's\n"
 	"                     chooser list on stdin and prints the chosen line\n"
 	"  capture.stop       stop a running recording\n"
-	"  settings.get       the shortcuts, the commands and the gestures, with\n"
-	"                     the file and its ignored lines\n"
+	"  settings.get       the shortcuts, the commands and every setting, with\n"
+	"                     the file, its ignored lines and what each setting takes\n"
 	"  settings.set       set one action's keys (\"keys\": null for the\n"
-	"                     defaults, [] for none), the commands, the swipe\n"
-	"                     preset, the pinch switch or a direction; the answer says\n"
-	"                     where a taken chord came from\n"
+	"                     defaults, [] for none), the commands or one setting\n"
+	"                     (a param named as in settings.get's gestures and\n"
+	"                     session); the answer says where a taken chord came from\n"
 	"  shortcut.capture   record a shortcut: the answer comes when the chord\n"
 	"                     is pressed (Esc alone cancels)\n"
 	"  shortcut.cancel    cancel a recording under way\n"
 	"  quit               end the session\n"
 	"\n"
-	"Every keyboard shortcut and the gesture choices live in\n"
+	"Every keyboard shortcut and every setting live in\n"
 	"~/.config/wayland-canvas/canvas.conf, written with every default on the\n"
 	"first run and re-read whenever it is saved.\n";
+
+// The whole help: the settings in the middle are the settings table's.
+std::string usage_text() {
+	return std::string{usage_head} + settings::fields_help() + usage_tail;
+}
 
 } // namespace
 
@@ -132,10 +134,10 @@ int main(int argc, char *argv[]) {
 			options.start_bar = false;
 			break;
 		case 'h':
-			std::fputs(usage_text, stdout);
+			std::fputs(usage_text().c_str(), stdout);
 			return 0;
 		default:
-			std::fputs(usage_text, stderr);
+			std::fputs(usage_text().c_str(), stderr);
 			return 1;
 		}
 	}

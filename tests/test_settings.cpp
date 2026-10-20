@@ -295,84 +295,199 @@ void errors_carry_line_numbers() {
 		"the good lines apply around the errors");
 }
 
-// [gestures] directions: each kind of scroll and swipe turns on its own
-// (docs/intents/input/gestures.md).
-void gesture_directions() {
-	settings::Resolved defaults = settings::resolve(settings::parse(""));
-	for (const settings::Direction &direction : settings::directions) {
-		check(!(defaults.*direction.turned),
-			std::format("{} defaults to {}", direction.key, direction.way));
-	}
-	// Each key turns its own direction and no other.
-	for (const settings::Direction &direction : settings::directions) {
-		settings::Parsed parsed = settings::parse(
-			std::format("[gestures]\n{} = {}\n", direction.key, direction.other));
-		settings::Resolved resolved = settings::resolve(parsed);
-		bool only_it = parsed.errors.empty();
-		for (const settings::Direction &other : settings::directions) {
-			only_it = only_it && resolved.*other.turned == (&other == &direction);
+// The values a field takes at its edges, for the checks that run over the
+// whole table: every name of a choice or toggle, an integer's bounds and
+// default, and 0 where the field has `off`.
+std::vector<int> edge_values(const settings::Field &field) {
+	std::vector<int> out;
+	switch (field.kind) {
+	case settings::Kind::choice:
+	case settings::Kind::toggle:
+		for (std::size_t i = 0; i < field.values().size(); i++) {
+			out.push_back(static_cast<int>(i));
 		}
-		check(only_it, std::format("{} = {} turns that direction alone", direction.key,
-			direction.other));
+		break;
+	case settings::Kind::integer:
+		out = {field.min, field.max, field.fallback};
+		if (field.off) {
+			out.push_back(0);
+		}
+		break;
 	}
-	settings::Parsed bad = settings::parse("[gestures]\nhop-swipe = sideways\n");
-	check(error_at(bad, 2, "hop-swipe must be toward or away"),
-		"a value that is neither way is an error naming both, with its line");
-	check(!settings::resolve(bad).hops_away, "the bad line leaves the default");
-
-	settings::File file{"[gestures]\npan = natural\npan = natural\n"};
-	auto edit = file.set_direction("pan", "traditional");
-	check(edit.has_value() && edit->text == "[gestures]\npan = traditional\n",
-		"set_direction rewrites the first line and drops the duplicate");
-	check(edit.has_value() && settings::File{edit->text}.resolved().pan_traditional,
-		"the written way resolves");
-	check(!file.set_direction("pan", "sideways").has_value()
-			&& !file.set_direction("wheel", "natural").has_value(),
-		"an unknown way or direction is an error");
+	return out;
 }
 
-void lock_idle_has_a_range() {
-	settings::Parsed top = settings::parse(
-		std::format("[session]\nlock-idle = {}\n", settings::max_lock_idle_minutes));
-	check(!error_on_line(top, 2) && settings::resolve(top).lock_idle_minutes
-			== settings::max_lock_idle_minutes,
-		"the largest idle time the timer holds is accepted");
-	for (std::string_view past : {"35792", "4294967301", "0", "-3"}) {
-		settings::Parsed parsed = settings::parse(
-			std::format("[session]\nlock-idle = {}\n", past));
-		check(error_on_line(parsed, 2) && settings::resolve(parsed).lock_idle_minutes
-				== settings::default_lock_idle_minutes,
-			std::format("lock-idle = {} is an error and the default stays", past));
+// A value of `field` as one line of its section.
+std::string setting_text(const settings::Field &field, int value) {
+	return std::format("[{}]\n{} = {}\n", field.section, field.key,
+		settings::value_text(field, value));
+}
+
+// The settings table (settings.h): its rows are well-formed.
+void the_table_is_well_formed() {
+	for (std::size_t i = 0; i < settings::fields.size(); i++) {
+		const settings::Field &field = settings::fields[i];
+		std::string name{field.key};
+		check(settings::find_field(field.section, field.key) == &field,
+			name + " is found by its section and key");
+		check(settings::find_param(field.param) == &field,
+			name + " is found by its param");
+		check(settings::allows(field, field.fallback), name + " allows its own default");
+		check(!field.help.empty(), name + " says what it does");
+		check(field.section == "gestures" || field.section == "session",
+			name + " is in [gestures] or [session]");
+		if (field.kind == settings::Kind::choice) {
+			check(field.values().size() >= 2, name + " has at least two names");
+		}
+		if (field.kind == settings::Kind::integer) {
+			check(field.min <= field.max && !field.unit.empty(),
+				name + " has bounds and a unit");
+		}
+		for (std::size_t j = 0; j < i; j++) {
+			check(settings::fields[j].param != field.param
+					&& (settings::fields[j].section != field.section
+						|| settings::fields[j].key != field.key),
+				name + " shares neither its key nor its param with another row");
+		}
 	}
+	settings::Resolved defaults;
+	for (const settings::Field &field : settings::fields) {
+		check(field.read(defaults) == field.fallback,
+			std::format("{} starts at its default", field.key));
+	}
+}
+
+// Every value of every setting is written by the file, parsed back and
+// resolved to itself, and changes no other setting.
+void every_setting_round_trips() {
+	settings::Resolved defaults;
+	for (const settings::Field &field : settings::fields) {
+		for (int value : edge_values(field)) {
+			std::string what = std::format("{} = {}", field.key,
+				settings::value_text(field, value));
+			settings::Parsed parsed = settings::parse(setting_text(field, value));
+			check(parsed.errors.empty(), what + " parses");
+			settings::Resolved resolved = settings::resolve(parsed);
+			check(field.read(resolved) == value, what + " resolves to itself");
+			for (const settings::Field &other : settings::fields) {
+				check(&other == &field || other.read(resolved) == other.fallback,
+					what + " leaves " + std::string{other.key} + " alone");
+			}
+		}
+	}
+}
+
+// A value outside what a field takes is an error naming what it takes, on
+// its line, and the default stays.
+void bad_values_are_errors() {
+	for (const settings::Field &field : settings::fields) {
+		std::vector<std::string> bad = {"sideways", "1.5"};
+		if (field.kind == settings::Kind::integer) {
+			bad = {"sometimes", std::to_string(field.min - 1),
+				std::to_string(static_cast<long long>(field.max) + 1),
+				"4294967301", "-3"};
+			if (field.off) {
+				bad.push_back("0");
+			}
+		}
+		for (const std::string &value : bad) {
+			std::string what = std::format("{} = '{}'", field.key, value);
+			settings::Parsed parsed = settings::parse(
+				std::format("[{}]\n{} = {}\n", field.section, field.key, value));
+			check(error_at(parsed, 2, std::format("{} must be {}", field.key,
+					settings::allowed(field))),
+				what + " is an error naming what the setting takes");
+			check(field.read(settings::resolve(parsed)) == field.fallback,
+				what + " leaves the default");
+		}
+	}
+	check(settings::allowed(*settings::find_param("hopSwipe")) == "toward or away",
+		"a choice names its values");
 	check(!error_on_line(settings::parse("[session]\nlock-idle = off\n"), 2),
 		"lock-idle = off is accepted");
+	check(!error_on_line(settings::parse(std::format("[session]\nlock-idle = {}\n",
+			settings::lock_idle.max)), 2),
+		"the largest idle time the timer holds is accepted");
+	check(error_at(settings::parse("[gestures]\nwaggle = on\n"), 2,
+			"unknown setting 'waggle'"),
+		"a key no row has is an unknown setting");
 }
 
-void template_parses_back() {
+// The first setting line wins, a later one is ignored.
+void first_line_of_a_setting_wins() {
+	settings::Resolved resolved = settings::resolve(settings::parse(
+		"[gestures]\npan = traditional\npan = natural\n"));
+	check(resolved.pan_traditional, "the first pan line wins");
+}
+
+// The first-run file and --help are written from the table.
+void template_and_help_list_every_setting() {
 	std::string text = settings::template_text();
 	settings::Parsed parsed = settings::parse(text);
 	check(parsed.errors.empty(), "the template parses without errors");
-	settings::Resolved from_template = settings::resolve(parsed);
-	settings::Resolved defaults = settings::resolve(settings::parse(""));
-	check(from_template == defaults,
+	check(settings::resolve(parsed) == settings::resolve(settings::parse("")),
 		"the template resolves to exactly the defaults");
 	check(text.find("[commands]\n") != std::string::npos
 			&& text.find("# Super+B = firefox") != std::string::npos,
 		"the template holds an empty [commands] with a commented example");
-	bool directions_written = true;
-	for (const settings::Direction &direction : settings::directions) {
-		directions_written = directions_written
-			&& text.find(std::format("\n{} = {}\n", direction.key, direction.way))
-				!= std::string::npos;
-	}
 	check(text.find("[gestures]\n") != std::string::npos
-			&& text.find("swipes = three-finger-hops") != std::string::npos
-			&& text.find("pinch-scale = on") != std::string::npos && directions_written,
-		"the template holds [gestures] at its defaults, every direction too");
+			&& text.find("[session]\n") != std::string::npos,
+		"the template holds [gestures] and [session]");
+	std::string help = settings::fields_help();
+	for (const settings::Field &field : settings::fields) {
+		std::string key{field.key};
+		check(text.find(std::format("\n{} = {}\n", field.key,
+				settings::value_text(field, field.fallback))) != std::string::npos,
+			key + " is written in the template at its default");
+		check(text.find(std::string{field.help}) != std::string::npos,
+			key + " is explained in the template");
+		check(help.find(std::format("{} = {}", field.key, settings::allowed(field)))
+				!= std::string::npos && help.find(std::string{field.help})
+					!= std::string::npos,
+			key + " is in --help with what it takes");
+	}
 	check(text.find("# Apps\n") != std::string::npos
 			&& text.find("# Windows\n") != std::string::npos
 			&& text.find("# In the overview\n") != std::string::npos,
 		"the template names the groups");
+}
+
+// File::set writes every setting in place.
+void set_writes_every_setting() {
+	for (const settings::Field &field : settings::fields) {
+		for (int value : edge_values(field)) {
+			settings::File file{"# kept\n"};
+			auto edit = file.set(field, value);
+			std::string what = std::format("set {} = {}", field.key,
+				settings::value_text(field, value));
+			check(edit.has_value(), what + " succeeds");
+			settings::File reloaded{edit->text};
+			check(reloaded.parsed().errors.empty()
+					&& field.read(reloaded.resolved()) == value
+					&& edit->text.starts_with("# kept\n"),
+				what + " is written, resolves to itself, and keeps the comment");
+		}
+		long long past = static_cast<long long>(field.max) + 1;
+		settings::File file{"[gestures]\n"};
+		check(!file.set(field, field.kind == settings::Kind::integer ? past
+				: static_cast<long long>(field.values().size())).has_value(),
+			std::format("set {} past its values is an error", field.key));
+		if (field.kind == settings::Kind::integer) {
+			check(!file.set(field, static_cast<long long>(field.max) * 100000).has_value(),
+				std::format("set {} past an int is an error, not a wrapped value",
+					field.key));
+		}
+	}
+	settings::File file{"[gestures]\npan = natural\npan = natural\n"};
+	auto edit = file.set(*settings::find_param("pan"), 1);
+	check(edit.has_value() && edit->text == "[gestures]\npan = traditional\n",
+		"set rewrites the first line and drops the duplicate");
+	check(!file.set(*settings::find_param("pan"), 2).has_value(),
+		"a way that is neither is an error");
+	settings::File untouched{"[gestures]\npan = natural\npan = natural\n"};
+	check(!untouched.set(*settings::find_param("pan"), 2).has_value()
+			&& untouched.text() == "[gestures]\npan = natural\npan = natural\n",
+		"an error leaves the file as it was");
 }
 
 void edit_keeps_every_other_byte() {
@@ -436,8 +551,9 @@ void edit_keeps_every_other_byte() {
 void edit_appends_into_missing_section() {
 	std::string before = "[shortcuts]\nlauncher = Super+Space\n";
 	settings::File file{before};
-	auto edit = file.set_swipes(settings::SwipePreset::four_finger_hops);
-	check(edit.has_value(), "set_swipes succeeds");
+	auto edit = file.set(*settings::find_param("swipes"),
+		static_cast<long long>(settings::SwipePreset::four_finger_hops));
+	check(edit.has_value(), "set succeeds");
 	check(edit->text == "[shortcuts]\nlauncher = Super+Space\n"
 			"\n[gestures]\nswipes = four-finger-hops\n",
 		"a missing section is appended at the end of the file");
@@ -554,6 +670,19 @@ void overview_resolution() {
 		"overview lines leave global actions alone");
 }
 
+void scope_names_round_trip() {
+	for (settings::Scope scope : {settings::Scope::global, settings::Scope::overview}) {
+		check(settings::parse_scope(settings::scope_name(scope)) == scope,
+			std::format("scope '{}' parses back to itself", settings::scope_name(scope)));
+	}
+	check(settings::scope_name(settings::Scope::global) == "global"
+			&& settings::scope_name(settings::Scope::overview) == "overview",
+		"the scopes are named global and overview");
+	check(!settings::parse_scope("Global").has_value() && !settings::parse_scope("").has_value()
+			&& !settings::parse_scope("shortcuts").has_value(),
+		"any other text is no scope");
+}
+
 } // namespace
 
 int main() {
@@ -569,15 +698,19 @@ int main() {
 	precedence_none();
 	precedence_taken_from_default_holders();
 	errors_carry_line_numbers();
-	gesture_directions();
-	template_parses_back();
-	lock_idle_has_a_range();
+	the_table_is_well_formed();
+	every_setting_round_trips();
+	bad_values_are_errors();
+	first_line_of_a_setting_wins();
+	template_and_help_list_every_setting();
+	set_writes_every_setting();
 	edit_keeps_every_other_byte();
 	edit_appends_into_missing_section();
 	edit_reports_moved();
 	edit_back_to_defaults();
 	edit_errors();
 	overview_resolution();
+	scope_names_round_trip();
 
 	return unit::summary();
 }

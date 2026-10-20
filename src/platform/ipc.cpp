@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -19,6 +20,7 @@
 
 #include "canvas/desktop.h"
 #include "core/config.h"
+#include "core/json.h"
 #include "core/text.h"
 #include "core/theme.h"
 #include "core/wlr.h"
@@ -30,16 +32,6 @@ namespace {
 
 constexpr int listen_backlog = 4;
 constexpr std::size_t line_chunk = 512;
-
-std::string_view trim(std::string_view line) {
-	while (!line.empty() && (line.front() == ' ' || line.front() == '\t' || line.front() == '\r')) {
-		line.remove_prefix(1);
-	}
-	while (!line.empty() && (line.back() == ' ' || line.back() == '\t' || line.back() == '\r')) {
-		line.remove_suffix(1);
-	}
-	return line;
-}
 
 // Fills `addr` with `path`. False when the path does not fit.
 bool fill_address(sockaddr_un &addr, const std::string &path) {
@@ -71,22 +63,6 @@ std::string socket_path_for(const char *runtime_dir, const char *display) {
 }
 
 // ------------------------------------------------------ json-glib wrappers
-
-// json-glib is C, so it is safe under -fno-exceptions; the RAII handles follow
-// the util.h pattern. g_error_free is not null-safe, so GError gets its own.
-using JsonParserPtr = Handle<JsonParser, g_object_unref>;
-using JsonBuilderPtr = Handle<JsonBuilder, g_object_unref>;
-using JsonGeneratorPtr = Handle<JsonGenerator, g_object_unref>;
-using GCharPtr = Handle<char, g_free>;
-
-struct GErrorHolder {
-	GError *error = nullptr;
-	~GErrorHolder() {
-		if (error != nullptr) {
-			g_error_free(error);
-		}
-	}
-};
 
 // Compact JSON text for a tree the caller still owns.
 std::string node_text(JsonNode *node) {
@@ -142,9 +118,49 @@ std::string event_line(std::string_view name, std::string_view params) {
 	return out;
 }
 
+// The x, y, width and height members of a rectangle: the one shape every
+// rectangle has on the wire.
+void add_number(JsonBuilder *builder, int value) {
+	json_builder_add_int_value(builder, value);
+}
+
+void add_number(JsonBuilder *builder, double value) {
+	json_builder_add_double_value(builder, value);
+}
+
+template <typename Number>
+void add_rect_members(JsonBuilder *builder, Number x, Number y, Number width, Number height) {
+	json_builder_set_member_name(builder, "x");
+	add_number(builder, x);
+	json_builder_set_member_name(builder, "y");
+	add_number(builder, y);
+	json_builder_set_member_name(builder, "width");
+	add_number(builder, width);
+	json_builder_set_member_name(builder, "height");
+	add_number(builder, height);
+}
+
 // ------------------------------------------------------------- params
 
-// A string param: nullopt when absent; an error naming it when not one.
+// The string a node holds; null for any other node, or none.
+const char *node_string(JsonNode *node) {
+	return node != nullptr && json_node_get_node_type(node) == JSON_NODE_VALUE
+			&& json_node_get_value_type(node) == G_TYPE_STRING
+		? json_node_get_string(node) : nullptr;
+}
+
+// The object a node holds; null for any other node, or none.
+JsonObject *node_object(JsonNode *node) {
+	return node != nullptr && json_node_get_node_type(node) == JSON_NODE_OBJECT
+		? json_node_get_object(node) : nullptr;
+}
+
+// The array a node holds; null for any other node, or none.
+JsonArray *node_array(JsonNode *node) {
+	return node != nullptr && json_node_get_node_type(node) == JSON_NODE_ARRAY
+		? json_node_get_array(node) : nullptr;
+}
+
 // A boolean parameter the caller has already found on `params`.
 std::expected<bool, std::string> req_bool(JsonObject *params, const char *name) {
 	JsonNode *node = json_object_get_member(params, name);
@@ -156,17 +172,17 @@ std::expected<bool, std::string> req_bool(JsonObject *params, const char *name) 
 	return static_cast<bool>(json_node_get_boolean(node));
 }
 
+// A string param: nullopt when absent; an error naming it when not one.
 std::expected<std::optional<std::string>, std::string> opt_string(
 		JsonObject *params, const char *name) {
 	if (params == nullptr || !json_object_has_member(params, name)) {
 		return std::optional<std::string>{};
 	}
-	JsonNode *node = json_object_get_member(params, name);
-	if (json_node_get_node_type(node) != JSON_NODE_VALUE
-			|| json_node_get_value_type(node) != G_TYPE_STRING) {
+	const char *value = node_string(json_object_get_member(params, name));
+	if (value == nullptr) {
 		return std::unexpected(std::format("params: {} must be a string", name));
 	}
-	return std::optional{std::string{json_node_get_string(node)}};
+	return std::optional{std::string{value}};
 }
 
 // A whole-number param: nullopt when absent; an error naming it when not one.
@@ -181,6 +197,25 @@ std::expected<std::optional<long long>, std::string> opt_int(
 		return std::unexpected(std::format("params: {} must be a whole number", name));
 	}
 	return std::optional{json_node_get_int(node)};
+}
+
+// The `scope` param: global when absent; an error when it names neither scope.
+std::expected<settings::Scope, std::string> opt_scope(JsonObject *params) {
+	std::expected<std::optional<std::string>, std::string> name =
+		opt_string(params, "scope");
+	if (!name.has_value()) {
+		return std::unexpected(name.error());
+	}
+	if (!name->has_value()) {
+		return settings::Scope::global;
+	}
+	std::optional<settings::Scope> scope = settings::parse_scope(*(*name));
+	if (!scope.has_value()) {
+		return std::unexpected(std::format("params: scope must be \"{}\" or \"{}\"",
+			settings::scope_name(settings::Scope::global),
+			settings::scope_name(settings::Scope::overview)));
+	}
+	return *scope;
 }
 
 // -------------------------------------------------------- state as JSON
@@ -229,14 +264,7 @@ void add_output(JsonBuilder *builder, const Output &output) {
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "name");
 	json_builder_add_string_value(builder, output.wlr->name);
-	json_builder_set_member_name(builder, "x");
-	json_builder_add_int_value(builder, output.lx);
-	json_builder_set_member_name(builder, "y");
-	json_builder_add_int_value(builder, output.ly);
-	json_builder_set_member_name(builder, "width");
-	json_builder_add_int_value(builder, output.width);
-	json_builder_set_member_name(builder, "height");
-	json_builder_add_int_value(builder, output.height);
+	add_rect_members(builder, output.lx, output.ly, output.width, output.height);
 	json_builder_set_member_name(builder, "scale");
 	json_builder_add_double_value(builder, output.wlr->scale);
 	// What the output is looking at, in canvas pixels: a plugin placing
@@ -244,14 +272,7 @@ void add_output(JsonBuilder *builder, const Output &output) {
 	Rect view = output.viewport();
 	json_builder_set_member_name(builder, "view");
 	json_builder_begin_object(builder);
-	json_builder_set_member_name(builder, "x");
-	json_builder_add_double_value(builder, view.x);
-	json_builder_set_member_name(builder, "y");
-	json_builder_add_double_value(builder, view.y);
-	json_builder_set_member_name(builder, "width");
-	json_builder_add_double_value(builder, view.w);
-	json_builder_set_member_name(builder, "height");
-	json_builder_add_double_value(builder, view.h);
+	add_rect_members(builder, view.x, view.y, view.w, view.h);
 	json_builder_end_object(builder);
 	// What that view leaves free of the chrome, in canvas pixels — the
 	// bars' exclusive zones, and the overview's strips while the overview
@@ -263,14 +284,7 @@ void add_output(JsonBuilder *builder, const Output &output) {
 		screen.y + screen.height);
 	json_builder_set_member_name(builder, "usable");
 	json_builder_begin_object(builder);
-	json_builder_set_member_name(builder, "x");
-	json_builder_add_double_value(builder, tl.x);
-	json_builder_set_member_name(builder, "y");
-	json_builder_add_double_value(builder, tl.y);
-	json_builder_set_member_name(builder, "width");
-	json_builder_add_double_value(builder, br.x - tl.x);
-	json_builder_set_member_name(builder, "height");
-	json_builder_add_double_value(builder, br.y - tl.y);
+	add_rect_members(builder, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
 	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "overview");
 	json_builder_add_boolean_value(builder, output.overview.active());
@@ -296,14 +310,7 @@ void add_desktops_array(JsonBuilder *builder, Server &server) {
 		json_builder_add_int_value(builder, static_cast<int>(desktop.id()));
 		json_builder_set_member_name(builder, "number");
 		json_builder_add_int_value(builder, desktop.number());
-		json_builder_set_member_name(builder, "x");
-		json_builder_add_int_value(builder, frame.x);
-		json_builder_set_member_name(builder, "y");
-		json_builder_add_int_value(builder, frame.y);
-		json_builder_set_member_name(builder, "width");
-		json_builder_add_int_value(builder, frame.width);
-		json_builder_set_member_name(builder, "height");
-		json_builder_add_int_value(builder, frame.height);
+		add_rect_members(builder, frame.x, frame.y, frame.width, frame.height);
 		json_builder_end_object(builder);
 	}
 	json_builder_end_array(builder);
@@ -367,35 +374,62 @@ void add_windows_array(JsonBuilder *builder, const std::vector<WindowRow> &rows)
 
 // -------------------------------------------------------- settings as JSON
 
-// A swipe preset's name, as canvas.conf and the settings window write it.
-std::string_view swipe_name(settings::SwipePreset preset) {
-	switch (preset) {
-	case settings::SwipePreset::three_finger_hops:
-		return "three-finger-hops";
-	case settings::SwipePreset::four_finger_hops:
-		return "four-finger-hops";
-	case settings::SwipePreset::off:
-		return "off";
+// A setting's value as JSON: a choice's name, a toggle's boolean, an
+// integer's number.
+void add_field_value(JsonBuilder *builder, const settings::Field &field, int value) {
+	switch (field.kind) {
+	case settings::Kind::choice:
+		json_builder_add_string_value(builder,
+			std::string{field.values()[static_cast<std::size_t>(value)]}.c_str());
+		break;
+	case settings::Kind::toggle:
+		json_builder_add_boolean_value(builder, value != 0);
+		break;
+	case settings::Kind::integer:
+		json_builder_add_int_value(builder, value);
+		break;
 	}
-	return "off";
 }
 
-std::optional<settings::SwipePreset> swipe_preset(std::string_view name) {
-	if (name == "three-finger-hops") {
-		return settings::SwipePreset::three_finger_hops;
+// What one setting takes, as the `fields` of settings.get report it:
+// where it is written, its kind, its bounds or names, and its default.
+void add_field_limits(JsonBuilder *builder, const settings::Field &field) {
+	auto add_string = [builder](const char *name, std::string_view text) {
+		json_builder_set_member_name(builder, name);
+		json_builder_add_string_value(builder, std::string(text).c_str());
+	};
+	add_string("section", field.section);
+	add_string("key", field.key);
+	switch (field.kind) {
+	case settings::Kind::choice:
+		add_string("kind", "choice");
+		json_builder_set_member_name(builder, "choices");
+		json_builder_begin_array(builder);
+		for (std::string_view name : field.values()) {
+			json_builder_add_string_value(builder, std::string{name}.c_str());
+		}
+		json_builder_end_array(builder);
+		break;
+	case settings::Kind::toggle:
+		add_string("kind", "toggle");
+		break;
+	case settings::Kind::integer:
+		add_string("kind", "integer");
+		add_string("unit", field.unit);
+		json_builder_set_member_name(builder, "min");
+		json_builder_add_int_value(builder, field.off ? 0 : field.min);
+		json_builder_set_member_name(builder, "max");
+		json_builder_add_int_value(builder, field.max);
+		break;
 	}
-	if (name == "four-finger-hops") {
-		return settings::SwipePreset::four_finger_hops;
-	}
-	if (name == "off") {
-		return settings::SwipePreset::off;
-	}
-	return std::nullopt;
+	json_builder_set_member_name(builder, "default");
+	add_field_value(builder, field, field.fallback);
 }
 
 // The settings as settings.get returns them (docs/intents/platform/ipc.md):
 // the file, its ignored lines, every action with its keys and defaults in
-// the registry's order, the commands, the gestures.
+// the registry's order, the commands, each section's settings and what
+// each setting takes.
 void add_settings(JsonBuilder *builder, Server &server) {
 	auto add_string = [builder](const char *name, std::string_view text) {
 		json_builder_set_member_name(builder, name);
@@ -427,8 +461,7 @@ void add_settings(JsonBuilder *builder, Server &server) {
 	for (std::size_t i = 0; i < registry.size(); i++) {
 		const settings::ActionDef &def = registry[i];
 		json_builder_begin_object(builder);
-		add_string("scope",
-			def.scope == settings::Scope::overview ? "overview" : "global");
+		add_string("scope", settings::scope_name(def.scope));
 		add_string("action", def.name);
 		add_string("label", def.label);
 		add_string("group", def.group);
@@ -450,25 +483,180 @@ void add_settings(JsonBuilder *builder, Server &server) {
 		json_builder_end_object(builder);
 	}
 	json_builder_end_array(builder);
-	json_builder_set_member_name(builder, "gestures");
-	json_builder_begin_object(builder);
-	add_string("swipes", swipe_name(server.conf.swipes));
-	json_builder_set_member_name(builder, "pinchScale");
-	json_builder_add_boolean_value(builder, server.conf.pinch_scale);
-	for (const settings::Direction &direction : settings::directions) {
-		add_string(std::string{direction.param}.c_str(),
-			server.conf.*direction.turned ? direction.other : direction.way);
+	// [gestures] and [session]: each setting's value, a section at a time.
+	std::string_view section;
+	for (const settings::Field &field : settings::fields) {
+		if (field.section != section) {
+			if (!section.empty()) {
+				json_builder_end_object(builder);
+			}
+			section = field.section;
+			json_builder_set_member_name(builder, std::string{section}.c_str());
+			json_builder_begin_object(builder);
+		}
+		json_builder_set_member_name(builder, std::string{field.param}.c_str());
+		add_field_value(builder, field, field.read(server.conf));
 	}
 	json_builder_end_object(builder);
-	json_builder_set_member_name(builder, "session");
+	json_builder_set_member_name(builder, "fields");
 	json_builder_begin_object(builder);
-	json_builder_set_member_name(builder, "lockIdleMinutes");
-	json_builder_add_int_value(builder, server.conf.lock_idle_minutes);
-	json_builder_set_member_name(builder, "nightLight");
-	json_builder_add_boolean_value(builder, server.conf.night_light);
-	json_builder_set_member_name(builder, "nightLightTemperature");
-	json_builder_add_int_value(builder, server.conf.night_light_k);
+	for (const settings::Field &field : settings::fields) {
+		json_builder_set_member_name(builder, std::string{field.param}.c_str());
+		json_builder_begin_object(builder);
+		add_field_limits(builder, field);
+		json_builder_end_object(builder);
+	}
 	json_builder_end_object(builder);
+}
+
+// The settings.set usage, naming every param the table gives.
+std::string settings_set_usage() {
+	std::string out = "params: exactly one of action with keys, commands";
+	for (std::size_t i = 0; i < settings::fields.size(); i++) {
+		out += i + 1 == settings::fields.size() ? " or " : ", ";
+		out += settings::fields[i].param;
+	}
+	return out;
+}
+
+// The value settings.set's param of `field`'s name asks for, as a value of the
+// field: the index of a choice's name, 0 or 1 for a toggle, an integer's
+// number. An integer is compared as the int64 it arrived as: narrowing first
+// would wrap a number past an int into a valid one.
+std::expected<long long, std::string> field_value(const settings::Field &field,
+		JsonObject *params) {
+	std::string param{field.param};
+	switch (field.kind) {
+	case settings::Kind::toggle: {
+		std::expected<bool, std::string> on = req_bool(params, param.c_str());
+		if (!on.has_value()) {
+			return std::unexpected(on.error());
+		}
+		return *on ? 1 : 0;
+	}
+	case settings::Kind::choice: {
+		std::expected<std::optional<std::string>, std::string> name =
+			opt_string(params, param.c_str());
+		if (!name.has_value()) {
+			return std::unexpected(name.error());
+		}
+		std::optional<int> index = name->has_value()
+			? settings::parse_value(field, **name) : std::nullopt;
+		if (!index.has_value()) {
+			return std::unexpected(std::format("params: {} must be {}", param,
+				settings::allowed(field)));
+		}
+		return *index;
+	}
+	case settings::Kind::integer: {
+		std::expected<std::optional<long long>, std::string> number =
+			opt_int(params, param.c_str());
+		if (!number.has_value()) {
+			return std::unexpected(number.error());
+		}
+		if (!settings::allows(field, **number)) {
+			// 0 is the user's "never" where the file spells it `off`.
+			return std::unexpected(std::format("params: {} must be {} to {} {}{}", param,
+				field.off ? 0 : field.min, field.max, field.unit,
+				field.off ? ", 0 for off" : ""));
+		}
+		return **number;
+	}
+	}
+	return std::unexpected(std::string{"params: not a setting"});
+}
+
+// scope + action + keys: `keys` null (or absent) writes the action's
+// defaults into its line, `[]` leaves it keyless.
+std::expected<settings::Edit, std::string> edit_action(settings::File &file,
+		JsonObject *params) {
+	std::expected<settings::Scope, std::string> scope = opt_scope(params);
+	if (!scope.has_value()) {
+		return std::unexpected(scope.error());
+	}
+	std::expected<std::optional<std::string>, std::string> action =
+		opt_string(params, "action");
+	if (!action.has_value()) {
+		return std::unexpected(action.error());
+	}
+	if (!action->has_value() || (*action)->empty()) {
+		return std::unexpected(std::string{
+			"params: action must be a non-empty string"});
+	}
+	std::optional<std::vector<settings::Chord>> keys;
+	if (json_object_has_member(params, "keys")) {
+		JsonNode *node = json_object_get_member(params, "keys");
+		if (json_node_get_node_type(node) == JSON_NODE_NULL) {
+			keys = std::nullopt; // the reset: the defaults
+		} else if (JsonArray *array = node_array(node)) {
+			std::vector<settings::Chord> chords;
+			for (unsigned i = 0; i < json_array_get_length(array); i++) {
+				const char *key = node_string(json_array_get_element(array, i));
+				if (key == nullptr) {
+					return std::unexpected(std::string{
+						"params: keys must be chord strings"});
+				}
+				std::expected<settings::Chord, std::string> chord =
+					settings::parse_chord(key, *scope);
+				if (!chord.has_value()) {
+					return std::unexpected(std::format("bad chord '{}': {}",
+						key, chord.error()));
+				}
+				chords.push_back(*chord);
+			}
+			keys = std::optional{std::move(chords)};
+		} else {
+			return std::unexpected(std::string{
+				"params: keys must be an array of chords or null"});
+		}
+	}
+	return file.set_action(*scope, *(*action), keys);
+}
+
+// The [commands] entries, replaced wholesale.
+std::expected<settings::Edit, std::string> edit_commands(settings::File &file,
+		JsonObject *params) {
+	constexpr std::string_view usage = "params: commands must be an array of {keys, command}";
+	JsonArray *array = node_array(json_object_get_member(params, "commands"));
+	if (array == nullptr) {
+		return std::unexpected(std::string{usage});
+	}
+	std::vector<settings::Command> commands;
+	for (unsigned i = 0; i < json_array_get_length(array); i++) {
+		JsonObject *entry = node_object(json_array_get_element(array, i));
+		if (entry == nullptr) {
+			return std::unexpected(std::string{usage});
+		}
+		const char *keys_text = nullptr;
+		const char *command_text = nullptr;
+		for (const char *name : {"keys", "command"}) {
+			if (!json_object_has_member(entry, name)) {
+				continue;
+			}
+			const char *value = node_string(json_object_get_member(entry, name));
+			if (value == nullptr) {
+				return std::unexpected(std::format(
+					"params: commands' {} must be a string", name));
+			}
+			if (name == std::string_view{"keys"}) {
+				keys_text = value;
+			} else {
+				command_text = value;
+			}
+		}
+		if (keys_text == nullptr || command_text == nullptr) {
+			return std::unexpected(std::string{
+				"params: every command needs keys and command"});
+		}
+		std::expected<settings::Chord, std::string> chord =
+			settings::parse_chord(keys_text, settings::Scope::global);
+		if (!chord.has_value()) {
+			return std::unexpected(std::format("bad chord '{}': {}",
+				keys_text, chord.error()));
+		}
+		commands.push_back({*chord, command_text});
+	}
+	return file.set_commands(commands);
 }
 
 // ------------------------------------------------------------ the client
@@ -536,6 +724,62 @@ std::optional<std::string> read_line(int fd) {
 	}
 }
 
+// A connected socket, closed when it goes out of scope.
+class OwnedFd {
+public:
+	explicit OwnedFd(int fd = -1) : fd_(fd) {
+	}
+	OwnedFd(OwnedFd &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {
+	}
+	OwnedFd(const OwnedFd &) = delete;
+	OwnedFd &operator=(const OwnedFd &) = delete;
+	OwnedFd &operator=(OwnedFd &&) = delete;
+	~OwnedFd() {
+		if (fd_ >= 0) {
+			close(fd_);
+		}
+	}
+	int get() const { return fd_; }
+
+private:
+	int fd_;
+};
+
+// One request sent and its first response read; the socket stays open for the
+// events a subscription goes on to read.
+struct Exchange {
+	OwnedFd socket;
+	JsonParserPtr parser; // owns `answer`
+	JsonObject *answer = nullptr; // null when the response is not a JSON object
+};
+
+// Sends `method` with `params` (JSON text, empty for none) on a new connection
+// and reads the first response. Nullopt, explained on stderr, when the
+// compositor cannot be reached or does not answer.
+std::optional<Exchange> round_trip(std::string_view method, std::string_view params) {
+	OwnedFd socket(connect_to_socket());
+	if (socket.get() < 0) {
+		return std::nullopt;
+	}
+	std::string request = std::format(R"({{"id":1,"method":{})", text::json_quote(method));
+	if (!params.empty()) {
+		request += std::format(R"(,"params":{})", params);
+	}
+	request += "}\n";
+	if (!write_request(socket.get(), request)) {
+		std::fputs("wayland-canvas: could not send the request\n", stderr);
+		return std::nullopt;
+	}
+	std::optional<std::string> first = read_line(socket.get());
+	if (!first.has_value()) {
+		std::fputs("wayland-canvas: the compositor did not answer\n", stderr);
+		return std::nullopt;
+	}
+	Exchange exchange{.socket = std::move(socket), .parser = parse_json(*first)};
+	exchange.answer = root_object(exchange.parser);
+	return exchange;
+}
+
 void msg_usage() {
 	std::fputs("usage: wayland-canvas msg <method> [<params as JSON>]\n"
 		"       wayland-canvas msg subscribe\n", stderr);
@@ -549,19 +793,16 @@ Ipc::Client::Client(Ipc &ipc, int fd) : ipc(ipc), fd(fd) {
 }
 
 Ipc::Client::~Client() {
-	if (ipc.pick_client_ == this) {
-		ipc.pick_client_ = nullptr; // its pick can never be answered now
-		ipc.pick_id_.clear();
+	// What it was waiting for can never be answered now.
+	bool capturing = ipc.slot(Wait::capture).client == this;
+	for (Waiting &waiting : ipc.waiting_) {
+		if (waiting.client == this) {
+			waiting = {};
+		}
 	}
-	if (ipc.capture_client_ == this) {
-		ipc.capture_client_ = nullptr; // its capture can never be answered
-		ipc.capture_id_.clear();
+	if (capturing) {
 		// The capture itself ends: no keys are swallowed for a dead client.
 		ipc.server_.input.cancel_shortcut_capture();
-	}
-	if (ipc.drag_client_ == this) {
-		ipc.drag_client_ = nullptr; // its drag runs on to the release, unanswered
-		ipc.drag_id_.clear();
 	}
 	source.reset(); // off the loop before the fd it watched is closed
 	if (fd >= 0) { // a dropped client's fd is already closed
@@ -670,32 +911,28 @@ namespace {
 // A parsed request line. Owns the json-glib tree its pointers point into.
 struct Request {
 	JsonParserPtr parser;
-	bool ok = false; // an object with a string method and object (or no) params
 	std::string id_json = "null"; // the id as JSON text, null when unreadable
 	std::string method; // empty when absent
 	JsonObject *params = nullptr; // null when absent
-	std::string error; // why the line is not a request; empty when ok
+	std::string error; // why the line is not a request; empty when it is one
 };
 
 // Parses one line. `error` carries the reason when it is not a request.
 Request parse_line(std::string_view line) {
 	Request out;
-	out.parser.reset(json_parser_new());
-	std::string buffer(line); // NUL-terminated copy for the C API
-	GErrorHolder gerr;
-	if (!json_parser_load_from_data(out.parser.get(), buffer.c_str(),
-			static_cast<gssize>(buffer.size()), &gerr.error)) {
-		out.error = gerr.error != nullptr && gerr.error->message != nullptr
-			? std::format("not JSON: {}", gerr.error->message)
+	GErrorPtr reason;
+	out.parser = parse_json(line, &reason);
+	if (out.parser == nullptr) {
+		out.error = reason != nullptr && reason->message != nullptr
+			? std::format("not JSON: {}", reason->message)
 			: std::string{"not JSON"};
 		return out;
 	}
-	JsonNode *root = json_parser_get_root(out.parser.get());
-	if (root == nullptr || json_node_get_node_type(root) != JSON_NODE_OBJECT) {
+	JsonObject *object = root_object(out.parser);
+	if (object == nullptr) {
 		out.error = "not a JSON object";
 		return out;
 	}
-	JsonObject *object = json_node_get_object(root);
 	if (json_object_has_member(object, "id")) {
 		JsonNode *id = json_object_get_member(object, "id");
 		if (json_node_get_node_type(id) == JSON_NODE_VALUE) {
@@ -709,22 +946,19 @@ Request parse_line(std::string_view line) {
 		out.error = "no method";
 		return out;
 	}
-	JsonNode *method = json_object_get_member(object, "method");
-	if (json_node_get_node_type(method) != JSON_NODE_VALUE
-			|| json_node_get_value_type(method) != G_TYPE_STRING) {
+	const char *method = node_string(json_object_get_member(object, "method"));
+	if (method == nullptr) {
 		out.error = "method is not a string";
 		return out;
 	}
-	out.method = json_node_get_string(method);
+	out.method = method;
 	if (json_object_has_member(object, "params")) {
-		JsonNode *params = json_object_get_member(object, "params");
-		if (json_node_get_node_type(params) != JSON_NODE_OBJECT) {
+		out.params = node_object(json_object_get_member(object, "params"));
+		if (out.params == nullptr) {
 			out.error = "params is not an object";
 			return out;
 		}
-		out.params = json_node_get_object(params);
 	}
-	out.ok = true;
 	return out;
 }
 
@@ -736,142 +970,142 @@ void Ipc::handle_line(Client &client, std::string_view line) {
 		queue(client, response(request.id_json, text::json_quote(request.error), true));
 		return;
 	}
-	if (request.method == "capture.pick") {
-		capture_pick(client, request.id_json, request.params);
+	Reply reply = dispatch_method(client, request.method, request.params);
+	if (reply.wait.has_value()) {
+		// The method has begun what the user finishes; answer() sends the response then.
+		slot(*reply.wait) = {&client, request.id_json};
 		return;
 	}
-	if (request.method == "shortcut.capture") {
-		shortcut_capture(client, request.id_json, request.params);
-		return;
-	}
-	if (request.method == "surface.move" || request.method == "surface.resize") {
-		surface_drag(client, request.id_json, request.params,
-			request.method == "surface.resize");
-		return;
-	}
-	std::expected<std::string, std::string> result =
-		dispatch_method(client, request.method, request.params);
-	queue(client, response(request.id_json,
-		result.has_value() ? *result : text::json_quote(result.error()),
-		!result.has_value()));
+	send(client, request.id_json, reply.body);
 }
 
-void Ipc::capture_pick(Client &client, std::string_view id_json,
-		JsonObject *params) {
-	auto bail = [&](std::string_view error) {
-		queue(client, response(id_json, text::json_quote(error), true));
-	};
-	constexpr std::string_view usage =
-		R"(params: what must be "region", "window", "output" or "any")";
-	if (params == nullptr || !json_object_has_member(params, "what")) {
-		bail(usage);
+void Ipc::send(Client &client, std::string_view id_json, const Answer &body) {
+	queue(client, response(id_json,
+		body.has_value() ? *body : text::json_quote(body.error()), !body.has_value()));
+}
+
+void Ipc::answer(Wait kind, const Answer &body) {
+	Waiting &waiting = slot(kind);
+	if (waiting.client == nullptr) {
 		return;
 	}
-	JsonNode *node = json_object_get_member(params, "what");
-	const char *what = json_node_get_node_type(node) == JSON_NODE_VALUE
-			&& json_node_get_value_type(node) == G_TYPE_STRING
-		? json_node_get_string(node) : nullptr;
+	Client &client = *waiting.client;
+	std::string id = std::move(waiting.id);
+	waiting = {};
+	send(client, id, body);
+}
+
+namespace {
+
+std::optional<PickWhat> pick_what(std::string_view name) {
 	constexpr std::array kinds = {
 		std::pair{std::string_view{"region"}, PickWhat::region},
 		std::pair{std::string_view{"window"}, PickWhat::window},
 		std::pair{std::string_view{"output"}, PickWhat::output},
 		std::pair{std::string_view{"any"}, PickWhat::any},
 	};
-	PickWhat kind = PickWhat::any;
-	bool known = false;
-	for (const auto &[name, value] : kinds) {
-		if (name == what) {
-			kind = value;
-			known = true;
-			break;
+	for (const auto &[known, kind] : kinds) {
+		if (known == name) {
+			return kind;
 		}
 	}
-	if (what == nullptr || !known) {
-		bail(usage);
-		return;
-	}
-	std::expected<Output *, std::string> output = resolve_output(params);
-	if (!output.has_value()) {
-		bail(output.error());
-		return;
-	}
-	if (*output == nullptr) {
-		bail("no output to pick on");
-		return;
-	}
-	if (pick_client_ != nullptr
-			|| !server_.capture_ui.start_pick(*output, kind,
-				PickUse::ipc, CaptureOptions{})) {
-		bail("a capture pick is already running");
-		return;
-	}
-	pick_client_ = &client;
-	pick_id_ = id_json;
-	// No response yet: answer_pick() sends it once the user has picked.
+	return std::nullopt;
 }
 
-void Ipc::answer_pick(bool ok, std::string_view payload) {
-	if (pick_client_ == nullptr) {
-		return;
+// What `capture.pick` answers for the user's pick, or for none.
+std::expected<std::string, std::string> pick_answer(
+		const std::optional<CapturePicker::Pick> &pick) {
+	if (!pick.has_value()) {
+		return std::unexpected(std::string{"cancelled"});
 	}
-	Client &client = *pick_client_;
-	std::string id = pick_id_;
-	pick_client_ = nullptr;
-	pick_id_.clear();
-	queue(client, response(id, ok ? payload : text::json_quote(payload), !ok));
+	return object_text([&](JsonBuilder *builder) {
+		switch (pick->kind) {
+		case CapturePicker::Pick::Kind::region:
+			json_builder_set_member_name(builder, "output");
+			json_builder_add_string_value(builder, pick->output->wlr->name);
+			json_builder_set_member_name(builder, "x");
+			json_builder_add_int_value(builder, pick->area.x);
+			json_builder_set_member_name(builder, "y");
+			json_builder_add_int_value(builder, pick->area.y);
+			json_builder_set_member_name(builder, "w");
+			json_builder_add_int_value(builder, pick->area.width);
+			json_builder_set_member_name(builder, "h");
+			json_builder_add_int_value(builder, pick->area.height);
+			break;
+		case CapturePicker::Pick::Kind::window: {
+			const char *identifier = pick->view->ext_toplevel_identifier();
+			json_builder_set_member_name(builder, "window");
+			json_builder_add_int_value(builder, static_cast<gint64>(pick->view->session_id));
+			json_builder_set_member_name(builder, "identifier");
+			json_builder_add_string_value(builder, identifier != nullptr ? identifier : "");
+			break;
+		}
+		case CapturePicker::Pick::Kind::output:
+			json_builder_set_member_name(builder, "output");
+			json_builder_add_string_value(builder, pick->output->wlr->name);
+			break;
+		}
+	});
 }
 
-void Ipc::shortcut_capture(Client &client, std::string_view id_json,
-		JsonObject *params) {
-	auto bail = [&](std::string_view error) {
-		queue(client, response(id_json, text::json_quote(error), true));
-	};
-	// The scope is only named for what settings.set will decide; the
-	// capture reports the chord as pressed.
-	std::expected<std::optional<std::string>, std::string> scope =
-		opt_string(params, "scope");
-	if (!scope.has_value()) {
-		bail(scope.error());
-		return;
-	}
-	if (scope->has_value() && *(*scope) != "global" && *(*scope) != "overview") {
-		bail("params: scope must be \"global\" or \"overview\"");
-		return;
-	}
-	// A capture under way is cancelled: its client is answered now.
-	server_.input.cancel_shortcut_capture();
-	capture_client_ = &client;
-	capture_id_ = id_json;
-	// No response yet: answer_capture() sends it once the chord is pressed
-	// or the capture is cancelled.
-	server_.input.begin_shortcut_capture(
-		[this](std::optional<settings::Chord> chord) {
-			answer_capture(chord);
-		});
-}
-
-void Ipc::answer_capture(std::optional<settings::Chord> chord) {
-	if (capture_client_ == nullptr) {
-		return;
-	}
-	Client &client = *capture_client_;
-	std::string id = capture_id_;
-	capture_client_ = nullptr;
-	capture_id_.clear();
-	std::string payload = object_text([&](JsonBuilder *builder) {
+// What `shortcut.capture` answers: the chord pressed, or null when it was cancelled.
+std::string chord_answer(std::optional<settings::Chord> chord) {
+	return object_text([&](JsonBuilder *builder) {
 		json_builder_set_member_name(builder, "keys");
 		if (chord.has_value()) {
-			json_builder_add_string_value(builder,
-				settings::chord_text(*chord).c_str());
+			json_builder_add_string_value(builder, settings::chord_text(*chord).c_str());
 		} else {
 			json_builder_add_null_value(builder);
 		}
 	});
-	queue(client, response(id, payload, false));
 }
 
-std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
-		std::string_view name, JsonObject *params) {
+} // namespace
+
+Ipc::Reply Ipc::m_capture_pick(Client &, JsonObject *params) {
+	constexpr std::string_view usage =
+		R"(params: what must be "region", "window", "output" or "any")";
+	std::expected<std::optional<std::string>, std::string> what =
+		opt_string(params, "what");
+	std::optional<PickWhat> kind = what.has_value() && what->has_value()
+		? pick_what(*(*what)) : std::nullopt;
+	if (!kind.has_value()) {
+		return std::unexpected(std::string{usage});
+	}
+	std::expected<Output *, std::string> output = resolve_output(params);
+	if (!output.has_value()) {
+		return std::unexpected(output.error());
+	}
+	if (*output == nullptr) {
+		return std::unexpected(std::string{"no output to pick on"});
+	}
+	bool started = slot(Wait::pick).client == nullptr
+		&& server_.capture_ui.ask_pick(*output, *kind,
+			[this](std::optional<CapturePicker::Pick> pick) {
+				answer(Wait::pick, pick_answer(pick));
+			});
+	if (!started) {
+		return std::unexpected(std::string{"a capture pick is already running"});
+	}
+	return Wait::pick;
+}
+
+Ipc::Reply Ipc::m_shortcut_capture(Client &, JsonObject *params) {
+	// The scope is only named for what settings.set will decide; the
+	// capture reports the chord as pressed.
+	std::expected<settings::Scope, std::string> scope = opt_scope(params);
+	if (!scope.has_value()) {
+		return std::unexpected(scope.error());
+	}
+	// A capture under way is answered null as this one begins.
+	server_.input.begin_shortcut_capture([this](std::optional<settings::Chord> chord) {
+		answer(Wait::capture, chord_answer(chord));
+	});
+	return Wait::capture;
+}
+
+Ipc::Reply Ipc::dispatch_method(Client &client, std::string_view name,
+		JsonObject *params) {
 	// The protocol's method table.
 	constexpr std::array table = {
 		std::pair{std::string_view{"state"}, &Ipc::m_state},
@@ -884,10 +1118,14 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 		std::pair{std::string_view{"action.run"}, &Ipc::m_action_run},
 		std::pair{std::string_view{"surface.place"}, &Ipc::m_surface_place},
 		std::pair{std::string_view{"surface.unplace"}, &Ipc::m_surface_unplace},
+		std::pair{std::string_view{"surface.move"}, &Ipc::m_surface_move},
+		std::pair{std::string_view{"surface.resize"}, &Ipc::m_surface_resize},
+		std::pair{std::string_view{"capture.pick"}, &Ipc::m_capture_pick},
 		std::pair{std::string_view{"capture.stop"}, &Ipc::m_capture_stop},
+		std::pair{std::string_view{"shortcut.capture"}, &Ipc::m_shortcut_capture},
+		std::pair{std::string_view{"shortcut.cancel"}, &Ipc::m_shortcut_cancel},
 		std::pair{std::string_view{"settings.get"}, &Ipc::m_settings_get},
 		std::pair{std::string_view{"settings.set"}, &Ipc::m_settings_set},
-		std::pair{std::string_view{"shortcut.cancel"}, &Ipc::m_shortcut_cancel},
 	};
 	for (const auto &[method, run] : table) {
 		if (method == name) {
@@ -897,7 +1135,7 @@ std::expected<std::string, std::string> Ipc::dispatch_method(Client &client,
 	return std::unexpected(std::format("unknown method '{}'", name));
 }
 
-std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
+Ipc::Reply Ipc::m_state(Client &, JsonObject *) {
 	return object_text([&](JsonBuilder *builder) {
 		add_outputs_array(builder, server_);
 		// Where the cursor is on the canvas, on the output it is on: a
@@ -938,31 +1176,29 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 	});
 }
 
-std::expected<std::string, std::string> Ipc::m_subscribe(Client &client, JsonObject *) {
+Ipc::Reply Ipc::m_subscribe(Client &client, JsonObject *) {
 	client.subscribed = true;
 	return std::string{"true"};
 }
 
 std::expected<Output *, std::string> Ipc::resolve_output(JsonObject *params) const {
-	if (params == nullptr || !json_object_has_member(params, "output")) {
+	std::expected<std::optional<std::string>, std::string> name =
+		opt_string(params, "output");
+	if (!name.has_value()) {
+		return std::unexpected(name.error());
+	}
+	if (!name->has_value()) {
 		return server_.output_under_cursor();
 	}
-	JsonNode *node = json_object_get_member(params, "output");
-	if (json_node_get_node_type(node) != JSON_NODE_VALUE
-			|| json_node_get_value_type(node) != G_TYPE_STRING) {
-		return std::unexpected(std::string{"params: output must be a string"});
-	}
-	const char *name = json_node_get_string(node);
 	for (const std::unique_ptr<Output> &output : server_.outputs) {
-		if (strcmp(output->wlr->name, name) == 0) {
+		if (*(*name) == output->wlr->name) {
 			return output.get();
 		}
 	}
-	return std::unexpected(std::format("unknown output '{}'", name));
+	return std::unexpected(std::format("unknown output '{}'", *(*name)));
 }
 
-std::expected<std::string, std::string> Ipc::m_launcher_toggle(Client &,
-		JsonObject *params) {
+Ipc::Reply Ipc::m_launcher_toggle(Client &, JsonObject *params) {
 	std::expected<Output *, std::string> output = resolve_output(params);
 	if (!output.has_value()) {
 		return std::unexpected(output.error());
@@ -971,8 +1207,7 @@ std::expected<std::string, std::string> Ipc::m_launcher_toggle(Client &,
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_overview_toggle(Client &,
-		JsonObject *params) {
+Ipc::Reply Ipc::m_overview_toggle(Client &, JsonObject *params) {
 	std::expected<Output *, std::string> output = resolve_output(params);
 	if (!output.has_value()) {
 		return std::unexpected(output.error());
@@ -989,30 +1224,24 @@ std::expected<std::string, std::string> Ipc::m_overview_toggle(Client &,
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_quit(Client &, JsonObject *) {
+Ipc::Reply Ipc::m_quit(Client &, JsonObject *) {
 	quit_ = true; // handle_client ends the session once the response is out
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *params) {
+Ipc::Reply Ipc::m_theme_set(Client &, JsonObject *params) {
 	constexpr std::string_view usage =
 		"params: mode must be \"light\" or \"dark\"";
-	if (params == nullptr || !json_object_has_member(params, "mode")) {
+	std::expected<std::optional<std::string>, std::string> mode =
+		opt_string(params, "mode");
+	if (!mode.has_value() || !mode->has_value()) {
 		return std::unexpected(std::string{usage});
 	}
-	JsonNode *node = json_object_get_member(params, "mode");
-	const char *mode = json_node_get_node_type(node) == JSON_NODE_VALUE
-			&& json_node_get_value_type(node) == G_TYPE_STRING
-		? json_node_get_string(node) : nullptr;
-	if (mode == nullptr) {
-		return std::unexpected(std::string{usage});
-	}
-	if (strcmp(mode, "light") != 0 && strcmp(mode, "dark") != 0) {
+	if (*(*mode) != "light" && *(*mode) != "dark") {
 		return std::unexpected(std::format(
-			"params: mode must be \"light\" or \"dark\", not '{}'", mode));
+			"params: mode must be \"light\" or \"dark\", not '{}'", *(*mode)));
 	}
-	ThemeMode resolved = strcmp(mode, "light") == 0 ? ThemeMode::light : ThemeMode::dark;
-	server_.set_theme(resolved);
+	server_.set_theme(*(*mode) == "light" ? ThemeMode::light : ThemeMode::dark);
 	return std::string{"true"};
 }
 
@@ -1020,8 +1249,7 @@ std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *p
 
 // Goes to a window by its session id: the same restore path a shelf click
 // takes (docs/intents/windows/window-management.md).
-std::expected<std::string, std::string> Ipc::m_window_focus(Client &,
-		JsonObject *params) {
+Ipc::Reply Ipc::m_window_focus(Client &, JsonObject *params) {
 	std::expected<std::optional<long long>, std::string> id =
 		opt_int(params, "window");
 	if (!id.has_value()) {
@@ -1060,9 +1288,9 @@ std::vector<LayerSurface *> named_surfaces(Server &server, std::string_view name
 
 // The `edges` of a `surface.resize`: a list of edge names, as WLR_EDGE bits.
 std::optional<uint32_t> edge_bits(JsonObject *params) {
-	if (params == nullptr || !json_object_has_member(params, "edges")
-			|| json_node_get_node_type(json_object_get_member(params, "edges"))
-				!= JSON_NODE_ARRAY) {
+	JsonArray *list = params != nullptr
+		? node_array(json_object_get_member(params, "edges")) : nullptr;
+	if (list == nullptr) {
 		return std::nullopt;
 	}
 	constexpr std::array names = {
@@ -1071,14 +1299,11 @@ std::optional<uint32_t> edge_bits(JsonObject *params) {
 		std::pair{std::string_view{"top"}, WLR_EDGE_TOP},
 		std::pair{std::string_view{"bottom"}, WLR_EDGE_BOTTOM},
 	};
-	JsonArray *list = json_object_get_array_member(params, "edges");
 	uint32_t edges = 0;
 	for (guint i = 0; i < json_array_get_length(list); i++) {
-		JsonNode *node = json_array_get_element(list, i);
-		const char *text = json_node_get_value_type(node) == G_TYPE_STRING
-			? json_node_get_string(node) : nullptr;
-		auto known = std::ranges::find_if(names, [text](const auto &entry) {
-			return text != nullptr && entry.first == text;
+		const char *edge = node_string(json_array_get_element(list, i));
+		auto known = std::ranges::find_if(names, [edge](const auto &entry) {
+			return edge != nullptr && entry.first == edge;
 		});
 		if (known == names.end()) {
 			return std::nullopt;
@@ -1093,8 +1318,7 @@ std::optional<uint32_t> edge_bits(JsonObject *params) {
 
 } // namespace
 
-std::expected<std::string, std::string> Ipc::m_surface_place(Client &,
-		JsonObject *params) {
+Ipc::Reply Ipc::m_surface_place(Client &, JsonObject *params) {
 	constexpr std::string_view usage =
 		"params: surface (a layer surface's name), x, y, width, height";
 	std::expected<std::optional<std::string>, std::string> name =
@@ -1130,8 +1354,7 @@ std::expected<std::string, std::string> Ipc::m_surface_place(Client &,
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_surface_unplace(Client &,
-		JsonObject *params) {
+Ipc::Reply Ipc::m_surface_unplace(Client &, JsonObject *params) {
 	std::expected<std::optional<std::string>, std::string> name =
 		opt_string(params, "surface");
 	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
@@ -1144,11 +1367,22 @@ std::expected<std::string, std::string> Ipc::m_surface_unplace(Client &,
 	return std::string{"true"};
 }
 
-void Ipc::surface_drag(Client &client, std::string_view id_json,
-		JsonObject *params, bool resize) {
-	auto bail = [&](std::string_view error) {
-		queue(client, response(id_json, text::json_quote(error), true));
-	};
+namespace {
+
+// What `surface.move` and `surface.resize` answer at the release: the
+// rectangle the surface ended at, or an error when the drag lost its surface.
+std::expected<std::string, std::string> drag_answer(std::optional<wlr_box> box) {
+	if (!box.has_value()) {
+		return std::unexpected(std::string{"the drag ended with its surface gone"});
+	}
+	return object_text([&](JsonBuilder *builder) {
+		add_rect_members(builder, box->x, box->y, box->width, box->height);
+	});
+}
+
+} // namespace
+
+Ipc::Reply Ipc::surface_drag(JsonObject *params, bool resize) {
 	std::string_view usage = resize
 		? "params: surface (a layer surface's name), edges (a list of left, "
 			"right, top, bottom), minWidth and minHeight (optional)"
@@ -1156,8 +1390,7 @@ void Ipc::surface_drag(Client &client, std::string_view id_json,
 	std::expected<std::optional<std::string>, std::string> name =
 		opt_string(params, "surface");
 	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
-		bail(usage);
-		return;
+		return std::unexpected(std::string{usage});
 	}
 	uint32_t edges = 0;
 	int min_w = 1, min_h = 1;
@@ -1168,8 +1401,7 @@ void Ipc::surface_drag(Client &client, std::string_view id_json,
 		std::expected<std::optional<long long>, std::string> tall =
 			opt_int(params, "minHeight");
 		if (!bits.has_value() || !wide.has_value() || !tall.has_value()) {
-			bail(usage);
-			return;
+			return std::unexpected(std::string{usage});
 		}
 		edges = *bits;
 		min_w = static_cast<int>(wide->value_or(1));
@@ -1184,80 +1416,54 @@ void Ipc::surface_drag(Client &client, std::string_view id_json,
 		}
 	}
 	if (held == nullptr) {
-		bail("no button is held on that surface");
-		return;
+		return std::unexpected(std::string{"no button is held on that surface"});
 	}
 	if (!held->canvas_box.has_value()) {
-		bail("that surface is not on the plane");
-		return;
+		return std::unexpected(std::string{"that surface is not on the plane"});
 	}
 	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);
-	if (server_.input.grab.active() || drag_client_ != nullptr || output == nullptr) {
-		bail("the pointer is already in a drag");
-		return;
+	if (server_.input.grab.active() || slot(Wait::drag).client != nullptr
+			|| output == nullptr) {
+		return std::unexpected(std::string{"the pointer is already in a drag"});
 	}
-	drag_client_ = &client;
-	drag_id_ = id_json;
-	// No response yet: answer_surface_drag() sends it at the release.
 	server_.input.grab.begin_surface_drag(*held, *output, server_.input.press_lx(),
 		server_.input.press_ly(), edges, min_w, min_h);
+	return Wait::drag;
+}
+
+Ipc::Reply Ipc::m_surface_move(Client &, JsonObject *params) {
+	return surface_drag(params, false);
+}
+
+Ipc::Reply Ipc::m_surface_resize(Client &, JsonObject *params) {
+	return surface_drag(params, true);
 }
 
 void Ipc::answer_surface_drag(std::optional<wlr_box> box) {
-	if (drag_client_ == nullptr) {
-		return;
-	}
-	Client &client = *drag_client_;
-	std::string id = drag_id_;
-	drag_client_ = nullptr;
-	drag_id_.clear();
-	if (!box.has_value()) {
-		queue(client, response(id,
-			text::json_quote("the drag ended with its surface gone"), true));
-		return;
-	}
-	std::string payload = object_text([&](JsonBuilder *builder) {
-		json_builder_set_member_name(builder, "x");
-		json_builder_add_int_value(builder, box->x);
-		json_builder_set_member_name(builder, "y");
-		json_builder_add_int_value(builder, box->y);
-		json_builder_set_member_name(builder, "width");
-		json_builder_add_int_value(builder, box->width);
-		json_builder_set_member_name(builder, "height");
-		json_builder_add_int_value(builder, box->height);
-	});
-	queue(client, response(id, payload, false));
+	answer(Wait::drag, drag_answer(box));
 }
 
-std::expected<std::string, std::string> Ipc::m_action_run(Client &,
-		JsonObject *params) {
+Ipc::Reply Ipc::m_action_run(Client &, JsonObject *params) {
 	constexpr std::string_view usage =
 		"params: name must be a non-empty string, args an object";
-	if (params == nullptr || !json_object_has_member(params, "name")) {
-		return std::unexpected(std::string{usage});
-	}
-	JsonNode *name = json_object_get_member(params, "name");
-	const char *name_text = name != nullptr
-			&& json_node_get_node_type(name) == JSON_NODE_VALUE
-			&& json_node_get_value_type(name) == G_TYPE_STRING
-		? json_node_get_string(name) : nullptr;
-	if (name_text == nullptr || *name_text == '\0') {
+	std::expected<std::optional<std::string>, std::string> name =
+		opt_string(params, "name");
+	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
 		return std::unexpected(std::string{usage});
 	}
 	std::string args_json = "{}";
-	if (json_object_has_member(params, "args")) {
+	if (params != nullptr && json_object_has_member(params, "args")) {
 		JsonNode *args = json_object_get_member(params, "args");
-		if (json_node_get_node_type(args) != JSON_NODE_OBJECT) {
+		if (node_object(args) == nullptr) {
 			return std::unexpected(std::string{usage});
 		}
 		args_json = node_text(args);
 	}
-	emit_action(name_text, args_json);
+	emit_action(*(*name), args_json);
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_capture_stop(Client &,
-		JsonObject *) {
+Ipc::Reply Ipc::m_capture_stop(Client &, JsonObject *) {
 	if (!server_.capture_ui.recording()) {
 		return std::unexpected(std::string{"not recording"});
 	}
@@ -1265,216 +1471,41 @@ std::expected<std::string, std::string> Ipc::m_capture_stop(Client &,
 	return std::string{"true"};
 }
 
-std::expected<std::string, std::string> Ipc::m_settings_get(Client &,
-		JsonObject *) {
+Ipc::Reply Ipc::m_settings_get(Client &, JsonObject *) {
 	return object_text([&](JsonBuilder *builder) {
 		add_settings(builder, server_);
 	});
 }
 
-std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
-		JsonObject *params) {
-	constexpr std::string_view usage = R"(params: exactly one of action with keys, commands,)"
-		R"( swipes, pinchScale, mouseScroll, touchpadScroll, pan, overviewSwipe or hopSwipe)";
+Ipc::Reply Ipc::m_settings_set(Client &, JsonObject *params) {
 	if (params == nullptr) {
-		return std::unexpected(std::string{usage});
+		return std::unexpected(settings_set_usage());
 	}
 	bool has_action = json_object_has_member(params, "action");
 	bool has_commands = json_object_has_member(params, "commands");
-	bool has_swipes = json_object_has_member(params, "swipes");
-	bool has_pinch = json_object_has_member(params, "pinchScale");
-	const settings::Direction *direction = nullptr;
-	int directions_named = 0;
-	for (const settings::Direction &each : settings::directions) {
+	const settings::Field *field = nullptr;
+	int named = has_action + has_commands;
+	for (const settings::Field &each : settings::fields) {
 		if (json_object_has_member(params, std::string{each.param}.c_str())) {
-			direction = &each;
-			directions_named++;
+			field = &each;
+			named++;
 		}
 	}
-	bool has_idle = json_object_has_member(params, "lockIdleMinutes");
-	bool has_night = json_object_has_member(params, "nightLight");
-	bool has_temperature = json_object_has_member(params, "nightLightTemperature");
-	if (has_action + has_commands + has_swipes + has_pinch + directions_named + has_idle
-			+ has_night + has_temperature != 1) {
-		return std::unexpected(std::string{usage});
+	if (named != 1) {
+		return std::unexpected(settings_set_usage());
 	}
 	settings::File file{server_.conf_text};
-	std::expected<settings::Edit, std::string> edit =
-		std::unexpected(std::string{usage});
-	if (has_action) {
-		// scope + action + keys: `keys` null (or absent) writes the
-		// action's defaults into its line, `[]` leaves it keyless.
-		std::expected<std::optional<std::string>, std::string> scope =
-			opt_string(params, "scope");
-		if (!scope.has_value()) {
-			return std::unexpected(scope.error());
+	std::expected<settings::Edit, std::string> edit = std::unexpected(std::string{});
+	if (field != nullptr) {
+		std::expected<long long, std::string> value = field_value(*field, params);
+		if (!value.has_value()) {
+			return std::unexpected(value.error());
 		}
-		settings::Scope scope_value = settings::Scope::global;
-		if (scope->has_value()) {
-			if (*(*scope) == "overview") {
-				scope_value = settings::Scope::overview;
-			} else if (*(*scope) != "global") {
-				return std::unexpected(std::string{
-					"params: scope must be \"global\" or \"overview\""});
-			}
-		}
-		std::expected<std::optional<std::string>, std::string> action =
-			opt_string(params, "action");
-		if (!action.has_value()) {
-			return std::unexpected(action.error());
-		}
-		if (!action->has_value() || (*action)->empty()) {
-			return std::unexpected(std::string{
-				"params: action must be a non-empty string"});
-		}
-		std::optional<std::vector<settings::Chord>> keys;
-		if (json_object_has_member(params, "keys")) {
-			JsonNode *node = json_object_get_member(params, "keys");
-			if (json_node_get_node_type(node) == JSON_NODE_NULL) {
-				keys = std::nullopt; // the reset: the defaults
-			} else if (json_node_get_node_type(node) == JSON_NODE_ARRAY) {
-				JsonArray *array = json_node_get_array(node);
-				std::vector<settings::Chord> chords;
-				for (unsigned i = 0; i < json_array_get_length(array); i++) {
-					JsonNode *element = json_array_get_element(array, i);
-					if (json_node_get_node_type(element) != JSON_NODE_VALUE
-							|| json_node_get_value_type(element) != G_TYPE_STRING) {
-						return std::unexpected(std::string{
-							"params: keys must be chord strings"});
-					}
-					std::string text = json_node_get_string(element);
-					std::expected<settings::Chord, std::string> chord =
-						settings::parse_chord(text, scope_value);
-					if (!chord.has_value()) {
-						return std::unexpected(std::format("bad chord '{}': {}",
-							text, chord.error()));
-					}
-					chords.push_back(*chord);
-				}
-				keys = std::optional{std::move(chords)};
-			} else {
-				return std::unexpected(std::string{
-					"params: keys must be an array of chords or null"});
-			}
-		}
-		edit = file.set_action(scope_value, *(*action), keys);
-	} else if (has_commands) {
-		// The [commands] entries, replaced wholesale.
-		JsonNode *node = json_object_get_member(params, "commands");
-		if (json_node_get_node_type(node) != JSON_NODE_ARRAY) {
-			return std::unexpected(std::string{
-				"params: commands must be an array of {keys, command}"});
-		}
-		JsonArray *array = json_node_get_array(node);
-		std::vector<settings::Command> commands;
-		for (unsigned i = 0; i < json_array_get_length(array); i++) {
-			JsonNode *element = json_array_get_element(array, i);
-			if (json_node_get_node_type(element) != JSON_NODE_OBJECT) {
-				return std::unexpected(std::string{
-					"params: commands must be an array of {keys, command}"});
-			}
-			JsonObject *entry = json_node_get_object(element);
-			const char *keys_text = nullptr;
-			const char *command_text = nullptr;
-			for (const char *name : {"keys", "command"}) {
-				if (!json_object_has_member(entry, name)) {
-					continue;
-				}
-				JsonNode *member = json_object_get_member(entry, name);
-				if (json_node_get_node_type(member) != JSON_NODE_VALUE
-						|| json_node_get_value_type(member) != G_TYPE_STRING) {
-					return std::unexpected(std::format(
-						"params: commands' {} must be a string", name));
-				}
-				if (name == std::string_view{"keys"}) {
-					keys_text = json_node_get_string(member);
-				} else {
-					command_text = json_node_get_string(member);
-				}
-			}
-			if (keys_text == nullptr || command_text == nullptr) {
-				return std::unexpected(std::string{
-					"params: every command needs keys and command"});
-			}
-			std::expected<settings::Chord, std::string> chord =
-				settings::parse_chord(keys_text, settings::Scope::global);
-			if (!chord.has_value()) {
-				return std::unexpected(std::format("bad chord '{}': {}",
-					keys_text, chord.error()));
-			}
-			commands.push_back({*chord, command_text});
-		}
-		edit = file.set_commands(commands);
-	} else if (has_swipes) {
-		std::expected<std::optional<std::string>, std::string> swipes =
-			opt_string(params, "swipes");
-		if (!swipes.has_value()) {
-			return std::unexpected(swipes.error());
-		}
-		if (!swipes->has_value()) {
-			return std::unexpected(std::string{
-				"params: swipes must be \"three-finger-hops\","
-				" \"four-finger-hops\" or \"off\""});
-		}
-		std::optional<settings::SwipePreset> preset = swipe_preset(*(*swipes));
-		if (!preset.has_value()) {
-			return std::unexpected(std::format(
-				"params: swipes must be \"three-finger-hops\","
-				" \"four-finger-hops\" or \"off\", not '{}'", *(*swipes)));
-		}
-		edit = file.set_swipes(*preset);
-	} else if (has_pinch) {
-		std::expected<bool, std::string> on = req_bool(params, "pinchScale");
-		if (!on.has_value()) {
-			return std::unexpected(on.error());
-		}
-		edit = file.set_pinch_scale(*on);
-	} else if (direction != nullptr) {
-		std::string param{direction->param};
-		std::expected<std::optional<std::string>, std::string> way =
-			opt_string(params, param.c_str());
-		if (!way.has_value()) {
-			return std::unexpected(way.error());
-		}
-		if (!way->has_value() || (**way != direction->way && **way != direction->other)) {
-			return std::unexpected(std::format("params: {} must be \"{}\" or \"{}\"", param,
-				direction->way, direction->other));
-		}
-		edit = file.set_direction(direction->key, **way);
-	} else if (has_night) {
-		std::expected<bool, std::string> on = req_bool(params, "nightLight");
-		if (!on.has_value()) {
-			return std::unexpected(on.error());
-		}
-		edit = file.set_session("night-light", *on ? "on" : "off");
+		edit = file.set(*field, *value);
+	} else if (has_action) {
+		edit = edit_action(file, params);
 	} else {
-		const char *name = has_idle ? "lockIdleMinutes" : "nightLightTemperature";
-		JsonNode *node = json_object_get_member(params, name);
-		if (json_node_get_node_type(node) != JSON_NODE_VALUE
-				|| json_node_get_value_type(node) != G_TYPE_INT64) {
-			return std::unexpected(std::format("params: {} must be a number", name));
-		}
-		// Compared as the int64 it arrived as: narrowing first would wrap a
-		// number past an int into a valid one.
-		long long value = json_node_get_int(node);
-		if (has_idle) {
-			// 0 is the user's "never"; the file writes it as `off`.
-			if (value < 0 || value > settings::max_lock_idle_minutes) {
-				return std::unexpected(std::format(
-					"params: lockIdleMinutes must be 0 (never) to {} minutes",
-					settings::max_lock_idle_minutes));
-			}
-			edit = file.set_session("lock-idle",
-				value == 0 ? std::string{"off"} : std::to_string(value));
-		} else {
-			if (value < settings::night_light_min_k
-					|| value > settings::night_light_max_k) {
-				return std::unexpected(std::format(
-					"params: nightLightTemperature must be {} to {} K",
-					settings::night_light_min_k, settings::night_light_max_k));
-			}
-			edit = file.set_session("night-light-temperature", std::to_string(value));
-		}
+		edit = edit_commands(file, params);
 	}
 	if (!edit.has_value()) {
 		return std::unexpected(edit.error());
@@ -1492,7 +1523,7 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 			json_builder_begin_object(builder);
 			json_builder_set_member_name(builder, "scope");
 			json_builder_add_string_value(builder,
-				moved.scope == settings::Scope::overview ? "overview" : "global");
+				std::string{settings::scope_name(moved.scope)}.c_str());
 			json_builder_set_member_name(builder, "action");
 			json_builder_add_string_value(builder, moved.action.c_str());
 			if (!moved.command.empty()) {
@@ -1512,8 +1543,7 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 	});
 }
 
-std::expected<std::string, std::string> Ipc::m_shortcut_cancel(Client &,
-		JsonObject *) {
+Ipc::Reply Ipc::m_shortcut_cancel(Client &, JsonObject *) {
 	// A capture under way is cancelled: its client is answered null now.
 	server_.input.cancel_shortcut_capture();
 	return std::string{"true"};
@@ -1723,7 +1753,7 @@ int Ipc::handle_client(int, uint32_t mask, void *data) {
 			nl != std::string::npos && !client->doomed && !oversized;
 			nl = client->pending.find('\n', start)) {
 		std::string_view line =
-			trim(std::string_view(client->pending).substr(start, nl - start));
+			settings::trim(std::string_view(client->pending).substr(start, nl - start));
 		start = nl + 1;
 		if (line.size() > config::ipc_max_line) {
 			oversized = true;
@@ -1801,13 +1831,8 @@ std::vector<ChooserEntry> read_chooser_list() {
 
 // The object's string `member`, or empty when absent or not a string.
 std::string string_member(JsonObject *object, const char *member) {
-	if (object == nullptr || !json_object_has_member(object, member)) {
-		return {};
-	}
-	JsonNode *node = json_object_get_member(object, member);
-	const char *text = json_node_get_node_type(node) == JSON_NODE_VALUE
-			&& json_node_get_value_type(node) == G_TYPE_STRING
-		? json_node_get_string(node) : nullptr;
+	const char *text = object != nullptr
+		? node_string(json_object_get_member(object, member)) : nullptr;
 	return text != nullptr ? std::string{text} : std::string{};
 }
 
@@ -1832,43 +1857,17 @@ int capture_pick_bridge() {
 		return 0; // nothing to choose between: no answer is a cancel
 	}
 	const char *what = windows && monitors ? "any" : windows ? "window" : "output";
-	int fd = connect_to_socket();
-	if (fd < 0) {
+	std::optional<Exchange> exchange = round_trip("capture.pick",
+		std::format(R"({{"what":{}}})", text::json_quote(what)));
+	if (!exchange.has_value()) {
 		return 1;
 	}
-	std::string request = std::format(
-		R"({{"id":1,"method":"capture.pick","params":{{"what":"{}"}}}})", what);
-	request += '\n';
-	if (!write_request(fd, request)) {
-		std::fputs("wayland-canvas: could not send the request\n", stderr);
-		close(fd);
-		return 1;
-	}
-	std::optional<std::string> first = read_line(fd);
-	if (!first.has_value()) {
-		std::fputs("wayland-canvas: the compositor did not answer\n", stderr);
-		close(fd);
-		return 1;
-	}
-	JsonParserPtr parser(json_parser_new());
-	std::string buffer(*first);
-	GErrorHolder gerr;
-	JsonNode *root = nullptr;
-	if (json_parser_load_from_data(parser.get(), buffer.c_str(),
-			static_cast<gssize>(buffer.size()), &gerr.error)) {
-		root = json_parser_get_root(parser.get());
-	}
-	JsonObject *answer = root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
-		? json_node_get_object(root) : nullptr;
+	JsonObject *answer = exchange->answer;
 	if (answer == nullptr || json_object_has_member(answer, "error")
 			|| !json_object_has_member(answer, "result")) {
-		close(fd); // an error answer is the user cancelling: silence, exit 0
-		return 0;
+		return 0; // an error answer is the user cancelling: silence, exit 0
 	}
-	JsonNode *result_node = json_object_get_member(answer, "result");
-	JsonObject *result = result_node != nullptr
-			&& json_node_get_node_type(result_node) == JSON_NODE_OBJECT
-		? json_node_get_object(result_node) : nullptr;
+	JsonObject *result = node_object(json_object_get_member(answer, "result"));
 	std::string want_monitor = string_member(result, "output");
 	std::string want_identifier = string_member(result, "identifier");
 	for (const ChooserEntry &entry : entries) {
@@ -1876,12 +1875,10 @@ int capture_pick_bridge() {
 			|| (!want_monitor.empty() && entry.monitor == want_monitor);
 		if (chosen) {
 			std::printf("%s\n", entry.line.c_str());
-			close(fd);
 			return 0;
 		}
 	}
-	close(fd); // a result matching no line is as good as no answer
-	return 0;
+	return 0; // a result matching no line is as good as no answer
 }
 
 } // namespace
@@ -1900,86 +1897,49 @@ int msg_command(int argc, char *argv[]) {
 	std::string params_json;
 	if (argc == 3) {
 		// Re-serialized through json-glib: validates the text the user gave.
-		std::string params_text(argv[2]);
-		JsonParserPtr parser(json_parser_new());
-		GErrorHolder gerr;
-		if (!json_parser_load_from_data(parser.get(), params_text.c_str(),
-				static_cast<gssize>(params_text.size()), &gerr.error)) {
+		GErrorPtr reason;
+		JsonParserPtr parser = parse_json(argv[2], &reason);
+		if (parser == nullptr) {
 			std::fprintf(stderr, "wayland-canvas: invalid params JSON: %s\n",
-				gerr.error != nullptr && gerr.error->message != nullptr
-					? gerr.error->message : "not JSON");
+				reason != nullptr && reason->message != nullptr
+					? reason->message : "not JSON");
 			return 1;
 		}
 		params_json = node_text(json_parser_get_root(parser.get()));
 	}
 
-	int fd = connect_to_socket();
-	if (fd < 0) {
+	std::optional<Exchange> exchange = round_trip(argv[1], params_json);
+	if (!exchange.has_value()) {
 		return 1;
 	}
-	std::string request = std::format(R"({{"id":1,"method":{})", text::json_quote(argv[1]));
-	if (!params_json.empty()) {
-		request += std::format(R"(,"params":{})", params_json);
-	}
-	request += "}\n";
-	if (!write_request(fd, request)) {
-		std::fputs("wayland-canvas: could not send the request\n", stderr);
-		close(fd);
-		return 1;
-	}
-
-	std::optional<std::string> first = read_line(fd);
-	if (!first.has_value()) {
-		std::fputs("wayland-canvas: the compositor did not answer\n", stderr);
-		close(fd);
-		return 1;
-	}
-	JsonParserPtr parser(json_parser_new());
-	std::string buffer(*first);
-	GErrorHolder gerr;
-	JsonNode *root = nullptr;
-	if (json_parser_load_from_data(parser.get(), buffer.c_str(),
-			static_cast<gssize>(buffer.size()), &gerr.error)) {
-		root = json_parser_get_root(parser.get());
-	}
-	JsonObject *answer = root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
-		? json_node_get_object(root) : nullptr;
+	JsonObject *answer = exchange->answer;
 	if (answer == nullptr) {
 		std::fputs("wayland-canvas: unreadable response\n", stderr);
-		close(fd);
 		return 1;
 	}
 	if (json_object_has_member(answer, "error")) {
-		JsonNode *error = json_object_get_member(answer, "error");
-		const char *message = error != nullptr
-				&& json_node_get_node_type(error) == JSON_NODE_VALUE
-				&& json_node_get_value_type(error) == G_TYPE_STRING
-			? json_node_get_string(error) : nullptr;
+		const char *message = node_string(json_object_get_member(answer, "error"));
 		std::fprintf(stderr, "wayland-canvas: %s\n",
 			message != nullptr ? message : "error");
-		close(fd);
 		return 1;
 	}
 	if (!json_object_has_member(answer, "result")) {
 		std::fputs("wayland-canvas: unreadable response\n", stderr);
-		close(fd);
 		return 1;
 	}
 	if (!subscribe) {
 		std::string result = node_text(json_object_get_member(answer, "result"));
 		std::printf("%s\n", result.c_str());
-		close(fd);
 		return 0;
 	}
 	// Events follow, one per line, until the compositor goes or we are killed.
 	for (;;) {
-		std::optional<std::string> line = read_line(fd);
+		std::optional<std::string> line = read_line(exchange->socket.get());
 		if (!line.has_value()) {
 			break;
 		}
 		std::printf("%s\n", line->c_str());
 		std::fflush(stdout); // a piped reader sees each event as it happens
 	}
-	close(fd);
 	return 0;
 }

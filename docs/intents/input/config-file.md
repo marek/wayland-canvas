@@ -27,6 +27,11 @@ the same file, so the two never disagree.
   collides with a default the user cannot see in the file.
 - **Edits keep the user's file**: the settings window rewrites only the line
   it changes; comments, order and every other line stay as written.
+- **One table of settings.** Every `[gestures]` and `[session]` setting — its
+  key, the name `settings.get` and `settings.set` know it by, what it takes,
+  its default — is one row of one table. The parser, the first-run file,
+  the in-place edit, the IPC and `--help` all read it, so none of them can
+  disagree about a key or a bound.
 - **Only what the user acts with is here.** Tuning constants — thresholds,
   sizes, colours — stay compile-time in `src/core/config.h`; the shell's own
   settings (which bar widgets show, the toolbar's edge) are its `shell.json`

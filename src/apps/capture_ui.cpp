@@ -16,7 +16,6 @@
 #include "apps/capture_ui.h"
 #include "core/config.h"
 #include "core/server.h"
-#include "core/text.h"
 #include "platform/output.h"
 #include "render/draw.h"
 #include "render/render.h"
@@ -47,8 +46,7 @@ CaptureUi::~CaptureUi() {
 	finish();
 }
 
-bool CaptureUi::start_pick(Output *output, PickWhat what, PickUse use,
-		CaptureOptions options) {
+bool CaptureUi::open_picker(Output *output, PickWhat what, PickGoal goal) {
 	if (output == nullptr) {
 		output = server_.output_under_cursor();
 	}
@@ -56,18 +54,35 @@ bool CaptureUi::start_pick(Output *output, PickWhat what, PickUse use,
 		return false;
 	}
 	toolbar_.close(); // never both: a mode click closes it first anyway
-	picker_.start(*output, what, use, options);
+	goal_ = std::move(goal);
+	picker_.start(*output, what);
 	return true;
 }
 
+bool CaptureUi::ask_pick(Output *output, PickWhat what, PickAnswer answer) {
+	return open_picker(output, what, std::move(answer));
+}
+
 void CaptureUi::cancel_picker() {
-	if (picker_.close() == PickUse::ipc) {
-		server_.ipc.answer_pick(false, "cancelled");
+	if (!picker_.active()) {
+		return;
+	}
+	picker_.close();
+	PickGoal goal = std::move(*goal_);
+	goal_.reset();
+	if (PickAnswer *answer = std::get_if<PickAnswer>(&goal)) {
+		(*answer)(std::nullopt);
 	}
 }
 
-void CaptureUi::pick_done(const CapturePicker::Pick &pick, PickUse use,
-		const CaptureOptions &options) {
+void CaptureUi::pick_done(const CapturePicker::Pick &pick) {
+	PickGoal goal = std::move(*goal_);
+	goal_.reset();
+	if (PickAnswer *answer = std::get_if<PickAnswer>(&goal)) {
+		(*answer)(pick);
+		return;
+	}
+	const auto &[use, options] = std::get<PickJob>(goal);
 	std::optional<wlr_box> area;
 	if (pick.kind == CapturePicker::Pick::Kind::region) {
 		area = pick.area;
@@ -79,9 +94,6 @@ void CaptureUi::pick_done(const CapturePicker::Pick &pick, PickUse use,
 	View *view = pick.kind == CapturePicker::Pick::Kind::window ? pick.view : nullptr;
 
 	switch (use) {
-	case PickUse::ipc:
-		answer_ipc(pick);
-		return;
 	case PickUse::shot:
 		if (options.timer_s > 0) {
 			deferred_ = Deferred{.kind = Deferred::Kind::shot, .output = pick.output,
@@ -100,33 +112,6 @@ void CaptureUi::pick_done(const CapturePicker::Pick &pick, PickUse use,
 		}
 		recorder_.start(*pick.output, area);
 		return;
-	}
-}
-
-// The pick as the picker IPC answers it.
-void CaptureUi::answer_ipc(const CapturePicker::Pick &pick) {
-	switch (pick.kind) {
-	case CapturePicker::Pick::Kind::region: {
-		std::string name = pick.output->wlr->name;
-		server_.ipc.answer_pick(true, std::format(
-			R"({{"output":{},"x":{},"y":{},"w":{},"h":{}}})",
-			text::json_quote(name), pick.area.x, pick.area.y, pick.area.width,
-			pick.area.height));
-		return;
-	}
-	case CapturePicker::Pick::Kind::window: {
-		const char *identifier = pick.view->ext_toplevel_identifier();
-		server_.ipc.answer_pick(true, std::format(R"({{"window":{},"identifier":{}}})",
-			pick.view->session_id,
-			text::json_quote(identifier != nullptr ? identifier : "")));
-		return;
-	}
-	case CapturePicker::Pick::Kind::output: {
-		std::string name = pick.output->wlr->name;
-		server_.ipc.answer_pick(true,
-			std::format(R"({{"output":{}}})", text::json_quote(name)));
-		return;
-	}
 	}
 }
 
@@ -166,9 +151,10 @@ void CaptureUi::key_sym(xkb_keysym_t sym, uint32_t mods) {
 			&& picker_.toggle_window_mode()) {
 		return;
 	}
-	// The capture chords still work with the capture UI up, so the same
-	// key that opened something closes it again.
-	server_.bindings.handle_capture(sym, mods, server_.output_under_cursor());
+	// The chords that reach everywhere (the capture actions') still work
+	// with the capture UI up, so the same key that opened something closes
+	// it again.
+	server_.bindings.handle_everywhere(sym, mods, server_.output_under_cursor());
 }
 
 bool CaptureUi::pointer_motion(Output &output, double ox, double oy) {
@@ -185,9 +171,8 @@ bool CaptureUi::pointer_button(Output &output, double ox, double oy, uint32_t bu
 		bool pressed) {
 	if (picker_.active()) {
 		return picker_.pointer_button(output, ox, oy, button, pressed,
-			[this](const CapturePicker::Pick &pick, PickUse use,
-					const CaptureOptions &options) {
-				pick_done(pick, use, options);
+			[this](const CapturePicker::Pick &pick) {
+				pick_done(pick);
 			});
 	}
 	if (toolbar_.shows_on(output)) {
@@ -223,9 +208,9 @@ void CaptureUi::toolbar_chose(ToolbarMode mode, Output &output,
 		const CaptureOptions &options) {
 	PickUse use = mode.record ? PickUse::record : PickUse::shot;
 	if (mode.target != ToolbarTarget::screen) {
-		start_pick(&output,
+		open_picker(&output,
 			mode.target == ToolbarTarget::window ? PickWhat::window : PickWhat::region,
-			use, options);
+			PickJob{use, options});
 		return;
 	}
 	if (options.timer_s > 0) {
@@ -250,7 +235,7 @@ void CaptureUi::pick_for_shot(Output *output, CaptureOptions options) {
 		cancel_picker(); // the same chord again cancels
 		return;
 	}
-	start_pick(output, PickWhat::region, PickUse::shot, options);
+	open_picker(output, PickWhat::region, PickJob{PickUse::shot, options});
 }
 
 void CaptureUi::stop_recording_or_toolbar(Output *output, CaptureOptions options) {
