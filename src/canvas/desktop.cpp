@@ -3,8 +3,9 @@
 #include <optional>
 
 #include "canvas/canvas.h"
-#include "core/config.h"
 #include "canvas/desktop.h"
+#include "core/box.h"
+#include "core/config.h"
 #include "core/geometry.h"
 #include "core/server.h"
 #include "platform/output.h"
@@ -91,12 +92,7 @@ const wlr_box &Desktop::frame() const {
 }
 
 Rect Desktop::rect() const {
-	return Rect{
-		static_cast<double>(frame_.x),
-		static_cast<double>(frame_.y),
-		static_cast<double>(frame_.width),
-		static_cast<double>(frame_.height),
-	};
+	return rect_of_box(frame_);
 }
 
 Point Desktop::centre() const {
@@ -208,12 +204,7 @@ wlr_box Desktops::anchor_frame() const {
 }
 
 bool Desktops::overlaps_any(wlr_box box) const {
-	Rect candidate{
-		static_cast<double>(box.x),
-		static_cast<double>(box.y),
-		static_cast<double>(box.width),
-		static_cast<double>(box.height),
-	};
+	Rect candidate = rect_of_box(box);
 	for (const std::unique_ptr<Desktop> &desktop : stack_) {
 		if (candidate.intersects(desktop->rect())) {
 			return true;

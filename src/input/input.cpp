@@ -15,6 +15,7 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "input/ui_layer.h"
 
 namespace {
 
@@ -26,11 +27,6 @@ constexpr uint32_t binding_mods = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
 void notify_activity(Server &server) {
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
 	server.lock.notice_activity();
-}
-
-bool box_contains(const wlr_box &box, double x, double y) {
-	return x >= box.x && x < box.x + box.width &&
-		y >= box.y && y < box.y + box.height;
 }
 
 uint32_t seat_modifiers(Server &server) {
@@ -88,13 +84,14 @@ std::optional<uint32_t> modifier_bit(xkb_keysym_t sym) {
 
 // The key's unshifted symbols: Super+Shift+3 is '#' on a US layout, so the
 // digit chords are matched through their level-0 symbol as well.
-int base_syms(wlr_keyboard *wlr, uint32_t keycode, const xkb_keysym_t **syms) {
+std::span<const xkb_keysym_t> base_syms(wlr_keyboard *wlr, uint32_t keycode) {
 	xkb_layout_index_t layout = xkb_state_key_get_layout(wlr->xkb_state, keycode);
 	if (layout == XKB_LAYOUT_INVALID) {
-		*syms = nullptr;
-		return 0;
+		return {};
 	}
-	return xkb_keymap_key_get_syms_by_level(wlr->keymap, keycode, layout, 0, syms);
+	const xkb_keysym_t *syms = nullptr;
+	int count = xkb_keymap_key_get_syms_by_level(wlr->keymap, keycode, layout, 0, &syms);
+	return {syms, static_cast<std::size_t>(count)};
 }
 
 // ---- pointer hit testing ----
@@ -217,7 +214,7 @@ PressTarget overview_press_target(Server &server, Output &output, double ox,
 		double oy, double cx, double cy, double zoom) {
 	Shelf shelf = overview_shelf_layout(output);
 	for (const ShelfItem &item : shelf) {
-		if (box_contains(item.box, ox, oy)) {
+		if (wlr_box_contains_point(&item.box, ox, oy)) {
 			return PressOnShelf{.view = item.view};
 		}
 	}
@@ -227,13 +224,13 @@ PressTarget overview_press_target(Server &server, Output &output, double ox,
 		if (!tab.has_value()) {
 			continue;
 		}
-		if (box_contains(tab->tile_button, ox, oy)) {
+		if (wlr_box_contains_point(&tab->tile_button, ox, oy)) {
 			return PressOnTile{.desktop = desktop.id()};
 		}
-		if (box_contains(tab->abandon_button, ox, oy)) {
+		if (wlr_box_contains_point(&tab->abandon_button, ox, oy)) {
 			return PressOnAbandon{.desktop = desktop.id()};
 		}
-		if (box_contains(tab->tab, ox, oy)) {
+		if (wlr_box_contains_point(&tab->tab, ox, oy)) {
 			return PressOnDesktop{.desktop = desktop.id()};
 		}
 	}
@@ -431,6 +428,31 @@ void Input::handle_new_virtual_keyboard(wlr_virtual_keyboard_v1 *keyboard) {
 	new_keyboard(&keyboard->keyboard.base, keyboard->has_keymap);
 }
 
+// ---- the compositor's own UIs ----
+
+UiLayer *Input::layer_for_keys() const {
+	for (UiLayer *layer : layers_) {
+		if (layer->owns_keyboard()) {
+			return layer;
+		}
+	}
+	return nullptr;
+}
+
+UiLayer *Input::layer_at(const Output &output, double ox, double oy) const {
+	for (UiLayer *layer : layers_) {
+		if (layer->takes_pointer_at(output, ox, oy)) {
+			return layer;
+		}
+	}
+	return nullptr;
+}
+
+bool Input::gestures_blocked() const {
+	return std::ranges::any_of(layers_,
+		[](const UiLayer *layer) { return layer->blocks_gestures(); });
+}
+
 // ---- key events ----
 
 void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
@@ -442,14 +464,14 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	uint32_t keycode = event->keycode + 8;
 	const xkb_keysym_t *syms = nullptr;
 	int nsyms = xkb_state_key_get_syms(wlr->xkb_state, keycode, &syms);
-	uint32_t all_mods = wlr_keyboard_get_modifiers(wlr);
-	uint32_t mods = all_mods & binding_mods;
+	std::span<const xkb_keysym_t> produced(syms, static_cast<std::size_t>(nsyms));
+	uint32_t mods = wlr_keyboard_get_modifiers(wlr) & binding_mods;
 	if (server.lock.locked()) {
 		// Only the locker and VT switching; no canvas shortcut, no tap.
 		super_tap_ = false;
 		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-			for (int i = 0; i < nsyms; i++) {
-				if (server.bindings.handle_locked(syms[i], mods,
+			for (xkb_keysym_t sym : produced) {
+				if (server.bindings.handle_locked(sym, mods,
 						server.output_under_cursor())) {
 					return;
 				}
@@ -460,8 +482,7 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			event->state);
 		return;
 	}
-	std::span<const xkb_keysym_t> sym_list(syms, static_cast<std::size_t>(nsyms));
-	bool logo = is_logo_key(sym_list);
+	bool logo = is_logo_key(produced);
 
 	bool handled = false;
 	bool tap = false;
@@ -469,7 +490,7 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 		if (!shortcut_capture_->ending) {
 			// From begin to end every key belongs to the capture: nothing
 			// runs, no surface sees one.
-			capture_key(keyboard, event, sym_list);
+			capture_key(keyboard, event, produced);
 			if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED
 					&& event->keycode < 256) {
 				key_consumed_[event->keycode] = true;
@@ -506,47 +527,16 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 		// A logo key pressed on its own may become a tap (see release).
 		super_tap_ = logo && wlr->num_keycodes == 1;
 		Output *output = server.output_under_cursor();
-		if (server.capture_ui.owns_keyboard()) {
-			// The picker, the toolbar or a countdown owns the keyboard:
-			// every key is consumed, and a lone Super tap means nothing.
-			super_tap_ = false;
-			for (xkb_keysym_t sym : sym_list) {
-				server.capture_ui.key(sym, mods);
+		KeySyms keys(produced, base_syms(wlr, keycode));
+		if (UiLayer *layer = layer_for_keys()) {
+			// A layer owns the keyboard: every key is consumed, and nothing
+			// it sees reaches a client.
+			if (!layer->allows_tap()) {
+				super_tap_ = false;
 			}
-			const xkb_keysym_t *base = nullptr;
-			int nbase = base_syms(wlr, keycode, &base);
-			for (int i = 0; i < nbase; i++) {
-				bool repeat = false; // Space is its own base symbol
-				for (xkb_keysym_t sym : sym_list) {
-					repeat = repeat || sym == base[i];
-				}
-				if (!repeat) {
-					server.capture_ui.key(base[i], mods);
-				}
-			}
-			handled = true; // nothing the capture UI sees reaches a client
-		} else if (server.launcher.is_open()) {
-			// The launcher owns the keyboard while open; its own chords —
-			// and only those — close it.
-			if (nsyms > 0 && !logo) {
-				bool closing = false;
-				for (xkb_keysym_t sym : sym_list) {
-					closing = closing || server.bindings.launcher_chord(sym, mods);
-				}
-				if (!closing) {
-					const xkb_keysym_t *base = nullptr;
-					int nbase = base_syms(wlr, keycode, &base);
-					for (int i = 0; i < nbase && !closing; i++) {
-						closing = server.bindings.launcher_chord(base[i], mods);
-					}
-				}
-				if (closing) {
-					server.launcher.close();
-				} else {
-					server.launcher.key(syms[0],
-						xkb_state_key_get_utf32(wlr->xkb_state, keycode), all_mods);
-				}
-			}
+			layer->key({.syms = keys,
+				.utf32 = xkb_state_key_get_utf32(wlr->xkb_state, keycode),
+				.mods = mods, .logo = logo});
 			handled = true;
 		} else if (output != nullptr && output->overview.active()) {
 			// A shell surface holding the keyboard (a panel, the note editor)
@@ -556,36 +546,15 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			bool shell_types = holder != nullptr && holder->mapped
 				&& (mods & WLR_MODIFIER_LOGO) == 0;
 			if (!shell_types) {
-				bool matched = false;
-				for (xkb_keysym_t sym : sym_list) {
-					if (server.bindings.handle_overview(sym, mods, *output)) {
-						matched = true;
-						break;
-					}
-				}
-				if (!matched) {
-					const xkb_keysym_t *base = nullptr;
-					int nbase = base_syms(wlr, keycode, &base);
-					for (int i = 0; i < nbase && !matched; i++) {
-						matched = server.bindings.handle_overview(base[i], mods, *output);
-					}
-				}
+				keys.any([&](xkb_keysym_t sym) {
+					return server.bindings.handle_overview(sym, mods, *output);
+				});
 				handled = true; // the overview owns every other key
 			}
 		} else {
-			for (xkb_keysym_t sym : sym_list) {
-				if (server.bindings.handle(sym, mods, output)) {
-					handled = true;
-					break;
-				}
-			}
-			if (!handled) {
-				const xkb_keysym_t *base = nullptr;
-				int nbase = base_syms(wlr, keycode, &base);
-				for (int i = 0; i < nbase && !handled; i++) {
-					handled = server.bindings.handle(base[i], mods, output);
-				}
-			}
+			handled = keys.any([&](xkb_keysym_t sym) {
+				return server.bindings.handle(sym, mods, output);
+			});
 		}
 		if (handled && event->keycode < 256) {
 			key_consumed_[event->keycode] = true;
@@ -845,19 +814,14 @@ void Input::process_cursor_motion(uint32_t time) {
 		set_cursor_image("default");
 		return;
 	}
-	if (server.capture_ui.pointer_motion(*output, server.cursor->x - output->lx,
-			server.cursor->y - output->ly)) {
-		wlr_seat_pointer_notify_clear_focus(server.seat);
-		set_view_hover(server, nullptr, DecoPart::none);
-		set_cursor_image(server.capture_ui.cursor_image());
-		return;
-	}
-	if (server.launcher.pointer_motion(*output, server.cursor->x - output->lx,
-			server.cursor->y - output->ly)) {
-		wlr_seat_pointer_notify_clear_focus(server.seat);
-		set_view_hover(server, nullptr, DecoPart::none);
-		set_cursor_image("default");
-		return;
+	double ox = server.cursor->x - output->lx, oy = server.cursor->y - output->ly;
+	for (UiLayer *layer : layers_) {
+		if (layer->pointer_motion(*output, ox, oy)) {
+			wlr_seat_pointer_notify_clear_focus(server.seat);
+			set_view_hover(server, nullptr, DecoPart::none);
+			set_cursor_image(layer->cursor_image());
+			return;
+		}
 	}
 
 	if (!output->interactive()) {
@@ -1009,13 +973,11 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	if (output == nullptr) {
 		return;
 	}
-	if (server.capture_ui.pointer_button(*output, server.cursor->x - output->lx,
-			server.cursor->y - output->ly, button, true)) {
-		return;
-	}
-	if (server.launcher.pointer_button(*output, server.cursor->x - output->lx,
-			server.cursor->y - output->ly, button, true)) {
-		return;
+	double ox = server.cursor->x - output->lx, oy = server.cursor->y - output->ly;
+	for (UiLayer *layer : layers_) {
+		if (layer->pointer_button(*output, ox, oy, button, true)) {
+			return;
+		}
 	}
 	if (!output->interactive()) {
 		if (std::optional<LayerHit> shell = shell_surface_at(server, *output)) {
@@ -1141,12 +1103,12 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 	if (output == nullptr) {
 		return;
 	}
-	if (server_.capture_ui.pointer_button(*output, server_.cursor->x - output->lx,
-			server_.cursor->y - output->ly, button, false)) {
-		return;
+	double ox = server_.cursor->x - output->lx, oy = server_.cursor->y - output->ly;
+	for (UiLayer *layer : layers_) {
+		if (layer->pointer_button(*output, ox, oy, button, false)) {
+			return;
+		}
 	}
-	server_.launcher.pointer_button(*output, server_.cursor->x - output->lx,
-		server_.cursor->y - output->ly, button, false);
 }
 
 // ---- touch and the pen ----
@@ -1165,8 +1127,7 @@ std::optional<Input::ContactHit> Input::client_at(double lx, double ly) {
 		}
 		return ContactHit{.surface = surface, .sx = ox, .sy = oy};
 	}
-	if (server.capture_ui.takes_pointer_at(*output, ox, oy)
-			|| server.launcher.open_on(*output)) {
+	if (layer_at(*output, ox, oy) != nullptr) {
 		return std::nullopt;
 	}
 	double zoom = output->camera.drawn().zoom;
@@ -1197,8 +1158,7 @@ bool Input::canvas_at(double lx, double ly) {
 		return false;
 	}
 	double ox = lx - output->lx, oy = ly - output->ly;
-	if (server.capture_ui.takes_pointer_at(*output, ox, oy)
-			|| server.launcher.open_on(*output)
+	if (layer_at(*output, ox, oy) != nullptr
 			|| shell_surface_at(server, *output, ox, oy).has_value()) {
 		return false;
 	}
@@ -1422,13 +1382,11 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	if (output == nullptr) {
 		return;
 	}
-	if (server.capture_ui.owns_keyboard()) {
-		return; // the picker and the toolbar swallow scrolling
-	}
-	if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL &&
-			server.launcher.pointer_axis(*output, server.cursor->x - output->lx,
-				server.cursor->y - output->ly, event->delta)) {
-		return;
+	double ox = server.cursor->x - output->lx, oy = server.cursor->y - output->ly;
+	for (UiLayer *layer : layers_) {
+		if (layer->pointer_axis(*output, ox, oy, event->orientation, event->delta)) {
+			return;
+		}
 	}
 	// A shell surface under the pointer scrolls, in the overview too.
 	if (output->overview.active() && !shell_surface_at(server, *output)) {
@@ -1477,8 +1435,8 @@ void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	}
 	notify_activity(server_);
 	other_input();
-	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
-		return; // the capture UI or the lock owns the pointer
+	if (gestures_blocked() || server_.lock.locked()) {
+		return; // a layer or the lock owns the pointer
 	}
 	server_.gestures.swipe_begin(event->time_msec, event->fingers);
 }
@@ -1505,8 +1463,8 @@ void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 	}
 	notify_activity(server_);
 	other_input();
-	if (server_.capture_ui.owns_keyboard() || server_.lock.locked()) {
-		return; // the capture UI or the lock owns the pointer
+	if (gestures_blocked() || server_.lock.locked()) {
+		return; // a layer or the lock owns the pointer
 	}
 	server_.gestures.pinch_begin(event->time_msec, event->fingers);
 }

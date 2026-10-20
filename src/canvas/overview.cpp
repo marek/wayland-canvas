@@ -6,47 +6,12 @@
 #include <vector>
 
 #include "canvas/camera.h"
-#include "core/config.h"
 #include "canvas/desktop.h"
+#include "core/box.h"
+#include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
 #include "windows/view.h"
-
-namespace {
-
-Point box_centre(wlr_box box) {
-	return Point{
-		.x = box.x + box.width / 2.0,
-		.y = box.y + box.height / 2.0,
-	};
-}
-
-// Screen-sized canvas box centred on (cx, cy), edges rounded to integers.
-wlr_box centred_box(const Output &output, double cx, double cy) {
-	int w = output.width, h = output.height;
-	return wlr_box{
-		static_cast<int>(std::round(cx - w / 2.0)),
-		static_cast<int>(std::round(cy - h / 2.0)),
-		w,
-		h,
-	};
-}
-
-wlr_box rect_to_box(Rect r) {
-	return wlr_box{
-		static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y)),
-		static_cast<int>(std::round(r.w)),
-		static_cast<int>(std::round(r.h)),
-	};
-}
-
-// A desktop's name, or nullopt for no desktop.
-std::optional<DesktopId> id_of(const Desktop *desktop) {
-	return desktop != nullptr ? std::optional<DesktopId>{desktop->id()} : std::nullopt;
-}
-
-} // namespace
 
 Overview::Overview(Output &output)
 	: output_(output) {
@@ -115,7 +80,7 @@ Camera Overview::prepare() {
 		target_ = OverviewTarget{.box = desktop->frame(), .desktop = desktop->id()};
 	} else {
 		target_ = OverviewTarget{
-			.box = rect_to_box(home.viewport(output_.width, output_.height)),
+			.box = box_rounded(home.viewport(output_.width, output_.height)),
 			.desktop = std::nullopt,
 		};
 	}
@@ -184,7 +149,7 @@ void Overview::cancel() {
 		target_ = OverviewTarget{.box = desktop->frame(), .desktop = desktop->id()};
 	} else {
 		target_ = OverviewTarget{
-			.box = rect_to_box(home_.viewport(output_.width, output_.height)),
+			.box = box_rounded(home_.viewport(output_.width, output_.height)),
 			.desktop = std::nullopt,
 		};
 	}
@@ -228,7 +193,7 @@ void Overview::target_point(double cx, double cy) {
 
 void Overview::zoom_by(double factor, double ox, double oy) {
 	double zoom = clampd(output_.camera.current().zoom * factor,
-		config::overview_min_zoom, 0.75);
+		config::overview_min_zoom, config::overview_zoom_limit);
 	Point c = output_.local_to_canvas(ox, oy);
 	Camera next = {
 		.cx = c.x - (ox - output_.width / 2.0) / zoom,
@@ -281,7 +246,7 @@ void Overview::combine(std::optional<DesktopId> into) {
 }
 
 void Overview::new_desktop(double cx, double cy) {
-	wlr_box box = centred_box(output_, cx, cy);
+	wlr_box box = centred_box(output_.width, output_.height, cx, cy);
 	Desktop &desktop = output_.server.canvas.desktops.create(box);
 	set_target(box, desktop.id(), false);
 	output_.server.hint.set(std::format("New Desktop {}", desktop.number()));

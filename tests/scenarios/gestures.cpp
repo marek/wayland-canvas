@@ -27,6 +27,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "core/box.h"
 #include "core/config.h"
 #include "core/geometry.h"
 #include "platform/output.h"
@@ -445,24 +446,14 @@ constexpr Slice RT{0.5, 0, 1, 0.5}, RB{0.5, 0.5, 1, 1};
 // desktop's frame, rounded the way the compositor rounds it (the scenarios
 // run with no bar, so the frame is the whole tiling area).
 wlr_box slice_frame_of(const Desktop &desktop, Slice slice) {
-	const wlr_box &frame = desktop.frame();
-	Rect area{double(frame.x), double(frame.y), double(frame.width),
-		double(frame.height)};
-	Rect r = slice_box(area, slice, config::tile_gap);
-	return wlr_box{
-		static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y)),
-		static_cast<int>(std::round(r.x + r.w)) - static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y + r.h)) - static_cast<int>(std::round(r.y)),
-	};
+	return box_snapped(slice_box(rect_of_box(desktop.frame()), slice, config::tile_gap));
 }
 
 // The view's frame lies on its slice (clients snap to their own units, so a
 // side may sit a few px short of the slice's box).
 bool on_slice(View *view, const wlr_box &expected) {
 	Rect f = view->frame_rect();
-	Rect e{double(expected.x), double(expected.y), double(expected.width),
-		double(expected.height)};
+	Rect e = rect_of_box(expected);
 	return std::fabs(f.x - e.x) < 3 && std::fabs(f.y - e.y) < 3
 		&& e.w - f.w < 12 && e.h - f.h < 12;
 }
@@ -652,12 +643,13 @@ int run_step() {
 	case 2: {
 		// Title bar hit-testing at the close/maximize/minimize buttons.
 		wlr_box f = three->frame_box();
-		check(three->deco.hit(f.x + f.width - 10, f.y + 10, 1).part == DecoPart::close,
-			"close button hit");
-		check(three->deco.hit(f.x + f.width - 50, f.y + 10, 1).part == DecoPart::maximize,
-			"maximize button hit");
-		check(three->deco.hit(f.x + f.width - 100, f.y + 10, 1).part == DecoPart::minimize,
-			"minimize button hit");
+		auto hits = [&](DecoPart part) {
+			Point at = button_centre(f, part);
+			return three->deco.hit(at.x, at.y, 1).part == part;
+		};
+		check(hits(DecoPart::close), "close button hit");
+		check(hits(DecoPart::maximize), "maximize button hit");
+		check(hits(DecoPart::minimize), "minimize button hit");
 		check(three->deco.hit(f.x + 60, f.y + 10, 1).part == DecoPart::title, "title hit");
 		DecoHit h = three->deco.hit(f.x + f.width + 3, f.y + f.height + 3, 1);
 		check(h.part == DecoPart::resize &&
@@ -879,8 +871,18 @@ int run_step() {
 	case 25: {
 		if (!acted) {
 			acted = true;
-			one->activate();
-			check(!one->minimized, "restore from minimized");
+			// The shelf's thumbnail takes the click where it is drawn.
+			Shelf shelf = overview_shelf_layout(*o);
+			check(!shelf.empty() && shelf.front().view == one,
+				"the minimized window sits on the shelf");
+			if (!shelf.empty()) {
+				const wlr_box &thumb = shelf.front().box;
+				move_to(thumb.x + thumb.width / 2.0, thumb.y + thumb.height / 2.0);
+				click(BTN_LEFT, true);
+				click(BTN_LEFT, false);
+			}
+			check(!one->minimized && server->focused_view == one,
+				"a click on the shelf's thumbnail restores the window");
 			// Restoring a window leaves the overview: open it again to click.
 			if (!o->overview.active()) {
 				o->overview.enter();
@@ -2391,7 +2393,7 @@ int run_step() {
 	case 133: {
 		Desktop *d3 = server->canvas.desktops.by_number(3);
 		float scale = o->wlr->scale;
-		DesktopLabel label = server->painter.desktop_label(*d3, scale, false);
+		CachedText label = desktop_label(*server, *d3, scale, false);
 		uint32_t drawn = label.texture != nullptr ? label.texture->width : 0;
 		check(label.texture != nullptr
 				&& drawn == static_cast<uint32_t>(std::ceil(label.w * scale)),
@@ -2692,6 +2694,73 @@ int run_step() {
 			"once the edge is reached, the next window opens at the first spot again");
 		shot("38-cascade");
 		return 300;
+	}
+	case 156: { // a second output at scale 2 joins the first, at scale 1
+		wlr_backend *headless = nullptr;
+		wlr_multi_for_each_backend(server->backend,
+			[](wlr_backend *backend, void *data) {
+				if (wlr_backend_is_headless(backend)) {
+					*static_cast<wlr_backend **>(data) = backend;
+				}
+			}, &headless);
+		check(headless != nullptr && wlr_headless_add_output(headless, 640, 480) != nullptr,
+			"a second output was added for the text cache");
+		return 600;
+	}
+	case 157: {
+		if (server->outputs.size() < 2 && retries++ < 50) {
+			return -100;
+		}
+		Output *second = server->outputs.back().get();
+		wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_scale(&state, 2);
+		wlr_output_commit_state(second->wlr, &state);
+		wlr_output_state_finish(&state);
+		second->camera.jump(o->camera.current());
+		check(server->outputs.size() == 2 && second->wlr->scale == 2 && o->wlr->scale == 1,
+			"two outputs, at scales 1 and 2");
+		return 400;
+	}
+	case 158: { // both in the overview, with a minimized window on the shelf
+		two->set_minimized(true);
+		o->overview.enter();
+		server->outputs.back()->overview.enter();
+		return 900;
+	}
+	case 159: {
+		// Frames are rendered here, one after the other, so that none is
+		// skipped and the hint's 2 s cannot run out between them.
+		auto frames = [](int n) {
+			for (int i = 0; i < n; i++) {
+				for (const std::unique_ptr<Output> &output : server->outputs) {
+					server->painter.render(*output);
+				}
+			}
+		};
+		const config::Palette &pal = server->theme.colors();
+		server->hint.set("Text cache check");
+		unsigned long before = server->text_cache.rebuilt();
+		frames(2);
+		unsigned long warm = server->text_cache.rebuilt();
+		check(warm > before, std::format("the first frames built their textures ({} new)",
+			warm - before));
+		check(server->text_cache.find_size(panel_text_spec("Text cache check", 1, pal))
+				&& server->text_cache.find_size(panel_text_spec("Text cache check", 2, pal)),
+			"the hint is cached at scale 1 and at scale 2");
+		frames(100);
+		check(server->text_cache.rebuilt() == warm,
+			std::format("no texture was rebuilt across 100 unchanged frames on both outputs "
+				"({} rebuilt)", server->text_cache.rebuilt() - warm));
+		server->hint.set("Another line");
+		frames(1);
+		check(server->text_cache.rebuilt() - warm == 2,
+			std::format("a changed hint builds one texture per scale, and the counter sees "
+				"it ({} built)", server->text_cache.rebuilt() - warm));
+		two->set_minimized(false);
+		o->overview.exit();
+		server->outputs.back()->overview.exit();
+		return 700;
 	}
 	default:
 		finished = true;

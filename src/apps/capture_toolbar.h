@@ -8,6 +8,7 @@
 #include "apps/capture_overlay.h"
 #include "apps/capture_toolbar_layout.h"
 #include "core/util.h"
+#include "render/cached_texture.h"
 
 class Output;
 class Server;
@@ -44,8 +45,6 @@ public:
 	// The panel, and the accent on the recordings when opened for them,
 	// onto `out` when the toolbar is open on `output`.
 	void add_overlay(Output &output, float scale, CaptureOverlay &out);
-	// Drops the cached texture so the next frame redraws in the new palette.
-	void theme_changed() { stale_ = true; }
 
 private:
 	std::optional<ToolbarButton> button_at(const Output &output, double ox, double oy) const;
@@ -60,9 +59,5 @@ private:
 	std::optional<ToolbarButton> hover_;
 	std::optional<ToolbarButton> pressed_;
 
-	// Rebuilt when stale, or the scale or the box changes.
-	TexturePtr texture_;
-	float scale_ = 0;
-	wlr_box box_{};
-	bool stale_ = true;
+	CachedTexture<wlr_box> panel_; // the toolbar image, per scale and layout
 };

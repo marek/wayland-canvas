@@ -20,6 +20,13 @@ inline constexpr const char *title_font = "Sans 10";
 inline constexpr int title_padding = 12;
 inline constexpr const char *ui_font = "Sans 10";
 inline constexpr const char *ui_font_bold = "Sans Bold 10";
+// Logical px around the text of a banner on a panel: the hint, the help line,
+// the picker's size label.
+inline constexpr int panel_text_pad_x = 10;
+inline constexpr int panel_text_pad_y = 5;
+// The text textures of the compositor's own UI kept between frames, one per
+// distinct text, colours and scale; the least recently used go past this.
+inline constexpr std::size_t text_cache_entries = 512;
 
 // The compositor's palette, 0xRRGGBBAA: one entry per thing it draws. The
 // active one is Theme::colors() (core/theme.h); the compositor starts dark.
@@ -141,7 +148,32 @@ inline constexpr double overview_swipe_distance = 260.0; // 4-finger travel for 
 inline constexpr double overview_commit = 0.25; // progress past which a released zoom gesture completes
 inline constexpr double overview_max_zoom = 0.30; // relative to a view at 100 %; further out below it
 inline constexpr double overview_min_zoom = 0.02;
+inline constexpr double overview_zoom_limit = 0.75; // the closest a pinch or the wheel zooms the overview in
 inline constexpr int overview_margin = 80; // logical px kept around the content
+
+// The overview's desktop tabs, logical px: a tab sits above its desktop's frame,
+// and holds the label, the Tile switch and the Abandon button in a row.
+inline constexpr int tab_height = 28;
+inline constexpr int tab_lift = 4; // the gap between a tab and its frame
+inline constexpr int tab_pad = 12; // before the label
+inline constexpr int tab_gap = 8; // between the label and the buttons
+inline constexpr int tab_button = 24; // the buttons are squares this wide
+inline constexpr int tab_button_gap = 6;
+inline constexpr int tab_button_inset = 2; // from the tab's top to its buttons
+inline constexpr int tab_label_guess = 9; // px a character before the label is drawn once
+
+// The overview's bottom stack, logical px, from the bottom edge up: the help
+// line, the row a hint takes, the shelf.
+inline constexpr int overview_help_margin = 12;
+inline constexpr int overview_hint_gap = 8;
+inline constexpr int overview_shelf_gap = 16;
+inline constexpr int overview_help_guess_h = 28; // before the help line is drawn once
+inline constexpr int shelf_thumb_w = 160;
+inline constexpr int shelf_thumb_h = 100;
+inline constexpr int shelf_gap = 12;
+inline constexpr int shelf_backing = 10; // the panel behind the shelf, beyond its thumbnails
+inline constexpr int shelf_title_strip = 16; // under a thumbnail, for the title
+
 inline constexpr double abandon_distance = 200.0; // 4-finger sideways travel that abandons a desktop
 inline constexpr double pinch_tile_scale = 1.30; // 3-finger spread past this tiles
 inline constexpr double pinch_combine_scale = 0.72; // 3-finger pinch below this combines
@@ -196,6 +228,11 @@ inline constexpr int launcher_max_rows = 10;
 inline constexpr int launcher_icon = 28;
 inline constexpr const char *launcher_font = "Sans 11";
 inline constexpr const char *launcher_search_font = "Sans 13";
+inline constexpr int launcher_pad = 12; // around the search field and the rows
+inline constexpr int launcher_gap = 8; // between the search field, the rows and the footer
+inline constexpr int launcher_footer_height = 28;
+inline constexpr int launcher_margin_x = 16; // kept clear on each side of the panel
+inline constexpr int launcher_margin_y = 32; // and above and below it
 
 // Top bar: a Quickshell client autostarted by Server::start() when qs is on
 // PATH. Its config is found beside the compositor binary at one of the two

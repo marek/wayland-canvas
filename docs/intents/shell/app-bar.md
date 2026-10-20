@@ -42,6 +42,7 @@ anything, and the user can turn it off.
 | Subject | Rule |
 |---|---|
 | Place | The edge the shell config's `appbar.position` names, left by default: on the left or right edge a column centred vertically, on the top or bottom a row centred horizontally, 8 px from the edge — a top one below the bar. Above the canvas and below panels (the surface's namespace: `wayland-canvas-app-bar`). A new edge applies at once |
+| Below it | In the overview, the compositor's shelf and help line stay clear of a bottom app bar, as of a bottom toolbar ([../canvas/overview.md](../canvas/overview.md)) |
 | When | Slides in as that screen enters the overview and out as it leaves, each screen on its own, exactly as the toolbar does |
 | Off | `appbar.enabled` false: no surface on any screen |
 | Entries | One per open app, in the order the apps' first windows opened; the app's icon and its name from the desktop entry its app id names ([../apps/desktop-entries.md](../apps/desktop-entries.md)), else the app id's first letter in its place. A dot under the mark, a second one for an app holding more than one window; the focused app's mark takes the accent, a wholly minimized app's is dimmed |

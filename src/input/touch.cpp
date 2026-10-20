@@ -161,10 +161,10 @@ bool Touch::join_gesture(Contact &contact, std::size_t fingers, uint32_t time) {
 		}
 		return true;
 	}
-	// The capture UI owns the pointer, as it does for a touchpad swipe
+	// A layer owns the pointer, as it does for a touchpad swipe
 	// (Input::handle_swipe_begin): the fingers beyond the first are ignored.
 	if ((fingers == 3 || fingers == 4)
-			&& !server_.capture_ui.owns_keyboard()
+			&& !input_.gestures_blocked()
 			&& server_.gestures.options().swipes != SwipePreset::off) {
 		contact.role = Role::view;
 		contacts_.push_back(contact);

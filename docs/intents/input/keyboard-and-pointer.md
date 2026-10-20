@@ -118,6 +118,23 @@ change, in `canvas.conf` or by pressing the new keys in the settings window.
 | A locked session | The locker's surface holds the keyboard; nothing else sees a key, and only VT switching is still a compositor chord ([../shell/lock.md](../shell/lock.md)) |
 | A chord being recorded for the settings | The compositor takes every key, modifiers included, until the chord is pressed or the recording is cancelled: nothing runs and no surface sees them ([../shell/settings.md](../shell/settings.md)) |
 
+### Who takes an event first
+
+The compositor's own UIs take keys, the pointer, touch and the pen before
+the overview and the bindings do, and are drawn over everything, the
+capture UI above the launcher.
+
+| Holder | Takes |
+|---|---|
+| A locked session | Everything ([../shell/lock.md](../shell/lock.md)); no UI below it is reached |
+| A chord being recorded | Every key |
+| The capture UI | Every key while its picker, toolbar or countdown is up; the pointer, a touch, the pen and a scroll wherever its picker, toolbar or thumbnail is; every swipe and pinch while it holds the keyboard ([../apps/capture.md](../apps/capture.md)) |
+| The launcher | Every key while it is open; the pointer, a touch and the pen on the output it is open on (a press outside its panel closes it); a scroll over its panel ([../apps/launcher.md](../apps/launcher.md)) |
+| The overview, then the bindings | What is left |
+
+A lone Super tap still runs its action while the launcher is open, and does
+nothing while the capture UI holds the keyboard.
+
 ### Devices
 
 | Setting | Rule |

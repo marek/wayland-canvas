@@ -7,12 +7,15 @@
 #include "apps/apps.h"
 #include "apps/icons.h"
 #include "core/util.h"
+#include "apps/launcher_layout.h"
+#include "input/ui_layer.h"
+#include "render/cached_texture.h"
 
 class Output;
 class Server;
 
 // The Start-menu-style app launcher overlay.
-class Launcher {
+class Launcher final : public UiLayer {
 public:
 	explicit Launcher(Server &server);
 	~Launcher();
@@ -23,19 +26,25 @@ public:
 	void toggle(Output *output);
 	void close();
 	bool is_open() const;
+
+	// While open the launcher owns the keyboard: every press is consumed,
+	// and its own chords — the ones that open it — close it.
+	bool owns_keyboard() const override { return is_open(); }
+	void key(const KeyPress &press) override;
+	// A lone Super tap runs its action: the launcher's own tap closes it.
+	bool allows_tap() const override { return true; }
+
 	// Open on `output`: every press there is the launcher's, inside the
-	// panel or a click outside that closes it.
-	bool open_on(const Output &output) const;
-
-	// While open the launcher owns the keyboard: every press is consumed. `utf32` is the
-	// character the key produces (0 for none), `mods` the WLR_MODIFIER_* mask.
-	void key(xkb_keysym_t sym, uint32_t utf32, uint32_t mods);
-
-	// Pointer at output-local logical (ox, oy). True when the event is consumed: over the
-	// panel, or (button) a click outside that closes it.
-	bool pointer_motion(Output &output, double ox, double oy);
-	bool pointer_button(Output &output, double ox, double oy, uint32_t button, bool pressed);
-	bool pointer_axis(Output &output, double ox, double oy, double delta);
+	// panel or a click outside that closes it. Motion and scrolling are
+	// consumed only over the panel.
+	bool takes_pointer_at(const Output &output, double ox, double oy) const override;
+	bool pointer_motion(Output &output, double ox, double oy) override;
+	bool pointer_button(Output &output, double ox, double oy, uint32_t button,
+		bool pressed) override;
+	bool pointer_axis(Output &output, double ox, double oy,
+		wl_pointer_axis orientation, double delta) override;
+	bool blocks_gestures() const override { return false; }
+	const char *cursor_image() const override { return "default"; }
 
 	struct Panel {
 		wlr_texture *texture = nullptr;
@@ -44,11 +53,11 @@ public:
 	// The panel image for `output` (rebuilt when stale); nullopt unless open there.
 	std::optional<Panel> panel(Output &output);
 
-	// Before `output` is destroyed: closes the launcher if it is open there.
-	void output_destroyed(Output &output);
-	// Redraws the open panel in the new palette.
-	void theme_changed();
-	void finish(); // releases the panel texture, apps and icons before the renderer goes
+	// Draws the backdrop and the panel on `ctx`'s output when open there.
+	void draw(const RenderCtx &ctx) override;
+	// Closes the launcher if it is open on `output`.
+	void output_gone(Output &output) override;
+	void finish() override; // closes, and releases the icons before the renderer goes
 
 private:
 	Server &server_;
@@ -66,12 +75,12 @@ private:
 	int hover_ = -1; // result index under the pointer, -1 none
 	int pressed_row_ = -1; // result index of the pending click, -1 none
 
-	TexturePtr texture_; // cached panel image
-	float texture_scale_ = 0; // scale it was drawn for
-	wlr_box texture_box_{}; // layout it was drawn for
-	bool stale_ = true;
+	CachedTexture<wlr_box> panel_; // the panel image, per scale and layout
 
 	void open(Output &output);
+	// One key's symbol: navigation, editing the query, or typing into it.
+	// `utf32` is the character it produces (0 for none).
+	void key_sym(xkb_keysym_t sym, uint32_t utf32, uint32_t mods);
 	bool query_pop_char();
 	bool query_pop_word();
 	void query_changed();
@@ -81,6 +90,6 @@ private:
 	void launch_selected();
 	void scroll_to_selection(int rows);
 	void move_selection(int rows, int delta);
-	int row_at(const wlr_box &box, int rows, double ox, double oy) const;
-	TexturePtr draw_panel(const Output &output, const wlr_box &box, int rows);
+	int row_at(const PanelLayout &layout, double ox, double oy) const;
+	TexturePtr draw_panel(const Output &output, const PanelLayout &layout);
 };

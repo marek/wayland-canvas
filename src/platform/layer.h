@@ -36,6 +36,11 @@ public:
 	// when the surface is made: the namespace never changes, and pointer
 	// motion asks for it.
 	bool belongs_on_canvas() const;
+	// A shell strip the overview works around: the toolbar or the app bar.
+	// Overlays that reserve no exclusive zone, so the free box and the
+	// overview's bottom UI cut them out by hand. Decided when the surface
+	// is made, like belongs_on_canvas(): frames ask for it.
+	bool is_overview_strip() const;
 	// Puts it at `box` on the plane, remembered under its name; the
 	// client is told a new size, and every output showing it repaints.
 	void place(wlr_box box);
@@ -63,6 +68,7 @@ private:
 	// unmap, commit and destroy must not arrange on it any more.
 	bool attached_ = true;
 	const bool on_canvas_;
+	const bool overview_strip_;
 
 	friend class Output;
 

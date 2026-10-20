@@ -68,10 +68,6 @@ public:
 
 	// The dimmed screen, selection, size label and frames onto `out`.
 	void add_overlay(Output &output, float scale, CaptureOverlay &out);
-	// Drops the cached texture so the next frame redraws in the new palette.
-	void theme_changed();
-	// Releases the cached texture before the renderer goes.
-	void finish();
 
 private:
 	// What the picker is doing right now.
@@ -98,10 +94,4 @@ private:
 	Server &server_;
 
 	State state_;
-
-	// The drag size label, rebuilt when its text or the scale changes.
-	TexturePtr size_texture_;
-	std::string size_text_;
-	float size_scale_ = 0;
-	int size_w_ = 0, size_h_ = 0;
 };

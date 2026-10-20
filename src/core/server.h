@@ -18,6 +18,7 @@
 #include "core/theme.h"
 #include "platform/night_light.h"
 #include "render/render.h"
+#include "render/text_cache.h"
 #include "core/util.h"
 #include "platform/session_bus.h"
 #include "windows/launches.h"
@@ -56,6 +57,10 @@ public:
 	void damage_all();
 	Output *output_at(double lx, double ly);
 	Output *output_under_cursor();
+	// The output whose viewport holds the canvas point, nullptr when none
+	// does; `normal_view` leaves out the outputs showing the overview.
+	enum class Showing { viewport, normal_view };
+	Output *output_showing(double cx, double cy, Showing which = Showing::viewport);
 	void update_visibility();
 
 	// server.cpp: switches the palette, repaints, tells the subscribers.
@@ -124,6 +129,9 @@ public:
 	wlr_cursor *cursor = nullptr;
 	wlr_xcursor_manager *xcursor_mgr = nullptr;
 	Options options;
+
+	// Declared before everything that holds a texture of it, so it outlives them.
+	TextCache text_cache;
 
 	std::vector<std::unique_ptr<Output>> outputs;
 	std::vector<std::unique_ptr<View>> toplevels; // every view, mapped or not

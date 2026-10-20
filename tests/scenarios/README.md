@@ -94,7 +94,10 @@ own the machine's Wayland display namespace and GPU.
   counter counts an `operator new` and a `g_strdup`. Last, nine windows wider
   than a third of the screen opening one after another cascade to the right
   edge of the usable area, none passes it, and the next opens on the first
-  spot again.
+  spot again. Last, a second output at scale 2 beside the first, both in
+  the overview with a hint: 100 unchanged frames on both rebuild no text
+  texture (a counter in the text cache), and a changed hint builds one per
+  scale.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close

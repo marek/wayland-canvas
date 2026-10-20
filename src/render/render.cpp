@@ -7,10 +7,12 @@
 #include <ranges>
 #include <span>
 
+#include "core/box.h"
 #include "core/config.h"
 #include "render/draw.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "input/ui_layer.h"
 
 namespace {
 
@@ -47,15 +49,7 @@ double canvas_y(const RenderCtx &ctx, double cy) {
 	return (cy - ctx.top) * ctx.cam.zoom;
 }
 
-// wlr_box (ints) as a canvas Rect.
-Rect box_rect(const wlr_box &box) {
-	Rect r;
-	r.x = box.x;
-	r.y = box.y;
-	r.w = box.width;
-	r.h = box.height;
-	return r;
-}
+} // namespace
 
 // Screen-space rect, clipped to the render target; empty rects are skipped.
 void draw_logical_rect(const RenderCtx &ctx, double x, double y, double w, double h,
@@ -76,12 +70,6 @@ void draw_logical_rect(const RenderCtx &ctx, double x, double y, double w, doubl
 		.blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
 	};
 	wlr_render_pass_add_rect(ctx.pass, &opts);
-}
-
-void draw_canvas_rect(const RenderCtx &ctx, double x, double y, double w, double h,
-		wlr_render_color color) {
-	draw_logical_rect(ctx, canvas_x(ctx, x), canvas_y(ctx, y),
-		w * ctx.cam.zoom, h * ctx.cam.zoom, color);
 }
 
 // Our own (cairo) textures, authored upright: same source transform as a
@@ -109,35 +97,12 @@ void draw_ui_texture(const RenderCtx &ctx, wlr_texture *texture,
 	wlr_render_pass_add_texture(ctx.pass, &opts);
 }
 
-// One hollow rectangle of the capture overlay: four thin fills. The
-// horizontal edges carry the corners.
-void draw_capture_outline(const RenderCtx &ctx, const CaptureOutline &outline) {
-	wlr_render_color color = color_rgba(outline.rgba);
-	double t = outline.thickness;
-	const wlr_box &b = outline.box;
-	draw_logical_rect(ctx, b.x, b.y, b.width, t, color);
-	draw_logical_rect(ctx, b.x, b.y + b.height - t, b.width, t, color);
-	draw_logical_rect(ctx, b.x, b.y + t, t, b.height - 2 * t, color);
-	draw_logical_rect(ctx, b.x + b.width - t, b.y + t, t, b.height - 2 * t, color);
-}
+namespace {
 
-// The capture UI's own overlay: the picker, the toolbar, the thumbnail.
-void draw_capture_overlay(const RenderCtx &ctx) {
-	const CaptureOverlay &capture =
-		ctx.output->server.capture_ui.overlay(*ctx.output, ctx.scale);
-	for (const CaptureFill &fill : capture.fills) {
-		draw_logical_rect(ctx, fill.box.x, fill.box.y, fill.box.width,
-			fill.box.height, color_rgba(fill.rgba));
-	}
-	for (const CaptureOutline &outline : capture.outlines) {
-		draw_capture_outline(ctx, outline);
-	}
-	for (const CaptureImage &image : capture.images) {
-		if (image.texture != nullptr) {
-			draw_ui_texture(ctx, image.texture, image.box.x, image.box.y,
-				image.box.width, image.box.height, 1.0);
-		}
-	}
+void draw_canvas_rect(const RenderCtx &ctx, double x, double y, double w, double h,
+		wlr_render_color color) {
+	draw_logical_rect(ctx, canvas_x(ctx, x), canvas_y(ctx, y),
+		w * ctx.cam.zoom, h * ctx.cam.zoom, color);
 }
 
 // Dashed rectangle outline (dash 10, gap 6). The horizontal edges carry the
@@ -358,10 +323,9 @@ void draw_view(const RenderCtx &ctx, View &view) {
 		// full frame width from the frame's top edge; the border runs
 		// below it and around the content.
 		if (tb > 0) {
-			view.deco.update(ctx.deco_scale);
-			if (view.deco.texture() != nullptr) {
-				draw_ui_texture(ctx, view.deco.texture(),
-					canvas_x(ctx, frame.x), canvas_y(ctx, frame.y),
+			wlr_texture *bar = view.deco.title_bar(ctx.deco_scale);
+			if (bar != nullptr) {
+				draw_ui_texture(ctx, bar, canvas_x(ctx, frame.x), canvas_y(ctx, frame.y),
 					frame.w * ctx.cam.zoom, tb * ctx.cam.zoom, 1.0);
 			}
 		}
@@ -444,7 +408,7 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 	if (server.canvas.desktops.find(o.overview.target().desktop) == nullptr
 			&& !wlr_box_empty(&o.overview.target().box)) {
 		const wlr_box &t = o.overview.target().box;
-		Rect tr = box_rect(t);
+		Rect tr = rect_of_box(t);
 		if (tr.intersects(ctx.viewport)) {
 			double zoom = ctx.cam.zoom;
 			draw_dashed_logical_rect(ctx, canvas_x(ctx, t.x),
@@ -479,7 +443,7 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 	Desktop *desktop = o.server.canvas.desktops.find(g->desktop);
 	Desktop *merge_from = o.server.canvas.desktops.find(g->merge_from);
 	const wlr_box &box = desktop != nullptr ? desktop->frame() : o.overview.target().box;
-	Rect br = box_rect(box);
+	Rect br = rect_of_box(box);
 	bool box_visible = br.intersects(ctx.viewport);
 
 	if (g->scale > config::pinch_tile_scale && box_visible) {
@@ -488,7 +452,7 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 	}
 	if (merge_from != nullptr) {
 		const wlr_box &m = merge_from->frame();
-		Rect mr = box_rect(m);
+		Rect mr = rect_of_box(m);
 		if (mr.intersects(ctx.viewport)) {
 			draw_dashed_desktop(ctx, *merge_from, 0, 3.0,
 				color_rgba(o.server.theme.colors().combine));
@@ -506,18 +470,45 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 
 // ---------------------------------------------------------------- tabs
 
+using LabelBuffer = std::array<char, 48>;
+
+// "Desktop 3", with the percentage of a scaled desktop.
+std::string_view desktop_label_text(const Desktop &desktop, LabelBuffer &buf) {
+	int len;
+	if (desktop.scale() == 1.0) {
+		len = std::snprintf(buf.data(), buf.size(), "Desktop %d", desktop.number());
+	} else {
+		len = std::snprintf(buf.data(), buf.size(), "Desktop %d · %d %%",
+			desktop.number(), static_cast<int>(std::lround(desktop.scale() * 100)));
+	}
+	return {buf.data(), std::min(static_cast<std::size_t>(std::max(len, 0)), buf.size() - 1)};
+}
+
+// The tab's label: the text cache's request for its text, in `fg`.
+TextSpec desktop_label_spec(std::string_view text, float scale, uint32_t fg) {
+	return {.text = text, .font = config::ui_font_bold, .fg = fg, .scale = scale};
+}
+
+// The Tile switch's glyph: four squares centred in the button.
 void draw_tile_glyph(const RenderCtx &ctx, const wlr_box &button, wlr_render_color color) {
-	constexpr int off[4][2] = {{4, 4}, {13, 4}, {4, 13}, {13, 13}};
-	for (int i = 0; i < 4; i++) {
-		draw_logical_rect(ctx, button.x + off[i][0], button.y + off[i][1], 7, 7, color);
+	constexpr int square = 7, gap = 2;
+	int x0 = button.x + (button.width - (2 * square + gap)) / 2;
+	int y0 = button.y + (button.height - (2 * square + gap)) / 2;
+	for (int row = 0; row < 2; row++) {
+		for (int col = 0; col < 2; col++) {
+			draw_logical_rect(ctx, x0 + col * (square + gap), y0 + row * (square + gap),
+				square, square, color);
+		}
 	}
 }
 
+// The Abandon button's glyph: a cross centred in the button.
 void draw_abandon_glyph(const RenderCtx &ctx, const wlr_box &button, wlr_render_color color) {
-	draw_stepped_line(ctx, button.x + 7, button.y + 7,
-		button.x + 17, button.y + 17, 2.0, 1.0, color);
-	draw_stepped_line(ctx, button.x + 7, button.y + 17,
-		button.x + 17, button.y + 7, 2.0, 1.0, color);
+	constexpr int size = 10;
+	int x0 = button.x + (button.width - size) / 2;
+	int y0 = button.y + (button.height - size) / 2;
+	draw_stepped_line(ctx, x0, y0, x0 + size, y0 + size, 2.0, 1.0, color);
+	draw_stepped_line(ctx, x0, y0 + size, x0 + size, y0, 2.0, 1.0, color);
 }
 
 void draw_tabs(const RenderCtx &ctx) {
@@ -527,9 +518,7 @@ void draw_tabs(const RenderCtx &ctx) {
 		// The target's tab is the accent fill, so its label is drawn in
 		// the accent-text variant: a contrasting colour in both modes.
 		bool target = o.overview.target().desktop == d.id();
-		// Make sure the cached label matches this output's scale before
-		// the layout measures it.
-		DesktopLabel label = server.painter.desktop_label(d, ctx.scale, target);
+		CachedText label = desktop_label(server, d, ctx.scale, target);
 		std::optional<TabLayout> layout = server.painter.overview_tab_layout(o, d);
 		if (!layout) {
 			continue;
@@ -538,7 +527,7 @@ void draw_tabs(const RenderCtx &ctx) {
 		draw_logical_rect(ctx, layout->tab.x, layout->tab.y, layout->tab.width,
 			layout->tab.height, color_rgba(bg));
 		if (label.texture != nullptr && label.w > 0 && label.h > 0) {
-			draw_ui_texture(ctx, label.texture, layout->tab.x + 12,
+			draw_ui_texture(ctx, label.texture, layout->tab.x + config::tab_pad,
 				layout->tab.y + (layout->tab.height - label.h) / 2,
 				label.w, label.h, 1.0);
 		}
@@ -566,36 +555,20 @@ void draw_tabs(const RenderCtx &ctx) {
 
 // --------------------------------------------------------------- shelf
 
-// The shell's overview toolbar on this output, while it is mapped: the
-// strip surface the overview's bottom UI keeps clear of when it sits on
-// the bottom edge. Keep the namespace in sync with plugins/canvas.toolbar
-// (docs/intents/shell/toolbar.md).
-constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
-
-const LayerSurface *output_toolbar(const Output &o) {
+// The y the overview's bottom UI — the help line, the hint's row, the shelf —
+// stays above: the output's bottom edge, or the top of the highest shell
+// strip (the toolbar, the app bar) anchored to it.
+int strips_top(const Output &o) {
+	int bottom = o.height;
 	for (const auto &vec : o.layers) {
 		for (const std::unique_ptr<LayerSurface> &layer : vec) {
-			if (layer->mapped && layer->wlr->namespace_ != nullptr
-					&& std::strcmp(layer->wlr->namespace_, toolbar_namespace) == 0) {
-				return layer.get();
+			if (layer->mapped && layer->is_overview_strip()
+					&& (layer->wlr->current.anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) != 0) {
+				bottom = std::min(bottom, layer->geo.y);
 			}
 		}
 	}
-	return nullptr;
-}
-
-// The y the overview's bottom UI — the help line, the hints, the shelf —
-// stays above: the output's bottom edge, or the top of a toolbar anchored
-// to it. The shelf's hit-testing reads the same layout
-// (input.cpp:overview_press_target), so what is drawn and what takes the
-// pointer are one box.
-int overview_bottom(const Output &o) {
-	const LayerSurface *toolbar = output_toolbar(o);
-	if (toolbar != nullptr
-			&& (toolbar->wlr->current.anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) != 0) {
-		return toolbar->geo.y;
-	}
-	return o.height;
+	return bottom;
 }
 
 // Shelf thumbnails: the view's frame fitted into the box, aspect kept.
@@ -606,7 +579,8 @@ void draw_shelf(const RenderCtx &ctx) {
 	}
 	int left = shelf.front().box.x, right = shelf.back().box.x + shelf.back().box.width;
 	int top = shelf.front().box.y, bottom = shelf.front().box.y + shelf.front().box.height;
-	draw_logical_rect(ctx, left - 10, top - 10, right - left + 20, bottom - top + 20,
+	draw_logical_rect(ctx, left - config::shelf_backing, top - config::shelf_backing,
+		right - left + 2 * config::shelf_backing, bottom - top + 2 * config::shelf_backing,
 		color_rgba(ctx.output->server.theme.colors().panel));
 
 	for (std::size_t i = 0; i < shelf.size(); i++) {
@@ -616,7 +590,7 @@ void draw_shelf(const RenderCtx &ctx) {
 		double fit = 0.0;
 		if (frame.width > 0 && frame.height > 0) {
 			fit = std::fmin(box.width / static_cast<double>(frame.width),
-				(box.height - 16.0) / frame.height);
+				(box.height - config::shelf_title_strip) / frame.height);
 		}
 		Point origin = view->surface_origin();
 		double ox = origin.x, oy = origin.y;
@@ -630,7 +604,7 @@ void draw_shelf(const RenderCtx &ctx) {
 					|| cy + ch > frame.y + frame.height) {
 				return;
 			}
-			double thumbs_h = box.height - 16.0;
+			double thumbs_h = box.height - config::shelf_title_strip;
 			double x = box.x + (box.width - frame.width * fit) / 2.0
 				+ (cx - frame.x) * fit;
 			double y = box.y + (thumbs_h - frame.height * fit) / 2.0
@@ -638,76 +612,50 @@ void draw_shelf(const RenderCtx &ctx) {
 			draw_surface_logical(ctx, surface, x, y, cw * fit, ch * fit, 1.0f, true);
 		});
 
-		DesktopLabel title = ctx.output->server.painter.shelf_title(*view, ctx.scale);
-		if (title.texture != nullptr && title.w > 0 && title.h > 0) {
-			double w = std::fmin(title.w, static_cast<double>(box.width));
-			draw_ui_texture(ctx, title.texture, box.x + (box.width - w) / 2.0,
-				box.y + box.height - title.h, w, title.h, w / title.w);
+		const char *title = view->shell_title();
+		if (title != nullptr && title[0] != '\0') {
+			Server &server = ctx.output->server;
+			CachedText text = server.text_cache.get({.text = title, .font = config::ui_font,
+				.fg = server.theme.colors().panel_text, .scale = ctx.scale});
+			if (text.texture != nullptr && text.w > 0 && text.h > 0) {
+				double w = std::fmin(text.w, static_cast<double>(box.width));
+				draw_ui_texture(ctx, text.texture, box.x + (box.width - w) / 2.0,
+					box.y + box.height - text.h, w, text.h, w / text.w);
+			}
 		}
 	}
 }
 
 // ----------------------------------------------------- help line/hint
 
-HelpSlot &help_texture(const RenderCtx &ctx) {
-	const GestureOptions &options = ctx.output->server.gestures.options();
-	for (HelpSlot &slot : ctx.help_cache) {
-		if (slot.texture != nullptr && slot.scale == ctx.scale
-				&& slot.preset == options.swipes) {
-			return slot;
-		}
-	}
-	HelpSlot &slot = ctx.help_cache[(*ctx.help_clock)++ % ctx.help_cache.size()];
-	slot.texture.reset();
-	TextTexture t = draw_text(ctx.output->server.renderer,
-		overview_help_text(options), config::ui_font,
-		ctx.output->server.theme.colors().panel_text,
-		ctx.output->server.theme.colors().panel, ctx.scale, 10, 5);
-	slot.texture = std::move(t.texture);
-	slot.w = t.width;
-	slot.h = t.height;
-	slot.scale = ctx.scale;
-	slot.preset = options.swipes;
-	return slot;
-}
-
-int draw_help_line(const RenderCtx &ctx) {
-	HelpSlot &help = help_texture(ctx);
-	if (help.texture == nullptr || help.w <= 0) {
-		return 0;
-	}
-	// Narrow outputs: shrink the line rather than clip it.
-	double fit = std::fmin(1.0, (ctx.output->width - 24.0) / help.w);
-	double w = help.w * fit, h = help.h * fit;
-	draw_ui_texture(ctx, help.texture.get(), (ctx.output->width - w) / 2.0,
-		overview_bottom(*ctx.output) - 12 - h, w, h, 1.0);
-	return static_cast<int>(std::ceil(h));
-}
-
-void draw_hint(const RenderCtx &ctx, int help_h) {
-	Output &o = *ctx.output;
-	Hint &hint = o.server.hint;
-	if (hint.text.empty()) {
+void draw_help_line(const RenderCtx &ctx, const OverviewBottom &bottom) {
+	Server &server = ctx.output->server;
+	CachedText help = server.text_cache.get(panel_text_spec(
+		overview_help_text(server.gestures.options()), ctx.scale, server.theme.colors()));
+	if (help.texture == nullptr || wlr_box_empty(&bottom.help)) {
 		return;
 	}
-	if (hint.texture == nullptr || hint.scale != ctx.scale) {
-		hint.texture.reset();
-		TextTexture t = draw_text(o.server.renderer, hint.text.c_str(), config::ui_font,
-			o.server.theme.colors().panel_text, o.server.theme.colors().panel,
-			ctx.scale, 10, 5);
-		hint.texture = std::move(t.texture);
-		hint.w = t.width;
-		hint.h = t.height;
-		hint.scale = ctx.scale;
+	draw_ui_texture(ctx, help.texture, bottom.help.x, bottom.help.y,
+		bottom.help.width, bottom.help.height, 1.0);
+}
+
+// The hint sits in the overview's hint row, or above the bottom edge
+// without the overview.
+void draw_hint(const RenderCtx &ctx, const std::optional<OverviewBottom> &bottom) {
+	Output &o = *ctx.output;
+	const std::string &text = o.server.hint.text;
+	if (text.empty()) {
+		return;
 	}
+	CachedText hint = o.server.text_cache.get(
+		panel_text_spec(text, ctx.scale, o.server.theme.colors()));
 	if (hint.texture == nullptr || hint.w <= 0 || hint.h <= 0) {
 		return;
 	}
-	int bottom = overview_bottom(o);
-	int y = ctx.overview
-		? bottom - 12 - help_h - 8 - hint.h
+	int y = bottom.has_value()
+		? bottom->hint.y + bottom->hint.height - hint.h
 		: o.height - 48 - hint.h;
-	draw_ui_texture(ctx, hint.texture.get(),
+	draw_ui_texture(ctx, hint.texture,
 		(o.width - hint.w) / 2.0, y, hint.w, hint.h, 1.0);
 }
 
@@ -746,13 +694,11 @@ void send_surface_feedback(const RenderCtx &ctx) {
 		if (!entered) {
 			wlr_surface_send_enter(surface, wlr_output);
 			// Like view_update_outputs: the sharpest output the surface is on wins.
-			double scale = 1;
+			double scale = 0;
 			wl_list_for_each(so, &surface->current_outputs, link) {
-				scale = std::fmax(scale, so->output->scale);
+				scale = Output::sharper_scale(scale, *so->output);
 			}
-			wlr_fractional_scale_v1_notify_scale(surface, scale);
-			wlr_surface_set_preferred_buffer_scale(surface,
-				static_cast<int32_t>(std::ceil(scale)));
+			Output::tell_scale(surface, scale);
 		}
 		wlr_presentation_surface_textured_on_output(surface, wlr_output);
 		if (drawn.frame_done) {
@@ -784,89 +730,11 @@ const char *overview_help_text(const GestureOptions &options) {
 
 // ------------------------------------------------------------- public
 
-Painter::LabelSlot *Painter::label_slot(DesktopId id) {
-	for (LabelSlot &slot : label_cache_) {
-		if (slot.id == id) {
-			return &slot;
-		}
-	}
-	return nullptr;
-}
-
-const Painter::LabelSlot *Painter::label_slot(DesktopId id) const {
-	for (const LabelSlot &slot : label_cache_) {
-		if (slot.id == id) {
-			return &slot;
-		}
-	}
-	return nullptr;
-}
-
-bool Painter::LabelImage::current(const Desktop &desktop, float at) const {
-	return texture != nullptr && number == desktop.number()
-		&& desktop_scale == desktop.scale() && scale == at;
-}
-
-DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale, bool on_accent) {
-	LabelSlot *slot = label_slot(desktop.id());
-	if (slot == nullptr) {
-		label_cache_.push_back(LabelSlot{.id = desktop.id()});
-		slot = label_slot(desktop.id());
-	}
-	LabelImage &image = on_accent ? slot->accent : slot->plain;
-	if (image.current(desktop, scale)) {
-		return {image.texture.get(), image.w, image.h};
-	}
-	char buf[48];
-	int len;
-	if (desktop.scale() == 1.0) {
-		len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.number());
-	} else {
-		len = std::snprintf(buf, sizeof(buf), "Desktop %d · %d %%",
-			desktop.number(), static_cast<int>(std::lround(desktop.scale() * 100)));
-	}
-	// The same text in the colour its fill asks for: the panel text of an
-	// ordinary tab, the contrasting accent text of the target's accent.
-	TextTexture t;
-	if (len > 0) {
-		t = draw_text(server_.renderer, buf, config::ui_font_bold,
-			on_accent ? server_.theme.colors().accent_text
-				  : server_.theme.colors().panel_text,
-			0x00000000u, scale, 0, 0);
-	}
-	image = LabelImage{
-		.texture = std::move(t.texture),
-		.number = desktop.number(),
-		.w = t.width,
-		.h = t.height,
-		.desktop_scale = desktop.scale(),
-		.scale = scale,
-	};
-	return {image.texture.get(), image.w, image.h};
-}
-
-DesktopLabel Painter::shelf_title(const View &view, float scale) {
-	const char *title = view.shell_title();
-	if (title == nullptr || title[0] == '\0') {
-		return {};
-	}
-	auto entry = std::ranges::find_if(shelf_titles_, [&](const ShelfTitle &candidate) {
-		return candidate.view == &view && candidate.scale == scale;
-	});
-	if (entry == shelf_titles_.end()) {
-		entry = shelf_titles_.emplace(shelf_titles_.end());
-		entry->view = &view;
-		entry->scale = scale;
-	} else if (entry->texture != nullptr && entry->title == title) {
-		return {entry->texture.get(), entry->w, entry->h};
-	}
-	TextTexture t = draw_text(server_.renderer, title, config::ui_font,
-		server_.theme.colors().panel_text, 0x00000000u, scale, 0, 0);
-	entry->title.assign(title);
-	entry->texture = std::move(t.texture);
-	entry->w = t.width;
-	entry->h = t.height;
-	return {entry->texture.get(), entry->w, entry->h};
+CachedText desktop_label(Server &server, const Desktop &desktop, float scale, bool on_accent) {
+	LabelBuffer buf;
+	const config::Palette &pal = server.theme.colors();
+	return server.text_cache.get(desktop_label_spec(desktop_label_text(desktop, buf), scale,
+		on_accent ? pal.accent_text : pal.panel_text));
 }
 
 std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
@@ -878,50 +746,57 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 	double frame_left = (desktop.frame().x - left) * cam.zoom + offset;
 	double frame_top = (desktop.frame().y - top) * cam.zoom;
 
-	// The text's width from whichever image of it is current, else a guess
-	// of nine pixels a character until the first frame draws one.
-	const LabelSlot *slot = label_slot(desktop.id());
-	std::optional<int> label_w;
-	if (slot != nullptr) {
-		for (const LabelImage *image : {&slot->plain, &slot->accent}) {
-			if (image->current(desktop, o.wlr->scale)) {
-				label_w = image->w;
-				break;
-			}
-		}
-	}
-	if (!label_w.has_value()) {
-		char number[16];
-		std::to_chars_result digits = std::to_chars(number, number + sizeof(number),
-			desktop.number());
-		label_w = 9 * (static_cast<int>(sizeof("Desktop ") - 1)
-			+ static_cast<int>(digits.ptr - number));
-	}
-	int text_w = *label_w;
+	// The text's width once the first frame has drawn it, a guess of nine
+	// pixels a character before.
+	LabelBuffer buf;
+	std::string_view text = desktop_label_text(desktop, buf);
+	std::optional<CachedText> label = server_.text_cache.find_size(
+		desktop_label_spec(text, o.wlr->scale, 0));
+	int text_w = label.has_value() ? label->w : config::tab_label_guess * static_cast<int>(text.size());
 
 	TabLayout layout;
 	layout.tab.x = static_cast<int>(std::round(frame_left));
-	layout.tab.y = static_cast<int>(std::round(frame_top)) - 28 - 4;
-	if (layout.tab.y < 4) {
-		layout.tab.y = static_cast<int>(std::round(frame_top)) + 4;
+	int frame_y = static_cast<int>(std::round(frame_top));
+	layout.tab.y = frame_y - config::tab_height - config::tab_lift;
+	if (layout.tab.y < config::tab_lift) {
+		layout.tab.y = frame_y + config::tab_lift;
 	}
-	layout.tab.width = 12 + text_w + 8 + 2 * 24 + 6;
-	layout.tab.height = 28;
+	layout.tab.width = config::tab_pad + text_w + config::tab_gap
+		+ 2 * config::tab_button + config::tab_button_gap;
+	layout.tab.height = config::tab_height;
 
-	layout.tile_button.x = layout.tab.x + 12 + text_w + 8;
-	layout.tile_button.y = layout.tab.y + 2;
-	layout.tile_button.width = 24;
-	layout.tile_button.height = 24;
-	layout.abandon_button.x = layout.tile_button.x + 24 + 6;
-	layout.abandon_button.y = layout.tab.y + 2;
-	layout.abandon_button.width = 24;
-	layout.abandon_button.height = 24;
+	layout.tile_button = {layout.tab.x + config::tab_pad + text_w + config::tab_gap,
+		layout.tab.y + config::tab_button_inset, config::tab_button, config::tab_button};
+	layout.abandon_button = {layout.tile_button.x + config::tab_button + config::tab_button_gap,
+		layout.tile_button.y, config::tab_button, config::tab_button};
 
 	if (layout.tab.x < o.width && layout.tab.x + layout.tab.width > 0
 			&& layout.tab.y < o.height && layout.tab.y + layout.tab.height > 0) {
 		return layout;
 	}
 	return std::nullopt;
+}
+
+OverviewBottom overview_bottom_layout(const Output &o, float scale) {
+	Server &server = o.server;
+	CachedText help = server.text_cache.get(panel_text_spec(
+		overview_help_text(server.gestures.options()), scale, server.theme.colors()));
+	bool has_help = help.texture != nullptr && help.w > 0 && help.h > 0;
+	OverviewBottom stack;
+	int help_top = strips_top(o) - config::overview_help_margin;
+	if (has_help) {
+		// Narrow outputs: shrink the line rather than clip it.
+		double fit = std::fmin(1.0, (o.width - 2.0 * config::overview_help_margin) / help.w);
+		int w = static_cast<int>(std::ceil(help.w * fit));
+		int h = static_cast<int>(std::ceil(help.h * fit));
+		help_top -= h;
+		stack.help = {(o.width - w) / 2, help_top, w, h};
+	}
+	// A hint's texture is as tall as the help line's: one font, one padding.
+	int line_h = has_help ? help.h : config::overview_help_guess_h;
+	stack.hint = {0, help_top - config::overview_hint_gap - line_h, o.width, line_h};
+	stack.shelf_bottom = stack.hint.y - config::overview_shelf_gap;
+	return stack;
 }
 
 Shelf overview_shelf_layout(const Output &o) {
@@ -939,16 +814,16 @@ Shelf overview_shelf_layout(const Output &o) {
 		}
 		shelf[i] = {.view = view, .box = {}};
 	}
-	int bw = 160, bh = 100, gap = 12;
-	// The help line's margin and height, 16 px above it; the bottom is
-	// the toolbar's top when one sits on the bottom edge.
-	int bottom = overview_bottom(o) - 12 - 28 - 16;
-	int total = static_cast<int>(shelf.size()) * bw
-		+ (static_cast<int>(shelf.size()) - 1) * gap;
+	int count = static_cast<int>(shelf.size());
+	int total = count * config::shelf_thumb_w + (count - 1) * config::shelf_gap;
 	int x = (o.width - total) / 2;
-	for (std::size_t i = 0; i < shelf.size(); i++) {
-		shelf[i].box = {.x = x + static_cast<int>(i) * (bw + gap),
-			.y = bottom - bh, .width = bw, .height = bh};
+	int bottom = overview_bottom_layout(o, o.wlr->scale).shelf_bottom;
+	for (int i = 0; i < count; i++) {
+		shelf[static_cast<std::size_t>(i)].box = {
+			.x = x + i * (config::shelf_thumb_w + config::shelf_gap),
+			.y = bottom - config::shelf_thumb_h,
+			.width = config::shelf_thumb_w,
+			.height = config::shelf_thumb_h};
 	}
 	return shelf;
 }
@@ -968,8 +843,6 @@ void Hint::set(std::string_view text) {
 		return;
 	}
 	this->text.assign(text);
-	texture.reset();
-	scale = 0; // regenerate at the output's scale
 	restart_timer();
 	server_.damage_all();
 }
@@ -1000,23 +873,11 @@ void Hint::restart_timer() {
 
 void Hint::clear() {
 	text.clear();
-	texture.reset();
-	w = 0;
-	h = 0;
-	scale = 0;
-}
-
-void Hint::theme_changed() {
-	texture.reset();
-	scale = 0; // redraw at the output's scale, in the new palette
 }
 
 void Hint::finish() {
 	timer_.reset();
-	texture.reset();
 	text.clear();
-	w = 0;
-	h = 0;
 }
 
 Painter::Painter(Server &server) : server_(server) {}
@@ -1040,8 +901,6 @@ RenderCtx Painter::make_ctx(Output &output, wlr_render_pass *pass) {
 	ctx.vh = output.height;
 	ctx.overview = output.overview.active();
 	ctx.drawn = &drawn_;
-	ctx.help_cache = help_cache_;
-	ctx.help_clock = &help_clock_;
 	return ctx;
 }
 
@@ -1068,14 +927,6 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 		return;
 	}
 	ctx.drawn->clear(); // no-op for a capture's scratch buffer
-	// Drop the labels of desktops that are gone.
-	std::erase_if(label_cache_, [this](const LabelSlot &slot) {
-		return server_.canvas.desktops.find(slot.id) == nullptr;
-	});
-	// And the titles of windows that are gone.
-	std::erase_if(shelf_titles_, [this](const ShelfTitle &entry) {
-		return std::ranges::find(server_.views, entry.view) == server_.views.end();
-	});
 
 	// clear
 	draw_logical_rect(ctx, 0, 0, output.width, output.height,
@@ -1123,27 +974,20 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 	}
 
 	// The compositor's own UI: overview chrome, the hint, client overlay
-	// surfaces, the launcher.
-	int help_h = 0;
+	// surfaces, then the layers over everything, the lowest first.
+	std::optional<OverviewBottom> bottom;
 	if (ctx.overview) {
+		bottom = overview_bottom_layout(*ctx.output, ctx.scale);
 		draw_pinch_preview(ctx);
 		draw_tabs(ctx);
 		draw_shelf(ctx);
-		help_h = draw_help_line(ctx);
+		draw_help_line(ctx, *bottom);
 	}
-	draw_hint(ctx, help_h);
+	draw_hint(ctx, bottom);
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
 		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY);
-	if (std::optional<Launcher::Panel> panel = server_.launcher.panel(output)) {
-		draw_logical_rect(ctx, 0, 0, output.width, output.height,
-			color_rgba(server_.theme.colors().launcher_backdrop));
-		draw_ui_texture(ctx, panel->texture, panel->box.x, panel->box.y,
-			panel->box.width, panel->box.height, 1.0);
-	}
-	// The picker, toolbar and thumbnail are all a capture leaves out: a shot
-	// or a shared screen never shows the capture UI that took it.
-	if (ctx.show_capture_ui) {
-		draw_capture_overlay(ctx);
+	for (UiLayer *layer : std::views::reverse(server_.input.layers())) {
+		layer->draw(ctx);
 	}
 	draw_drag_icon(ctx);
 
@@ -1171,6 +1015,7 @@ void Painter::render(Output &output) {
 	wlr_render_pass_submit(pass);
 	wlr_output_commit_state(wlr_output, &state);
 	wlr_output_state_finish(&state);
+	server_.text_cache.trim();
 
 	send_surface_feedback(ctx);
 }
@@ -1248,27 +1093,6 @@ RenderCtx Painter::make_capture_ctx(Output &output, wlr_render_pass *pass,
 	ctx.tw = target->width;
 	ctx.th = target->height;
 	ctx.drawn = &capture_drawn_;
-	ctx.show_capture_ui = false;
+	ctx.offscreen = true;
 	return ctx;
-}
-
-void Painter::theme_changed() {
-	for (HelpSlot &slot : help_cache_) {
-		slot.texture.reset();
-	}
-	for (LabelSlot &slot : label_cache_) {
-		slot.plain.texture.reset();
-		slot.accent.texture.reset();
-	}
-	for (ShelfTitle &entry : shelf_titles_) {
-		entry.texture.reset();
-	}
-}
-
-void Painter::finish() {
-	for (HelpSlot &slot : help_cache_) {
-		slot.texture.reset();
-	}
-	label_cache_.clear();
-	shelf_titles_.clear();
 }

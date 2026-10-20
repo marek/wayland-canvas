@@ -3996,10 +3996,23 @@ bool watch_settle(const char *name, bool wider, bool light,
 // overview's shelf, with a minimized window on it, must sit above a
 // bottom-edge strip.
 
-// The shelf's bottom line: the help line's 12 px margin and 28 px
-// height, 16 px above it (src/render/render.cpp's overview_shelf_layout
-// and the toolbar it clears). Keep in sync with it.
-constexpr int shelf_bottom_gap = 12 + 28 + 16;
+// The overview's bottom stack on the first output, as the compositor draws
+// and hit-tests it.
+OverviewBottom overview_stack() {
+	Output &output = *server->outputs.front();
+	return overview_bottom_layout(output, output.wlr->scale);
+}
+
+// Whether the minimized window's shelf thumbnails end where the stack puts
+// them, above the help line.
+bool shelf_above_help(const Shelf &shelf, const OverviewBottom &stack) {
+	if (shelf.empty()) {
+		return false;
+	}
+	int bottom = shelf.front().box.y + shelf.front().box.height;
+	return bottom == stack.shelf_bottom && bottom < stack.help.y;
+}
+
 // The note button's place in the strip: order 3, the fourth square —
 // the scratch plugin's three buttons above it, the settings gear
 // (order 4) below. Keep in sync with the plugins' manifests.
@@ -9998,10 +10011,11 @@ int run_step() {
 		retries = 0;
 		edge_checks("left", "edges-left");
 		Shelf shelf = overview_shelf_layout(*server->outputs.front());
+		OverviewBottom stack = overview_stack();
 		check(!shelf.empty(), "the minimized window sits on the shelf");
-		check(!shelf.empty()
-			&& shelf.front().box.y + shelf.front().box.height
-				== screen_h - shelf_bottom_gap,
+		check(shelf_above_help(shelf, stack)
+				&& stack.help.y + stack.help.height
+					== screen_h - config::overview_help_margin,
 			"the shelf keeps its place along the bottom (a side toolbar "
 			"clears nothing)");
 		return 700;
@@ -10071,14 +10085,15 @@ int run_step() {
 		LayerSurface *toolbar = toolbar_layer();
 		wlr_box strip = toolbar != nullptr ? toolbar_strip_box(toolbar->geo) : wlr_box{};
 		Shelf shelf = overview_shelf_layout(*server->outputs.front());
+		OverviewBottom stack = overview_stack();
 		check(!shelf.empty(), "the minimized window sits on the shelf");
-		check(!shelf.empty() && toolbar != nullptr
-			&& shelf.front().box.y + shelf.front().box.height
-				== strip.y - shelf_bottom_gap,
+		check(toolbar != nullptr && shelf_above_help(shelf, stack)
+				&& stack.help.y + stack.help.height
+					== strip.y - config::overview_help_margin,
 			std::format("the shelf rose above the bottom toolbar (its bottom "
-				"at {}, the toolbar's top at {})",
+				"at {}, the help line's top at {}, the toolbar's top at {})",
 				!shelf.empty() ? shelf.front().box.y + shelf.front().box.height : 0,
-				toolbar != nullptr ? strip.y : 0));
+				stack.help.y, toolbar != nullptr ? strip.y : 0));
 		return 700;
 	}
 	case 312: { // the note button: its colour flyout, above the strip

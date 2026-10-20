@@ -237,27 +237,18 @@ void CapturePicker::add_overlay(Output &output, float scale, CaptureOverlay &out
 			.thickness = config::capture_pick_outline});
 		// The size beside the selection's far corner, kept on the screen.
 		std::string text = std::format("{} × {}", sel.width, sel.height);
-		if (size_texture_ == nullptr || size_text_ != text || size_scale_ != scale) {
-			size_texture_.reset();
-			TextTexture label = draw_text(server_.renderer, text.c_str(),
-				config::ui_font, pal.panel_text, pal.panel, scale, 10, 5);
-			size_texture_ = std::move(label.texture);
-			size_text_ = text;
-			size_scale_ = scale;
-			size_w_ = label.width;
-			size_h_ = label.height;
-		}
-		if (size_texture_ != nullptr && size_w_ > 0) {
+		CachedText label = server_.text_cache.get(panel_text_spec(text, scale, pal));
+		if (label.texture != nullptr && label.w > 0) {
 			int lx = sel.x + sel.width + config::capture_pick_label_gap;
 			int ly = sel.y + sel.height + config::capture_pick_label_gap;
-			if (lx + size_w_ > output.width) {
-				lx = sel.x - config::capture_pick_label_gap - size_w_;
+			if (lx + label.w > output.width) {
+				lx = sel.x - config::capture_pick_label_gap - label.w;
 			}
-			if (ly + size_h_ > output.height) {
-				ly = sel.y - config::capture_pick_label_gap - size_h_;
+			if (ly + label.h > output.height) {
+				ly = sel.y - config::capture_pick_label_gap - label.h;
 			}
-			out.images.push_back({.texture = size_texture_.get(),
-				.box = {lx < 0 ? 0 : lx, ly < 0 ? 0 : ly, size_w_, size_h_}});
+			out.images.push_back({.texture = label.texture,
+				.box = {lx < 0 ? 0 : lx, ly < 0 ? 0 : ly, label.w, label.h}});
 		}
 		return;
 	}
@@ -286,14 +277,4 @@ void CapturePicker::add_overlay(Output &output, float scale, CaptureOverlay &out
 	}
 	out.fills.push_back({.box = {0, 0, output.width, output.height},
 		.rgba = pal.launcher_backdrop});
-}
-
-void CapturePicker::theme_changed() {
-	size_texture_.reset();
-	size_text_.clear();
-	size_scale_ = 0;
-}
-
-void CapturePicker::finish() {
-	size_texture_.reset();
 }

@@ -1,5 +1,4 @@
 #include <cmath>
-#include <pango/pangocairo.h>
 #include "core/config.h"
 #include "render/draw.h"
 #include "core/server.h"
@@ -53,12 +52,10 @@ void draw_restore_glyph(cairo_t *cr, double gx, double gy,
 	cairo_stroke(cr);
 }
 
-void draw_button(cairo_t *cr, const View &view, DecoPart part, int width, bool active) {
-	double x = width
-		- (static_cast<int>(DecoPart::close) - static_cast<int>(part) + 1)
-			* config::button_width;
-	double bw = config::button_width;
-	double bh = config::titlebar_height;
+void draw_button(cairo_t *cr, const View &view, DecoPart part, const wlr_box &box, bool active) {
+	double x = box.x;
+	double bw = box.width;
+	double bh = box.height;
 
 	bool hover = view.deco.hover == part;
 	bool pressed = view.deco.pressed == part;
@@ -100,7 +97,7 @@ void draw_button(cairo_t *cr, const View &view, DecoPart part, int width, bool a
 // ---- Decoration ----
 
 Decoration::Decoration(View &view)
-	: view_(view) {
+	: view_(view), bar_(view.server.text_cache) {
 }
 
 Decoration::~Decoration() = default;
@@ -115,87 +112,50 @@ int Decoration::border() const {
 	return ssd && !view_.fullscreen && !view_.maximized ? config::border_width : 0;
 }
 
-wlr_texture *Decoration::texture() const {
-	return texture_.get();
+wlr_texture *Decoration::title_bar(float scale) {
+	if (titlebar() == 0) {
+		bar_.drop();
+		return nullptr;
+	}
+	const char *title = view_.shell_title();
+	wlr_box content = view_.content_box();
+	wanted_.width = std::max(content.width + 2 * border(), 1);
+	wanted_.active = view_.server.focused_view == &view_;
+	wanted_.maximized = view_.maximized;
+	wanted_.hover = hover;
+	wanted_.pressed = pressed;
+	if (wanted_.title != (title != nullptr ? title : "")) {
+		wanted_.title.assign(title != nullptr ? title : "");
+	}
+	return bar_.get(scale, wanted_, [&] { return draw_bar(scale); });
 }
 
-void Decoration::update(float scale) {
+TexturePtr Decoration::draw_bar(float scale) const {
 	Server &server = view_.server;
-	const char *title = view_.shell_title();
-	bool active = server.focused_view == &view_;
-
-	if (titlebar() == 0) {
-		texture_.reset();
-		width_ = 0;
-		return;
-	}
-
-	wlr_box content = view_.content_box();
-	int width = content.width + 2 * border();
-	if (width < 1) {
-		width = 1;
-	}
-
-	bool changed = texture_ == nullptr || width_ != width || scale_ != scale
-		|| active_ != active || maximized_ != view_.maximized
-		|| hover_ != hover || pressed_ != pressed
-		|| (title != nullptr) != title_.has_value()
-		|| (title != nullptr && title_.has_value() && *title_ != title);
-	if (!changed) {
-		return;
-	}
-
-	if (title != nullptr) {
-		title_ = std::string(title);
-	} else {
-		title_.reset();
-	}
-
+	int width = wanted_.width;
 	CairoSurfacePtr surf(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 		static_cast<int>(std::ceil(width * scale)),
 		static_cast<int>(std::ceil(config::titlebar_height * scale))));
 	CairoPtr cr(cairo_create(surf.get()));
 	cairo_scale(cr.get(), scale, scale);
-	uint32_t base = active ? server.theme.colors().title_active
+	uint32_t base = wanted_.active ? server.theme.colors().title_active
 		: server.theme.colors().title_inactive;
 	fill_rect(cr.get(), 0, 0, width, config::titlebar_height, base);
 
-	draw_button(cr.get(), view_, DecoPart::minimize, width, active);
-	draw_button(cr.get(), view_, DecoPart::maximize, width, active);
-	draw_button(cr.get(), view_, DecoPart::close, width, active);
-
-	if (title_.has_value()) {
-		Handle<PangoLayout, g_object_unref> layout(pango_cairo_create_layout(cr.get()));
-		Handle<PangoFontDescription, pango_font_description_free> desc(
-			pango_font_description_from_string(config::title_font));
-		pango_layout_set_font_description(layout.get(), desc.get());
-		pango_layout_set_text(layout.get(), title_->c_str(), -1);
-		pango_layout_set_ellipsize(layout.get(), PANGO_ELLIPSIZE_END);
-		int avail = width - 2 * config::title_padding - 3 * config::button_width;
-		if (avail > 0) {
-			pango_layout_set_width(layout.get(), avail * PANGO_SCALE);
-		}
-		int lw = 0, lh = 0;
-		pango_layout_get_pixel_size(layout.get(), &lw, &lh);
-		set_source_rgba32(cr.get(), active ? server.theme.colors().text_active
-			: server.theme.colors().text_inactive);
-		cairo_move_to(cr.get(), config::title_padding,
-			(config::titlebar_height - lh) / 2.0);
-		pango_cairo_show_layout(cr.get(), layout.get());
+	for (std::size_t i = 0; i < deco_buttons.size(); i++) {
+		draw_button(cr.get(), view_, deco_buttons[i], button_box(i, width), wanted_.active);
 	}
 
-	texture_ = texture_from_cairo(server.renderer, surf.get());
+	if (!wanted_.title.empty()) {
+		int avail = button_box(0, width).x - 2 * config::title_padding;
+		paint_text(cr.get(), wanted_.title.c_str(), config::title_font,
+			wanted_.active ? server.theme.colors().text_active
+				: server.theme.colors().text_inactive,
+			config::title_padding, config::titlebar_height / 2.0, TextAnchor::middle_left,
+			avail);
+	}
 
-	width_ = width;
-	scale_ = scale;
-	active_ = active;
-	maximized_ = view_.maximized;
-	hover_ = hover;
-	pressed_ = pressed;
-}
-
-void Decoration::theme_changed() {
-	texture_.reset(); // update() redraws whenever the texture is gone
+	return texture_from_cairo(server.renderer, surf.get());
 }
 
 // ---- hit testing (canvas coordinates vs the frame) ----
@@ -228,15 +188,11 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 			}
 			return {DecoPart::resize, edges};
 		}
-		double right = fx + fw;
-		if (cx >= right - config::button_width) {
-			return {DecoPart::close, 0};
-		}
-		if (cx >= right - 2 * config::button_width) {
-			return {DecoPart::maximize, 0};
-		}
-		if (cx >= right - 3 * config::button_width) {
-			return {DecoPart::minimize, 0};
+		for (std::size_t i = 0; i < deco_buttons.size(); i++) {
+			wlr_box button = button_box(i, frame.width);
+			if (cx >= fx + button.x && cx < fx + button.x + button.width) {
+				return {deco_buttons[i], 0};
+			}
 		}
 		return {DecoPart::title, 0};
 	}

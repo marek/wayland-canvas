@@ -17,17 +17,6 @@ bool covered_by(const View &other, const View &view) {
 		&& other.kind() != ViewKind::client_placed;
 }
 
-// The screen whose view holds the window's frame centre now, if any.
-Output *output_showing(Server &server, const View &view) {
-	Rect frame = view.frame_rect();
-	for (const std::unique_ptr<Output> &output : server.outputs) {
-		if (output->viewport().contains(frame.cx(), frame.cy())) {
-			return output.get();
-		}
-	}
-	return nullptr;
-}
-
 // The window's own dialogs move by (dx, dy), their saved boxes with them.
 void move_dialogs(Server &server, const View &view, int dx, int dy) {
 	for (View *other : server.views) {
@@ -55,7 +44,8 @@ void FullscreenDesktops::enter(View &view, wlr_box covers) {
 			[&view](const View *other) { return covered_by(*other, view); })) {
 		return;
 	}
-	Output *showing = output_showing(server_, view);
+	Rect frame = view.frame_rect();
+	Output *showing = server_.output_showing(frame.cx(), frame.cy());
 	const Output *sized = showing != nullptr ? showing : server_.output_under_cursor();
 	if (sized == nullptr) {
 		return;
@@ -66,7 +56,7 @@ void FullscreenDesktops::enter(View &view, wlr_box covers) {
 	Away away{
 		.view = view.session_id,
 		.own = own.id(),
-		.home = home != nullptr ? std::optional{home->id()} : std::nullopt,
+		.home = id_of(home),
 		.home_camera = showing != nullptr ? showing->camera.destination()
 			: camera_for_box(covers),
 		.dx = own.frame().x - covers.x,

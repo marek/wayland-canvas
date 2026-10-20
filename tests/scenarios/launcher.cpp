@@ -257,11 +257,10 @@ int run_step() {
 	case 8: {
 		// Click the first result row: launches it.
 		Output *o = server->output_under_cursor();
-		std::optional<Launcher::Panel> panel = server->launcher.panel(*o);
-		wlr_box box = panel ? panel->box : wlr_box{};
+		PanelLayout layout = panel_layout(o->width, o->height);
+		wlr_box first = layout.row(0);
 		views_before = mapped();
-		click(box.x + box.width / 2.0,
-			box.y + 12 + config::launcher_search_height + 8 + config::launcher_row_height / 2.0);
+		click(first.x + first.width / 2.0, first.y + first.height / 2.0);
 		check(!server->launcher.is_open(), "clicking a result launched it and closed the launcher");
 		return 300;
 	}

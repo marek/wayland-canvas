@@ -27,6 +27,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include "core/box.h"
 #include "core/config.h"
 #include "platform/output.h"
 #include "render/render.h"
@@ -124,24 +125,14 @@ constexpr Slice TL{0, 0, 0.5, 0.5}, BL{0, 0.5, 0.5, 1};
 // desktop's frame, rounded the way the compositor rounds it (the scenarios
 // run with no bar, so the frame is the whole tiling area).
 wlr_box slice_frame_of(const Desktop &desktop, Slice slice) {
-	const wlr_box &frame = desktop.frame();
-	Rect area{double(frame.x), double(frame.y), double(frame.width),
-		double(frame.height)};
-	Rect r = slice_box(area, slice, config::tile_gap);
-	return wlr_box{
-		static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y)),
-		static_cast<int>(std::round(r.x + r.w)) - static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y + r.h)) - static_cast<int>(std::round(r.y)),
-	};
+	return box_snapped(slice_box(rect_of_box(desktop.frame()), slice, config::tile_gap));
 }
 
 // The view's frame lies on its slice (clients snap to their own units, so a
 // side may sit a few px short of the slice's box).
 bool on_slice(View *view, const wlr_box &expected) {
 	Rect f = view->frame_rect();
-	Rect e{double(expected.x), double(expected.y), double(expected.width),
-		double(expected.height)};
+	Rect e = rect_of_box(expected);
 	return std::fabs(f.x - e.x) < 3 && std::fabs(f.y - e.y) < 3
 		&& e.w - f.w < 12 && e.h - f.h < 12;
 }
@@ -479,7 +470,8 @@ int run_step() {
 	case 5: { // the maximize button now shows restore; click it
 		wlr_box f = b->frame_box();
 		shot("maximized");
-		click(f.x + f.width - config::button_width * 1.5, f.y + 16, BTN_LEFT);
+		Point restore = button_centre(f, DecoPart::maximize);
+		click(restore.x, restore.y, BTN_LEFT);
 		check(!b->maximized, "restore button restored the window");
 		return 400;
 	}
@@ -500,14 +492,16 @@ int run_step() {
 	}
 	case 8: { // minimize button
 		wlr_box f = b->frame_box();
-		move_to(f.x + f.width - config::button_width * 2.5, f.y + 16);
+		Point mini = button_centre(f, DecoPart::minimize);
+		move_to(mini.x, mini.y);
 		check(b->deco.hover == DecoPart::minimize, "hovering the minimize button highlights it");
 		shot("hover-minimize");
 		return 300;
 	}
 	case 9: {
 		wlr_box f = b->frame_box();
-		click(f.x + f.width - config::button_width * 2.5, f.y + 16, BTN_LEFT);
+		Point mini = button_centre(f, DecoPart::minimize);
+		click(mini.x, mini.y, BTN_LEFT);
 		check(b->minimized && server->focused_view == a, "minimize button hid it, focus moved to a");
 		chord(KEY_M, SUPER_SHIFT);
 		check(!b->minimized && server->focused_view == b, "Super+Shift+M restored it");
@@ -515,7 +509,8 @@ int run_step() {
 	}
 	case 10: { // close button
 		wlr_box f = b->frame_box();
-		move_to(f.x + f.width - config::button_width * 0.5, f.y + 16);
+		Point close = button_centre(f, DecoPart::close);
+		move_to(close.x, close.y);
 		shot("hover-close");
 		return 300;
 	}
@@ -523,7 +518,8 @@ int run_step() {
 		wlr_box f = b->frame_box();
 		click(f.x + 60, f.y + 16, BTN_LEFT); // a title click: b is now the double-click candidate
 		closed_view = b;
-		click(f.x + f.width - config::button_width * 0.5, f.y + 16, BTN_LEFT);
+		Point close = button_centre(f, DecoPart::close);
+		click(close.x, close.y, BTN_LEFT);
 		return 600;
 	}
 	case 12:
@@ -810,8 +806,8 @@ int run_step() {
 			"maximize moved no other window: no re-layout happens anymore");
 		shot("slice-maximized");
 		wlr_box frame = c->frame_box();
-		Point restore = o->canvas_to_local(
-			frame.x + frame.width - config::button_width * 1.5, frame.y + 16);
+		Point maximize = button_centre(frame, DecoPart::maximize);
+		Point restore = o->canvas_to_local(maximize.x, maximize.y);
 		click(restore.x, restore.y, BTN_LEFT);
 		return 500;
 	}
@@ -825,8 +821,8 @@ int run_step() {
 			"leaving maximize put the window back on its reserved slice");
 		// Minimize: the slice frees up but is remembered.
 		wlr_box frame = c->frame_box();
-		Point mini = o->canvas_to_local(
-			frame.x + frame.width - config::button_width * 2.5, frame.y + 16);
+		Point minimize = button_centre(frame, DecoPart::minimize);
+		Point mini = o->canvas_to_local(minimize.x, minimize.y);
 		click(mini.x, mini.y, BTN_LEFT);
 		return 400;
 	}

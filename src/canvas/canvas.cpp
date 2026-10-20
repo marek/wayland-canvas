@@ -8,8 +8,9 @@
 #include <vector>
 
 #include "canvas/canvas.h"
-#include "core/config.h"
 #include "canvas/desktop.h"
+#include "core/box.h"
+#include "core/config.h"
 #include "core/server.h"
 #include "windows/view.h"
 
@@ -18,32 +19,9 @@ namespace {
 // Cap on views collected for tiling / combining; the rest stay untouched.
 constexpr std::size_t box_views_max = 64;
 
-Rect box_to_rect(wlr_box box) {
-	return Rect{
-		static_cast<double>(box.x),
-		static_cast<double>(box.y),
-		static_cast<double>(box.width),
-		static_cast<double>(box.height),
-	};
-}
-
-Point box_centre(wlr_box box) {
-	return Point{
-		.x = box.x + box.width / 2.0,
-		.y = box.y + box.height / 2.0,
-	};
-}
-
-// The board's slices as canvas boxes, edges rounded so neighbouring boxes
-// stay a tile_gap apart at any rounding.
+// The board's slices as canvas boxes.
 wlr_box slice_frame(const Rect &area, const Slice &slice) {
-	Rect r = slice_box(area, slice, config::tile_gap);
-	return wlr_box{
-		static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y)),
-		static_cast<int>(std::round(r.x + r.w)) - static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y + r.h)) - static_cast<int>(std::round(r.y)),
-	};
+	return box_snapped(slice_box(area, slice, config::tile_gap));
 }
 
 // Reading order of where the views stand: rows top to bottom, left to right.
@@ -53,17 +31,6 @@ bool standing_before(const View *a, const View *b) {
 		return ra.cy() < rb.cy();
 	}
 	return ra.cx() < rb.cx();
-}
-
-// Screen-sized canvas box centred on (cx, cy), edges rounded to integers.
-wlr_box centred_box(const Output &output, double cx, double cy) {
-	int w = output.width, h = output.height;
-	return wlr_box{
-		static_cast<int>(std::round(cx - w / 2.0)),
-		static_cast<int>(std::round(cy - h / 2.0)),
-		w,
-		h,
-	};
 }
 
 } // namespace
@@ -127,17 +94,14 @@ std::vector<Slice> Canvas::held_slices(const Desktop &desktop) {
 
 Rect Canvas::tiling_area(const Desktop &desktop) {
 	Point centre = desktop.centre();
-	const Output *picked = server_.output_under_cursor();
-	for (const std::unique_ptr<Output> &output : server_.outputs) {
-		if (output->viewport().contains(centre.x, centre.y)) {
-			picked = output.get();
-			break;
-		}
+	const Output *picked = server_.output_showing(centre.x, centre.y);
+	if (picked == nullptr) {
+		picked = server_.output_under_cursor();
 	}
 	if (picked == nullptr) {
 		return desktop.rect();
 	}
-	return box_to_rect(picked->usable_canvas_box(desktop.frame(), desktop.scale()));
+	return rect_of_box(picked->usable_canvas_box(desktop.frame(), desktop.scale()));
 }
 
 void Canvas::tile(wlr_box area, const Output &output) {
@@ -147,7 +111,7 @@ void Canvas::tile(wlr_box area, const Output &output) {
 		server_.hint.set("No windows to tile here");
 		return;
 	}
-	Rect usable = box_to_rect(output.usable_canvas_box(area, 1.0)); // a free spot rests at 1
+	Rect usable = rect_of_box(output.usable_canvas_box(area, 1.0)); // a free spot rests at 1
 	std::sort(in_area.begin(), in_area.end(), standing_before);
 	std::vector<Slice> occupied;
 	for (View *view : in_area) {
@@ -447,7 +411,7 @@ wlr_box Canvas::spot_at(double cx, double cy, const Output &output) {
 	if (Desktop *desktop = desktops.at(cx, cy)) {
 		return desktop->frame();
 	}
-	return centred_box(output, cx, cy);
+	return centred_box(output.width, output.height, cx, cy);
 }
 
 void Canvas::settle_scale(DesktopId id, double scale) {

@@ -1,11 +1,17 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+#include "core/config.h"
+#include "core/geometry.h"
 #include "core/util.h"
+#include "render/cached_texture.h"
 
 class Server;
 class View;
@@ -24,8 +30,38 @@ struct DecoHit {
 	uint32_t edges = 0; // wlr_edges, for DecoPart::resize
 };
 
+// The title bar's buttons from left to right, against its right edge.
+inline constexpr std::array<DecoPart, 3> deco_buttons{
+	DecoPart::minimize, DecoPart::maximize, DecoPart::close};
+
+// The `index`th of deco_buttons on a title bar `width` logical px wide,
+// bar-local: drawing, hit-testing and the tests that click it share it.
+inline wlr_box button_box(std::size_t index, int width) {
+	int from_right = static_cast<int>(deco_buttons.size() - index);
+	return {width - from_right * config::button_width, 0, config::button_width,
+		config::titlebar_height};
+}
+
+// The middle of `part`'s button on a view whose frame is `frame`, canvas
+// coordinates.
+inline Point button_centre(const wlr_box &frame, DecoPart part) {
+	std::size_t index = static_cast<std::size_t>(std::ranges::find(deco_buttons, part)
+		- deco_buttons.begin());
+	wlr_box box = button_box(index, frame.width);
+	return {frame.x + box.x + box.width / 2.0, frame.y + box.y + box.height / 2.0};
+}
+
+// What a title bar's picture shows besides its scale.
+struct BarState {
+	int width = 0;
+	bool active = false, maximized = false;
+	DecoPart hover = DecoPart::none, pressed = DecoPart::none;
+	std::string title; // empty for none
+	bool operator==(const BarState &) const = default;
+};
+
 // A view's server-side title bar and border: the mode negotiated with the client, hit
-// testing and the cached title bar texture.
+// testing and the cached title bar textures.
 class Decoration {
 public:
 	explicit Decoration(View &view);
@@ -37,11 +73,9 @@ public:
 	int border() const;
 	// What the canvas point lies on at `zoom`.
 	DecoHit hit(double cx, double cy, double zoom) const;
-	// Redraws the title bar texture at `scale` when what it shows changed.
-	void update(float scale);
-	// Drops the cached texture so the next update() redraws in the new palette.
-	void theme_changed();
-	wlr_texture *texture() const;
+	// The title bar's picture at `scale`, drawn again when what it shows
+	// changed; nullptr while the window has no title bar.
+	wlr_texture *title_bar(float scale);
 	// View initial commit: send the SERVER_SIDE mode once the toplevel is initialized.
 	void handle_initial_commit();
 	// Recomputes `ssd` from the negotiated decoration modes; damages when it flips. Called
@@ -56,16 +90,14 @@ private:
 	void attach(wlr_xdg_toplevel_decoration_v1 *decoration);
 	void handle_request_mode();
 	void handle_deco_destroy();
+	// Draws the picture of `wanted_` at `scale`.
+	TexturePtr draw_bar(float scale) const;
 
 	View &view_;
 	wlr_xdg_toplevel_decoration_v1 *xdg_decoration_ = nullptr;
 	Listener deco_request_mode_, deco_destroy_;
-	TexturePtr texture_; // the title bar as drawn for the cached state below
-	int width_ = 0;
-	float scale_ = 0;
-	bool active_ = false, maximized_ = false;
-	DecoPart hover_ = DecoPart::none, pressed_ = DecoPart::none;
-	std::optional<std::string> title_;
+	CachedTexture<BarState> bar_;
+	BarState wanted_; // what the bar shows now, reused for each lookup
 
 	friend class Decorations;
 };

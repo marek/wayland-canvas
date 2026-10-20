@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cairo.h>
+#include <pango/pangocairo.h>
 #include "core/util.h"
 
 struct TextTexture {
@@ -24,6 +25,33 @@ TextTexture draw_item_card(wlr_renderer *renderer, const char *text, uint32_t co
 TexturePtr texture_from_cairo(wlr_renderer *renderer, cairo_surface_t *surface);
 
 void set_source_rgba32(cairo_t *cr, uint32_t rgba);
+
+// A rounded rectangle as the current path; `r` is clamped to half the
+// shorter side.
+void rounded_path(cairo_t *cr, double x, double y, double w, double h, double r);
+
+using PangoLayoutPtr = Handle<PangoLayout, g_object_unref>;
+using FontDescPtr = Handle<PangoFontDescription, pango_font_description_free>;
+
+// A layout of `text` in `font`, ellipsized at `avail` logical px when that
+// is positive; every other property is the caller's to set.
+PangoLayoutPtr make_layout(cairo_t *cr, const char *text, const char *font, int avail = 0);
+
+// The pixel width `text` takes in `font` within `avail` (see make_layout).
+int text_width(cairo_t *cr, const char *text, const char *font, int avail = 0);
+
+// Which point of a painted text sits at the given position: its top left
+// corner, the middle of its left edge, or its centre.
+enum class TextAnchor { top_left, middle_left, centre };
+
+// Paints `layout` in `rgba` anchored at (x, y); returns its pixel width.
+int paint_layout(cairo_t *cr, PangoLayout *layout, uint32_t rgba, double x, double y,
+	TextAnchor anchor);
+
+// Paints `text` in `font` and `rgba` anchored at (x, y), ellipsized at
+// `avail` logical px when that is positive; returns its pixel width.
+int paint_text(cairo_t *cr, const char *text, const char *font, uint32_t rgba, double x,
+	double y, TextAnchor anchor, int avail = 0);
 
 // 0xRRGGBBAA with `alpha` multiplied in, premultiplied as wlr_render_color expects.
 constexpr wlr_render_color color_rgba(uint32_t rgba, float alpha = 1.0f) {

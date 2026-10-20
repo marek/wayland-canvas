@@ -1,119 +1,26 @@
 #include <cairo.h>
-#include <pango/pangocairo.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "core/config.h"
 #include "render/draw.h"
+#include "render/render.h"
 #include "platform/output.h"
 #include "core/server.h"
 
 namespace {
 
-constexpr double launcher_pi = 3.14159265358979323846;
 constexpr std::size_t query_max = 255;
 
-using PangoLayoutPtr = Handle<PangoLayout, g_object_unref>;
-using FontDescPtr = Handle<PangoFontDescription, pango_font_description_free>;
-
-// ---- geometry (output-local logical px) ----
-
-int panel_rows(int output_height) {
-	int chrome = 12 + config::launcher_search_height + 8 + 8 + 28;
-	int rows = (output_height - 64 - chrome) / config::launcher_row_height;
-	if (rows < 1) {
-		rows = 1;
-	}
-	if (rows > config::launcher_max_rows) {
-		rows = config::launcher_max_rows;
-	}
-	return rows;
-}
-
-struct PanelLayout {
-	wlr_box box{};
-	int rows = 0;
-};
-
-PanelLayout panel_layout(const Output &output) {
-	int width = config::launcher_width;
-	int avail = output.width - 32;
-	if (width > avail) {
-		width = avail > 1 ? avail : 1;
-	}
-	int rows = panel_rows(output.height);
-	int height = 12 + config::launcher_search_height + 8
-		+ rows * config::launcher_row_height + 8 + 28;
-	return {
-		.box = {
-			.x = (output.width - width) / 2,
-			.y = (output.height - height) / 2,
-			.width = width,
-			.height = height,
-		},
-		.rows = rows,
-	};
-}
-
-bool box_eq(const wlr_box &a, const wlr_box &b) {
-	return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
-}
-
 // ---- cairo/pango helpers ----
-
-void rounded_path(cairo_t *cr, double x, double y, double w, double h, double r) {
-	if (r > w / 2.0) {
-		r = w / 2.0;
-	}
-	if (r > h / 2.0) {
-		r = h / 2.0;
-	}
-	cairo_new_path(cr);
-	cairo_arc(cr, x + w - r, y + r, r, -launcher_pi / 2, 0);
-	cairo_arc(cr, x + w - r, y + h - r, r, 0, launcher_pi / 2);
-	cairo_arc(cr, x + r, y + h - r, r, launcher_pi / 2, launcher_pi);
-	cairo_arc(cr, x + r, y + r, r, launcher_pi, 3 * launcher_pi / 2);
-	cairo_close_path(cr);
-}
-
-PangoLayoutPtr make_layout(cairo_t *cr, const char *text, const char *font, int avail) {
-	PangoLayoutPtr layout(pango_cairo_create_layout(cr));
-	FontDescPtr desc(pango_font_description_from_string(font));
-	pango_layout_set_font_description(layout.get(), desc.get());
-	pango_layout_set_text(layout.get(), text, -1);
-	pango_layout_set_ellipsize(layout.get(), PANGO_ELLIPSIZE_END);
-	if (avail > 0) {
-		pango_layout_set_width(layout.get(), avail * PANGO_SCALE);
-	}
-	return layout;
-}
-
-int text_width(cairo_t *cr, const char *text, const char *font, int avail) {
-	PangoLayoutPtr layout = make_layout(cr, text, font, avail);
-	int w = 0;
-	pango_layout_get_pixel_size(layout.get(), &w, nullptr);
-	return w;
-}
-
-// Draws `text` left-aligned at x, vertically centred on cy; returns its
-// (possibly ellipsized) pixel width.
-int paint_text(cairo_t *cr, const char *text, const char *font,
-	uint32_t rgba, double x, double cy, int avail) {
-	PangoLayoutPtr layout = make_layout(cr, text, font, avail);
-	int w = 0, h = 0;
-	pango_layout_get_pixel_size(layout.get(), &w, &h);
-	set_source_rgba32(cr, rgba);
-	cairo_move_to(cr, x, cy - h / 2.0);
-	pango_cairo_show_layout(cr, layout.get());
-	return w;
-}
 
 uint32_t name_hash(const char *s) {
 	uint32_t h = 5381;
@@ -219,17 +126,17 @@ void draw_icon(cairo_t *cr, Icons &icons, const App &app, double x, double y,
 	char letter[5];
 	first_letter(name, letter);
 	if (letter[0] != '\0') {
-		int lw = text_width(cr, letter, config::launcher_font, -1);
+		int lw = text_width(cr, letter, config::launcher_font);
 		paint_text(cr, letter, config::launcher_font, text_color,
-			x + (config::launcher_icon - lw) / 2.0,
-			y + config::launcher_icon / 2.0, -1);
+			x + (config::launcher_icon - lw) / 2.0, y + config::launcher_icon / 2.0,
+			TextAnchor::middle_left);
 	}
 }
 
 } // namespace
 
 Launcher::Launcher(Server &server)
-	: server_(server) {
+	: server_(server), panel_(server.text_cache) {
 }
 
 Launcher::~Launcher() {
@@ -272,8 +179,7 @@ void Launcher::query_changed() {
 	results_ = apps_.search(query_);
 	selected_ = 0;
 	scroll_ = 0;
-	stale_ = true;
-	output_->damage();
+	panel_.invalidate(*output_);
 }
 
 // ---- selection ----
@@ -307,28 +213,24 @@ void Launcher::move_selection(int rows, int delta) {
 	}
 	selected_ = static_cast<std::size_t>(sel);
 	scroll_to_selection(rows);
-	stale_ = true;
-	output_->damage();
+	panel_.invalidate(*output_);
 }
 
-int Launcher::row_at(const wlr_box &box, int rows, double ox, double oy) const {
-	double rel = oy - (box.y + 12 + config::launcher_search_height + 8);
-	if (rel < 0) {
+int Launcher::row_at(const PanelLayout &layout, double ox, double oy) const {
+	std::optional<int> visible = layout.row_at(ox, oy);
+	if (!visible.has_value()) {
 		return -1;
 	}
-	int vis = static_cast<int>(rel / config::launcher_row_height);
-	if (vis >= rows) {
-		return -1;
-	}
-	std::size_t idx = scroll_ + static_cast<std::size_t>(vis);
+	std::size_t idx = scroll_ + static_cast<std::size_t>(*visible);
 	if (idx >= results_.size()) {
 		return -1;
 	}
 	return static_cast<int>(idx);
 }
 
-TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int rows) {
+TexturePtr Launcher::draw_panel(const Output &output, const PanelLayout &layout) {
 	float scale = output.wlr->scale;
+	const wlr_box &box = layout.box;
 	int dev_w = static_cast<int>(std::ceil(box.width * scale));
 	int dev_h = static_cast<int>(std::ceil(box.height * scale));
 	if (dev_w < 1) {
@@ -341,20 +243,23 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 	CairoPtr cr_owner(cairo_create(surf.get()));
 	cairo_t *cr = cr_owner.get();
 	cairo_scale(cr, scale, scale);
+	// The layout's boxes are output-local; the picture starts at the card.
+	cairo_translate(cr, -box.x, -box.y);
 	double w = box.width, h = box.height;
 	const config::Palette &pal = server_.theme.colors();
 
 	// Panel: rounded card with a 1 px border.
-	rounded_path(cr, 0, 0, w, h, 8);
+	rounded_path(cr, box.x, box.y, w, h, 8);
 	set_source_rgba32(cr, pal.launcher);
 	cairo_fill(cr);
-	rounded_path(cr, 0.5, 0.5, w - 1, h - 1, 7.5);
+	rounded_path(cr, box.x + 0.5, box.y + 0.5, w - 1, h - 1, 7.5);
 	set_source_rgba32(cr, pal.launcher_border);
 	cairo_set_line_width(cr, 1.0);
 	cairo_stroke(cr);
 
 	// Search field with magnifier glyph.
-	double fx = 12, fy = 12, fw = w - 24, fh = config::launcher_search_height;
+	const wlr_box &search = layout.search;
+	double fx = search.x, fy = search.y, fw = search.width, fh = search.height;
 	rounded_path(cr, fx, fy, fw, fh, 6);
 	set_source_rgba32(cr, pal.launcher_search);
 	cairo_fill(cr);
@@ -362,7 +267,7 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 	set_source_rgba32(cr, pal.launcher_dim_text);
 	cairo_set_line_width(cr, 1.5);
 	cairo_new_path(cr);
-	cairo_arc(cr, gx, gy, gr, 0, 2 * launcher_pi);
+	cairo_arc(cr, gx, gy, gr, 0, 2 * std::numbers::pi);
 	cairo_stroke(cr);
 	double gd = gr * 0.70710678;
 	cairo_move_to(cr, gx + gd, gy + gd);
@@ -374,7 +279,7 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 	double tcy = fy + fh / 2;
 	if (!query_.empty()) {
 		int qw = paint_text(cr, query_.c_str(), config::launcher_search_font,
-			pal.launcher_text, tx, tcy, tavail);
+			pal.launcher_text, tx, tcy, TextAnchor::middle_left, tavail);
 		double cx = std::floor(tx + qw + 4) + 0.5;
 		set_source_rgba32(cr, pal.launcher_text);
 		cairo_set_line_width(cr, 1.0);
@@ -383,93 +288,96 @@ TexturePtr Launcher::draw_panel(const Output &output, const wlr_box &box, int ro
 		cairo_stroke(cr);
 	} else {
 		paint_text(cr, "Type to search apps", config::launcher_search_font,
-			pal.launcher_dim_text, tx, tcy, tavail);
+			pal.launcher_dim_text, tx, tcy, TextAnchor::middle_left, tavail);
 	}
 
-	double rows_y = 12 + config::launcher_search_height + 8;
+	const wlr_box &rows = layout.rows;
 	if (results_.empty()) {
 		std::string msg = std::format("No apps match \xE2\x80\x9C{}\xE2\x80\x9D", query_);
-		int avail = static_cast<int>(w) - 48;
+		int avail = rows.width - 24;
 		int mw = text_width(cr, msg.c_str(), config::launcher_font, avail);
 		paint_text(cr, msg.c_str(), config::launcher_font, pal.launcher_dim_text,
-			(w - mw) / 2.0, rows_y + rows * config::launcher_row_height / 2.0, avail);
+			box.x + (w - mw) / 2.0, rows.y + rows.height / 2.0,
+			TextAnchor::middle_left, avail);
 	} else {
-		for (int i = 0; i < rows; i++) {
+		for (int i = 0; i < layout.row_count; i++) {
 			std::size_t idx = scroll_ + static_cast<std::size_t>(i);
 			if (idx >= results_.size()) {
 				break;
 			}
 			const App &app = apps_.items()[results_[idx]];
-			double ry = rows_y + i * config::launcher_row_height;
-			double rw = w - 24;
+			wlr_box row = layout.row(i);
 			// The selected row is the accent fill, so everything on it — icon,
 			// name, generic name — is drawn in the accent's contrasting text
 			// colour; the dim grey would vanish on it.
 			uint32_t row_text = idx == selected_ ? pal.accent_text : pal.launcher_text;
 			if (idx == selected_) {
-				rounded_path(cr, 12, ry, rw, config::launcher_row_height, 4);
+				rounded_path(cr, row.x, row.y, row.width, row.height, 4);
 				set_source_rgba32(cr, pal.launcher_selected);
 				cairo_fill(cr);
 			} else if (hover_ >= 0 && static_cast<std::size_t>(hover_) == idx) {
-				rounded_path(cr, 12, ry, rw, config::launcher_row_height, 4);
+				rounded_path(cr, row.x, row.y, row.width, row.height, 4);
 				set_source_rgba32(cr, pal.launcher_hover);
 				cairo_fill(cr);
 			}
 
-			draw_icon(cr, icons_, app, 24,
-				ry + (config::launcher_row_height - config::launcher_icon) / 2.0,
-				scale, row_text);
+			double icon_x = row.x + config::launcher_pad;
+			draw_icon(cr, icons_, app, icon_x,
+				row.y + (row.height - config::launcher_icon) / 2.0, scale, row_text);
 
-			double nx = 24 + config::launcher_icon + 10;
-			int navail = static_cast<int>(w) - 12 - 8 - static_cast<int>(nx);
-			double ncy = ry + config::launcher_row_height / 2.0;
+			double nx = icon_x + config::launcher_icon + 10;
+			int navail = row.x + row.width - config::launcher_gap - static_cast<int>(nx);
+			double ncy = row.y + row.height / 2.0;
 			int nw = 0;
 			if (!app.name.empty()) {
 				nw = paint_text(cr, app.name.c_str(), config::launcher_font,
-					row_text, nx, ncy, navail);
+					row_text, nx, ncy, TextAnchor::middle_left, navail);
 			}
 			if (!app.generic.empty()) {
-				int rem = navail - nw - 8;
+				int rem = navail - nw - config::launcher_gap;
 				if (rem >= 32) {
 					paint_text(cr, app.generic.c_str(), config::launcher_font,
 						idx == selected_ ? pal.accent_text : pal.launcher_dim_text,
-						nx + nw + 8, ncy, rem);
+						nx + nw + config::launcher_gap, ncy, TextAnchor::middle_left, rem);
 				}
 			}
 		}
 
 		// Thin scrollbar when the results don't fit.
-		if (results_.size() > static_cast<std::size_t>(rows)) {
-			double th = rows * static_cast<double>(config::launcher_row_height);
-			double thumb = th * rows / static_cast<double>(results_.size());
+		if (results_.size() > static_cast<std::size_t>(layout.row_count)) {
+			double th = rows.height;
+			double thumb = th * layout.row_count / static_cast<double>(results_.size());
 			if (thumb < 24) {
 				thumb = 24;
 			}
 			if (thumb > th) {
 				thumb = th;
 			}
-			std::size_t max_scroll = results_.size() - static_cast<std::size_t>(rows);
+			std::size_t max_scroll = results_.size() - static_cast<std::size_t>(layout.row_count);
 			double frac = static_cast<double>(scroll_) / static_cast<double>(max_scroll);
-			double ty = rows_y + frac * (th - thumb);
-			rounded_path(cr, w - 16, rows_y, 4, th, 2);
+			double ty = rows.y + frac * (th - thumb);
+			double bar_x = rows.x + rows.width - 4;
+			rounded_path(cr, bar_x, rows.y, 4, th, 2);
 			set_source_rgba32(cr, pal.launcher_hover);
 			cairo_fill(cr);
-			rounded_path(cr, w - 16, ty, 4, thumb, 2);
+			rounded_path(cr, bar_x, ty, 4, thumb, 2);
 			set_source_rgba32(cr, pal.launcher_dim_text);
 			cairo_fill(cr);
 		}
 	}
 
 	// Footer.
-	double fcy = h - 14;
+	const wlr_box &footer = layout.footer;
+	double fcy = footer.y + footer.height / 2.0;
+	int inset = config::launcher_pad + config::launcher_gap;
 	paint_text(cr, "\xE2\x86\x91\xE2\x86\x93 select   Enter open   Esc close",
-		config::ui_font, pal.launcher_dim_text, 20, fcy,
-		static_cast<int>(w) - 40);
+		config::ui_font, pal.launcher_dim_text, footer.x + inset, fcy, TextAnchor::middle_left,
+		footer.width - 2 * inset);
 	std::string count = std::format("{} app{}", results_.size(),
 		results_.size() == 1 ? "" : "s");
-	int cw = text_width(cr, count.c_str(), config::ui_font, -1);
+	int cw = text_width(cr, count.c_str(), config::ui_font);
 	paint_text(cr, count.c_str(), config::ui_font, pal.launcher_dim_text,
-		w - 20 - cw, fcy, -1);
+		footer.x + footer.width - inset - cw, fcy, TextAnchor::middle_left);
 
 	return texture_from_cairo(server_.renderer, surf.get());
 }
@@ -489,8 +397,7 @@ void Launcher::open(Output &output) {
 	scroll_ = 0;
 	hover_ = -1;
 	pressed_row_ = -1;
-	stale_ = true;
-	output.damage();
+	panel_.invalidate(output);
 }
 
 void Launcher::toggle(Output *output) {
@@ -516,8 +423,7 @@ void Launcher::close() {
 	scroll_ = 0;
 	hover_ = -1;
 	pressed_row_ = -1;
-	texture_.reset();
-	stale_ = true;
+	panel_.drop();
 	if (output != nullptr) {
 		output->damage();
 	}
@@ -535,18 +441,14 @@ bool Launcher::is_open() const {
 	return open_;
 }
 
-bool Launcher::open_on(const Output &output) const {
+bool Launcher::takes_pointer_at(const Output &output, double, double) const {
 	return open_ && output_ == &output;
 }
 
-void Launcher::output_destroyed(Output &output) {
+void Launcher::output_gone(Output &output) {
 	if (open_ && output_ == &output) {
 		close();
 	}
-}
-
-void Launcher::theme_changed() {
-	stale_ = true; // panel() redraws on the next frame
 }
 
 void Launcher::finish() {
@@ -556,12 +458,23 @@ void Launcher::finish() {
 
 // ---- keyboard ----
 
-void Launcher::key(xkb_keysym_t sym, uint32_t utf32, uint32_t mods) {
-	if (!open_) {
+void Launcher::key(const KeyPress &press) {
+	if (!open_ || press.syms.produced().empty() || press.logo) {
 		return;
 	}
+	bool closing = press.syms.any([&](xkb_keysym_t sym) {
+		return server_.bindings.launcher_chord(sym, press.mods);
+	});
+	if (closing) {
+		close();
+		return;
+	}
+	key_sym(press.syms.produced().front(), press.utf32, press.mods);
+}
+
+void Launcher::key_sym(xkb_keysym_t sym, uint32_t utf32, uint32_t mods) {
 	bool ctrl = (mods & WLR_MODIFIER_CTRL) != 0;
-	int rows = panel_rows(output_->height);
+	int rows = panel_layout(output_->width, output_->height).row_count;
 
 	if (sym == XKB_KEY_Escape) {
 		close();
@@ -618,8 +531,7 @@ void Launcher::key(xkb_keysym_t sym, uint32_t utf32, uint32_t mods) {
 			std::size_t max_scroll = results_.size() > static_cast<std::size_t>(rows)
 				? results_.size() - static_cast<std::size_t>(rows) : 0;
 			scroll_ = sym == XKB_KEY_Home ? 0 : max_scroll;
-			stale_ = true;
-			output_->damage();
+			panel_.invalidate(*output_);
 		}
 		return;
 	}
@@ -646,20 +558,18 @@ bool Launcher::pointer_motion(Output &output, double ox, double oy) {
 	if (!open_ || output_ != &output) {
 		return false;
 	}
-	PanelLayout pl = panel_layout(output);
+	PanelLayout pl = panel_layout(output.width, output.height);
 	if (!wlr_box_contains_point(&pl.box, ox, oy)) {
 		if (hover_ != -1) {
 			hover_ = -1;
-			stale_ = true;
-			output.damage();
+			panel_.invalidate(output);
 		}
 		return false;
 	}
-	int row = row_at(pl.box, pl.rows, ox, oy);
+	int row = row_at(pl, ox, oy);
 	if (row != hover_) {
 		hover_ = row;
-		stale_ = true;
-		output.damage();
+		panel_.invalidate(output);
 	}
 	return true;
 }
@@ -670,17 +580,17 @@ bool Launcher::pointer_button(Output &output, double ox, double oy, uint32_t but
 	if (!open_ || output_ != &output) {
 		return false;
 	}
-	PanelLayout pl = panel_layout(output);
+	PanelLayout pl = panel_layout(output.width, output.height);
 	bool inside = wlr_box_contains_point(&pl.box, ox, oy);
 	if (pressed) {
 		if (inside) {
-			pressed_row_ = row_at(pl.box, pl.rows, ox, oy);
+			pressed_row_ = row_at(pl, ox, oy);
 			return true;
 		}
 		close();
 		return true;
 	}
-	int row = inside ? row_at(pl.box, pl.rows, ox, oy) : -1;
+	int row = inside ? row_at(pl, ox, oy) : -1;
 	if (row >= 0 && row == pressed_row_) {
 		selected_ = static_cast<std::size_t>(row);
 		launch_selected();
@@ -690,16 +600,17 @@ bool Launcher::pointer_button(Output &output, double ox, double oy, uint32_t but
 	return true;
 }
 
-bool Launcher::pointer_axis(Output &output, double ox, double oy, double delta) {
-	if (!open_ || output_ != &output) {
+bool Launcher::pointer_axis(Output &output, double ox, double oy,
+		wl_pointer_axis orientation, double delta) {
+	if (!open_ || output_ != &output || orientation != WL_POINTER_AXIS_VERTICAL_SCROLL) {
 		return false;
 	}
-	PanelLayout pl = panel_layout(output);
+	PanelLayout pl = panel_layout(output.width, output.height);
 	if (!wlr_box_contains_point(&pl.box, ox, oy)) {
 		return false;
 	}
-	if (delta != 0 && results_.size() > static_cast<std::size_t>(pl.rows)) {
-		std::size_t max_scroll = results_.size() - static_cast<std::size_t>(pl.rows);
+	if (delta != 0 && results_.size() > static_cast<std::size_t>(pl.row_count)) {
+		std::size_t max_scroll = results_.size() - static_cast<std::size_t>(pl.row_count);
 		long next = static_cast<long>(scroll_) + (delta > 0 ? 1 : -1);
 		if (next < 0) {
 			next = 0;
@@ -709,8 +620,7 @@ bool Launcher::pointer_axis(Output &output, double ox, double oy, double delta) 
 		}
 		if (static_cast<std::size_t>(next) != scroll_) {
 			scroll_ = static_cast<std::size_t>(next);
-			stale_ = true;
-			output.damage();
+			panel_.invalidate(output);
 		}
 	}
 	return true;
@@ -722,16 +632,23 @@ std::optional<Launcher::Panel> Launcher::panel(Output &output) {
 	if (!open_ || output_ != &output) {
 		return std::nullopt;
 	}
-	PanelLayout pl = panel_layout(output);
-	float scale = output.wlr->scale;
-	if (!texture_ || stale_ || texture_scale_ != scale || !box_eq(texture_box_, pl.box)) {
-		texture_ = draw_panel(output, pl.box, pl.rows);
-		texture_scale_ = scale;
-		texture_box_ = pl.box;
-		stale_ = false;
-	}
-	if (!texture_) {
+	PanelLayout pl = panel_layout(output.width, output.height);
+	wlr_texture *texture = panel_.get(output.wlr->scale, pl.box,
+		[&] { return draw_panel(output, pl); });
+	if (texture == nullptr) {
 		return std::nullopt;
 	}
-	return Panel{.texture = texture_.get(), .box = pl.box};
+	return Panel{.texture = texture, .box = pl.box};
+}
+
+void Launcher::draw(const RenderCtx &ctx) {
+	Output &output = *ctx.output;
+	std::optional<Panel> shown = panel(output);
+	if (!shown.has_value()) {
+		return;
+	}
+	draw_logical_rect(ctx, 0, 0, output.width, output.height,
+		color_rgba(server_.theme.colors().launcher_backdrop));
+	draw_ui_texture(ctx, shown->texture, shown->box.x, shown->box.y,
+		shown->box.width, shown->box.height, 1.0);
 }

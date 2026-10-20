@@ -21,6 +21,8 @@
 #include "platform/session_bus.h"
 #include "platform/session_services.h"
 #include "core/server.h"
+#include "core/theme_prefs.h"
+#include "input/ui_layer.h"
 #include "windows/view.h"
 
 namespace {
@@ -409,10 +411,12 @@ struct Server::Inhibitor {
 };
 
 Server::Server()
-	: input(*this), bindings(*this), gestures(*this), hint(*this), launcher(*this),
+	: text_cache(*this), input(*this), bindings(*this), gestures(*this), hint(*this),
+	launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), ipc(*this),
 	image_capture(*this),
 	capture_ui(*this), lock(*this), night_light(*this), logind(*this) {
+	input.set_layers({&capture_ui, &launcher});
 }
 
 Server::~Server() {
@@ -445,10 +449,11 @@ Server::~Server() {
 	finish_xwayland();
 	night_light.finish();
 	lock.finish();
-	capture_ui.finish();
+	for (UiLayer *layer : input.layers()) {
+		layer->finish();
+	}
 	image_capture.finish();
-	launcher.finish();
-	painter.finish();
+	text_cache.clear();
 	hint.finish();
 	// wlroots asserts that destroyed objects have no listeners left.
 	input.finish();
@@ -559,7 +564,8 @@ bool Server::init(const Options &options) {
 	cursor = wlr_cursor_create();
 	wlr_cursor_attach_output_layout(cursor, output_layout);
 	const char *size_env = getenv("XCURSOR_SIZE");
-	int cursor_size = size_env != nullptr && atoi(size_env) > 0 ? atoi(size_env) : 24;
+	int cursor_size = size_env != nullptr && atoi(size_env) > 0 ? atoi(size_env)
+		: config::cursor_size;
 	xcursor_mgr = wlr_xcursor_manager_create(getenv("XCURSOR_THEME"), cursor_size);
 
 	init_outputs();
@@ -762,18 +768,17 @@ int Server::handle_conf_change(int fd, uint32_t mask, void *data) {
 }
 
 void Server::set_theme(ThemeMode mode) {
+	// The applications' preference follows every call, a changed palette or
+	// not: the shell's start push makes it match the mode the compositor
+	// already has. Only the real session writes it (a seat session opened
+	// from a TTY): nested and headless runs never do.
+	theme_prefs::apply(mode, session != nullptr);
 	if (theme.mode() == mode) {
 		return; // no change: no event, no repaint
 	}
 	theme.set_mode(mode);
 	// Every cached texture was drawn with the old palette.
-	painter.theme_changed();
-	hint.theme_changed();
-	launcher.theme_changed();
-	capture_ui.theme_changed();
-	for (std::unique_ptr<View> &view : toplevels) {
-		view->deco.theme_changed();
-	}
+	text_cache.clear();
 	damage_all();
 	ipc.emit_theme();
 }

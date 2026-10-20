@@ -17,6 +17,8 @@
 #include "core/config.h"
 #include "core/server.h"
 #include "platform/output.h"
+#include "render/draw.h"
+#include "render/render.h"
 
 namespace {
 
@@ -39,6 +41,18 @@ std::string quote_json(const std::string &text) {
 		}
 	}
 	return out + "\"";
+}
+
+// One hollow rectangle of the capture overlay: four thin fills. The
+// horizontal edges carry the corners.
+void draw_outline(const RenderCtx &ctx, const CaptureOutline &outline) {
+	wlr_render_color color = color_rgba(outline.rgba);
+	double t = outline.thickness;
+	const wlr_box &b = outline.box;
+	draw_logical_rect(ctx, b.x, b.y, b.width, t, color);
+	draw_logical_rect(ctx, b.x, b.y + b.height - t, b.width, t, color);
+	draw_logical_rect(ctx, b.x, b.y + t, t, b.height - 2 * t, color);
+	draw_logical_rect(ctx, b.x + b.width - t, b.y + t, t, b.height - 2 * t, color);
 }
 
 } // namespace
@@ -149,7 +163,13 @@ bool CaptureUi::takes_pointer_at(const Output &output, double ox, double oy) con
 	return thumbnail_.takes_pointer_at(output, ox, oy);
 }
 
-void CaptureUi::key(xkb_keysym_t sym, uint32_t mods) {
+void CaptureUi::key(const KeyPress &press) {
+	press.syms.each([&](xkb_keysym_t sym) {
+		key_sym(sym, press.mods);
+	});
+}
+
+void CaptureUi::key_sym(xkb_keysym_t sym, uint32_t mods) {
 	sym = xkb_keysym_to_lower(sym);
 	if (sym == XKB_KEY_Escape) {
 		if (deferred_.kind != Deferred::Kind::none) {
@@ -196,6 +216,11 @@ bool CaptureUi::pointer_button(Output &output, double ox, double oy, uint32_t bu
 			});
 	}
 	return thumbnail_.pointer_button(output, ox, oy, button, pressed);
+}
+
+bool CaptureUi::pointer_axis(Output &output, double ox, double oy, wl_pointer_axis,
+		double) {
+	return takes_pointer_at(output, ox, oy); // scrolling is swallowed
 }
 
 void CaptureUi::open_toolbar(Output *output, bool recording_focus,
@@ -323,6 +348,26 @@ const CaptureOverlay &CaptureUi::overlay(Output &output, float scale) {
 	return overlay_;
 }
 
+void CaptureUi::draw(const RenderCtx &ctx) {
+	if (ctx.offscreen) {
+		return; // a shot or a shared screen never shows the capture UI that took it
+	}
+	const CaptureOverlay &capture = overlay(*ctx.output, ctx.scale);
+	for (const CaptureFill &fill : capture.fills) {
+		draw_logical_rect(ctx, fill.box.x, fill.box.y, fill.box.width,
+			fill.box.height, color_rgba(fill.rgba));
+	}
+	for (const CaptureOutline &outline : capture.outlines) {
+		draw_outline(ctx, outline);
+	}
+	for (const CaptureImage &image : capture.images) {
+		if (image.texture != nullptr) {
+			draw_ui_texture(ctx, image.texture, image.box.x, image.box.y,
+				image.box.width, image.box.height, 1.0);
+		}
+	}
+}
+
 void CaptureUi::forget(const View &view) {
 	picker_.forget(view);
 	if (deferred_.view == &view) {
@@ -330,7 +375,7 @@ void CaptureUi::forget(const View &view) {
 	}
 }
 
-void CaptureUi::output_destroyed(Output &output) {
+void CaptureUi::output_gone(Output &output) {
 	if (picker_.uses(output)) {
 		cancel_picker();
 	}
@@ -341,11 +386,6 @@ void CaptureUi::output_destroyed(Output &output) {
 	recorder_.output_destroyed(output);
 }
 
-void CaptureUi::theme_changed() {
-	picker_.theme_changed();
-	toolbar_.theme_changed();
-}
-
 void CaptureUi::finish() {
 	cancel_countdown();
 	cancel_picker();
@@ -353,5 +393,4 @@ void CaptureUi::finish() {
 	thumbnail_.finish();
 	clipboard_.finish();
 	recorder_.finish();
-	picker_.finish();
 }

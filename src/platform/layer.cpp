@@ -1,7 +1,9 @@
 #include "platform/layer.h"
 
 #include <algorithm>
+#include <iterator>
 #include <ranges>
+#include <string_view>
 
 #include "platform/output.h"
 #include "core/config.h"
@@ -118,11 +120,25 @@ void leave_canvas(LayerSurface &layer) {
 	layer.server.input.grab.forget(layer);
 }
 
+// The namespaces of the shell's overview strips. Keep them in sync with
+// plugins/canvas.toolbar and plugins/canvas.apps
+// (docs/intents/shell/toolbar.md, app-bar.md).
+constexpr std::string_view overview_strip_namespaces[] = {
+	"wayland-canvas-toolbar",
+	"wayland-canvas-app-bar",
+};
+
+bool is_strip_namespace(std::string_view name) {
+	return std::ranges::find(overview_strip_namespaces, name)
+		!= std::end(overview_strip_namespaces);
+}
+
 } // namespace
 
 LayerSurface::LayerSurface(Server &server, Output &output, wlr_layer_surface_v1 *wlr)
 		: server(server), output(&output), wlr(wlr),
-		on_canvas_(name().starts_with(config::canvas_surface_prefix)) {
+		on_canvas_(name().starts_with(config::canvas_surface_prefix)),
+		overview_strip_(is_strip_namespace(name())) {
 	wlr->data = this;
 	map_.connect<&LayerSurface::handle_map>(wlr->surface->events.map, this);
 	unmap_.connect<&LayerSurface::handle_unmap>(wlr->surface->events.unmap, this);
@@ -229,6 +245,10 @@ std::string LayerSurface::name() const {
 
 bool LayerSurface::belongs_on_canvas() const {
 	return on_canvas_;
+}
+
+bool LayerSurface::is_overview_strip() const {
+	return overview_strip_;
 }
 
 void LayerSurface::place(wlr_box box) {

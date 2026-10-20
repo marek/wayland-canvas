@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <format>
 #include <string>
+#include "core/box.h"
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -9,21 +11,6 @@
 #include "windows/view_xdg.h"
 
 namespace {
-
-// ---- geometry ----
-
-Rect rect_of_box(const wlr_box &box) {
-	return Rect{double(box.x), double(box.y), double(box.width), double(box.height)};
-}
-
-wlr_box box_of_viewport(const Rect &r) {
-	return wlr_box{
-		static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y)),
-		static_cast<int>(std::ceil(r.w)),
-		static_cast<int>(std::ceil(r.h)),
-	};
-}
 
 // ---- maximize/fullscreen areas ----
 
@@ -44,16 +31,8 @@ wlr_box inset_usable(const Output *output, wlr_box area, double zoom) {
 // else its desktop box, else a screen-sized box centred on the frame.
 wlr_box maximize_area(View &view) {
 	Rect frame = view.frame_rect();
-	Output *picked = nullptr;
-	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if (output->overview.active()) {
-			continue;
-		}
-		if (output->viewport().contains(frame.cx(), frame.cy())) {
-			picked = output.get();
-			break;
-		}
-	}
+	Output *picked = view.server.output_showing(frame.cx(), frame.cy(),
+		Server::Showing::normal_view);
 	if (picked != nullptr) {
 		return inset_usable(picked, box_of_viewport(picked->viewport()),
 			picked->camera.drawn().zoom);
@@ -81,13 +60,7 @@ wlr_box fullscreen_area(View &view) {
 		return *own;
 	}
 	Rect frame = view.frame_rect();
-	Output *picked = nullptr;
-	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if (output->viewport().contains(frame.cx(), frame.cy())) {
-			picked = output.get();
-			break;
-		}
-	}
+	Output *picked = view.server.output_showing(frame.cx(), frame.cy());
 	if (picked == nullptr) {
 		picked = view.server.output_under_cursor();
 	}
@@ -142,12 +115,9 @@ Opening opening_of(const View &view, Output &under_cursor) {
 // normal view the windows whose frame centre its viewport holds.
 bool shown_anywhere(const View &view) {
 	Rect frame = view.frame_rect();
-	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if (output->overview.active() || output->viewport().contains(frame.cx(), frame.cy())) {
-			return true;
-		}
-	}
-	return false;
+	return view.server.output_showing(frame.cx(), frame.cy()) != nullptr
+		|| std::ranges::any_of(view.server.outputs,
+			[](const std::unique_ptr<Output> &output) { return output->overview.active(); });
 }
 
 // For the hint about a window that opened unseen: where it is.

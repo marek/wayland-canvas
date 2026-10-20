@@ -1,5 +1,6 @@
 #include "apps/capture_toolbar_layout.h"
 
+#include "core/box.h"
 #include "core/config.h"
 
 ToolbarLayout toolbar_layout(int width, int height) {
@@ -59,15 +60,11 @@ ToolbarLayout toolbar_layout(int width, int height) {
 }
 
 std::optional<ToolbarButton> toolbar_hit(const ToolbarLayout &layout, double x, double y) {
-	for (std::size_t i = 0; i < toolbar_modes.size(); i++) {
-		if (wlr_box_contains_point(&layout.modes[i], x, y)) {
-			return toolbar_modes[i];
-		}
+	if (std::optional<std::size_t> at = box_hit(layout.modes, x, y)) {
+		return toolbar_modes[*at];
 	}
-	for (std::size_t i = 0; i < toolbar_options.size(); i++) {
-		if (wlr_box_contains_point(&layout.options[i], x, y)) {
-			return toolbar_options[i];
-		}
+	if (std::optional<std::size_t> at = box_hit(layout.options, x, y)) {
+		return toolbar_options[*at];
 	}
 	return std::nullopt;
 }

@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <format>
 
+#include "core/box.h"
 #include "platform/layer.h"
 #include "core/server.h"
+#include "input/ui_layer.h"
 #include "windows/view.h"
 
 namespace {
@@ -53,8 +55,8 @@ void view_update_outputs(View &view, uint32_t mask) {
 	// a window.
 	double scale = 0;
 	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if ((mask & output->bit) && output->wlr->scale > scale) {
-			scale = output->wlr->scale;
+		if (mask & output->bit) {
+			scale = Output::sharper_scale(scale, *output->wlr);
 		}
 	}
 	// Like wlr_scene: a view scrolled off every output keeps its last
@@ -68,17 +70,13 @@ void view_update_outputs(View &view, uint32_t mask) {
 					wlr_surface_send_leave(surface, output->wlr);
 				}
 			}
-			wlr_fractional_scale_v1_notify_scale(surface, scale);
-			wlr_surface_set_preferred_buffer_scale(surface,
-				(int32_t)std::ceil(scale));
+			Output::tell_scale(surface, scale);
 		});
 		view.told_scale = scale;
 	} else if (mask != 0 && scale != view.told_scale) {
 		// Same outputs, a new scale: one of them changed its scale.
 		view.for_each_surface([&](wlr_surface *surface, int, int) {
-			wlr_fractional_scale_v1_notify_scale(surface, scale);
-			wlr_surface_set_preferred_buffer_scale(surface,
-				(int32_t)std::ceil(scale));
+			Output::tell_scale(surface, scale);
 		});
 		view.told_scale = scale;
 	}
@@ -91,38 +89,6 @@ void view_update_outputs(View &view, uint32_t mask) {
 			view.foreign_output_leave(*output);
 		}
 	}
-}
-
-Point box_centre(wlr_box box) {
-	return Point{
-		.x = box.x + box.width / 2.0,
-		.y = box.y + box.height / 2.0,
-	};
-}
-
-// Screen-sized canvas box centred on (cx, cy), edges rounded to integers.
-wlr_box centred_box(const Output &output, double cx, double cy) {
-	int w = output.width, h = output.height;
-	return wlr_box{
-		static_cast<int>(std::round(cx - w / 2.0)),
-		static_cast<int>(std::round(cy - h / 2.0)),
-		w,
-		h,
-	};
-}
-
-wlr_box rect_to_box(Rect r) {
-	return wlr_box{
-		static_cast<int>(std::round(r.x)),
-		static_cast<int>(std::round(r.y)),
-		static_cast<int>(std::round(r.w)),
-		static_cast<int>(std::round(r.h)),
-	};
-}
-
-// A desktop's name, or nullopt for no desktop.
-std::optional<DesktopId> id_of(const Desktop *desktop) {
-	return desktop != nullptr ? std::optional<DesktopId>{desktop->id()} : std::nullopt;
 }
 
 } // namespace
@@ -145,6 +111,15 @@ Output::Output(Server &server, wlr_output *wlr)
 }
 
 Output::~Output() = default;
+
+double Output::sharper_scale(double scale, const wlr_output &output) {
+	return std::fmax(scale, output.scale);
+}
+
+void Output::tell_scale(wlr_surface *surface, double scale) {
+	wlr_fractional_scale_v1_notify_scale(surface, scale);
+	wlr_surface_set_preferred_buffer_scale(surface, static_cast<int32_t>(std::ceil(scale)));
+}
 
 void Output::damage() {
 	dirty = true;
@@ -342,7 +317,7 @@ void Output::pin_desktop() {
 		return;
 	}
 	// Pinned at its zoom: the new desktop fills the screen at that scale.
-	Desktop &created = server.canvas.desktops.create(rect_to_box(vp), camera.current().zoom);
+	Desktop &created = server.canvas.desktops.create(box_rounded(vp), camera.current().zoom);
 	server.hint.set(std::format("New Desktop {}", created.number()));
 }
 
@@ -363,7 +338,7 @@ void Server::reveal_view(View &view) {
 	}
 	Desktop *desktop = canvas.desktop_of(view);
 	wlr_box box = desktop != nullptr ? desktop->frame()
-		: centred_box(*output, centre.x, centre.y);
+		: centred_box(output->width, output->height, centre.x, centre.y);
 	if (output->overview.active()) {
 		output->overview.set_target(box, id_of(desktop), false);
 		output->overview.exit();
@@ -390,6 +365,18 @@ Output *Server::output_under_cursor() {
 		output = outputs.front().get();
 	}
 	return output;
+}
+
+Output *Server::output_showing(double cx, double cy, Showing which) {
+	for (const std::unique_ptr<Output> &output : outputs) {
+		if (which == Showing::normal_view && output->overview.active()) {
+			continue;
+		}
+		if (output->viewport().contains(cx, cy)) {
+			return output.get();
+		}
+	}
+	return nullptr;
 }
 
 void Server::update_visibility() {
@@ -459,8 +446,9 @@ void Output::handle_destroy() {
 	for (View *view : server.views) {
 		view->output_mask &= ~bit;
 	}
-	server.launcher.output_destroyed(*this);
-	server.capture_ui.output_destroyed(*this);
+	for (UiLayer *layer : server.input.layers()) {
+		layer->output_gone(*this);
+	}
 
 	// The layer surfaces die with the output; destroying each wlroots object
 	// runs its own destroy handler, which takes it out of these vectors. A

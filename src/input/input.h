@@ -18,6 +18,7 @@
 class LayerSurface;
 class Output;
 class Server;
+class UiLayer;
 class View;
 struct libinput_device;
 
@@ -83,6 +84,21 @@ public:
 	void set_cursor_image(const char *name);
 	// A view was unmapped or destroyed: drop what referred to it.
 	void forget(const View &view);
+
+	// ---- the compositor's own UIs (input/ui_layer.h) ----
+
+	// Set once by Server: the layers, topmost first. Every path that gives
+	// a layer input, a frame or a change of palette goes through this list.
+	void set_layers(std::vector<UiLayer *> layers) { layers_ = std::move(layers); }
+	std::span<UiLayer *const> layers() const { return layers_; }
+	// The topmost layer that owns the keyboard: it gets every key press.
+	UiLayer *layer_for_keys() const;
+	// The topmost layer that takes the pointer, a touch or the pen at
+	// output-local (ox, oy) on `output`: it gets the event, and no window
+	// or surface does.
+	UiLayer *layer_at(const Output &output, double ox, double oy) const;
+	// Whether a layer owns touchpad and touchscreen swipes and pinches.
+	bool gestures_blocked() const;
 
 	// canvas.conf was (re-)read: re-applies what the file decides about the
 	// devices — the mouse wheel's and the touchpad's scroll direction
@@ -188,6 +204,7 @@ public:
 
 private:
 	Server &server_;
+	std::vector<UiLayer *> layers_; // topmost first
 
 	bool must_wait(bool for_x);
 	void queue(std::function<void()> run);

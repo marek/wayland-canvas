@@ -1,4 +1,4 @@
-#include <cmath>
+#include "core/box.h"
 #include "core/server.h"
 #include "platform/layer.h"
 #include "platform/output.h"
@@ -49,13 +49,7 @@ bool popup_unconstrain(Popup &popup) {
 		// The output whose viewport shows the frame centre, else the one
 		// under the cursor.
 		Rect frame = view->frame_rect();
-		Output *picked = nullptr;
-		for (const std::unique_ptr<Output> &output : server.outputs) {
-			if (output->viewport().contains(frame.cx(), frame.cy())) {
-				picked = output.get();
-				break;
-			}
-		}
+		Output *picked = server.output_showing(frame.cx(), frame.cy());
 		if (picked == nullptr) {
 			picked = server.output_under_cursor();
 		}
@@ -64,12 +58,12 @@ bool popup_unconstrain(Popup &popup) {
 			wlr_box geo = view->shell_geometry();
 			// Canvas -> toplevel surface-local: the surface origin sits at
 			// (view->x - geo.x, view->y - geo.y) on the canvas.
-			wlr_box box{
-				static_cast<int>(std::floor(viewport.x - (view->x - geo.x))),
-				static_cast<int>(std::floor(viewport.y - (view->y - geo.y))),
-				static_cast<int>(std::ceil(viewport.w)),
-				static_cast<int>(std::ceil(viewport.h)),
-			};
+			wlr_box box = box_covering(Rect{
+				viewport.x - (view->x - geo.x),
+				viewport.y - (view->y - geo.y),
+				viewport.w,
+				viewport.h,
+			});
 			wlr_xdg_popup_unconstrain_from_box(xdg_popup, &box);
 			return true;
 		}

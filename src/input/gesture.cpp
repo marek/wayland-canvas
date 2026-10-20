@@ -281,7 +281,7 @@ void Gestures::swipe_update(uint32_t time, double dx, double dy) {
 			}
 			Camera cam = z.output->camera.current();
 			cam.zoom = clampd(z.start_zoom * std::exp(z.ay / 400),
-				config::overview_min_zoom, 0.75);
+				config::overview_min_zoom, config::overview_zoom_limit);
 			z.output->camera.jump(cam);
 		},
 		[&](Abandon &a) {

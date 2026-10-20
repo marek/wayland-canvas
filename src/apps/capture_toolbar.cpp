@@ -3,10 +3,10 @@
 #include <linux/input-event-codes.h>
 
 #include <cairo.h>
-#include <pango/pangocairo.h>
 
 #include <cmath>
 #include <format>
+#include <numbers>
 #include <string>
 
 #include "core/config.h"
@@ -16,40 +16,6 @@
 #include "render/draw.h"
 
 namespace {
-
-constexpr double capture_pi = 3.14159265358979323846;
-
-using PangoLayoutPtr = Handle<PangoLayout, g_object_unref>;
-using FontDescPtr = Handle<PangoFontDescription, pango_font_description_free>;
-
-void rounded_path(cairo_t *cr, double x, double y, double w, double h, double r) {
-	if (r > w / 2.0) {
-		r = w / 2.0;
-	}
-	if (r > h / 2.0) {
-		r = h / 2.0;
-	}
-	cairo_new_path(cr);
-	cairo_arc(cr, x + w - r, y + r, r, -capture_pi / 2, 0);
-	cairo_arc(cr, x + w - r, y + h - r, r, 0, capture_pi / 2);
-	cairo_arc(cr, x + r, y + h - r, r, capture_pi / 2, capture_pi);
-	cairo_arc(cr, x + r, y + r, r, capture_pi, 3 * capture_pi / 2);
-	cairo_close_path(cr);
-}
-
-// Text centred on (cx, cy); returns its pixel width.
-int paint_centred(cairo_t *cr, const char *text, uint32_t rgba, double cx, double cy) {
-	PangoLayoutPtr layout(pango_cairo_create_layout(cr));
-	FontDescPtr desc(pango_font_description_from_string(config::ui_font));
-	pango_layout_set_font_description(layout.get(), desc.get());
-	pango_layout_set_text(layout.get(), text, -1);
-	int w = 0, h = 0;
-	pango_layout_get_pixel_size(layout.get(), &w, &h);
-	set_source_rgba32(cr, rgba);
-	cairo_move_to(cr, cx - w / 2.0, cy - h / 2.0);
-	pango_cairo_show_layout(cr, layout.get());
-	return w;
-}
 
 // One mode button's glyph — a screen, a window, the picker's dashed
 // rectangle — centred on (cx, cy).
@@ -107,7 +73,7 @@ bool option_on(ToolbarOption option, const CaptureOptions &options) {
 
 } // namespace
 
-CaptureToolbar::CaptureToolbar(Server &server) : server_(server) {
+CaptureToolbar::CaptureToolbar(Server &server) : server_(server), panel_(server.text_cache) {
 }
 
 void CaptureToolbar::open(Output &output, bool recording_focus, const CaptureOptions &preset) {
@@ -119,9 +85,8 @@ void CaptureToolbar::open(Output &output, bool recording_focus, const CaptureOpt
 	}
 	hover_.reset();
 	pressed_.reset();
-	stale_ = true;
 	wlr_seat_pointer_notify_clear_focus(server_.seat);
-	output.damage();
+	panel_.invalidate(output);
 }
 
 void CaptureToolbar::close() {
@@ -133,9 +98,7 @@ void CaptureToolbar::close() {
 	record_focus_ = false;
 	hover_.reset();
 	pressed_.reset();
-	texture_.reset();
-	stale_ = true;
-	output->damage();
+	panel_.invalidate(*output);
 }
 
 std::optional<ToolbarButton> CaptureToolbar::button_at(const Output &output, double ox,
@@ -151,8 +114,7 @@ bool CaptureToolbar::pointer_motion(Output &output, double ox, double oy) {
 	std::optional<ToolbarButton> hit = button_at(output, ox, oy);
 	if (hit != hover_) {
 		hover_ = hit;
-		stale_ = true;
-		output.damage();
+		panel_.invalidate(output);
 	}
 	return true;
 }
@@ -169,8 +131,7 @@ bool CaptureToolbar::pointer_button(Output &output, double ox, double oy, uint32
 		record_focus_ = false;
 		pressed_ = button_at(output, ox, oy);
 		if (pressed_) {
-			stale_ = true;
-			output.damage();
+			panel_.invalidate(output);
 		} else {
 			close(); // a click outside cancels
 		}
@@ -182,9 +143,8 @@ bool CaptureToolbar::pointer_button(Output &output, double ox, double oy, uint32
 	}
 	if (pressed_) {
 		pressed_.reset();
-		stale_ = true;
 		if (output_ != nullptr) {
-			output_->damage();
+			panel_.invalidate(*output_);
 		}
 	}
 	return true;
@@ -204,9 +164,8 @@ void CaptureToolbar::activate(ToolbarButton button, Chose chose) {
 		} else {
 			options_.show_pointer = !options_.show_pointer;
 		}
-		stale_ = true;
 		if (output_ != nullptr) {
-			output_->damage();
+			panel_.invalidate(*output_);
 		}
 		return;
 	}
@@ -221,17 +180,12 @@ void CaptureToolbar::add_overlay(Output &output, float scale, CaptureOverlay &ou
 		return;
 	}
 	ToolbarLayout layout = toolbar_layout(output.width, output.height);
-	if (texture_ == nullptr || stale_ || scale_ != scale || !wlr_box_equal(&box_, &layout.box)) {
-		texture_.reset();
-		texture_ = draw(output, layout);
-		scale_ = scale;
-		box_ = layout.box;
-		stale_ = false;
-	}
-	if (texture_ == nullptr) {
+	wlr_texture *texture = panel_.get(scale, layout.box,
+		[&] { return draw(output, layout); });
+	if (texture == nullptr) {
 		return;
 	}
-	out.images.push_back({.texture = texture_.get(), .box = layout.box});
+	out.images.push_back({.texture = texture, .box = layout.box});
 	if (record_focus_) {
 		// Alt+Print opened this: the recording choices carry the accent.
 		out.outlines.push_back({.box = layout.records,
@@ -270,9 +224,9 @@ TexturePtr CaptureToolbar::draw(const Output &output, const ToolbarLayout &layou
 		rounded_path(cr.get(), px + box.x, py + box.y, box.width, box.height, 8);
 		set_source_rgba32(cr.get(), on ? pal.launcher_selected : pal.launcher_search);
 		cairo_fill(cr.get());
-		paint_centred(cr.get(), option_text(option, options_).c_str(),
+		paint_text(cr.get(), option_text(option, options_).c_str(), config::ui_font,
 			on ? pal.accent_text : pal.launcher_dim_text,
-			px + box.x + box.width / 2.0, py + box.y + box.height / 2.0);
+			px + box.x + box.width / 2.0, py + box.y + box.height / 2.0, TextAnchor::centre);
 	}
 
 	for (std::size_t i = 0; i < toolbar_modes.size(); i++) {
@@ -287,17 +241,17 @@ TexturePtr CaptureToolbar::draw(const Output &output, const ToolbarLayout &layou
 		paint_glyph(cr.get(), mode.target, pal.launcher_text, cx, cy);
 		if (mode.record) { // the recording mark: a red dot on the glyph's corner
 			cairo_set_line_width(cr.get(), 1.5);
-			cairo_arc(cr.get(), cx + 15, cy - 9, 4, 0, 2 * capture_pi);
+			cairo_arc(cr.get(), cx + 15, cy - 9, 4, 0, 2 * std::numbers::pi);
 			set_source_rgba32(cr.get(), pal.close_hover);
 			cairo_fill(cr.get());
 		}
-		paint_centred(cr.get(), target_name(mode.target), pal.launcher_dim_text, cx,
-			py + box.y + box.height - 11);
+		paint_text(cr.get(), target_name(mode.target), config::ui_font, pal.launcher_dim_text,
+			cx, py + box.y + box.height - 11, TextAnchor::centre);
 	}
 
-	paint_centred(cr.get(), "Esc closes", pal.launcher_dim_text,
+	paint_text(cr.get(), "Esc closes", config::ui_font, pal.launcher_dim_text,
 		px + layout.box.width / 2.0,
-		py + layout.box.height - config::capture_toolbar_pad / 2.0);
+		py + layout.box.height - config::capture_toolbar_pad / 2.0, TextAnchor::centre);
 
 	return texture_from_cairo(server_.renderer, surf.get());
 }

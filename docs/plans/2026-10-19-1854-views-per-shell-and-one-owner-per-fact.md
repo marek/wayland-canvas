@@ -1041,7 +1041,7 @@ Tests:
 
 ### 6. One owner per fact: the compositor
 
-- [ ] The compositor's own UIs take input and draw in one order, from one
+- [x] The compositor's own UIs take input and draw in one order, from one
   list
   - Today the order lock → shortcut capture → capture UI → launcher →
     overview → bindings is written by hand in many places:
@@ -1086,13 +1086,28 @@ Tests:
     - The launcher, capture and touch scenarios are green.
     - A touch step: a 3-finger touchscreen swipe with the picker open
       changes nothing.
-- [ ] The theme switch happens wholly in `Server::set_theme`
+  - Done: `UiLayer` (src/input/ui_layer.h) and `KeySyms`
+    (src/input/key_syms.h) are in; `Server` hands Input `{capture_ui,
+    launcher}`, and `process_key`, the motion, button, axis, touch and
+    tablet paths, the touchpad gestures and Phase 5's touch swipe check
+    ask `layer_for_keys`, `layer_at` or `gestures_blocked`. The painter,
+    `set_theme`, teardown and output destroy walk the list. The touch step
+    (a three-finger swipe with the picker open) is Phase 5's case 18-22 in
+    touch.cpp, which fails with `gestures_blocked` forced to false. A
+    scroll is a layer's where it takes the pointer, not wherever the
+    capture UI holds the keyboard.
+- [x] The theme switch happens wholly in `Server::set_theme`
   - Move the applications' light/dark preference (`theme_prefs::apply`,
     called from ipc.cpp:1035) into it, so every caller gets the whole
     switch.
   - Acceptance: the ipc scenario's theme.set check still sees the
     preference written; `theme_prefs::apply` has one caller.
-- [ ] One text cache and one cached-texture helper
+  - Done: `Server::set_theme` calls `theme_prefs::apply` first, so it also
+    runs when the mode is unchanged (the shell's start push); it is the
+    one caller. A headless run is not a real session and never writes the
+    preference, so the ipc scenario's theme.set checks see the palette
+    switch and the reply, and test_theme_prefs holds the write itself.
+- [x] One text cache and one cached-texture helper
   - Text is cached today by many owners, in different ways:
     - the Hint's cache is public and written by Painter (render.h:112-115,
       render.cpp:709-718);
@@ -1115,7 +1130,18 @@ Tests:
   - Acceptance: with two outputs at scales 1 and 2, no text texture is
     rebuilt across 100 unchanged frames (a counter in the cache, read by
     a scenario); the pixel checks stay green.
-- [ ] Box helpers live in one header
+  - Done: `render/text_cache.{h,cpp}` holds `TextCache` (up to
+    `config::text_cache_entries` texts, least recently asked for trimmed
+    after each frame) and `Droppable`, and `render/cached_texture.h` holds
+    `CachedTexture<Key>`, four slots per scale and key. The hint, the
+    help line, the tab labels, the shelf titles and the picker's size
+    label ask the cache; the launcher panel, the toolbar and the title
+    bar are `CachedTexture`s. `Server` owns the cache,
+    `Server::set_theme` calls `text_cache.clear()`, which drops every
+    holder too, and the `theme_changed` hooks are gone. The gestures
+    scenario adds a second output at scale 2 and counts 0 rebuilds over
+    100 frames on both.
+- [x] Box helpers live in one header
   - The copies:
     - `box_centre` (output.cpp:96, overview.cpp:17, canvas.cpp:30) and
       `centred_box` (three copies);
@@ -1142,7 +1168,12 @@ Tests:
     input.cpp:129-135) use the header too.
   - Acceptance: each helper is defined once (grep), and the unit and
     scenario suites are green.
-- [ ] One cairo and pango kit
+  - Done: `box.h` holds `rect_of_box`, `box_centre`, `centred_box` and the
+    four roundings that really differ, `box_rounded`, `box_snapped`,
+    `box_of_viewport` and `box_covering`; `id_of` is in desktop.h. The
+    loops became `Server::output_showing`, with a `Showing::normal_view`
+    parameter for maximize's skip of outputs in the overview.
+- [x] One cairo and pango kit
   - `render/draw.h` exports:
     - `rounded_path`, identical today in launcher.cpp:71-84 and
       capture_ui.cpp:154-167;
@@ -1157,7 +1188,14 @@ Tests:
   - `launcher_pi` and `capture_pi` become `std::numbers::pi`.
   - Acceptance: one definition of each, and the pixel checks of the
     launcher, capture and gestures scenarios are green.
-- [ ] Each layout that drawing and hit-testing share is computed once
+  - Done: draw.h holds `rounded_path`, `PangoLayoutPtr`, `FontDescPtr`,
+    `make_layout`, `text_width` and `paint_layout`/`paint_text` with a
+    `TextAnchor` (top_left, middle_left, centre); the launcher, the
+    toolbar, the title bar and draw.cpp's labels and cards use them. The
+    hit helper is `box_hit` in box.h, beside the other box helpers, and
+    `toolbar_hit` uses it; the launcher's `row_at` indexes one uniform
+    column by division and has no boxes to loop over, so it stays.
+- [x] Each layout that drawing and hit-testing share is computed once
   - Launcher:
     - `PanelLayout` (launcher.cpp:40-63) gains the search, rows and
       footer boxes.
@@ -1182,7 +1220,22 @@ Tests:
       offsets (514-524, 545) derive from the tab's box.
   - Acceptance: no copied literal sum remains (grep), and the launcher
     row, title-bar button and shelf clicks in the scenarios are green.
-- [ ] Each constant that two places keep is defined once
+  - Done: `PanelLayout` moved to apps/launcher_layout.{h,cpp} so a
+    scenario can click through it; it holds the card, search, rows and
+    footer boxes, and the paddings are `config::launcher_pad`, `_gap`,
+    `_footer_height` and `_margin_x/_y`. A row takes a click only inside
+    the rows box, as it is drawn. decoration.h holds `deco_buttons`,
+    `button_box` and `button_centre`; the title bar draws, hit-tests and
+    sizes its title through them, and the gestures, input and xwayland
+    scenarios click `button_centre`. `overview_bottom_layout` returns the
+    help line, the hint's row and the shelf's bottom, so the shelf rests
+    on the help line as measured. The tab and shelf sizes are `config::`
+    values and the tab glyphs are centred in their buttons.
+    `overview_press_target` already hit-tested through
+    `overview_shelf_layout`. The gestures scenario restores its
+    minimized window with a click on the shelf thumbnail, and the bar
+    scenario's edge steps read `overview_bottom_layout`.
+- [x] Each constant that two places keep is defined once
   - The overview's maximum zoom of 0.75 (gesture.cpp:284 and
     overview.cpp:231) becomes `config::overview_max_zoom`, or the
     gesture calls the overview's own zoom.
@@ -1196,6 +1249,17 @@ Tests:
     toolbar and the app bar, and render.cpp:573-603 only the toolbar.
   - Acceptance: each value is defined once (grep), and the scenarios are
     green.
+  - Done: `config::overview_max_zoom` already names another bound (the
+    fitted overview's, 0.30), so the 0.75 is `config::overview_zoom_limit`,
+    read by the wheel and the pinch. The scale is `Output::sharper_scale`
+    and `Output::tell_scale`, with no floor: render/hidpi.md says clients
+    are told the scale of the outputs they are on, so a surface on a 0.5x
+    output is told 0.5, not 1. The strip names are in layer.cpp behind
+    `LayerSurface::is_overview_strip`; render's overview bottom now clears
+    a bottom app bar as it did a bottom toolbar (overview.md and
+    app-bar.md say so). No scenario puts the app bar on the bottom edge,
+    so that clearance is not exercised. ipc.cpp's messages build "1 MiB"
+    and "64 KiB" from the two config constants.
 - [ ] One settings table for every `[gestures]` and `[session]` key
   - Today each key is written out separately in each of these places:
     - settings.cpp: parse 550-611, resolve 674-703, setters 1015-1054,

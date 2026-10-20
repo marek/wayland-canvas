@@ -13,6 +13,7 @@
 #include "apps/shot_taker.h"
 #include "apps/shot_thumbnail.h"
 #include "core/util.h"
+#include "input/ui_layer.h"
 
 class Output;
 class Server;
@@ -26,8 +27,8 @@ class View;
 // the shared offscreen captures (src/render/capture.h); a recording is those
 // same offscreen captures piped as raw frames into ffmpeg, the one encoder,
 // so it works nested and from a TTY alike. While the picker, the toolbar or
-// a countdown is up, the capture UI owns the keyboard and the pointer.
-class CaptureUi {
+// a countdown is up, the capture UI owns the keyboard.
+class CaptureUi final : public UiLayer {
 public:
 	explicit CaptureUi(Server &server);
 	~CaptureUi();
@@ -53,24 +54,27 @@ public:
 
 	// True while the capture UI takes every key: the picker, the toolbar
 	// or a countdown is up.
-	bool owns_keyboard() const;
-	// One key press, with the modifiers. Esc cancels or closes, Space
-	// switches the picker between region and window picking, and the
-	// capture chords toggle their own UI.
-	void key(xkb_keysym_t sym, uint32_t mods);
+	bool owns_keyboard() const override;
+	// One key press. Esc cancels or closes, Space switches the picker
+	// between region and window picking, and the capture chords toggle
+	// their own UI. A lone Super tap means nothing.
+	void key(const KeyPress &press) override;
+	bool allows_tap() const override { return false; }
 
-	// Pointer at output-local logical (ox, oy). True when the event is
-	// consumed: the picker or the toolbar is up, or the pointer is over
-	// the thumbnail.
-	bool pointer_motion(Output &output, double ox, double oy);
+	// The picker or the toolbar is up on `output`, or the pointer is over
+	// the thumbnail: the claim pointer_motion makes, without its hover.
+	bool takes_pointer_at(const Output &output, double ox, double oy) const override;
+	// True when the event is consumed: whenever the capture UI takes the
+	// pointer there.
+	bool pointer_motion(Output &output, double ox, double oy) override;
 	bool pointer_button(Output &output, double ox, double oy, uint32_t button,
-		bool pressed);
-	// Whether the pointer at output-local (ox, oy) would be the capture
-	// UI's — the claim pointer_motion makes, without its hover: a touch or
-	// the pen asks before it picks a client.
-	bool takes_pointer_at(const Output &output, double ox, double oy) const;
+		bool pressed) override;
+	bool pointer_axis(Output &output, double ox, double oy,
+		wl_pointer_axis orientation, double delta) override;
+	// The picker, the toolbar and a countdown take swipes and pinches.
+	bool blocks_gestures() const override { return owns_keyboard(); }
 	// The cursor image the picker wants (crosshair while framing a region).
-	const char *cursor_image() const { return picker_.cursor_image(); }
+	const char *cursor_image() const override { return picker_.cursor_image(); }
 
 	// A shot of the whole output now.
 	void shoot_screen(Output &output, CaptureOptions options);
@@ -90,16 +94,17 @@ public:
 	// output's): the picker overlay, the toolbar, the thumbnail. Rebuilt
 	// into a reused buffer; empty when nothing is up.
 	const CaptureOverlay &overlay(Output &output, float scale);
+	// Draws that overlay on `ctx`'s output; an offscreen capture never
+	// shows it.
+	void draw(const RenderCtx &ctx) override;
 
 	// A view went away: the picker stops hovering or picking it.
 	void forget(const View &view);
 	// An output went away: the UI on it closes, its recording stops.
-	void output_destroyed(Output &output);
-	// Drops the cached textures so the next frame redraws in the new palette.
-	void theme_changed();
+	void output_gone(Output &output) override;
 	// Stops the recorder and releases timers and textures before the
 	// display and renderer go.
-	void finish();
+	void finish() override;
 
 private:
 	// The action waiting out a countdown.
@@ -113,6 +118,8 @@ private:
 		int seconds_left = 0;
 	};
 
+	// One key's symbol, lowercased.
+	void key_sym(xkb_keysym_t sym, uint32_t mods);
 	void cancel_picker(); // close + answer a pending ipc pick "cancelled"
 	void pick_done(const CapturePicker::Pick &pick, PickUse use,
 		const CaptureOptions &options);

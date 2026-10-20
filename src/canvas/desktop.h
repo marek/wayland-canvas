@@ -47,6 +47,11 @@ private:
 	bool tiling_ = false; // off on a new desktop
 };
 
+// A desktop's id, or nullopt for no desktop.
+inline std::optional<DesktopId> id_of(const Desktop *desktop) {
+	return desktop != nullptr ? std::optional<DesktopId>{desktop->id()} : std::nullopt;
+}
+
 // Every desktop on the canvas, topmost first; the only owner of Desktop objects.
 class Desktops {
 public:

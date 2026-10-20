@@ -35,6 +35,13 @@ public:
 	Desktop *desktop_showing() const;
 	double resting_zoom() const; // the zoom the camera rests at: the filling desktop's scale, else 1
 	void goto_desktop(const Desktop &desktop); // eases onto it at its scale
+	// The scale the clients of a surface shown on several outputs render
+	// for: `scale` with one more output folded in (0 before the first), the
+	// sharpest winning, with no floor (docs/intents/render/hidpi.md).
+	static double sharper_scale(double scale, const wlr_output &output);
+	// Tells `surface`'s client to render for `scale`: through
+	// fractional-scale, and rounded up as the preferred buffer scale.
+	static void tell_scale(wlr_surface *surface, double scale);
 	void goto_direction(double dx, double dy);
 	// A pan in the normal view is a look away
 	// (docs/intents/canvas/infinite-canvas.md): the camera jumps to `to`,

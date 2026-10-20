@@ -20,7 +20,6 @@
 #include "canvas/desktop.h"
 #include "core/config.h"
 #include "core/theme.h"
-#include "core/theme_prefs.h"
 #include "core/wlr.h"
 #include "platform/ipc.h"
 #include "platform/output.h"
@@ -138,6 +137,16 @@ std::string quote(std::string_view text) {
 	return out;
 }
 
+// A byte count the way the messages and the docs say it: "1 MiB", "64 KiB".
+std::string size_text(std::size_t bytes) {
+	constexpr std::size_t kib = 1024;
+	if (bytes % (kib * kib) == 0) {
+		return std::format("{} MiB", bytes / (kib * kib));
+	}
+	return bytes % kib == 0 ? std::format("{} KiB", bytes / kib)
+		: std::format("{} bytes", bytes);
+}
+
 // `{"id": <id>, "result"|"error": <payload>}` as one line. `payload` is
 // already JSON: a result's text, or a quoted error string.
 std::string response(std::string_view id_json, std::string_view payload, bool error) {
@@ -207,24 +216,6 @@ std::string_view theme_name(ThemeMode mode) {
 	return mode == ThemeMode::light ? "light" : "dark";
 }
 
-// The overview's strip surfaces (the toolbar, the app bar): overlays that
-// reserve no exclusive zone, so the free box cuts them out by hand. Keep
-// the namespaces in sync with plugins/canvas.toolbar and
-// plugins/canvas.apps (docs/intents/shell/toolbar.md, app-bar.md).
-constexpr std::string_view overview_strip_namespaces[] = {
-	"wayland-canvas-toolbar",
-	"wayland-canvas-app-bar",
-};
-
-bool is_overview_strip(std::string_view namespace_) {
-	for (std::string_view name : overview_strip_namespaces) {
-		if (name == namespace_) {
-			return true;
-		}
-	}
-	return false;
-}
-
 // The output-local rectangle the chrome leaves of the screen: the bars'
 // exclusive zones (Output::usable), less the overview's strips while the
 // overview shows. A strip's window is its settled square plus the pocket
@@ -237,8 +228,7 @@ wlr_box free_screen_box(const Output &output) {
 	}
 	for (const auto &surfaces : output.layers) {
 		for (const std::unique_ptr<LayerSurface> &layer : surfaces) {
-			if (!layer->mapped || layer->wlr->namespace_ == nullptr
-					|| !is_overview_strip(layer->wlr->namespace_)) {
+			if (!layer->mapped || !layer->is_overview_strip()) {
 				continue;
 			}
 			const wlr_box &geo = layer->geo;
@@ -365,7 +355,7 @@ void collect_windows(Server &server, std::vector<WindowRow> &rows) {
 		row.id = view->session_id;
 		row.app_id.assign(view->shell_app_id() != nullptr ? view->shell_app_id() : "");
 		row.title.assign(view->shell_title() != nullptr ? view->shell_title() : "");
-		row.desktop = desktop != nullptr ? std::optional{desktop->id()} : std::nullopt;
+		row.desktop = id_of(desktop);
 		row.minimized = view->minimized;
 		row.focused = server.focused_view == view;
 	}
@@ -1049,12 +1039,6 @@ std::expected<std::string, std::string> Ipc::m_theme_set(Client &, JsonObject *p
 	}
 	ThemeMode resolved = strcmp(mode, "light") == 0 ? ThemeMode::light : ThemeMode::dark;
 	server_.set_theme(resolved);
-	// Every theme.set — the shell's switch, the shell's start push, an
-	// outside client's call — also sets the applications' preference, but
-	// only when this compositor is the real session, which here means it
-	// opened a seat session from a TTY (docs/intents/shell/theme.md):
-	// nested and headless runs never get one.
-	theme_prefs::apply(resolved, server_.session != nullptr);
 	return std::string{"true"};
 }
 
@@ -1569,7 +1553,8 @@ void Ipc::queue(Client &client, std::string_view line) {
 	client.outbuf.append(line);
 	flush(client);
 	if (client.outbuf.size() > config::ipc_max_queued) {
-		drop(client, "over 1 MiB of unread events");
+		drop(client, std::format("over {} of unread events",
+			size_text(config::ipc_max_queued)).c_str());
 	}
 }
 
@@ -1783,8 +1768,9 @@ int Ipc::handle_client(int, uint32_t mask, void *data) {
 		client->pending.erase(0, start);
 	}
 	if (oversized) {
-		ipc.queue(*client, response("null", quote("line over 64 KiB"), true));
-		ipc.drop(*client, "a line over the 64 KiB cap");
+		std::string cap = size_text(config::ipc_max_line);
+		ipc.queue(*client, response("null", quote(std::format("line over {}", cap)), true));
+		ipc.drop(*client, std::format("a line over the {} cap", cap).c_str());
 		ipc.reap();
 		return 0;
 	}

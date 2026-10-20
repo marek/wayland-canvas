@@ -500,10 +500,8 @@ int run_step() {
 	case 4: { // maximize from the title bar
 		View *view = x11_view();
 		wlr_box frame = frame_on_screen(*view);
-		// The maximize button is the middle of the three, each one
-		// button_width wide at the frame's right edge.
-		click(frame.x + frame.width - config::button_width * 1.5,
-			frame.y + config::titlebar_height / 2);
+		Point maximize = button_centre(frame, DecoPart::maximize);
+		click(maximize.x, maximize.y);
 		return 1200;
 	}
 	case 5: {
@@ -522,8 +520,8 @@ int run_step() {
 	case 6: { // the × closes it through WM_DELETE_WINDOW
 		View *view = x11_view();
 		wlr_box frame = frame_on_screen(*view);
-		click(frame.x + frame.width - config::button_width / 2,
-			frame.y + config::titlebar_height / 2);
+		Point close = button_centre(frame, DecoPart::close);
+		click(close.x, close.y);
 		return 1200;
 	}
 	case 7: {

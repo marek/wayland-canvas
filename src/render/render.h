@@ -14,6 +14,7 @@
 #include <vector>
 #include "canvas/desktop.h"
 #include "input/gesture.h"
+#include "render/text_cache.h"
 
 class Output;
 class Server;
@@ -36,7 +37,21 @@ struct ShelfItem {
 };
 using Shelf = std::inplace_vector<ShelfItem, shelf_max>;
 
-// Minimized windows shelf along the bottom of an overview output.
+// The overview's bottom stack on an output, from its bottom edge (or the top of
+// the highest strip anchored to it) up: the help line, the row a hint takes
+// above it, and the shelf's bottom above both. Output-local logical px. What is
+// drawn and what takes the pointer read this one layout.
+struct OverviewBottom {
+	wlr_box help{}; // the help line, shrunk to fit a narrow output; empty without text
+	wlr_box hint{}; // the hint's row, as wide as the output
+	int shelf_bottom = 0; // the y the shelf's thumbnails end at
+};
+
+// `scale` is what the help line's text is measured at.
+OverviewBottom overview_bottom_layout(const Output &output, float scale);
+
+// Minimized windows shelf along the bottom of an overview output, above
+// overview_bottom_layout()'s hint row.
 Shelf overview_shelf_layout(const Output &output);
 
 // Surfaces drawn this frame: they need enter/presentation feedback, and frame_done when
@@ -46,18 +61,14 @@ struct DrawnSurface {
 	bool frame_done = false;
 };
 
-// One scale- and preset-keyed slot of the help-line texture cache, reused by
-// Painter.
-struct HelpSlot {
-	TexturePtr texture;
-	int w = 0, h = 0;
-	float scale = 0;
-	SwipePreset preset = SwipePreset::three_finger_hops;
-};
-
 // The overview's help line for the gesture options in force: the swipe
 // preset's gestures, or only the keys when no preset binds any.
 const char *overview_help_text(const GestureOptions &options);
+
+// A desktop tab's label at `scale`, from the text cache; `on_accent` is the
+// target tab's variant, in the contrasting accent text colour instead of the
+// panel text colour.
+CachedText desktop_label(Server &server, const Desktop &desktop, float scale, bool on_accent);
 
 // Everything one render target's frame is drawn with: an output's on-screen
 // frame, or an offscreen capture of a rectangle of that output (see
@@ -79,22 +90,22 @@ struct RenderCtx {
 	// for an on-screen frame, the captured area for an offscreen one.
 	double origin_x = 0, origin_y = 0;
 	int vw = 0, vh = 0;
-	// Whether the capture UI (picker, toolbar, thumbnail) is drawn: true for
-	// an on-screen frame; false for an offscreen capture, which shows what the
-	// output shows, minus the capture UI that asked for it.
-	bool show_capture_ui = true;
+	// Whether this is an offscreen capture: it shows what the output shows,
+	// minus the compositor's UI that asked for it (the capture UI, which a
+	// shot or a shared screen never shows).
+	bool offscreen = false;
 	bool overview;
 	std::vector<DrawnSurface> *drawn; // Painter's reused per-frame buffer
-	std::span<HelpSlot> help_cache; // Painter's help-line texture cache
-	unsigned *help_clock;
 };
 
-// A cached text texture and its size, drawn at some scale: a desktop tab's
-// label, a shelf title.
-struct DesktopLabel {
-	wlr_texture *texture = nullptr; // null when the text failed to render
-	int w = 0, h = 0; // logical px
-};
+// Screen-space rect (output-local logical px), clipped to the render target;
+// empty rects are skipped. `color` is premultiplied.
+void draw_logical_rect(const RenderCtx &ctx, double x, double y, double w, double h,
+	wlr_render_color color);
+// A cairo texture of ours at (x, y) of size (w, h), output-local logical px;
+// `src_frac` crops its source horizontally (0..1).
+void draw_ui_texture(const RenderCtx &ctx, wlr_texture *texture, double x, double y,
+	double w, double h, double src_frac);
 
 // Transient banner at the bottom of every output.
 class Hint {
@@ -105,18 +116,13 @@ public:
 	Hint &operator=(const Hint &) = delete;
 
 	// Shows `text` for about 2 s; empty clears. The text already showing
-	// only has its 2 s restarted: nothing is redrawn.
+	// only has its 2 s restarted.
 	void set(std::string_view text);
 	// Restarts the 2 s of the text showing; nothing when none shows.
 	void keep();
-	// Drops the cached texture so the next frame redraws it in the new palette.
-	void theme_changed();
-	void finish(); // releases the timer and texture before the display and renderer go
+	void finish(); // releases the timer before the display goes
 
 	std::string text;
-	TexturePtr texture; // drawn for `text` at `scale`
-	int w = 0, h = 0;
-	float scale = 0;
 
 private:
 	void clear();
@@ -148,30 +154,13 @@ public:
 	// draw_view an on-screen frame uses. False (logged) when the pass cannot
 	// begin, the view is not mapped, the session is locked or no output exists.
 	bool render_view(View &view, float scale, wlr_buffer *target);
-	void theme_changed(); // drops the help-line, tab-label and shelf-title textures
-	void finish(); // releases cached textures before the renderer goes
 
-	// Regenerates the cached label when the desktop's number or scale, the
-	// output scale, or the palette changed; `on_accent` picks the variant
-	// for the target tab's accent fill, in the contrasting accent text
-	// colour instead of the panel text colour.
-	DesktopLabel desktop_label(const Desktop &desktop, float scale, bool on_accent);
 	// The tab above a desktop frame and its Tile and Abandon buttons; nullopt when the
 	// tab is off-screen.
 	std::optional<TabLayout> overview_tab_layout(const Output &output,
 		const Desktop &desktop) const;
 
-	// `view`'s title for the overview shelf, drawn at `scale` and redrawn
-	// only when the title, the scale or the palette changed.
-	DesktopLabel shelf_title(const View &view, float scale);
-	// The item's card at `scale` (the output's scale times the zoom it is
-	// shown at). Re-rendered when its content changed, or once `settled`
-	// when the shown scale changed; a moving camera stretches the cached
-	// card instead of re-rendering every frame.
-
 private:
-	static constexpr std::size_t help_slots = 4;
-
 	// The context one render target's frame is drawn with.
 	RenderCtx make_ctx(Output &output, wlr_render_pass *pass);
 	// Everything from the canvas clear to the drag icon, into ctx's target.
@@ -181,43 +170,7 @@ private:
 	RenderCtx make_capture_ctx(Output &output, wlr_render_pass *pass, wlr_buffer *target);
 	void draw_lock(const RenderCtx &ctx);
 
-	// One rendered tab label and what it was made for: the number and scale
-	// its text names and the output scale it was drawn at.
-	struct LabelImage {
-		TexturePtr texture;
-		int number = 0, w = 0, h = 0;
-		double desktop_scale = 1;
-		float scale = 0;
-		bool current(const Desktop &desktop, float at) const;
-	};
-	// One slot of the desktop-label cache: an image per fill the label sits
-	// on — the panel of an ordinary tab, the accent of the target — each
-	// keyed on its own, so redrawing one never passes the other off as
-	// current.
-	struct LabelSlot {
-		DesktopId id{};
-		LabelImage plain, accent;
-	};
-
-	LabelSlot *label_slot(DesktopId id);
-	const LabelSlot *label_slot(DesktopId id) const;
-
-	// A minimized window's title on the shelf, and what it was drawn from.
-	struct ShelfTitle {
-		const View *view = nullptr;
-		std::string title;
-		float scale = 0;
-		TexturePtr texture;
-		int w = 0, h = 0;
-	};
-
 	Server &server_;
 	std::vector<DrawnSurface> drawn_; // surfaces drawn this frame, reused
 	std::vector<DrawnSurface> capture_drawn_; // the same for captures, reused
-	std::array<HelpSlot, help_slots> help_cache_{}; // help-line texture, one per scale
-	std::vector<LabelSlot> label_cache_; // desktop tab labels, dropped with their desktops
-	std::vector<ShelfTitle> shelf_titles_; // dropped with their windows
-	unsigned help_clock_ = 0; // round-robin over help_cache_
-
-
 };
