@@ -286,6 +286,14 @@ Rect View::frame_rect() const {
 	return rect_of_box(frame_box());
 }
 
+Point View::surface_origin() const {
+	wlr_box geo = shell_geometry();
+	if (wlr_box_empty(&geo)) {
+		return Point{static_cast<double>(x), static_cast<double>(y)};
+	}
+	return Point{static_cast<double>(x - geo.x), static_cast<double>(y - geo.y)};
+}
+
 // ---- state helpers ----
 
 void View::damage() {

@@ -335,8 +335,10 @@ void draw_grid(const RenderCtx &ctx) {
 
 // -------------------------------------------------------------- views
 
+// One window at the camera of `ctx`. Minimized or not is the caller's to
+// decide: the scene skips minimized windows, a capture of one window draws it.
 void draw_view(const RenderCtx &ctx, View &view) {
-	if (!view.mapped || view.minimized) {
+	if (!view.mapped) {
 		return;
 	}
 	Server &server = ctx.output->server;
@@ -373,16 +375,8 @@ void draw_view(const RenderCtx &ctx, View &view) {
 		}
 	}
 
-	wlr_box geo = view.shell_geometry();
-	if (wlr_box_empty(&geo)) {
-		// No window geometry set yet: the base surface fills it.
-		geo = {.x = 0, .y = 0,
-			.width = view.surface() != nullptr
-				? view.surface()->current.width : geo.width,
-			.height = view.surface() != nullptr
-				? view.surface()->current.height : geo.height};
-	}
-	double ox = view.x - geo.x, oy = view.y - geo.y;
+	Point origin = view.surface_origin();
+	double ox = origin.x, oy = origin.y;
 	// View surfaces (incl. subsurfaces and popups), positioned via the camera.
 	view.for_each_surface([&](wlr_surface *surface, int sx, int sy) {
 		double cx = ox + sx, cy = oy + sy;
@@ -622,15 +616,8 @@ void draw_shelf(const RenderCtx &ctx) {
 			fit = std::fmin(box.width / static_cast<double>(frame.width),
 				(box.height - 16.0) / frame.height);
 		}
-		wlr_box geo = view->shell_geometry();
-		if (wlr_box_empty(&geo)) {
-			geo = {.x = 0, .y = 0,
-				.width = view->surface() != nullptr
-					? view->surface()->current.width : geo.width,
-				.height = view->surface() != nullptr
-					? view->surface()->current.height : geo.height};
-		}
-		double ox = view->x - geo.x, oy = view->y - geo.y;
+		Point origin = view->surface_origin();
+		double ox = origin.x, oy = origin.y;
 		view->for_each_surface([&](wlr_surface *surface, int sx, int sy) {
 			double cx = ox + sx, cy = oy + sy;
 			double cw = surface->current.width, ch = surface->current.height;
@@ -1070,7 +1057,9 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 
 	// views bottom -> top
 	for (View *view : std::views::reverse(server_.views)) {
-		draw_view(ctx, *view);
+		if (!view->minimized) {
+			draw_view(ctx, *view);
+		}
 	}
 
 	// desktop frames
@@ -1159,24 +1148,65 @@ bool Painter::render_area(Output &output, wlr_box local_area, wlr_buffer *target
 		wlr_log(WLR_ERROR, "capture: failed to begin the offscreen render pass");
 		return false;
 	}
-	RenderCtx ctx = make_ctx(output, pass);
-	// The capture target: the clipped area, untransformed, at the output's
-	// scale — an upright image of it whatever the output's own transform.
-	// Cursors stay out: an on-screen frame owns them, and paint-cursor
-	// capture sessions get them through that frame.
-	ctx.transform = WL_OUTPUT_TRANSFORM_NORMAL;
-	ctx.out_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	RenderCtx ctx = make_capture_ctx(output, pass, target);
+	// The capture target is the clipped area at the output's scale.
 	ctx.origin_x = clipped.x;
 	ctx.origin_y = clipped.y;
 	ctx.vw = clipped.width;
 	ctx.vh = clipped.height;
-	ctx.tw = target->width;
-	ctx.th = target->height;
-	std::vector<DrawnSurface> drawn; // a capture sends no surface feedback
-	ctx.drawn = &drawn;
-	ctx.show_capture_ui = false; // a capture never shows the capture UI that asked for it
 	draw_scene(ctx);
 	return wlr_render_pass_submit(pass);
+}
+
+bool Painter::render_view(View &view, float scale, wlr_buffer *target) {
+	// Nothing behind the lock is captured.
+	if (target == nullptr || !view.mapped || server_.lock.locked()
+			|| server_.outputs.empty()) {
+		return false;
+	}
+	wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(server_.renderer, target, nullptr);
+	if (pass == nullptr) {
+		wlr_log(WLR_ERROR, "capture: failed to begin the window's render pass");
+		return false;
+	}
+	RenderCtx ctx = make_capture_ctx(*server_.outputs.front(), pass, target);
+	// The frame's corner is the target's origin, at zoom 1.
+	wlr_box frame = view.frame_box();
+	ctx.cam = camera_for_box(frame);
+	ctx.viewport = ctx.cam.viewport(frame.width, frame.height);
+	ctx.left = frame.x;
+	ctx.top = frame.y;
+	ctx.scale = scale;
+	ctx.deco_scale = scale;
+	ctx.vw = frame.width;
+	ctx.vh = frame.height;
+	// Window sources reuse their buffer frame after frame, and the renderer
+	// keeps a target's old contents: start from transparent.
+	const wlr_render_rect_options clear = {
+		.box = {0, 0, target->width, target->height},
+		.color = {0, 0, 0, 0},
+		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+	};
+	wlr_render_pass_add_rect(pass, &clear);
+	capture_drawn_.clear();
+	draw_view(ctx, view);
+	return wlr_render_pass_submit(pass);
+}
+
+// The capture target is untransformed — an upright image whatever the
+// output's own transform. Cursors stay out: an on-screen frame owns them, and
+// paint-cursor capture sessions get them through that frame. A capture never
+// shows the capture UI that asked for it and sends no surface feedback.
+RenderCtx Painter::make_capture_ctx(Output &output, wlr_render_pass *pass,
+		wlr_buffer *target) {
+	RenderCtx ctx = make_ctx(output, pass);
+	ctx.transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	ctx.out_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+	ctx.tw = target->width;
+	ctx.th = target->height;
+	ctx.drawn = &capture_drawn_;
+	ctx.show_capture_ui = false;
+	return ctx;
 }
 
 void Painter::theme_changed() {

@@ -140,6 +140,15 @@ theme_prefs_lib = static_library(
 	dependencies: [glib, gio],
 )
 
+# The capture toolbar's layout: a pure function of the output size, which the
+# toolbar and the scenarios that click it both call.
+capture_toolbar_layout_lib = static_library(
+	'canvas-capture-toolbar-layout',
+	'src/apps/capture_toolbar_layout.cpp',
+	include_directories: src_inc,
+	dependencies: [wlroots, wayland_server, xkbcommon, pixman, libinput],
+)
+
 session_bus_lib = static_library(
 	'canvas-session-bus',
 	'src/platform/session_bus.cpp',
@@ -182,7 +191,15 @@ core_lib = static_library(
 		'src/apps/apps.cpp',
 		'src/apps/icons.cpp',
 		'src/apps/launcher.cpp',
+		'src/apps/capture_files.cpp',
+		'src/apps/capture_geometry.cpp',
+		'src/apps/capture_picker.cpp',
+		'src/apps/capture_toolbar.cpp',
 		'src/apps/capture_ui.cpp',
+		'src/apps/clipboard_image.cpp',
+		'src/apps/recorder.cpp',
+		'src/apps/shot_taker.cpp',
+		'src/apps/shot_thumbnail.cpp',
 		'src/canvas/camera.cpp',
 		'src/canvas/canvas.cpp',
 		'src/canvas/desktop.cpp',
@@ -215,7 +232,7 @@ core_lib = static_library(
 	protocol_headers,
 	include_directories: src_inc,
 	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib,
-		settings_lib],
+		settings_lib, capture_toolbar_layout_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
 		glib, gio, json_glib, libinput, libdrm, libsystemd],
 )
@@ -311,6 +328,18 @@ test(
 )
 
 test(
+	'capture-toolbar',
+	executable(
+		'test-capture-toolbar',
+		'tests/test_capture_toolbar.cpp',
+		include_directories: src_inc,
+		link_with: capture_toolbar_layout_lib,
+		dependencies: [wlroots, wayland_server, xkbcommon, pixman, libinput],
+	),
+	suite: 'unit',
+)
+
+test(
 	'desktop-entry',
 	executable(
 		'test-desktop-entry',
@@ -396,6 +425,12 @@ if foot_prog.found() and grim_prog.found()
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
 	# The source tree, for scenarios that install a shipped file as-is.
 	scenario_env.set('CANVAS_SOURCE', meson.project_source_root())
+	# The capture scenario's stand-in encoder: an ffmpeg that never reads
+	# its input, put first on PATH for the recording it stalls.
+	scenario_env.set(
+		'CANVAS_RECORDER_STANDIN',
+		meson.project_source_root() / 'tests/scenarios/recorder-standins/ffmpeg',
+	)
 	# A locker of the scenarios' own: no swaylock or hyprlock is needed to
 	# prove the protocol.
 	lock_client = executable(

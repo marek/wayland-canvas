@@ -74,7 +74,7 @@ static void source_emit_frame(ImageCapture::ToplevelSource *s) {
 	if (s->buffer == nullptr || s->buffer->width != width || s->buffer->height != height) {
 		s->buffer.reset(make_capture_buffer(server, width, height));
 	}
-	s->failed = !render_view_offscreen(*s->view, scale, s->buffer.get());
+	s->failed = !server.painter.render_view(*s->view, scale, s->buffer.get());
 	// A whole new buffer: full damage, every time.
 	pixman_region32_t damage{};
 	pixman_region32_init_rect(&damage, 0, 0, width, height);

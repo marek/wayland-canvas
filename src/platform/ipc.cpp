@@ -789,12 +789,12 @@ void Ipc::capture_pick(Client &client, std::string_view id_json,
 			&& json_node_get_value_type(node) == G_TYPE_STRING
 		? json_node_get_string(node) : nullptr;
 	constexpr std::array kinds = {
-		std::pair{std::string_view{"region"}, CaptureUi::PickWhat::region},
-		std::pair{std::string_view{"window"}, CaptureUi::PickWhat::window},
-		std::pair{std::string_view{"output"}, CaptureUi::PickWhat::output},
-		std::pair{std::string_view{"any"}, CaptureUi::PickWhat::any},
+		std::pair{std::string_view{"region"}, PickWhat::region},
+		std::pair{std::string_view{"window"}, PickWhat::window},
+		std::pair{std::string_view{"output"}, PickWhat::output},
+		std::pair{std::string_view{"any"}, PickWhat::any},
 	};
-	CaptureUi::PickWhat kind = CaptureUi::PickWhat::any;
+	PickWhat kind = PickWhat::any;
 	bool known = false;
 	for (const auto &[name, value] : kinds) {
 		if (name == what) {
@@ -818,7 +818,7 @@ void Ipc::capture_pick(Client &client, std::string_view id_json,
 	}
 	if (pick_client_ != nullptr
 			|| !server_.capture_ui.start_pick(*output, kind,
-				CaptureUi::PickUse::ipc, CaptureUi::Options{})) {
+				PickUse::ipc, CaptureOptions{})) {
 		bail("a capture pick is already running");
 		return;
 	}

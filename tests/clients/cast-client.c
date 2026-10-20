@@ -1,9 +1,11 @@
 // A window-cast client for the scenarios: names the window titled argv[1]
 // through ext-foreign-toplevel-list, makes an ext-image-capture source of it
 // and copies its frames one after another, as fast as the compositor
-// answers, until the session stops. Prints a line at a time:
+// answers, until the session stops. Given a colour as argv[2] (rrggbb) it
+// also looks into its first frames. Prints a line at a time:
 //
 //   CAST READY <w> <h>        the first frame arrived
+//   CAST SHARE <n> <h> <t>    frame n (1 to 3): h of its t pixels are the colour
 //   CAST STOPPED <n>          the compositor ended the session after n frames
 //   CAST FAILED <reason>      a frame failed
 //
@@ -38,6 +40,11 @@ static int session_done;
 static int stopped;
 static volatile sig_atomic_t quit_now;
 static int started;
+static int have_colour;
+static uint32_t colour; // the rgb a frame's pixels are counted for
+static const uint32_t *pixels; // the buffer's memory, read back after each frame
+static size_t pixels_size;
+#define SHARE_FRAMES 3
 
 static void say(const char *text, ...) {
 	va_list args;
@@ -47,12 +54,30 @@ static void say(const char *text, ...) {
 	fflush(stdout);
 }
 
+static void say_share(uint32_t n) {
+	uint64_t hits = 0, total = (uint64_t)width * height;
+	for (uint64_t i = 0; i < total; i++) {
+		hits += (pixels[i] & 0x00ffffffu) == colour;
+	}
+	say("CAST SHARE %u %llu %llu\n", n, (unsigned long long)hits,
+		(unsigned long long)total);
+}
+
 static int make_buffer(void) {
 	size_t stride = (size_t)width * 4;
 	size_t size = stride * height;
 	int fd = memfd_create("cast-client", MFD_CLOEXEC);
 	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
 		return -1;
+	}
+	if (pixels != NULL) {
+		munmap((void *)pixels, pixels_size);
+		pixels = NULL;
+	}
+	void *mapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+	if (mapped != MAP_FAILED) {
+		pixels = mapped;
+		pixels_size = size;
 	}
 	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
 	if (buffer != NULL) {
@@ -80,6 +105,9 @@ static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *f) {
 	frames++;
 	if (frames == 1) {
 		say("CAST READY %u %u\n", width, height);
+	}
+	if (have_colour && pixels != NULL && frames <= SHARE_FRAMES) {
+		say_share(frames);
 	}
 	ext_image_copy_capture_frame_v1_destroy(f);
 	frame = NULL;
@@ -240,10 +268,14 @@ static void handle_sigterm(int signal) {
 
 int main(int argc, char **argv) {
 	if (argc < 2) {
-		fprintf(stderr, "usage: cast-client <window title>\n");
+		fprintf(stderr, "usage: cast-client <window title> [rrggbb]\n");
 		return 2;
 	}
 	wanted_title = argv[1];
+	if (argc > 2) {
+		colour = (uint32_t)strtoul(argv[2], NULL, 16);
+		have_colour = 1;
+	}
 	struct sigaction action = {.sa_handler = handle_sigterm};
 	sigaction(SIGTERM, &action, NULL);
 	struct wl_display *display = wl_display_connect(NULL);

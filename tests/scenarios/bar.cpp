@@ -49,6 +49,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <vector>
+#include "apps/capture_toolbar_layout.h"
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -2837,33 +2838,11 @@ std::string dot_recording;
 double dot_x = 0;
 bool dot_acted = false; // a step's chord or click has happened (retry-safe)
 
-// The capture toolbar's mode button `index` (0-5, the recordings from 3),
-// its click point: the geometry CaptureUi::toolbar_layout() builds, so the
-// real toolbar is clicked where it draws itself.
-std::pair<double, double> capture_mode_click(int index) {
-	int fixed = 2 * config::capture_toolbar_pad + 5 * config::capture_toolbar_gap
-		+ config::capture_toolbar_group_gap;
-	int avail = screen_w - 2 * config::capture_thumbnail_margin - fixed;
-	int bw = (avail - 5 * config::capture_toolbar_gap) / 6;
-	if (bw > config::capture_toolbar_button_w) {
-		bw = config::capture_toolbar_button_w;
-	}
-	if (bw < config::capture_toolbar_button_w / 2) {
-		bw = config::capture_toolbar_button_w / 2; // tiny outputs clip, not crush
-	}
-	int inner = 6 * bw + 5 * config::capture_toolbar_gap
-		+ config::capture_toolbar_group_gap;
-	int box_x = (screen_w - (inner + 2 * config::capture_toolbar_pad)) / 2;
-	int box_y = screen_h - config::capture_toolbar_margin
-		- (2 * config::capture_toolbar_pad + config::capture_toolbar_options_h
-			+ config::capture_toolbar_gap + config::capture_toolbar_button_h
-			+ config::capture_toolbar_gap + config::capture_toolbar_footer_h);
-	int x = box_x + config::capture_toolbar_pad
-		+ index * (bw + config::capture_toolbar_gap)
-		+ (index >= 3 ? config::capture_toolbar_group_gap : 0);
-	int y = box_y + config::capture_toolbar_pad
-		+ config::capture_toolbar_options_h + config::capture_toolbar_gap;
-	return {x + bw / 2.0, y + config::capture_toolbar_button_h / 2.0};
+// The capture toolbar's mode button, its click point: the layout the real
+// toolbar draws itself with.
+std::pair<double, double> capture_mode_click(ToolbarMode mode) {
+	wlr_box box = toolbar_layout(screen_w, screen_h).mode_box(mode);
+	return {box.x + box.width / 2.0, box.y + box.height / 2.0};
 }
 
 // The attention-coloured pixels inside the bar strip: how many, and their
@@ -7235,7 +7214,7 @@ int run_step() {
 		retries = 0;
 		check(server->capture_ui.owns_keyboard(),
 			"Alt+Print opened the capture toolbar");
-		auto [mx, my] = capture_mode_click(3);
+		auto [mx, my] = capture_mode_click({ToolbarTarget::screen, true});
 		click(mx, my); // record the screen
 		dot_acted = false; // the flag next guards the dot's click, not this one
 		return 600;

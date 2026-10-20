@@ -7,13 +7,15 @@
 // (the compositor's own offscreen frames piped into ffmpeg; started,
 // stopped by Alt+Print and by `capture.stop`, left as playable files,
 // proven by ffprobe, with a command started beside one holding none of
-// the compositor's descriptors). Shots are compared against grim
-// pixel for pixel.
+// the compositor's descriptors; and one whose encoder never reads, which
+// leaves input and drawing at their pace until the stop ends it). Shots
+// are compared against grim pixel for pixel.
 // Writes only under $CANVAS_TMP: the XDG pictures and videos dirs point
 // into it, and xdg-open is a stub.
 #include <algorithm>
 #include <cairo.h>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +38,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
+#include "apps/capture_toolbar_layout.h"
 #include "core/config.h"
 #include "core/server.h"
 #include "core/wlr.h"
@@ -54,6 +57,8 @@ uint32_t t = 90000;
 pid_t grim_pid = -1;
 pid_t sub_pid = -1; // the events subscriber
 pid_t held_pid = -1; // the command a recording runs beside
+std::string stall_bin; // the dir holding the stand-in encoder as `ffmpeg`
+std::chrono::steady_clock::time_point state_asked; // when the stalled state was asked
 std::string shot_dir;
 std::string pictures_dir; // the scratch XDG pictures dir
 std::string videos_dir; // the scratch XDG videos dir
@@ -557,47 +562,20 @@ bool output_settled() {
 	return output != nullptr && !output->camera.panning() && !output->camera.zooming();
 }
 
-// The middle of a toolbar button, mirroring CaptureUi::toolbar_layout().
-double toolbar_button_x(int index, bool option) {
+// The toolbar as the compositor lays it out on the first output.
+ToolbarLayout toolbar_on_screen() {
 	Output *output = server->outputs.front().get();
-	int fixed = 2 * config::capture_toolbar_pad + 5 * config::capture_toolbar_gap
-		+ config::capture_toolbar_group_gap;
-	int avail = output->width - 2 * config::capture_thumbnail_margin - fixed;
-	int bw = (avail - 5 * config::capture_toolbar_gap) / 6;
-	if (bw > config::capture_toolbar_button_w) {
-		bw = config::capture_toolbar_button_w;
-	}
-	int inner = 6 * bw + 5 * config::capture_toolbar_gap
-		+ config::capture_toolbar_group_gap;
-	int box_x = (output->width - (inner + 2 * config::capture_toolbar_pad)) / 2;
-	if (option) {
-		int pill = (inner - 2 * config::capture_toolbar_gap) / 3;
-		return box_x + config::capture_toolbar_pad
-			+ index * (pill + config::capture_toolbar_gap) + pill / 2.0;
-	}
-	return box_x + config::capture_toolbar_pad + index * (bw + config::capture_toolbar_gap)
-		+ (index >= 3 ? config::capture_toolbar_group_gap : 0) + bw / 2.0;
+	return toolbar_layout(output->width, output->height);
 }
 
-// The middle of the modes row (an option row is above it).
-double toolbar_modes_y() {
-	Output *output = server->outputs.front().get();
-	int box_y = output->height - config::capture_toolbar_margin
-		- (2 * config::capture_toolbar_pad + config::capture_toolbar_options_h
-			+ config::capture_toolbar_gap + config::capture_toolbar_button_h
-			+ config::capture_toolbar_gap + config::capture_toolbar_footer_h);
-	return box_y + config::capture_toolbar_pad + config::capture_toolbar_options_h
-		+ config::capture_toolbar_gap + config::capture_toolbar_button_h / 2.0;
+void click_mode(ToolbarMode mode) {
+	wlr_box box = toolbar_on_screen().mode_box(mode);
+	click(box.x + box.width / 2.0, box.y + box.height / 2.0);
 }
 
-double toolbar_options_y() {
-	Output *output = server->outputs.front().get();
-	int box_y = output->height - config::capture_toolbar_margin
-		- (2 * config::capture_toolbar_pad + config::capture_toolbar_options_h
-			+ config::capture_toolbar_gap + config::capture_toolbar_button_h
-			+ config::capture_toolbar_gap + config::capture_toolbar_footer_h);
-	return box_y + config::capture_toolbar_pad
-		+ config::capture_toolbar_options_h / 2.0;
+void click_option(ToolbarOption option) {
+	wlr_box box = toolbar_on_screen().option_box(option);
+	click(box.x + box.width / 2.0, box.y + box.height / 2.0);
 }
 
 // The thumbnail's on-screen box (the newest shot is 1280x720, fit into the
@@ -942,8 +920,8 @@ int run_step() {
 		if (grim_running()) {
 			return -100;
 		}
-		click(toolbar_button_x(0, true), toolbar_options_y()); // clipboard on
-		click(toolbar_button_x(0, false), toolbar_modes_y()); // shot the screen
+		click_option(ToolbarOption::destination); // clipboard on
+		click_mode({ToolbarTarget::screen, false}); // shot the screen
 		check(shots_saved() == 5, "the toolbar's clipboard option saved no file");
 		run_shell(std::format("wl-paste --no-newline | tee {}/pasted-2.png",
 			shot_dir), "paste-2");
@@ -967,9 +945,9 @@ int run_step() {
 	}
 	case 28: { // the timer: 5 s, then a screen shot that waits for it
 		chord(KEY_5, SUPER_SHIFT);
-		click(toolbar_button_x(0, true), toolbar_options_y()); // clipboard off
-		click(toolbar_button_x(1, true), toolbar_options_y()); // timer 5 s
-		click(toolbar_button_x(0, false), toolbar_modes_y()); // shot the screen
+		click_option(ToolbarOption::destination); // clipboard off
+		click_option(ToolbarOption::timer); // timer 5 s
+		click_mode({ToolbarTarget::screen, false}); // shot the screen
 		check(server->capture_ui.owns_keyboard(), "the countdown owns the keyboard");
 		shot("countdown");
 		return 2000; // inside the countdown: no file yet
@@ -1247,9 +1225,9 @@ int run_step() {
 		chord(KEY_5, SUPER_SHIFT);
 		// the timer option still reads 5 s from the countdown test: cycle
 		// it back to none (5 -> 10 -> none)
-		click(toolbar_button_x(1, true), toolbar_options_y());
-		click(toolbar_button_x(1, true), toolbar_options_y());
-		click(toolbar_button_x(3, false), toolbar_modes_y()); // record the screen
+		click_option(ToolbarOption::timer);
+		click_option(ToolbarOption::timer);
+		click_mode({ToolbarTarget::screen, true}); // record the screen
 		return 600;
 	}
 	case 50: {
@@ -1348,7 +1326,7 @@ int run_step() {
 	}
 	case 57: { // a region recording, stopped through the IPC
 		chord(KEY_5, SUPER_SHIFT);
-		click(toolbar_button_x(5, false), toolbar_modes_y()); // record a region
+		click_mode({ToolbarTarget::region, true}); // record a region
 		return 600;
 	}
 	case 58: {
@@ -1440,7 +1418,7 @@ int run_step() {
 	}
 	case 64: { // a window recording, the rect frozen at pick time
 		chord(KEY_5, SUPER_SHIFT);
-		click(toolbar_button_x(4, false), toolbar_modes_y()); // record a window
+		click_mode({ToolbarTarget::window, true}); // record a window
 		return 600;
 	}
 	case 65: {
@@ -1489,7 +1467,75 @@ int run_step() {
 		}
 		return 300;
 	}
-	case 68: { // the end: nothing recording, the event closed it
+	case 68: { // an encoder that never reads: the compositor must not wait for it
+		std::string path = std::getenv("PATH");
+		setenv("PATH", std::format("{}:{}", stall_bin, path).c_str(), 1);
+		chord(KEY_5, SUPER_SHIFT);
+		click_mode({ToolbarTarget::screen, true}); // record the screen
+		setenv("PATH", path.c_str(), 1); // the encoder is started by now
+		return 600;
+	}
+	case 69: {
+		if (!server->capture_ui.recording() && retries++ < 30) {
+			return -100;
+		}
+		check(server->capture_ui.recording(),
+			"the recording with an encoder that reads nothing started");
+		return 2500; // 150 frames come due; the pipe takes 64 KiB of the first
+	}
+	case 70: { // the compositor still answers
+		if (!acted) {
+			run_client("state", "", "state-stalled");
+			state_asked = std::chrono::steady_clock::now();
+			acted = true;
+		}
+		if (!client_done("state-stalled") && retries++ < 150) {
+			return -20;
+		}
+		long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - state_asked).count();
+		check(client_done("state-stalled") && ms <= 500, std::format(
+			"IPC state answered in {} ms while the encoder read nothing", ms));
+		std::string rec = state_recording("state-stalled");
+		check(rec.starts_with(videos_dir) && rec.ends_with(".mp4"),
+			std::format("the state reports the stalled recording ({})", rec));
+		std::size_t dropped = server->capture_ui.recording_dropped_frames();
+		check(dropped > 0, std::format("the frames that came due behind the "
+			"encoder were dropped and counted ({})", dropped));
+		shot("stalled");
+		return 400;
+	}
+	case 71: { // the screen is still drawn: grim gets its frame
+		if (grim_running()) {
+			return -100;
+		}
+		check(file_exists(std::format("{}/stalled.png", shot_dir)),
+			"grim captured the screen while the encoder stalled");
+		run_client("capture.stop", "", "stop-stalled");
+		return 400;
+	}
+	case 72: { // the stop ends it, the encoder not having read a byte
+		if ((!client_done("stop-stalled") || server->capture_ui.recording())
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(client_code("stop-stalled") == 0, "capture.stop answered true");
+		check(!server->capture_ui.recording(),
+			"the stop ended the recording whose encoder never read");
+		std::string report = read_file(std::format("{}/recorder-report.txt", shot_dir));
+		check(report.find("started args=") != std::string::npos
+				&& report.find("-f rawvideo") != std::string::npos,
+			"the stand-in was the encoder, started as ffmpeg raw video");
+		int unread = 0, capacity = 0;
+		std::size_t at = report.find("unread=");
+		check(at != std::string::npos
+				&& std::sscanf(report.c_str() + at, "unread=%d capacity=%d",
+					&unread, &capacity) == 2 && unread > 0 && unread <= capacity,
+			std::format("the pipe was closed on the encoder with the written "
+				"frames unread ({} of {} bytes)", unread, capacity));
+		return 300;
+	}
+	case 73: { // the end: nothing recording, the event closed it
 		check(!server->capture_ui.recording(), "no recording is left running");
 		check(read_file(events_path).find("\"active\":false") != std::string::npos,
 			"the capture.recording event closed the recording");
@@ -1563,6 +1609,23 @@ int main() {
 	std::string path = std::format("{}:{}", bin, std::getenv("PATH") != nullptr
 		? std::getenv("PATH") : "");
 	setenv("PATH", path.c_str(), 1);
+	// The stand-in encoder the stalled recording runs: an ffmpeg that never
+	// reads its stdin (tests/scenarios/recorder-standins/ffmpeg), first on
+	// PATH only while that recording starts, and a report it writes.
+	const char *standin = std::getenv("CANVAS_RECORDER_STANDIN");
+	if (standin == nullptr || *standin == '\0') {
+		std::fprintf(stderr, "capture: $CANVAS_RECORDER_STANDIN is not set "
+			"(meson passes it)\n");
+		return 2;
+	}
+	stall_bin = std::format("{}/stall-bin", shot_dir);
+	mkdir_p(stall_bin);
+	if (symlink(standin, (stall_bin + "/ffmpeg").c_str()) != 0) {
+		std::fprintf(stderr, "capture: cannot link the stand-in encoder\n");
+		return 2;
+	}
+	setenv("CANVAS_RECORDER_REPORT",
+		std::format("{}/recorder-report.txt", shot_dir).c_str(), 1);
 
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);

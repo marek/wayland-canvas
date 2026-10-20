@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# A stand-in `ffmpeg` for the capture scenario: an encoder that never reads
+# its input. It waits for the compositor to close the pipe on its stdin
+# (the end of the recording), reports in $CANVAS_RECORDER_REPORT what it was
+# given and how full the pipe was left, and exits without writing a video.
+#
+#   started args=<its arguments>
+#   unread=<bytes the pipe still held> capacity=<the pipe's size>
+#
+# Waiting is poll() for the hang-up alone: nothing here ever calls read().
+import fcntl
+import os
+import select
+import struct
+import sys
+import termios
+
+F_GETPIPE_SZ = getattr(fcntl, "F_GETPIPE_SZ", 1032)
+
+report = open(os.environ["CANVAS_RECORDER_REPORT"], "a", buffering=1)
+report.write("started args=%s\n" % " ".join(sys.argv[1:]))
+
+waiting = select.poll()
+waiting.register(0, select.POLLHUP)
+hung_up = False
+while not hung_up:
+    hung_up = any(event & select.POLLHUP for _, event in waiting.poll(200))
+
+unread = struct.unpack("i", fcntl.ioctl(0, termios.FIONREAD, b"\0\0\0\0"))[0]
+report.write("unread=%d capacity=%d\n" % (unread, fcntl.fcntl(0, F_GETPIPE_SZ)))
+report.close()

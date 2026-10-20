@@ -35,6 +35,10 @@ public:
 	wlr_box content_box() const; // window geometry on the canvas
 	wlr_box frame_box() const; // content plus title bar and border
 	Rect frame_rect() const;
+	// Canvas position of the surface tree's origin: the window geometry's
+	// corner sits at (x, y), and a window with no geometry yet has its base
+	// surface fill it from there.
+	Point surface_origin() const;
 	void close();
 	void set_minimized(bool minimized);
 	void set_maximized(bool maximized);

@@ -232,7 +232,13 @@ own the machine's Wayland display namespace and GPU.
   each left as a file ffprobe reads at the right size — odd edges cropped
   to the encoder's whole macroblocks — with `capture.recording` events and
   the state's `recording` following start and stop, and `capture.stop` on
-  nothing an error.
+  nothing an error. Last, a recording whose encoder never reads: a
+  stand-in `ffmpeg` (`recorder-standins/ffmpeg`, put first on PATH for
+  that one start) waits for the pipe to close and reports what it was
+  given and how much the pipe still held. While it runs IPC `state`
+  answers within 500 ms, frames that came due behind it are dropped and
+  counted, grim still gets the screen, and `capture.stop` ends the
+  recording with the written frames unread.
 
 - **`sharing.cpp`** — the capture core, its protocols and the portal. The
   offscreen captures first: two foot windows mapped (they start overlapped

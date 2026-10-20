@@ -1,8 +1,9 @@
 // End-to-end scenario for the capture core and its protocols: the offscreen
 // captures (an output area, a single window) proven pixel-by-pixel against
 // grim, a window shot that leaves out what overlaps it, ext-image-copy-
-// capture with real clients, and screen sharing through xdg-desktop-portal-
-// wlr on a private D-Bus session. Writes only under $CANVAS_TMP (meson passes
+// capture with real clients, screen sharing through xdg-desktop-portal-
+// wlr on a private D-Bus session, and a window cast of an X11 window that
+// closes while it is copied. Writes only under $CANVAS_TMP (meson passes
 // the repo's tmp/); meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
 #include <cairo.h>
 #include <cerrno>
@@ -47,6 +48,9 @@ pid_t portal_pid = -1; // the portal session's shell, its process group's leader
 std::string portal_runtime; // the session's short-lived runtime dir in /tmp
 pid_t portal_bus_pid = -1; // the dbus-daemon this run owns, killed by pid
 std::string portal_dir; // its scratch world, under the shot directory
+pid_t x11_pid = -1; // the X11 client whose window the cast phase copies
+pid_t cast_pid = -1; // the cast client of that window
+constexpr uint32_t x11_colour = 0xc04040; // x11-client's default window colour
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
 void check(bool cond, std::string_view note,
@@ -844,6 +848,97 @@ int run_step() {
 		// stop_portal() left nothing of this run in /tmp.
 		return 300;
 	}
+	// A window cast of an X11 window: the cast client copies the frames of
+	// the X11 client's window through the toplevel source.
+	case 13: {
+		const char *x11 = std::getenv("CANVAS_X11_CLIENT");
+		if (x11 == nullptr || *x11 == '\0') {
+			std::println("SKIP: the X11 window cast, no X11 client built");
+			step = 17;
+			return 100;
+		}
+		x11_pid = spawn(std::format("exec \"$CANVAS_X11_CLIENT\" --title=x11-cast"
+			" > '{}/x11.out' 2>&1", shot_dir).c_str());
+		return 1500;
+	}
+	case 14: {
+		View *window = view_titled("x11-cast");
+		if (window == nullptr && retries++ < 200) {
+			return -100;
+		}
+		check(window != nullptr && window->as_x11() != nullptr,
+			"the X11 client's window mapped as an X11 view");
+		if (window == nullptr) {
+			step = 15;
+			return 100;
+		}
+		cast_pid = spawn(std::format("exec \"$CANVAS_CAST_CLIENT\" x11-cast {:06x}"
+			" > '{}/x11-cast.out' 2>&1", x11_colour, shot_dir).c_str());
+		return 800;
+	}
+	case 15: {
+		std::string said = read_file(std::format("{}/x11-cast.out", shot_dir));
+		View *window = view_titled("x11-cast");
+		if (said.find("CAST SHARE 3 ") == std::string::npos && retries++ < 100) {
+			return -100;
+		}
+		wlr_box frame = window != nullptr ? window->frame_box() : wlr_box{};
+		int w = 0, h = 0;
+		std::size_t ready = said.find("CAST READY ");
+		if (ready != std::string::npos) {
+			std::sscanf(said.c_str() + ready, "CAST READY %d %d", &w, &h);
+		}
+		check(w > 0 && w == frame.width && h == frame.height,
+			std::format("the X11 window's cast frames are the window's size "
+				"({}x{}, frame {}x{})", w, h, frame.width, frame.height));
+		for (int n = 1; n <= 3; n++) {
+			long hits = 0, total = 0;
+			std::size_t at = said.find(std::format("CAST SHARE {} ", n));
+			if (at != std::string::npos) {
+				std::sscanf(said.c_str() + at, "CAST SHARE %*d %ld %ld", &hits, &total);
+			}
+			check(total > 0 && hits * 10 > total * 7,
+				std::format("frame {} of the X11 window's cast shows the client's "
+					"colour ({} of {} px)", n, hits, total));
+		}
+		// The window goes while the cast runs: the session ends with it.
+		if (x11_pid > 0) {
+			kill(x11_pid, SIGKILL);
+			x11_pid = -1;
+		}
+		return 300;
+	}
+	case 16: {
+		if (x11_pid > 0) { // the window never mapped: nothing is left running
+			kill(x11_pid, SIGKILL);
+			x11_pid = -1;
+		}
+		if (cast_pid > 0
+				&& read_file(std::format("{}/x11-cast.out", shot_dir)).find("CAST STOPPED")
+					== std::string::npos
+				&& retries++ < 100) {
+			return -100;
+		}
+		if (cast_pid > 0) {
+			check(read_file(std::format("{}/x11-cast.out", shot_dir)).find("CAST STOPPED")
+					!= std::string::npos,
+				"the compositor ended the X11 window's cast with the window");
+			kill(cast_pid, SIGTERM);
+			cast_pid = -1;
+		}
+		run_client("state", "", "x11-state");
+		return 600;
+	}
+	case 17: {
+		std::string code = read_file(std::format("{}/x11-state.code", shot_dir));
+		if (code.empty() && retries++ < 50) {
+			return -100;
+		}
+		check(code == "0" && read_file(std::format("{}/x11-state.out", shot_dir))
+				.find("\"windows\"") != std::string::npos,
+			"the compositor still answers `msg state` after the X11 window's cast");
+		return 300;
+	}
 	default:
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
 		finished = true;
@@ -907,6 +1002,11 @@ int main() {
 	wl_event_source_timer_update(timer, 200);
 	wl_display_run(server->display); // `msg quit` ends it
 	stop_portal(); // a run ended early still leaves no session behind
+	for (pid_t pid : {x11_pid, cast_pid}) { // an early end leaves no client behind
+		if (pid > 0) {
+			kill(pid, SIGKILL);
+		}
+	}
 	if (!finished) {
 		check(false, std::format("the run ended at step {}, before its last step", step));
 	}

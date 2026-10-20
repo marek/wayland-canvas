@@ -185,8 +185,8 @@ int run_step() {
 		}
 		wlr_box f = view->frame_box();
 		move_to(f.x + f.width / 2.0, f.y + f.height / 2.0);
-		check(server->capture_ui.start_pick(output(), CaptureUi::PickWhat::window,
-				CaptureUi::PickUse::ipc, CaptureUi::Options{}),
+		check(server->capture_ui.start_pick(output(), PickWhat::window,
+				PickUse::ipc, CaptureOptions{}),
 			"the window picker opened");
 		move_to(f.x + f.width / 2.0 + 4, f.y + f.height / 2.0 + 4);
 		check(picker_outlines_a_window(), "the picker outlines the window under the pointer");

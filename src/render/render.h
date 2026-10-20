@@ -136,6 +136,13 @@ public:
 	// holds. False (logged) when the pass cannot begin or the area is empty.
 	// Surfaces drawn get no enter or frame feedback: the output still owns that.
 	bool render_area(Output &output, wlr_box local_area, wlr_buffer *target);
+	// Draws `view` alone — title bar, border, content, popups, nothing over
+	// it, minimized or not — into an offscreen ARGB8888 `target` of
+	// view_device_size(view, scale): the frame's corner at (0, 0), zoom 1,
+	// `scale` device pixels per logical pixel, over transparent. The same
+	// draw_view an on-screen frame uses. False (logged) when the pass cannot
+	// begin, the view is not mapped, the session is locked or no output exists.
+	bool render_view(View &view, float scale, wlr_buffer *target);
 	void theme_changed(); // drops the help-line and tab-label textures
 	void finish(); // releases cached textures before the renderer goes
 
@@ -161,6 +168,9 @@ private:
 	RenderCtx make_ctx(Output &output, wlr_render_pass *pass);
 	// Everything from the canvas clear to the drag icon, into ctx's target.
 	void draw_scene(const RenderCtx &ctx);
+	// make_ctx() for an upright offscreen `target`: no capture UI, no cursors,
+	// and a scratch surface list of its own that no frame feedback reads.
+	RenderCtx make_capture_ctx(Output &output, wlr_render_pass *pass, wlr_buffer *target);
 	void draw_lock(const RenderCtx &ctx);
 
 	// One rendered tab label and what it was made for: the number and scale
@@ -186,6 +196,7 @@ private:
 
 	Server &server_;
 	std::vector<DrawnSurface> drawn_; // surfaces drawn this frame, reused
+	std::vector<DrawnSurface> capture_drawn_; // the same for captures, reused
 	std::array<HelpSlot, help_slots> help_cache_{}; // help-line texture, one per scale
 	std::vector<LabelSlot> label_cache_; // desktop tab labels, dropped with their desktops
 	unsigned help_clock_ = 0; // round-robin over help_cache_

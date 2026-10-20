@@ -362,14 +362,14 @@ Each split adds its new subsystems to cpp-standards.md's
 
 ### 4. Screenshots and recordings
 
-- [ ] A window cast of an X11 window works
+- [x] A window cast of an X11 window works
   - Today the cast takes the same `render_view_offscreen` path as the
     shot (image_capture.cpp:81), which crashed until phase 2.
   - Acceptance: the sharing scenario casts the X11 window of
     x11-client through the ext-image-copy-capture toplevel source. It
     gets frames the window's size showing the client's colour, and the
     compositor is still running.
-- [ ] A window is drawn by one path on screen and in a capture
+- [x] A window is drawn by one path on screen and in a capture
   - The problem:
     - `render_view_offscreen` (render/capture.cpp:151-210) is a hand copy
       of `draw_view` (render.cpp:338-397).
@@ -385,7 +385,7 @@ Each split adds its new subsystems to cpp-standards.md's
     - Delete the copies and their "like the renderer's …" comments.
   - Acceptance: the capture and sharing scenarios are green (window-shot
     pixels and window-cast frames, xdg and X11).
-- [ ] The recorder never stalls the compositor
+- [x] The recorder never stalls the compositor
   - The problem:
     - ffmpeg's stdin pipe is blocking (capture_ui.cpp:932), and
       `push_frame` (1007-1040) writes whole frames from the event loop.
@@ -410,7 +410,7 @@ Each split adds its new subsystems to cpp-standards.md's
     - A new step records with a stand-in `ffmpeg` first on PATH that
       never reads stdin. While it runs, IPC `state` answers within
       500 ms, and the stop ends the recording.
-- [ ] The capture toolbar's layout is one pure function the test calls
+- [x] The capture toolbar's layout is one pure function the test calls
   too
   - Today `toolbar_layout` (capture_ui.cpp:663-712) is private, and
     bar.cpp:2843-2865 re-derives it.
@@ -423,7 +423,13 @@ Each split adds its new subsystems to cpp-standards.md's
       enum class.
     - bar.cpp clicks through the function.
   - Acceptance: the capture and bar scenarios' toolbar clicks are green.
-- [ ] The capture UI is five components, not one class
+  - Done: `toolbar_layout(width, height)` and `toolbar_hit` are in
+    `capture_toolbar_layout.{h,cpp}`, unit-tested by `test-capture-toolbar`.
+    The buttons are a `ToolbarMode{target, record}` or a `ToolbarOption`;
+    the capture and bar scenarios click through `toolbar_layout`. The
+    capture scenario's copy lacked the narrow-output clamp; the one
+    function has it.
+- [x] The capture UI is five components, not one class
   - Today `CaptureUi` (capture_ui.h:205-300, capture_ui.cpp) holds the
     picker, the toolbar, the clipboard, the ffmpeg recorder, the
     countdown and the thumbnail. Its own banners name them.
@@ -439,6 +445,15 @@ Each split adds its new subsystems to cpp-standards.md's
     `src/apps/`.
   - Acceptance: the capture, sharing and bar scenarios are green, and
     `capture_ui.cpp` holds only the routing and the countdown.
+  - Done: beside capture_ui.*, in `src/apps/`: `capture_picker`,
+    `capture_toolbar` (over `capture_toolbar_layout`), `shot_thumbnail`,
+    `clipboard_image`, and `shot_taker` (`take_shot`, the cursor
+    composite); `capture_geometry` holds `frame_on_output`;
+    `capture_options.h` and `capture_overlay.h` are the shared structs.
+    The picker and the toolbar report a finished pick or a clicked mode
+    to `CaptureUi` through a `std::function_ref` argument.
+    `capture_ui.cpp` keeps the routing, what becomes of a pick
+    (`pick_done`, `answer_ipc`) and the countdown.
 
 ### 5. The other bugs
 
