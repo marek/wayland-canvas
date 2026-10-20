@@ -40,14 +40,12 @@ Item {
 
 	property var storage: null
 	property var compositor: null
-	property var colors: ({})
 	property int size: 220
-	// The colours for the strip's dots, in the manifest's own order: the
-	// settings map arrives alphabetised (a QVariantMap sorts its keys), so
-	// its order is not the manifest's — the manifest's order lives on in
-	// its menu, the toolbar's colour menu — and a colour the menu leaves
-	// out follows after, in the map's (alphabetical) order.
+	// The colours the strip's dots offer, in the order of the plugin's
+	// `colors` setting (the toolbar's colour menu is built from the same
+	// list): [{label, color}].
 	property var dotList: []
+	readonly property string defaultColor: dotList.length > 0 ? dotList[0].color : ""
 
 	readonly property string ink: "#1f2430"
 	readonly property string fileSuffix: ".html"
@@ -60,37 +58,20 @@ Item {
 		}
 		storage = api.storage
 		compositor = api.compositor
-		colors = api.plugin.settings.colors
 		size = api.plugin.settings.size
-		var ordered = []
-		var buttons = api.plugin.manifest != null
-			&& api.plugin.manifest.contributes != null
-			&& api.plugin.manifest.contributes.toolbarButtons != null
-			? api.plugin.manifest.contributes.toolbarButtons : []
-		for (var i = 0; i < buttons.length; i++) {
-			var entries = buttons[i].menu || []
-			for (var j = 0; j < entries.length; j++) {
-				if (entries[j].color !== undefined && entries[j].color !== "") {
-					ordered.push(entries[j].color)
-				}
-			}
+		dotList = colorList(api.plugin.settings.colors)
+		if (dotList.length === 0) {
+			dotList = colorList(api.plugin.manifest.settings.colors)
 		}
-		for (var name in colors) {
-			if (ordered.indexOf(colors[name]) === -1) {
-				ordered.push(colors[name])
-			}
-		}
-		var dots = []
-		for (var k = 0; k < ordered.length; k++) {
-			for (var key in colors) {
-				if (colors[key] === ordered[k]) {
-					dots.push({name: key, color: ordered[k]})
-					break
-				}
-			}
-		}
-		dotList = dots
 		storage.list(load)
+	}
+
+	// The entries of a `colors` setting that name a colour; a hand-edited
+	// config can hold anything there.
+	function colorList(list) {
+		return list == null || typeof list.filter !== "function" ? [] : list.filter(function(entry) {
+			return entry != null && typeof entry.color === "string" && entry.color !== ""
+		})
 	}
 
 	function load(names) {
@@ -138,10 +119,7 @@ Item {
 		}
 		var color = args != null && typeof args.color === "string" ? args.color : ""
 		if (color === "") {
-			for (var name in colors) {
-				color = colors[name]
-				break
-			}
+			color = defaultColor
 		}
 		var id = String(nextId)
 		nextId++
@@ -373,10 +351,9 @@ Item {
 		var family = /font-family:\s*"((?:[^"\\]|\\.)*)"/.exec(css)
 		var px = /font-size:\s*(\d+)px/.exec(css)
 		var body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(text)
-		var first = dotList.length > 0 ? dotList[0].color : "#ffd866"
 		return noteComponent.createObject(root, {
 			id: id,
-			color: background !== null ? background[1] : first,
+			color: background !== null ? background[1] : defaultColor,
 			html: body !== null ? body[1].replace(/^\s+|\s+$/g, "") : "",
 			x: place.x !== undefined ? place.x : 0,
 			y: place.y !== undefined ? place.y : 0,

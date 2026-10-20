@@ -7,7 +7,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 220
-	panelName: "clock"
 
 	readonly property date today: model && model.now ? model.now : new Date()
 

@@ -10,7 +10,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 260
-	panelName: "power"
 
 	readonly property var battery: model ? model.battery : null
 	readonly property bool present: battery != null && battery.isPresent

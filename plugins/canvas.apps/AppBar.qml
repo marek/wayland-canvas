@@ -27,45 +27,20 @@ Item {
 	readonly property int slideMs: 200
 	readonly property int edgeMargin: UiTheme.edgeMargin
 
-	// The host item, which holds the live config (as the toolbar reads it).
-	readonly property var shell: {
-		if (api == null) {
-			return null
-		}
-		if (api.shell !== undefined) {
-			return api.shell
-		}
-		return api.plugin != null ? api.plugin.host : null
-	}
-
-	readonly property var config: shell != null ? shell.config : null
-
 	// appbar.enabled: off leaves no surface on any screen.
-	readonly property bool switchedOn: {
-		var section = config != null ? config.appbar : null
-		return !(section != null && section.enabled === false)
-	}
+	readonly property bool switchedOn: api != null && api.shell != null
+		? api.shell.appBarEnabled : true
 
 	// The edge appbar.position names, the left when it names none or
 	// something else: a hand edit can hold anything.
-	readonly property string edge: {
-		var section = config != null ? config.appbar : null
-		var named = section != null && section.position !== undefined
-			? section.position : ""
-		return named === "right" || named === "top" || named === "bottom"
-			? named : "left"
-	}
+	readonly property string edge: api != null && api.shell != null
+		? api.shell.appBarPosition : "left"
 	readonly property bool vertical: edge === "left" || edge === "right"
 
 	// The toolbar's edge, and whether it is this one: the strips then share
 	// it, the apps after the toolbar's buttons.
-	readonly property string toolbarEdge: {
-		var section = config != null ? config.toolbar : null
-		var named = section != null && section.position !== undefined
-			? section.position : ""
-		return named === "left" || named === "top" || named === "bottom"
-			? named : "right"
-	}
+	readonly property string toolbarEdge: api != null && api.shell != null
+		? api.shell.toolbarPosition : "right"
 	readonly property bool shared: toolbarEdge === edge
 
 	// ---- the apps ----
@@ -491,7 +466,7 @@ Item {
 		api.compositor.call("window.focus", {window: id}, function(result, error) {
 			// A window closed between the draw and the click: the list
 			// catches up with the next event, and the view stays put.
-			if (error !== undefined && error !== null && error !== "") {
+			if (error !== null) {
 				console.warn("[canvas.apps] window.focus: " + error)
 			}
 		})

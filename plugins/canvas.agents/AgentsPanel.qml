@@ -13,7 +13,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 360
-	panelName: "agents"
 
 	// The provider the switch is on, by id: the collector reorders the
 	// families after Claude and GPT by their week's tokens, so a position

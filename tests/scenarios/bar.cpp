@@ -3632,6 +3632,58 @@ bool shell_reloaded() {
 	return bar_layer() != nullptr && bar_surfaces_made != bar_surfaces_remembered;
 }
 
+// The weather widget fetches once each time it is made, so the curl
+// stand-in's calls for wttr.in count the times the widget was made.
+int weather_fetch_count() {
+	std::string log = read_file(shot_dir + "/curl-standin.log");
+	int count = 0;
+	for (size_t at = log.find("wttr.in"); at != std::string::npos;
+			at = log.find("wttr.in", at + 1)) {
+		count++;
+	}
+	return count;
+}
+
+int weather_fetches = 0; // weather_fetch_count() before a host write
+
+// What a host write that changes no widget leaves as it was: the clock's
+// panel open, the shell not reloaded, and no widget made again.
+void check_widgets_kept(std::string_view write) {
+	check(panel_layer("clock") != nullptr,
+		std::format("the clock's panel stayed open through {}", write));
+	check(weather_fetch_count() == weather_fetches, std::format("{} made no "
+		"widget again (the weather fetched {} times, {} before)", write,
+		weather_fetch_count(), weather_fetches));
+	check(settings_shell_kept(), std::format("{} reloaded nothing", write));
+}
+
+// Shuts the compositor's end of the shell's control-socket connection, so
+// the shell's socket goes as it does when the compositor does. That end is
+// the socket bound at $WAYLAND_CANVAS_SOCKET whose peer is the shell's
+// process.
+bool drop_shell_socket() {
+	const char *path = std::getenv("WAYLAND_CANVAS_SOCKET");
+	if (path == nullptr || bar_client() == nullptr) {
+		return false;
+	}
+	pid_t shell_pid = 0;
+	wl_client_get_credentials(bar_client(), &shell_pid, nullptr, nullptr);
+	for (const auto &entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+		int fd = std::atoi(entry.path().filename().c_str());
+		sockaddr_un address{};
+		socklen_t address_size = sizeof address;
+		ucred peer{};
+		socklen_t peer_size = sizeof peer;
+		if (getsockname(fd, reinterpret_cast<sockaddr *>(&address), &address_size) == 0
+				&& address.sun_family == AF_UNIX && std::strcmp(address.sun_path, path) == 0
+				&& getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size) == 0
+				&& peer.pid == shell_pid) {
+			return shutdown(fd, SHUT_RDWR) == 0;
+		}
+	}
+	return false;
+}
+
 std::string config_good;   // the scratch shell.json before the edit that breaks it
 std::string config_broken; // and as that edit leaves it: cut short, not JSON
 
@@ -10162,6 +10214,150 @@ int run_step() {
 		check(panel_layers() == 0, "no panel outlived the toolbar's edges");
 		check(toolbar_position_in_config() == "right",
 			"the scratch shell.json ends with toolbar.position: right");
+		step = 320; // on to the host's writes
+		return -100; // without the advance: every other step moves on alone
+	}
+	// The host's own writes with the clock's panel open: the scratch
+	// plugin's `write` action moves the toolbar to the left edge and back
+	// and hides and shows the agents widget, all through api.shell. None
+	// reloads the shell, closes the panel or makes a widget again.
+	case 320: {
+		if (clock_x <= 0) {
+			return end_run("the walk found no clock to open the panel from");
+		}
+		watch_remember_bar();
+		click(clock_x, bar_h() / 2.0);
+		return 500;
+	}
+	case 321: { // the panel is up: the fetches counted, the toolbar's move asked for
+		if (panel_layer("clock") == nullptr && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layer("clock") != nullptr,
+			"the clock's panel is open before the host's writes");
+		weather_fetches = weather_fetch_count();
+		check(weather_fetches >= 1, std::format("the weather widget fetched "
+			"when it was made ({} fetches)", weather_fetches));
+		run_msg("action.run",
+			R"({"name":"canvas.scratch/write","args":{"edge":"left"}})",
+			"write-edge-left");
+		return 600;
+	}
+	case 322: { // on the left edge in the config; the agents widget hidden next
+		if (toolbar_position_in_config() != "left" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(toolbar_position_in_config() == "left",
+			"the scratch action moved toolbar.position to left");
+		check_widgets_kept("moving the toolbar to the left edge");
+		run_msg("action.run",
+			R"({"name":"canvas.scratch/write","args":{"hide":"canvas.agents/agents","hidden":true}})",
+			"write-hide");
+		return 600;
+	}
+	case 323: { // the agents widget in bar.hidden; it comes back next
+		if (shell_bar_hidden().size() != 1 && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		std::vector<std::string> hidden = shell_bar_hidden();
+		check(hidden.size() == 1 && hidden[0] == "canvas.agents/agents",
+			"the scratch action wrote the agents widget into bar.hidden");
+		check_widgets_kept("hiding the agents widget");
+		run_msg("action.run",
+			R"({"name":"canvas.scratch/write","args":{"hide":"canvas.agents/agents","hidden":false}})",
+			"write-show");
+		return 600;
+	}
+	case 324: { // bar.hidden empty again; the toolbar back to the right edge next
+		if (!shell_bar_hidden().empty() && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(shell_bar_hidden().empty(), "showing the agents widget emptied bar.hidden");
+		check_widgets_kept("showing the agents widget");
+		run_msg("action.run",
+			R"({"name":"canvas.scratch/write","args":{"edge":"right"}})",
+			"write-edge-right");
+		return 600;
+	}
+	case 325: { // the toolbar back; the panel closed by a click outside it
+		if (toolbar_position_in_config() != "right" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(toolbar_position_in_config() == "right",
+			"the scratch action moved toolbar.position back to right");
+		check_widgets_kept("moving the toolbar back to the right edge");
+		click(60.0, 700.0); // corner of the output, outside every card
+		return 400;
+	}
+	case 326: { // the world left as the settings window finds it
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0, "the clock's panel closed on a click outside");
+		step = 327; // on to the shell's socket
+		return -100; // without the advance: every other step moves on alone
+	}
+	// The shell's socket drops with a call in flight: the scratch plugin's
+	// `wait` action asks the compositor three things, and the third - a
+	// chord capture - has no answer until a chord is pressed. The drop
+	// answers it with an error, and the shell comes back subscribed.
+	case 327: {
+		run_msg("action.run", R"({"name":"canvas.scratch/wait"})", "wait-calls");
+		return 800;
+	}
+	case 328: { // two answers in, the third waiting: the socket is shut
+		std::string answers = read_storage("answers");
+		if (answers.find("\"call\": \"capture.stop\"") == std::string::npos
+				&& retries++ < 50) {
+			return -200;
+		}
+		retries = 0;
+		check(answers.find("\"call\": \"subscribe\"") != std::string::npos
+				&& answers.find("\"result\": true") != std::string::npos
+				&& answers.find("\"error\": null") != std::string::npos,
+			"a call the compositor answers gets its result and a null error");
+		check(answers.find("\"error\": \"not recording\"") != std::string::npos,
+			"a call the compositor refuses gets its error as text");
+		check(answers.find("shortcut.capture") == std::string::npos,
+			"the chord capture waits, unanswered, for a chord");
+		check(drop_shell_socket(),
+			"the compositor's end of the shell's control socket was found and shut");
+		return 600;
+	}
+	case 329: { // the waiting call is answered with an error; the shell reconnects
+		std::string answers = read_storage("answers");
+		if (answers.find("\"call\": \"shortcut.capture\"") == std::string::npos
+				&& retries++ < 50) {
+			return -200;
+		}
+		retries = 0;
+		check(answers.find("\"call\": \"shortcut.capture\"") != std::string::npos
+				&& answers.find("\"error\": \"disconnected\"") != std::string::npos,
+			"the call in flight when the shell's socket dropped got the error "
+			"\"disconnected\"");
+		return 3500; // the shell's reconnect timer is 2 s
+	}
+	case 330: { // subscribed again: an action sent over the socket runs
+		run_msg("action.run",
+			R"({"name":"canvas.scratch/mark","args":{"kind":"after-drop"}})",
+			"mark-after-drop");
+		return 600;
+	}
+	case 331: {
+		std::string marks = read_storage("marks");
+		if (marks.find("\"kind\": \"after-drop\"") == std::string::npos
+				&& retries++ < 50) {
+			return -200;
+		}
+		retries = 0;
+		check(marks.find("\"kind\": \"after-drop\"") != std::string::npos,
+			"the shell reconnected to the compositor and subscribed again");
 		step = 400; // on to the settings window: the gear, its tabs, its writes
 		return -100; // without the advance: every other step moves on alone
 	}
@@ -10402,7 +10598,7 @@ int main() {
 		"\t\t\t\t\"label\": \"Act\",\n\t\t\t\t\"action\": \"mark\",\n"
 		"\t\t\t\t\"args\": {\"kind\": \"button\"},\n\t\t\t\t\"order\": 0\n\t\t\t},\n"
 		"\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n\t\t\t\t\"icon\": \"P\",\n"
-		"\t\t\t\t\"label\": \"Panel\",\n\t\t\t\t\"panel\": \"panel\",\n"
+		"\t\t\t\t\"label\": \"Panel\",\n\t\t\t\t\"panel\": \"scratch\",\n"
 		"\t\t\t\t\"order\": 1\n\t\t\t},\n"
 		"\t\t\t{\n\t\t\t\t\"id\": \"menu\",\n\t\t\t\t\"icon\": \"M\",\n"
 		"\t\t\t\t\"label\": \"Menu\",\n\t\t\t\t\"menu\": [\n"
@@ -10414,10 +10610,14 @@ int main() {
 		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-yellow\"}\n\t\t\t\t\t}\n"
 		"\t\t\t\t],\n\t\t\t\t\"order\": 2\n\t\t\t}\n"
 		"\t\t],\n"
-		"\t\t\"panels\": [\n\t\t\t{\n\t\t\t\t\"id\": \"panel\",\n"
+		"\t\t\"panels\": [\n\t\t\t{\n\t\t\t\t\"id\": \"scratch\",\n"
 		"\t\t\t\t\"entry\": \"ScratchPanel.qml\"\n\t\t\t}\n\t\t],\n"
 		"\t\t\"actions\": [\n\t\t\t{\n\t\t\t\t\"id\": \"mark\",\n"
-		"\t\t\t\t\"entry\": \"Mark.qml\"\n\t\t\t}\n\t\t]\n\t}\n}\n");
+		"\t\t\t\t\"entry\": \"Mark.qml\"\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"write\",\n"
+		"\t\t\t\t\"entry\": \"Write.qml\"\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"wait\",\n"
+		"\t\t\t\t\"entry\": \"Wait.qml\"\n\t\t\t}\n\t\t]\n\t}\n}\n");
 	write_file(scratch_plugin + "/Mark.qml",
 		"import QtQuick\n// The scratch action: appends its args to the plugin's\n"
 		"// storage, so the scenario reads back that it ran and what with.\n"
@@ -10427,11 +10627,43 @@ int main() {
 		"\t\tif (marks == null) {\n\t\t\tmarks = []\n\t\t}\n"
 		"\t\tmarks.push(args == null ? {} : args)\n"
 		"\t\tapi.storage.write(\"marks\", marks)\n\t}\n}\n");
+	write_file(scratch_plugin + "/Write.qml",
+		"import QtQuick\n// The scratch write action: one of the shell's own\n"
+		"// writes through api.shell - an edge for the toolbar, or a widget\n"
+		"// hidden or shown - so the scenario can make them with a panel open.\n"
+		"Item {\n\tproperty var api: null\n"
+		"\tfunction run(args) {\n"
+		"\t\tif (args.edge !== undefined) {\n"
+		"\t\t\tapi.shell.setToolbarPosition(args.edge)\n"
+		"\t\t} else {\n"
+		"\t\t\tapi.shell.setBarHidden(args.hide, args.hidden)\n"
+		"\t\t}\n\t}\n}\n");
+	write_file(scratch_plugin + "/Wait.qml",
+		"import QtQuick\n// The scratch wait action: three calls to the compositor - one it\n"
+		"// answers, one it refuses, one it answers only when a chord is\n"
+		"// pressed - each answer written to storage as it comes, so the\n"
+		"// scenario reads back what the callbacks were given. The host\n"
+		"// destroys an action's item once run() returns: the callbacks keep\n"
+		"// to what run() captured, never to the item.\n"
+		"Item {\n\tproperty var api: null\n"
+		"\tfunction run(args) {\n"
+		"\t\tvar answers = []\n"
+		"\t\tvar compositor = api.compositor\n"
+		"\t\tvar storage = api.storage\n"
+		"\t\tvar ask = function(call, params) {\n"
+		"\t\t\tcompositor.call(call, params, function(result, error) {\n"
+		"\t\t\t\tanswers.push({call: call, result: result, error: error})\n"
+		"\t\t\t\tstorage.write(\"answers\", answers)\n"
+		"\t\t\t})\n\t\t}\n"
+		"\t\task(\"subscribe\")\n"
+		"\t\task(\"capture.stop\")\n"
+		"\t\task(\"shortcut.capture\", {scope: \"global\"})\n"
+		"\t}\n}\n");
 	write_file(scratch_plugin + "/ScratchPanel.qml",
 		"import QtQuick\nimport WaylandCanvas.Ui\n"
 		"// The scratch panel: two labelled rows, so the scenario finds the\n"
 		"// card where it should be on the screenshot.\n"
-		"PanelCard {\n\tpanelWidth: 200\n\tpanelName: \"scratch\"\n"
+		"PanelCard {\n\tpanelWidth: 200\n"
 		"\tPanelRow { glyph: \"1\"; label: \"Scratch one\"; clickable: false }\n"
 		"\tPanelRow { glyph: \"2\"; label: \"Scratch two\"; clickable: false }\n}\n");
 

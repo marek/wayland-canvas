@@ -7,7 +7,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 320
-	panelName: "weather"
 
 	readonly property var forecast: model ? model.forecast : []
 

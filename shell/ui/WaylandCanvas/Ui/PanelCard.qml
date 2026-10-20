@@ -23,8 +23,8 @@ PanelWindow {
 	property var api: null
 	property var anchorItem: null // the bar widget the panel hangs from
 	property var model: null // the widget the panel reads its state from
-	// Names the surface so the scenario suite can tell the panels apart;
-	// the fixed width per panel is the other distinguishing mark.
+	// The panel's manifest id, which the host sets: it names the layer
+	// surface `wayland-canvas-panel-<panelName>`.
 	property string panelName: ""
 	property int panelWidth: 240
 

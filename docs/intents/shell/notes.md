@@ -58,7 +58,7 @@ is a plain-HTML file that can be read and edited outside the shell.
 |---|---|
 | Create | The toolbar's note button expands into colour swatches; choosing one puts a note of that colour centred on the cursor — moved only as far as it takes to lie fully on the screen the cursor is on, at that screen's current camera, and clear of the toolbar and the bars — and gives it the keyboard |
 | Action | `canvas.notes/create {color}`: the one action behind it all — the toolbar's entries run it, and so does the control socket's `action.run`, so a script or a keybinding can put a note too. It places the note centred on the cursor, kept on the cursor's screen and clear of the toolbar and the bars, keeps it, and gives it the keyboard |
-| Colours | Yellow, green, blue, pink, purple and orange; the values are the plugin's settings |
+| Colours | One list, the plugin's `colors` setting: a label and a value each, yellow, green, blue, pink, purple and orange by default. The toolbar's colour menu is built from it, and so are the strip's dots, in its order |
 | Card | 220 × 220 canvas px when created, a plugin setting |
 | Look | A card of the note's colour, a darker strip along the top holding the note's controls, the text in dark ink, a grip in the bottom-right corner |
 | Strip | From the left: the colour dots, bold, italic and underline, the font, the text size (− and + around the size), and the × at the right. A note is never narrower than its strip |
@@ -67,7 +67,7 @@ is a plain-HTML file that can be read and edited outside the shell.
 | Formatting | Bold, italic, underline and the text size apply to the selected span, and text typed inside a span continues it; with nothing selected the choice applies to what is typed next. The strip shows the format of the selection — bold, italic or underline on when all of it has it — or at the caret, and Ctrl+B, Ctrl+I and Ctrl+U are the same buttons |
 | Text size | − and + step the size by a pixel: each part of a selection from its own size, or what is typed next. The number between them is the size of the selection or at the caret, empty when the selection mixes sizes, and can be typed into: Enter gives all of the selection that size, Escape leaves it as it was. A new note's text takes the shell's body size |
 | Font | The whole note's, chosen on the strip from every family installed on the machine, filtered by typing. A new note takes the shell's body font |
-| Recolour | Colour dots on the note's strip, ordered as the manifest orders the colours — the toolbar menu's order — because the settings map arrives alphabetised; a colour the menu leaves out follows after |
+| Recolour | Colour dots on the note's strip, one for each colour of the list, in its order |
 | Move | Drag the note by its strip, in the normal view or the overview, on any output: it follows the pointer and stays where it is dropped |
 | Resize | Drag the grip at the bottom-right corner, at any zoom: the note follows the pointer, never smaller than its strip and its text, and the text re-wraps to the new width |
 | Delete | The × at the right of the note's strip; a note left empty when the keyboard goes is deleted too |

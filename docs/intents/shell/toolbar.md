@@ -51,7 +51,7 @@ A toolbar button's manifest entry:
 | `id`, `icon`, `label` | Its name, glyph and label |
 | `action`, `args` | The action it runs, with its arguments |
 | `panel` | The panel it opens |
-| `menu` | Its submenu: entries of `label`, `icon` or `color`, `action`, `args` |
+| `menu` | Its submenu: entries of `label`, `icon` or `color`, `action`, `args`; or `{setting, action}`, one entry for each member of the plugin's list setting of that name, each running the action with that member as its args |
 
 A button names exactly one of `action`, `panel` and `menu`.
 

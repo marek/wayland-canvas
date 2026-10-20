@@ -8,7 +8,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 310
-	panelName: "history"
 
 	PanelRow {
 		label: "Silence popups"

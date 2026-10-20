@@ -9,9 +9,9 @@ import WaylandCanvas.Ui
 // bar.layout first, then each widget's declared order); a widget the
 // config's bar.hidden names is flagged there and left out here, and
 // because the list is live the settings panel hides or shows a widget
-// without reloading the shell — this bar rebuilds its rows when the
-// list changes. Each widget carries its own plugin's api and, when its
-// manifest names one, the panel a left click opens.
+// without reloading the shell — this bar adds or drops the widgets that
+// changed and keeps the rest. Each widget carries its own plugin's api
+// and, when its manifest names one, the panel a left click opens.
 PanelWindow {
 	id: root
 
@@ -63,21 +63,57 @@ PanelWindow {
 		}
 	}
 
+	// The live widget items by name: a change of the list keeps the items
+	// of the widgets that stay, so a hide or show elsewhere on the bar
+	// leaves a clock's format, a weather reading and an open panel's
+	// anchor as they are.
+	property var items: ({})
+
 	function buildWidgets() {
 		var rows = {left: leftSection, center: centreSection, right: rightSection}
-		for (var section in rows) {
-			var children = rows[section].children
-			for (var i = children.length - 1; i >= 0; i--) {
-				children[i].destroy()
+		var shown = widgets.filter(function(widget) { return !widget.hidden })
+		var kept = ({})
+		for (var name in items) {
+			if (shown.some(function(widget) { return widget.name === name })) {
+				kept[name] = items[name]
+			} else {
+				items[name].parent = null // out of the row's list now, destroyed after
+				items[name].destroy()
 			}
 		}
-		for (var j = 0; j < widgets.length; j++) {
-			var widget = widgets[j]
-			if (widget.hidden) {
-				continue
+		var wanted = {left: [], center: [], right: []}
+		for (var j = 0; j < shown.length; j++) {
+			var widget = shown[j]
+			if (kept[widget.name] === undefined) {
+				var item = widget.component.createObject(rows[widget.section],
+					{api: widget.api, panel: widget.panel})
+				if (item === null) {
+					continue
+				}
+				kept[widget.name] = item
 			}
-			widget.component.createObject(rows[widget.section],
-				{api: widget.api, panel: widget.panel})
+			wanted[widget.section].push(kept[widget.name])
+		}
+		items = kept
+		for (var section in rows) {
+			standInOrder(rows[section], wanted[section])
+		}
+	}
+
+	// Makes the row's children stand in the wanted order. Items already in
+	// place stay; from the first one out of place on, the rest are put
+	// back in line, an item new to the row having been added last.
+	function standInOrder(row, wanted) {
+		for (var k = 0; k < wanted.length; k++) {
+			if (row.children[k] !== wanted[k]) {
+				for (var m = k; m < wanted.length; m++) {
+					wanted[m].parent = null
+				}
+				for (m = k; m < wanted.length; m++) {
+					wanted[m].parent = row
+				}
+				return
+			}
 		}
 	}
 }

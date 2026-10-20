@@ -8,7 +8,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 280
-	panelName: "audio"
 
 	readonly property var sink: Pipewire.defaultAudioSink
 

@@ -16,7 +16,6 @@ PanelCard {
 	// Wide enough for its tabs' names on one row: six shares of 78 px hold
 	// the longest of them ("Shortcuts") without eliding.
 	panelWidth: 488
-	panelName: "settings"
 
 	// ---- the settings object: asked once, kept current by the event ----
 
@@ -957,8 +956,7 @@ PanelCard {
 							id: widgetRow
 							required property var modelData
 							label: modelData.pluginName
-							detail: modelData.name === "canvas.agents/agents"
-								? "Shows while an AI tool has usage" : ""
+							detail: modelData.description
 							marked: modelData.hidden
 							clickable: false
 

@@ -12,7 +12,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 200
-	panelName: "tray"
 
 	readonly property var entry: TrayState.activeItem
 

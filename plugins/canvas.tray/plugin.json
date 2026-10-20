@@ -10,7 +10,8 @@
 				"id": "tray",
 				"entry": "Tray.qml",
 				"section": "right",
-				"order": 0
+				"order": 0,
+				"panel": "tray"
 			}
 		],
 		"panels": [

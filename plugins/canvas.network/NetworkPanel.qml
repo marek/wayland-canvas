@@ -19,7 +19,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 340
-	panelName: "network"
 
 	// ---- what the service backends already know ----
 

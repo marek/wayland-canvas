@@ -44,8 +44,8 @@ What `contributes` may hold:
 | Key | Each entry | Shown |
 |---|---|---|
 | `surfaces` | `id`, `entry`, `perOutput` | Top-level windows the plugin owns (the bar, the overview toolbar, note windows) |
-| `barWidgets` | `id`, `entry`, `section` (`left`, `center`, `right`), `order`, optional `panel` | In the bar, whichever plugin provides it |
-| `panels` | `id`, `entry` | Through the common trigger; the id names the panel's layer surface, `wayland-canvas-panel-<id>` |
+| `barWidgets` | `id`, `entry`, `section` (`left`, `center`, `right`), `order`, optional `panel`, optional `description` (a line the settings window shows under the widget) | In the bar, whichever plugin provides it |
+| `panels` | `id`, `entry` | Through the common trigger; the host gives the panel its id, which names the panel's layer surface, `wayland-canvas-panel-<id>` |
 | `toolbarButtons` | `id`, `icon`, `label`, and one of `action`, `panel`, `menu` ([toolbar.md](toolbar.md)) | In the overview toolbar |
 | `actions` | `id`, `entry` (a component whose `run(args)` performs it) | Wherever a button, a menu entry or the control socket's `action.run` names it |
 
@@ -104,7 +104,9 @@ in an earlier one:
 Edits to the config, a plugin folder or a plugin's files apply while the
 shell runs: the shell reloads with them. What the host writes itself — a
 plugin setting, the mode, a change from the settings window
-([settings.md](settings.md)) — applies at once without a reload.
+([settings.md](settings.md)) — applies at once without a reload, and
+touches only what it changes: hiding or showing a bar widget adds or
+drops that widget, and every other widget and open panel stays as it is.
 
 ### The common trigger
 
@@ -134,8 +136,8 @@ its first bindings and its `Component.onCompleted` already have it:
 | `api.actions` | `run(<action name>, args)` |
 | `api.theme` | `mode` (`light` or `dark`), `colors` for that mode, `setMode(mode)` ([theme.md](theme.md)) |
 | `api.canvas` | A surface of the plugin's own on the plane: `place(<surface>, {x, y, width, height})` and `unplace(<surface>)`, in canvas coordinates, and for a drag the plugin hands to the compositor on a press, `move(<surface>, callback)` and `resize(<surface>, {edges, minWidth, minHeight}, callback)`, each answered with the rectangle at the release ([../platform/ipc.md](../platform/ipc.md)). What a plugin draws there is its own — the compositor places it and nothing more |
-| `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops), `call(method, params, callback)` with its result or error, and its events ([../platform/ipc.md](../platform/ipc.md)) |
-| `api.shell` | The shell config, live: `config`, `configPath`; every bar widget, hidden ones flagged (`barWidgets`: name, plugin name, section, order, hidden), `barHidden(name)`, `setBarHidden(name, hidden)`; `toolbarPosition`, `setToolbarPosition(edge)`. The host writes `shell.json` and applies the change at once, without a reload ([settings.md](settings.md)) |
+| `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops, windows, the theme mode and the recording), kept current by its events; `call(method, params, callback)`, answered once with `(result, error)`: `error` is null, or text, the compositor's own or `disconnected` when the socket went before the answer; and the events themselves ([../platform/ipc.md](../platform/ipc.md)) |
+| `api.shell` | The shell config, live: `config`, `configPath`; every bar widget, hidden ones flagged (`barWidgets`: name, plugin name, section, order, description, hidden), `barHidden(name)`, `setBarHidden(name, hidden)`; the edge of the overview toolbar (`toolbarPosition`, `setToolbarPosition(edge)`) and of the app bar with its switch (`appBarPosition`, `appBarEnabled`, `setAppBarPosition(edge)`, `setAppBarEnabled(on)`), each with its default when the config names none; `pluginSettingsPages` and `setPluginSetting(plugin id, key, value)`, the declared settings the settings window renders. The host writes `shell.json` and applies the change at once, without a reload ([settings.md](settings.md)). These members are all a plugin sees of the host |
 
 A surface component is also handed the registry of everything loaded — the
 ordered bar widgets and toolbar buttons with their components — because a

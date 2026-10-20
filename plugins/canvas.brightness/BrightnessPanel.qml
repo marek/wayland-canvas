@@ -7,7 +7,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 240
-	panelName: "brightness"
 
 	readonly property int percent: model ? model.percent : 0
 

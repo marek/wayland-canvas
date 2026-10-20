@@ -9,7 +9,6 @@ PanelCard {
 	id: root
 
 	panelWidth: 300
-	panelName: "bluetooth"
 
 	readonly property var adapter: model ? model.adapter : null
 	readonly property bool radioOn: adapter != null && adapter.enabled

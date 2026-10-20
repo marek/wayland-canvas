@@ -14,7 +14,8 @@
 				"entry": "Agents.qml",
 				"section": "right",
 				"order": 0.5,
-				"panel": "agents"
+				"panel": "agents",
+				"description": "Shows while an AI tool has usage"
 			}
 		],
 		"panels": [

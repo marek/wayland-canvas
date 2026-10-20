@@ -43,28 +43,11 @@ Item {
 	readonly property int slideMs: 200
 	readonly property int edgeMargin: UiTheme.edgeMargin
 
-	// The host item, which holds the live config: api.shell where the
-	// host hands itself out by that name, the plugin api's back-link
-	// otherwise — the same item either way.
-	readonly property var shell: {
-		if (api == null) {
-			return null
-		}
-		if (api.shell !== undefined) {
-			return api.shell
-		}
-		return api.plugin != null ? api.plugin.host : null
-	}
-
 	// The edge the config names — a column on the left and right, a row
 	// on the top and bottom — right when it names none of them or
 	// something else: a hand edit can hold anything.
-	readonly property string edge: {
-		var config = shell != null ? shell.config : null
-		var named = config != null && config.toolbar != null
-			? config.toolbar.position : ""
-		return named === "left" || named === "top" || named === "bottom" ? named : "right"
-	}
+	readonly property string edge: api != null && api.shell != null
+		? api.shell.toolbarPosition : "right"
 	readonly property bool vertical: edge === "left" || edge === "right"
 
 	// ---- which buttons, and when ----
@@ -146,19 +129,11 @@ Item {
 	// surface knows the other: this length comes from the shell config and
 	// the compositor's window list, which the app bar reads too.
 	readonly property int appsLength: {
-		var section = shell != null && shell.config != null
-			? shell.config.appbar : null
-		if (section != null && section.enabled === false) {
+		if (api == null || api.shell == null || !api.shell.appBarEnabled
+				|| api.shell.appBarPosition !== edge) {
 			return 0
 		}
-		var named = section != null && section.position !== undefined
-			? section.position : ""
-		var appEdge = named === "right" || named === "top" || named === "bottom"
-			? named : "left"
-		if (appEdge !== edge) {
-			return 0
-		}
-		var windows = api != null && api.compositor != null
+		var windows = api.compositor != null
 			? (api.compositor.state.windows || []) : []
 		var seen = ({})
 		var apps = 0

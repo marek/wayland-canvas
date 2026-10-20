@@ -25,8 +25,10 @@ Item {
 	property var plugins: []
 
 	// Everything the plugins contributed, for the surfaces that host them:
-	// barWidgets: {name, section, order, panel, component, api} — `panel`
-	//   is the global name of the panel a left click opens, "" for none;
+	// barWidgets: {name, pluginName, section, order, panel, description,
+	//   component, api} — `panel` is the global name of the panel a left
+	//   click opens, "" for none, and `description` the manifest's optional
+	//   line about the widget, "" for none;
 	//   a widget the config's bar.hidden names is left out of this list and
 	//   still listed by api.shell.barWidgets, flagged;
 	// toolbarButtons: {name, icon, label, action, args, panel, menu, order} —
@@ -212,11 +214,20 @@ Item {
 		for (var i = 0; i < plugins.length; i++) {
 			if (plugins[i].id === id) {
 				plugins[i].api.plugin.setSetting(key, value)
-				rebuildRegistry()
 				return true
 			}
 		}
 		return false
+	}
+
+	// A plugin's own setSetting landing in the config as the plugin's
+	// plugins.<id>.settings override.
+	function writePluginSetting(id, key, value) {
+		config.plugins = config.plugins || {}
+		config.plugins[id] = config.plugins[id] || {}
+		config.plugins[id].settings = config.plugins[id].settings || {}
+		config.plugins[id].settings[key] = value
+		writeConfig()
 	}
 
 	// Whether the config's bar.hidden names this widget.
@@ -256,7 +267,6 @@ Item {
 		config.toolbar = config.toolbar || {}
 		config.toolbar.position = edge
 		writeConfig()
-		rebuildRegistry()
 		return true
 	}
 
@@ -270,7 +280,6 @@ Item {
 		config.appbar = config.appbar || {}
 		config.appbar.position = edge
 		writeConfig()
-		rebuildRegistry()
 		return true
 	}
 
@@ -278,7 +287,6 @@ Item {
 		config.appbar = config.appbar || {}
 		config.appbar.enabled = on === true
 		writeConfig()
-		rebuildRegistry()
 		return true
 	}
 
@@ -305,6 +313,11 @@ Item {
 		id: panels
 	}
 
+	ShellApi {
+		id: shellApi
+		_host: host
+	}
+
 	CanvasApi {
 		id: canvasApi
 		compositor: compositor
@@ -316,7 +329,7 @@ Item {
 
 	ThemeApi {
 		id: theme
-		host: host
+		_host: host
 	}
 
 	// ---- reading manifests and plugin state ----
@@ -420,8 +433,11 @@ Item {
 				skip(candidate.dir, "disabled in the config")
 				continue
 			}
+			var overrides = config.plugins && config.plugins[id]
+				? config.plugins[id].settings : null
 			var pluginApi = pluginApiComponent.createObject(host,
-				{host: host, pluginId: id, manifest: manifest})
+				{pluginId: id, manifest: manifest, overrides: overrides})
+			pluginApi.settingWritten.connect(writePluginSetting)
 			var storage = storageApiComponent.createObject(host,
 				{dir: xdgHome("XDG_STATE_HOME", ".local/state") + "/wayland-canvas/plugins/" + id})
 			storageDirs.push(storage.dir)
@@ -437,7 +453,7 @@ Item {
 					actions: actions,
 					theme: theme,
 					compositor: compositor,
-					shell: host,
+					shell: shellApi,
 				},
 			})
 		}
@@ -570,11 +586,12 @@ Item {
 					section: e.section,
 					order: e.order || 0,
 					panel: e.panel ? plugin.id + "/" + e.panel : "",
+					description: e.description || "",
 					component: piece,
 					api: plugin.api,
 				})
 			} else if (kind === "panels") {
-				var instance = piece.createObject(host, {api: plugin.api})
+				var instance = piece.createObject(host, {api: plugin.api, panelName: e.id})
 				if (instance == null) {
 					problem = "panel " + e.id + " did not instantiate"
 					break
@@ -593,11 +610,7 @@ Item {
 			label: b.label || "",
 			action: b.action ? plugin.id + "/" + b.action : "",
 			panel: b.panel ? plugin.id + "/" + b.panel : "",
-			menu: (b.menu || []).map(function(entry) {
-				return Object.assign({}, entry, {
-					action: entry.action ? plugin.id + "/" + entry.action : ""
-				})
-			}),
+			menu: buttonMenu(plugin, b.menu),
 			args: b.args,
 			order: b.order || 0,
 		})
@@ -619,6 +632,27 @@ Item {
 	start()
 	}
 
+	// A button's submenu: the entries it declares, or the entries of the
+	// plugin setting its `menu` names ({setting, action}), each of which
+	// runs that action with the entry itself as its args. Action names
+	// become global. A list read from a manifest is not a real array
+	// (Array.isArray says no), so lists are told by their `map`.
+	function buttonMenu(plugin, menu) {
+		var entries = menu || []
+		if (typeof entries.map !== "function") {
+			var list = plugin.api.plugin.settings[menu.setting]
+			entries = list != null && typeof list.map === "function"
+				? list.map(function(item) {
+					return Object.assign({}, item, {action: menu.action, args: item})
+				}) : []
+		}
+		return entries.map(function(entry) {
+			return Object.assign({}, entry, {
+				action: entry.action ? plugin.id + "/" + entry.action : ""
+			})
+		})
+	}
+
 	// Every contribution that loaded, before the config orders and filters
 	// them: the registry is derived from these, so it can be re-derived when
 	// the config changes without compiling or registering anything again.
@@ -626,9 +660,10 @@ Item {
 	property var allButtons: []
 
 	// Rebuilds the registry (and the shell api's bar-widget list) from the
-	// contributions and the config as it stands. A reload ends in
-	// buildRegistry; the host's own config writes — which never reload —
-	// end here, so what they change reaches every live binding.
+	// contributions and the config as it stands. Only bar.layout,
+	// bar.hidden and toolbar.order feed it: a reload ends in
+	// buildRegistry, and setBarHidden, the host's one write of those,
+	// ends here. Every other write leaves the live widgets alone.
 	function rebuildRegistry() {
 		var ordered = orderedWidgets(allWidgets)
 		barWidgets = ordered

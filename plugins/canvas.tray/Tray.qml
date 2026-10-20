@@ -47,7 +47,7 @@ Row {
 							// shows lives in TrayState.
 							TrayState.activeItem = item.entry
 							if (root.api != null) {
-								root.api.panels.toggle("canvas.tray/tray", item)
+								root.api.panels.toggle(root.panel, item)
 							}
 						} else {
 							item.entry.secondaryActivate()

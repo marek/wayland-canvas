@@ -13,7 +13,7 @@ import WaylandCanvas.Ui
 Item {
 	id: root
 
-	property var host: null
+	required property var _host
 
 	// "light" or "dark".
 	readonly property string mode: UiTheme.mode
@@ -31,15 +31,15 @@ Item {
 			return false
 		}
 		UiTheme.mode = mode
-		host.config.theme = host.config.theme || {}
-		host.config.theme.mode = mode
-		host.writeConfig()
+		_host.config.theme = _host.config.theme || {}
+		_host.config.theme.mode = mode
+		_host.writeConfig()
 		return true
 	}
 
 	function setMode(mode) {
 		if (apply(mode)) {
-			host.compositorApi.call("theme.set", {mode: mode})
+			_host.compositorApi.call("theme.set", {mode: mode})
 		}
 	}
 
@@ -55,17 +55,17 @@ Item {
 	// unknown, logged), and the compositor told even when it is dark, so a
 	// compositor that did not start dark is corrected at once.
 	function start() {
-		var mode = host.config.theme ? host.config.theme.mode : undefined
+		var mode = _host.config.theme ? _host.config.theme.mode : undefined
 		if (mode !== undefined && mode !== "light" && mode !== "dark") {
 			console.warn("[plugins] unknown theme.mode '" + mode + "' in the config: dark")
 			mode = "dark"
 		}
 		UiTheme.mode = mode === "light" ? "light" : "dark"
-		host.compositorApi.call("theme.set", {mode: UiTheme.mode})
+		_host.compositorApi.call("theme.set", {mode: UiTheme.mode})
 	}
 
 	Connections {
-		target: host.compositorApi
+		target: _host.compositorApi
 		function onEvent(name, params) {
 			if (name === "theme") {
 				root.adopt(params.mode)

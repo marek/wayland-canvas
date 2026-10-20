@@ -1064,6 +1064,12 @@ Tests:
     network panel's dots do (cases 3, 11, 44, 51, 118, 122, 126, 130, 141,
     145, 186, 187, 230, 241, 424 and 615, and the 23 steps that take the
     shot before a check).
+  - Seen flaking on a loaded machine: `edge_checks`' "the strip is
+    centred along its edge" fails right after `toolbar_on_edge` holds,
+    and passes on a rerun. It checks the strip's place once instead of
+    polling until the strip has settled.
+  - Phase 8's harness (its `settled()` poll) and phase 10's bar split are
+    where the bar part gets done.
 
 ### 6. One owner per fact: the compositor
 
@@ -1420,7 +1426,7 @@ Tests:
 
 ### 7. One owner per fact: the shell and its plugins
 
-- [ ] Plugins see only the documented API
+- [x] Plugins see only the documented API
   - The problem:
     - `api.shell` is the Host item (Host.qml:418), and `api.plugin.host`
       exposes it too.
@@ -1477,6 +1483,10 @@ Tests:
   - Acceptance: `git grep -nE 'canvas\.[a-z]+/' -- plugins shell` finds
     only a plugin's own names inside its own folder, and the bar and
     notes scenarios are green.
+  - Left open: TrayState stays. The panel box below stops the panel
+    manager passing the anchor, which leaves TrayState the one owner of
+    the menu's item. The tray widget keeps its `panel` property, which
+    now carries the manifest's panel name. The rest is done and green.
 - [ ] Every panel reads its state from its plugin, wherever it was opened
   from
   - The problem: the panel manager hands a panel the item that opened it
@@ -1497,7 +1507,7 @@ Tests:
     - the weather is fetched once;
     - each of these panels opened through `api.panels.open` from an
       action shows its data.
-- [ ] The host rebuilds only what a write changes
+- [x] The host rebuilds only what a write changes
   - The problem:
     - `rebuildRegistry()` runs on every host write (Host.qml:193, 223,
       237, 251, 259, 613), though only bar.layout, bar.hidden and
@@ -1508,7 +1518,7 @@ Tests:
   - Acceptance: in the bar scenario, moving the toolbar to another edge
     leaves a clock panel's toggle state and the weather fetch count
     unchanged.
-- [ ] Compositor.qml keeps its state from one event table
+- [x] Compositor.qml keeps its state from one event table
   - The problem:
     - Five events update the state it keeps (110-128), but
       `capture.recording` (ipc.md:67, 141) is not among them.
