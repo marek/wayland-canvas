@@ -98,7 +98,7 @@ Each split adds its new subsystems to cpp-standards.md's
 
 ### 0. Before 2026-11-01
 
-- [ ] The agent-usage unit test holds in every season
+- [x] The agent-usage unit test holds in every season
   - The problem: `tests/test_agent_usage.cpp:703` sets
     `TZ=America/New_York`, and `test_midnight_buckets` (624-655) assumes
     UTC-4. Under EST that check fails `(600 0 0)`, and `tools/check.sh`

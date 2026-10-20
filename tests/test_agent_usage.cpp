@@ -624,8 +624,8 @@ void test_cache_reuse() {
 void test_midnight_buckets() {
 	// Two instants an hour apart, one either side of local midnight, both
 	// written with explicit Z offsets: the collector must land them on
-	// different local dates. 03:30Z and 04:30Z straddle midnight in
-	// America/New_York (UTC-4), so one lands a local day before the other.
+	// different local dates. 03:30Z and 04:30Z straddle midnight in the
+	// fixed UTC-4 zone main() sets, so one lands a local day before the other.
 	std::string late = date_offset(-1);
 	write_file(root + "/midnight/a.jsonl", join({
 		R"({"type":"message","id":"w1","timestamp":")", late,
@@ -698,9 +698,9 @@ int main() {
 	std::error_code ec;
 	std::filesystem::remove_all(root, ec);
 	std::filesystem::create_directories(root, ec);
-	// A fixed zone keeps the midnight arithmetic stable wherever the
-	// suite runs.
-	setenv("TZ", "America/New_York", 1);
+	// A fixed-offset zone (UTC-4 all year, no zoneinfo) keeps the midnight
+	// arithmetic and date_offset's day steps the same in every season.
+	setenv("TZ", "<-04>4", 1);
 	tzset();
 
 	test_display_names();
