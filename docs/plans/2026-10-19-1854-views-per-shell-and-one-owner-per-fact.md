@@ -118,7 +118,7 @@ Each split adds its new subsystems to cpp-standards.md's
 
 ### 2. A view per shell: the X11 crashes
 
-- [ ] The xwayland scenario drives the three crashes and fails on them
+- [x] The xwayland scenario drives the three crashes and fails on them
   - Add these steps to `tests/scenarios/xwayland.cpp`, against the X11
     window of `tests/clients/x11-client.c`:
     - (a) Hold Super, press BTN_RIGHT over the window, move in four steps,
@@ -133,7 +133,7 @@ Each split adds its new subsystems to cpp-standards.md's
     `canvas-plugins` skill, rule 7).
   - Before the split, each of (a), (b) and (c) ends the run with SIGSEGV
     (exit 139). Commit these steps with the split, not before it.
-- [ ] `View` is abstract, and `XdgView` and `X11View` are its two shells
+- [x] `View` is abstract, and `XdgView` and `X11View` are its two shells
   - `src/windows/view.h` gets a protected `View(Server &)` and
     `virtual ~View()`.
   - Every shell query becomes a pure virtual, named as today minus the
@@ -211,7 +211,7 @@ Each split adds its new subsystems to cpp-standards.md's
     - `git grep -nE 'is_x11|ViewShell|override_redirect' -- src ':!src/windows/view_x11.*'`
     - `git grep -nE 'wlr_xdg_toplevel|wlr_xwayland_surface' -- src/windows/view.h`
     - `git grep -lE 'windows/view_(xdg|x11)\.h' -- src ':!src/windows'`
-- [ ] An interactive resize belongs to the view, and each shell answers
+- [x] An interactive resize belongs to the view, and each shell answers
   its own part
   - Today grab.cpp does all of it, and skips X11 windows (233-235) even
     though their borders show resize cursors. It:
@@ -249,7 +249,7 @@ Each split adds its new subsystems to cpp-standards.md's
     - A left-edge drag keeps the right edge within 1 px, both after the
       release and after the client's next commit.
     - The input scenario's xdg resize checks stay green.
-- [ ] The unlock and the window shot go through View queries
+- [x] The unlock and the window shot go through View queries
   - lock.cpp:139 calls `focused_view->surface()`.
   - capture.cpp:196-201 uses `view.shell_geometry()` and `view.surface()`,
     with the same empty-geometry fallback as draw_view
@@ -259,7 +259,7 @@ Each split adds its new subsystems to cpp-standards.md's
       `seat->keyboard_state.focused_surface` is the X11 window's surface.
     - Step (c): the shot's PNG has the window frame's size and shows the
       client's colour.
-- [ ] xdg popups and the xdg-shell globals live beside XdgView
+- [ ] xdg popups and the xdg-shell globals live beside XdgView (on screen owed)
   - Move `Popup`, `popup_owner_view`, `popup_owner_layer` and the
     unconstrain code (view.cpp:262-345, 1025-1046) to
     `src/windows/popup.{h,cpp}`.
@@ -268,7 +268,7 @@ Each split adds its new subsystems to cpp-standards.md's
   - Acceptance: `git grep -nE 'wlr_xdg|wlr_xwayland' -- src/windows/view.cpp`
     prints nothing; the scenarios are green; in a nested run, a GTK app's
     menu opens where it should.
-- [ ] Phase 2 verified
+- [ ] Phase 2 verified (on screen owed)
   - `tools/check.sh` is green.
   - Nested run (`build/wayland-canvas -s foot` inside the session) with
     an X11 app such as `xterm`, `xeyes` or `xclock`:

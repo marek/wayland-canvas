@@ -21,6 +21,7 @@
 #include "core/util.h"
 #include "platform/session_bus.h"
 #include "windows/launches.h"
+#include "windows/popup.h"
 #include "windows/view.h"
 
 class LayerSurface;
@@ -89,6 +90,8 @@ public:
 	// X did not answer within config::x11_input_wait_ms: input goes on
 	// without the answer, and the ask is dropped.
 	void x11_give_up();
+	// Whether `surface` belongs to an X11 window: input to one waits for X.
+	static bool on_x11_window(wlr_surface *surface);
 
 	// layer.cpp
 	void refocus_layers();
@@ -183,8 +186,13 @@ private:
 	Listener new_output_, layout_change_;
 
 	// view.cpp
-	void init_views();
 	void finish_views();
+	// view_xdg.cpp: the xdg-shell global and the windows and popups it brings
+	void init_xdg_shell();
+	void finish_xdg_shell();
+	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
+	void handle_new_xdg_popup(wlr_xdg_popup *popup);
+	Listener new_xdg_toplevel_, new_xdg_popup_;
 	// view_x11.cpp: Xwayland and the X11 windows it brings
 	void init_xwayland();
 	void finish_xwayland();
@@ -203,9 +211,6 @@ private:
 	void x11_ask_settled();
 	std::optional<unsigned int> x11_settle_ask_;
 	bool x11_unasked_ = false;
-	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
-	void handle_new_xdg_popup(wlr_xdg_popup *popup);
-	Listener new_xdg_toplevel_, new_xdg_popup_;
 
 	// layer.cpp
 	void init_layers();

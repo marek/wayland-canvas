@@ -313,7 +313,7 @@ void drag_view(View &view, double dx, double dy) {
 
 View *view_titled(std::string_view title) {
 	for (View *v : server->views) {
-		if (v->mapped && v->wlr->title != nullptr && title == v->wlr->title) {
+		if (v->mapped && v->shell_title() != nullptr && title == v->shell_title()) {
 			return v;
 		}
 	}

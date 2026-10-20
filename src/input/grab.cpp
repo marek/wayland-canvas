@@ -113,13 +113,7 @@ void PointerGrab::begin_resize(View &view, Output &output, uint32_t edges) {
 		.start = start,
 		.edges = edges,
 	};
-	// view.cpp anchors the moving (left/top) edges on commit while resizing.
-	view.resize_edges = edges;
-	view.resize_end_serial = 0;
-	view.resize_start = start;
-	if (view.wlr != nullptr) {
-		wlr_xdg_toplevel_set_resizing(view.wlr, true);
-	}
+	view.begin_interactive_resize(edges);
 	server_.input.set_cursor_image(
 		wlr_xcursor_get_resize_name(static_cast<wlr_edges>(edges)));
 }
@@ -230,9 +224,6 @@ void PointerGrab::move_motion(Move &move) {
 
 void PointerGrab::resize_motion(Resize &resize) {
 	View *view = resize.view;
-	if (view->wlr == nullptr) {
-		return;
-	}
 	double dx = (server_.cursor->x - resize.lx) / resize.cam.zoom;
 	double dy = (server_.cursor->y - resize.ly) / resize.cam.zoom;
 	double x1 = resize.start.x;
@@ -252,22 +243,23 @@ void PointerGrab::resize_motion(Resize &resize) {
 		y2 += dy;
 	}
 
-	wlr_xdg_toplevel *toplevel = view->wlr;
-	double min_w = 100, min_h = 60;
-	if (toplevel->current.min_width > min_w) {
-		min_w = toplevel->current.min_width;
-	}
-	if (toplevel->current.min_height > min_h) {
-		min_h = toplevel->current.min_height;
-	}
-	double max_w = toplevel->current.max_width > 0
-		? toplevel->current.max_width : 1e9;
-	double max_h = toplevel->current.max_height > 0
-		? toplevel->current.max_height : 1e9;
-	double w = clampd(x2 - x1, min_w, max_w);
-	double h = clampd(y2 - y1, min_h, max_h);
-	wlr_xdg_toplevel_set_size(toplevel, static_cast<int32_t>(std::round(w)),
-		static_cast<int32_t>(std::round(h)));
+	SizeLimit min = view->min_size();
+	SizeLimit max = view->max_size();
+	double min_w = std::max(config::resize_min_width, min.width);
+	double min_h = std::max(config::resize_min_height, min.height);
+	double max_w = max.width > 0 ? max.width : 1e9;
+	double max_h = max.height > 0 ? max.height : 1e9;
+	int width = static_cast<int>(std::round(clampd(x2 - x1, min_w, max_w)));
+	int height = static_cast<int>(std::round(clampd(y2 - y1, min_h, max_h)));
+	// The edges not dragged stay where they were.
+	view->resize_to(wlr_box{
+		resize.edges & WLR_EDGE_LEFT ? resize.start.x + resize.start.width - width
+			: resize.start.x,
+		resize.edges & WLR_EDGE_TOP ? resize.start.y + resize.start.height - height
+			: resize.start.y,
+		width,
+		height,
+	});
 }
 
 void PointerGrab::pan_motion(Pan &pan) {
@@ -503,6 +495,7 @@ void PointerGrab::cancel() {
 	if (const auto *move = std::get_if<Move>(&state_)) {
 		end_view_grab(*move->view);
 	} else if (const auto *resize = std::get_if<Resize>(&state_)) {
+		resize->view->end_interactive_resize();
 		end_view_grab(*resize->view);
 	} else if (const auto *button = std::get_if<TitleButton>(&state_)) {
 		end_view_grab(*button->view);
@@ -518,11 +511,6 @@ void PointerGrab::cancel() {
 
 void PointerGrab::end_view_grab(View &view) {
 	view.deco.pressed = DecoPart::none;
-	if (view.resize_edges != 0 && view.resize_end_serial == 0) {
-		// view.cpp keeps anchoring until the client acks this configure.
-		view.resize_end_serial =
-			wlr_xdg_toplevel_set_resizing(view.wlr, false);
-	}
 	view.damage();
 }
 

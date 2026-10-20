@@ -136,7 +136,7 @@ void SessionLock::unlock_session() {
 	arm_idle_timer();
 	server_.refocus_layers();
 	if (server_.focused_view != nullptr && server_.focused_layer == nullptr) {
-		server_.focus_keyboard(server_.focused_view->wlr->base->surface);
+		server_.focus_keyboard(server_.focused_view->surface());
 	}
 	server_.damage_all();
 }

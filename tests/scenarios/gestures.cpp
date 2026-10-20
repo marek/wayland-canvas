@@ -95,7 +95,7 @@ Desktop *desk(std::optional<DesktopId> id) {
 
 View *view_titled(const char *title) {
 	for (View *v : server->views) {
-		if (v->mapped && v->wlr->title && std::strcmp(v->wlr->title, title) == 0) {
+		if (v->mapped && v->shell_title() && std::strcmp(v->shell_title(), title) == 0) {
 			return v;
 		}
 	}
@@ -318,7 +318,7 @@ std::string changed_boxes() {
 		if (!view->mapped || now.x != box.x || now.y != box.y || now.w != box.w
 				|| now.h != box.h) {
 			out += std::format(" ({} {:.0f}x{:.0f} at {:.0f},{:.0f} -> {:.0f}x{:.0f} at {:.0f},{:.0f}{})",
-				view->wlr->title != nullptr ? view->wlr->title : "?", box.w, box.h,
+				view->shell_title() != nullptr ? view->shell_title() : "?", box.w, box.h,
 				box.x, box.y, now.w, now.h, now.x, now.y, view->mapped ? "" : ", unmapped");
 		}
 	}
@@ -735,7 +735,7 @@ int run_step() {
 			&& std::fabs(server->seat->pointer_state.sy - (cy - marker->y)) < 1.0,
 			std::format("the pointer lands where it points ({:.1f},{:.1f} surface-local)",
 				server->seat->pointer_state.sx, server->seat->pointer_state.sy));
-		check(server->seat->pointer_state.focused_surface == marker->wlr->base->surface,
+		check(server->seat->pointer_state.focused_surface == marker->surface(),
 			"the pointer focuses the window through the camera");
 		click(BTN_LEFT, true);
 		click(BTN_LEFT, false);

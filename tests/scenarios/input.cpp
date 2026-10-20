@@ -410,7 +410,7 @@ void reap_x11_client() {
 
 View *x11_view() {
 	for (View *view : server->views) {
-		if (view->mapped && view->is_x11()) {
+		if (view->mapped && view->as_x11() != nullptr) {
 			return view;
 		}
 	}

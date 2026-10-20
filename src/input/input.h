@@ -182,8 +182,6 @@ public:
 	// Whatever waits runs now, in order: before a device goes, since a
 	// waiting event names it.
 	void run_waiting();
-	// Whether `surface` is an X11 window's.
-	static bool is_x11(wlr_surface *surface);
 
 	Touch touch;
 	Tablets tablets;

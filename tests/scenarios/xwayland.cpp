@@ -7,8 +7,12 @@
 // one under it takes clicks where it shows and once raised, a minimized one
 // takes none, and windows past X's screen or larger than it at 25 % take
 // clicks at their own points; a click after a jump, and a press in the same
-// instant as one, land where they were aimed. Writes only under
-// $CANVAS_TMP, with canvas.conf in its own scratch config dir.
+// instant as one, land where they were aimed. The window resizes (by
+// Super+right-drag, by its frame's left edge, by its own
+// _NET_WM_MOVERESIZE request), the session locks and unlocks over it, and
+// Super+Shift+4 shoots it, the compositor answering `msg state` after each.
+// Writes only under $CANVAS_TMP, with canvas.conf in its own scratch config
+// dir.
 #include <cairo.h>
 #include <cerrno>
 #include <cmath>
@@ -29,18 +33,21 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <variant>
 #include <vector>
 #include "core/config.h"
 #include "core/server.h"
 #include "core/wlr.h"
 #include "platform/output.h"
 #include "windows/view.h"
+#include "windows/view_x11.h"
 
 namespace {
 
 std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
+constexpr int last_step = 120; // the step that ends the run; a step that cannot go on jumps here
 bool finished = false;
 uint32_t t = 90000;
 // An X11 client of the scenario's own, and what it has said on stdout.
@@ -54,6 +61,8 @@ X11Client client, other;
 Camera home{}; // the camera the run starts at
 Point main_spot{}; // where the raised main window's click is aimed, its own point
 std::size_t desktops_before = 0; // the desktops before a fullscreen step
+wlr_box resized_from{}; // the X11 window's content box before the resize drag
+Point drag_from{}; // where the resize drag's button went down
 std::string shot_dir;
 wlr_pointer ptr{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
@@ -94,6 +103,15 @@ std::string read_text(const std::string &path) {
 		out.pop_back();
 	}
 	return out;
+}
+
+void write_text(const std::string &path, std::string_view text) {
+	FILE *f = std::fopen(path.c_str(), "w");
+	if (f == nullptr) {
+		return;
+	}
+	std::fwrite(text.data(), 1, text.size(), f);
+	std::fclose(f);
 }
 
 // Starts `c` at the scenario's size; later arguments override it.
@@ -203,9 +221,153 @@ void super_key(uint32_t code) {
 	key(KEY_LEFTMETA, false);
 }
 
+// ---- the control socket, the locker and the shots ----
+
+// The scenarios' locker, with its stdout on a pipe.
+pid_t locker_pid = -1;
+int locker_out = -1;
+std::string locker_lines;
+std::string pictures_dir; // the scratch Pictures: every shot lands here
+int state_asks = 0;
+
+bool start_locker() {
+	const char *bin = std::getenv("CANVAS_LOCK_CLIENT");
+	if (bin == nullptr || *bin == '\0') {
+		return false;
+	}
+	int fds[2];
+	if (pipe(fds) != 0) {
+		return false;
+	}
+	locker_pid = fork();
+	if (locker_pid == 0) {
+		sigset_t empty;
+		sigemptyset(&empty);
+		sigprocmask(SIG_SETMASK, &empty, nullptr);
+		close(fds[0]);
+		dup2(fds[1], 1);
+		close(fds[1]);
+		execl(bin, "lock-client", static_cast<char *>(nullptr));
+		_exit(127);
+	}
+	close(fds[1]);
+	fcntl(fds[0], F_SETFL, O_NONBLOCK);
+	locker_out = fds[0];
+	locker_lines.clear();
+	return locker_pid > 0;
+}
+
+std::string_view locker_said() {
+	char buf[512];
+	ssize_t got = 0;
+	while (locker_out >= 0 && (got = read(locker_out, buf, sizeof buf)) > 0) {
+		locker_lines.append(buf, static_cast<std::size_t>(got));
+	}
+	return locker_lines;
+}
+
+void reap_locker() {
+	if (locker_pid > 0) {
+		kill(locker_pid, SIGKILL);
+		waitpid(locker_pid, nullptr, 0);
+		locker_pid = -1;
+	}
+	if (locker_out >= 0) {
+		close(locker_out);
+		locker_out = -1;
+	}
+}
+
+// A `msg state` round trip on the compositor's own control socket, run
+// through its own spawn so this process never blocks; the answer is read a
+// step later by state_answered().
+void ask_state() {
+	state_asks++;
+	spawn(std::format("\"{}\" msg state > '{}/state-{}.out' 2>&1; "
+			"echo $? > '{}/state-{}.code'",
+		std::getenv("WAYLAND_CANVAS_BIN"), shot_dir, state_asks, shot_dir,
+		state_asks).c_str());
+}
+
+bool state_answered() {
+	return !read_text(std::format("{}/state-{}.code", shot_dir, state_asks)).empty();
+}
+
+// The last ask's answer: the compositor is alive and says what it holds.
+void check_alive(std::string_view after) {
+	std::string code = read_text(std::format("{}/state-{}.code", shot_dir, state_asks));
+	std::string said = read_text(std::format("{}/state-{}.out", shot_dir, state_asks));
+	check(code == "0" && said.find("\"windows\"") != std::string::npos,
+		std::format("the compositor answers `msg state` after {}", after));
+}
+
+// The newest file the shot hotkey saved, "" when there is none.
+std::string newest_shot() {
+	std::string newest;
+	std::filesystem::file_time_type newest_time{};
+	std::error_code ec;
+	for (const auto &entry : std::filesystem::directory_iterator(
+			pictures_dir + "/Screenshots", ec)) {
+		if (!entry.path().filename().string().starts_with("Screenshot")) {
+			continue;
+		}
+		std::filesystem::file_time_type time = entry.last_write_time(ec);
+		if (newest.empty() || time > newest_time) {
+			newest = entry.path().string();
+			newest_time = time;
+		}
+	}
+	return newest;
+}
+
+// A PNG's size and the share of its pixels that are the colour `rgb`.
+struct PngLook {
+	int width = 0, height = 0;
+	double share = -1;
+};
+
+PngLook look_at_png(const std::string &path, uint32_t rgb) {
+	cairo_surface_t *image = cairo_image_surface_create_from_png(path.c_str());
+	if (cairo_surface_status(image) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(image);
+		return {};
+	}
+	cairo_surface_flush(image);
+	PngLook look;
+	look.width = cairo_image_surface_get_width(image);
+	look.height = cairo_image_surface_get_height(image);
+	int stride = cairo_image_surface_get_stride(image);
+	const unsigned char *data = cairo_image_surface_get_data(image);
+	long hits = 0;
+	for (int y = 0; y < look.height; y++) {
+		const uint32_t *row = reinterpret_cast<const uint32_t *>(data + y * stride);
+		for (int x = 0; x < look.width; x++) {
+			if ((row[x] & 0x00ffffffu) == rgb) {
+				hits++;
+			}
+		}
+	}
+	cairo_surface_destroy(image);
+	look.share = look.width * look.height > 0
+		? static_cast<double>(hits) / (look.width * look.height) : -1;
+	return look;
+}
+
+// Whether the interactive resize grab is on.
+bool resizing() {
+	return std::holds_alternative<PointerGrab::Resize>(server->input.grab.state());
+}
+
+// Whether `now` still ends where `from` did, at the right and at the bottom,
+// within a pixel: the edges a drag by the left or top edge leaves alone.
+bool far_edges_held(const wlr_box &from, const wlr_box &now) {
+	return std::abs(now.x + now.width - (from.x + from.width)) <= 1
+		&& std::abs(now.y + now.height - (from.y + from.height)) <= 1;
+}
+
 View *x11_view() {
 	for (View *view : server->views) {
-		if (view->mapped && view->is_x11()) {
+		if (view->mapped && view->as_x11() != nullptr) {
 			return view;
 		}
 	}
@@ -219,7 +381,7 @@ Output &output() {
 // The mapped X11 window of that title.
 View *titled(std::string_view title) {
 	for (View *view : server->views) {
-		if (view->mapped && view->is_x11() && view->shell_title() != nullptr
+		if (view->mapped && view->as_x11() != nullptr && view->shell_title() != nullptr
 				&& title == view->shell_title()) {
 			return view;
 		}
@@ -300,7 +462,7 @@ int run_step() {
 		}
 		check(view != nullptr, "the X11 window mapped as a view");
 		if (view == nullptr) {
-			step = 90;
+			step = last_step - 1;
 			return 100;
 		}
 		check(client_said().find("MAPPED") != std::string_view::npos,
@@ -352,7 +514,8 @@ int run_step() {
 		check(view != nullptr && view->maximized,
 			"the title bar's maximize button maximized the X11 window");
 		check(view != nullptr && client_said().find(std::format("CONFIGURED {}x{}",
-				view->x11->width, view->x11->height)) != std::string_view::npos,
+				view->as_x11()->wlr->width,
+				view->as_x11()->wlr->height)) != std::string_view::npos,
 			"the client was told its new size");
 		return 600;
 	}
@@ -391,10 +554,10 @@ int run_step() {
 		View *menu = nullptr;
 		View *window = nullptr;
 		for (View *view : server->views) {
-			if (!view->mapped || !view->is_x11()) {
+			if (!view->mapped || view->as_x11() == nullptr) {
 				continue;
 			}
-			(view->override_redirect ? menu : window) = view;
+			(view->client_placed() ? menu : window) = view;
 		}
 		if (menu == nullptr && retries++ < 50) {
 			return -100;
@@ -537,7 +700,7 @@ int run_step() {
 		check(main != nullptr && dialog != nullptr && server->views.front() == dialog,
 			"both mapped, the second on top");
 		if (main == nullptr || dialog == nullptr) {
-			step = 89;
+			step = last_step - 1;
 			return 100;
 		}
 		return 600; // a frame tells X the stacking and the places
@@ -608,7 +771,7 @@ int run_step() {
 		check(distant != nullptr && distant->x > output().width, std::format(
 			"it opened where the camera looks ({})", distant != nullptr ? distant->x : 0));
 		if (distant == nullptr) {
-			step = 89;
+			step = last_step - 1;
 			return 100;
 		}
 		return 600;
@@ -642,7 +805,7 @@ int run_step() {
 		}
 		check(big != nullptr, "it mapped at 25 %");
 		if (big == nullptr) {
-			step = 89;
+			step = last_step - 1;
 			return 100;
 		}
 		return 600;
@@ -863,7 +1026,316 @@ int run_step() {
 		reap_client(client);
 		return 300;
 	}
+	// ---- an interactive resize, an unlock and a window shot of an X11 window:
+	// each asks the window's shell for something and each is followed by a
+	// `msg state` round trip, which only a live compositor answers.
+	case 60: {
+		reap_client(other);
+		check(start_client(client, {"--title=x11-act"}),
+			"an X11 window to resize, lock under and shoot started");
+		return 1500;
+	}
+	case 61: { // (a) Super is held, the pointer comes in over the window
+		View *view = titled("x11-act");
+		if (view == nullptr && retries++ < 200) {
+			return -100;
+		}
+		check(view != nullptr, "the window mapped");
+		if (view == nullptr) {
+			step = last_step - 1;
+			return 100;
+		}
+		resized_from = view->content_box();
+		wlr_box frame = frame_on_screen(*view);
+		// The lower right quarter: the right and bottom edges move.
+		drag_from = Point{frame.x + frame.width * 0.75, frame.y + frame.height * 0.75};
+		key(KEY_LEFTMETA, true);
+		move_to(drag_from.x, drag_from.y);
+		return 300;
+	}
+	case 62: { // the button goes down, and the grab is awaited before the pointer travels
+		button(BTN_RIGHT, true);
+		return 300;
+	}
+	case 63: {
+		if (!resizing() && retries++ < 50) {
+			return -100;
+		}
+		check(resizing(), "Super+right-drag over the X11 window began a resize");
+		move_to(drag_from.x + 20, drag_from.y + 15);
+		return 100;
+	}
+	case 64: {
+		move_to(drag_from.x + 40, drag_from.y + 30);
+		return 100;
+	}
+	case 65: {
+		move_to(drag_from.x + 60, drag_from.y + 45);
+		return 100;
+	}
+	case 66: {
+		move_to(drag_from.x + 80, drag_from.y + 60);
+		return 300;
+	}
+	case 67: { // the release ends the grab
+		button(BTN_RIGHT, false);
+		ask_state();
+		return 600;
+	}
+	case 68: {
+		View *view = titled("x11-act");
+		// The drag is in screen pixels: the window grows by as many canvas
+		// pixels as they cover at the zoom the drag began at.
+		double zoom = output().camera.drawn().zoom;
+		int want_w = resized_from.width + static_cast<int>(std::round(80 / zoom));
+		int want_h = resized_from.height + static_cast<int>(std::round(60 / zoom));
+		bool larger = view != nullptr
+			&& std::abs(view->content_box().width - want_w) <= 1
+			&& std::abs(view->content_box().height - want_h) <= 1;
+		if ((!state_answered() || !larger) && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the resize");
+		key(KEY_LEFTMETA, false);
+		check(!resizing(), "the release ended the resize");
+		check(larger, std::format("the window is larger by the drag ({}x{} to {}x{})",
+			resized_from.width, resized_from.height,
+			view != nullptr ? view->content_box().width : 0,
+			view != nullptr ? view->content_box().height : 0));
+		return 300;
+	}
+	case 69: { // (b) the window holds the focus
+		View *view = titled("x11-act");
+		if (view == nullptr) {
+			step = last_step - 1;
+			return 100;
+		}
+		wlr_box frame = frame_on_screen(*view);
+		click(frame.x + frame.width / 2.0, frame.y + config::titlebar_height + 20);
+		return 600;
+	}
+	case 70: { // ...and the session locks
+		View *view = titled("x11-act");
+		check(view != nullptr && server->focused_view == view,
+			"a click on the window focused it");
+		check(start_locker(), "the scenarios' locker started");
+		return 600;
+	}
+	case 71: {
+		if ((!server->lock.locked()
+				|| locker_said().find("LOCKED") == std::string_view::npos)
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(server->lock.locked(), "the locker took the session");
+		check(locker_said().find("LOCKED") != std::string_view::npos,
+			"the compositor confirmed the lock");
+		ask_state();
+		return 600;
+	}
+	case 72: {
+		if (!state_answered() && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the lock");
+		kill(locker_pid, SIGUSR1); // unlock and destroy
+		return 600;
+	}
+	case 73: {
+		if (server->lock.locked() && retries++ < 100) {
+			return -100;
+		}
+		check(!server->lock.locked(), "the locker unlocked the session");
+		ask_state();
+		return 600;
+	}
+	case 74: {
+		if (!state_answered() && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the unlock");
+		View *view = titled("x11-act");
+		check(view != nullptr
+				&& server->seat->keyboard_state.focused_surface == view->surface(),
+			"after the unlock the keyboard is on the X11 window's surface");
+		reap_locker();
+		return 300;
+	}
+	case 75: { // (c) Super+Shift+4, the pointer on the window
+		View *view = titled("x11-act");
+		if (view == nullptr) {
+			step = last_step - 1;
+			return 100;
+		}
+		wlr_box frame = frame_on_screen(*view);
+		move_to(frame.x + frame.width / 2.0, frame.y + config::titlebar_height + 20);
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTSHIFT, true);
+		key(KEY_4, true);
+		key(KEY_4, false);
+		key(KEY_LEFTSHIFT, false);
+		key(KEY_LEFTMETA, false);
+		return 600;
+	}
+	case 76: { // ...and a click on the window shoots it
+		check(server->capture_ui.picking(), "Super+Shift+4 opened the picker");
+		wlr_box frame = frame_on_screen(*titled("x11-act"));
+		click(frame.x + frame.width / 2.0, frame.y + config::titlebar_height + 20);
+		ask_state();
+		return 1500;
+	}
+	case 77: {
+		std::string shot = newest_shot();
+		if ((shot.empty() || !state_answered()) && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the window shot");
+		check(!shot.empty(), "the click saved a window shot");
+		View *view = titled("x11-act");
+		PngLook look = look_at_png(shot, 0xc04040);
+		wlr_box frame = view != nullptr ? view->frame_box() : wlr_box{};
+		check(view != nullptr && look.width == frame.width && look.height == frame.height,
+			std::format("the shot has the window frame's size ({}x{}, frame {}x{})",
+				look.width, look.height, frame.width, frame.height));
+		check(look.share > 0.7, std::format(
+			"and shows the client's colour ({:.2f} of it)", look.share));
+		return 300;
+	}
+	case 78: { // by the frame's left edge: the window grows leftwards, the right edge holds
+		View *view = titled("x11-act");
+		if (view == nullptr) {
+			step = last_step - 1;
+			return 100;
+		}
+		resized_from = view->content_box();
+		wlr_box frame = frame_on_screen(*view);
+		drag_from = Point{frame.x - config::resize_margin / 2.0, frame.y + frame.height / 2.0};
+		move_to(drag_from.x, drag_from.y);
+		return 300;
+	}
+	case 79: {
+		button(BTN_LEFT, true);
+		return 300;
+	}
+	case 80: {
+		if (!resizing() && retries++ < 50) {
+			return -100;
+		}
+		check(resizing(), "a press on the X11 window's left edge began a resize");
+		move_to(drag_from.x - 30, drag_from.y);
+		return 100;
+	}
+	case 81: {
+		move_to(drag_from.x - 60, drag_from.y);
+		return 100;
+	}
+	case 82: {
+		move_to(drag_from.x - 90, drag_from.y);
+		return 300;
+	}
+	case 83: {
+		button(BTN_LEFT, false);
+		ask_state();
+		return 600;
+	}
+	case 84: {
+		View *view = titled("x11-act");
+		double zoom = output().camera.drawn().zoom;
+		int want_w = resized_from.width + static_cast<int>(std::round(90 / zoom));
+		bool grown = view != nullptr
+			&& std::abs(view->content_box().width - want_w) <= 1;
+		if ((!state_answered() || !grown) && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the left-edge resize");
+		check(!resizing(), "the release ended the resize");
+		check(grown, std::format("the window grew by the drag ({} to {})", resized_from.width,
+			view != nullptr ? view->content_box().width : 0));
+		check(view != nullptr && far_edges_held(resized_from, view->content_box()),
+			"the right and bottom edges held after the release");
+		return 400;
+	}
+	case 85: { // the client has redrawn at its new size by now
+		View *view = titled("x11-act");
+		check(view != nullptr && far_edges_held(resized_from, view->content_box()),
+			"and after the client's next commit");
+		return 100;
+	}
+	case 86: { // a window that asks for a resize of its own
+		reap_client(client);
+		check(start_client(client, {"--title=x11-ask", "--moveresize"}),
+			"an X11 client that asks to be resized started");
+		return 1500;
+	}
+	case 87: {
+		View *view = titled("x11-ask");
+		if (view == nullptr && retries++ < 200) {
+			return -100;
+		}
+		check(view != nullptr, "its window mapped");
+		if (view == nullptr) {
+			step = last_step - 1;
+			return 100;
+		}
+		resized_from = view->content_box();
+		wlr_box frame = frame_on_screen(*view);
+		drag_from = Point{frame.x + frame.width / 2.0,
+			frame.y + config::titlebar_height + 20.0};
+		move_to(drag_from.x, drag_from.y);
+		return 300;
+	}
+	case 88: { // the press reaches the client, which asks for the resize
+		button(BTN_LEFT, true);
+		return 300;
+	}
+	case 89: {
+		if (!resizing() && retries++ < 50) {
+			return -100;
+		}
+		check(client_said().find("MOVERESIZE") != std::string_view::npos,
+			"the client asked the window manager to resize it");
+		check(resizing(), "the client's own request began the same resize");
+		move_to(drag_from.x - 40, drag_from.y - 30);
+		return 100;
+	}
 	case 90: {
+		move_to(drag_from.x - 80, drag_from.y - 60);
+		return 300;
+	}
+	case 91: {
+		button(BTN_LEFT, false);
+		ask_state();
+		return 600;
+	}
+	case 92: {
+		View *view = titled("x11-ask");
+		double zoom = output().camera.drawn().zoom;
+		int want_w = resized_from.width + static_cast<int>(std::round(80 / zoom));
+		int want_h = resized_from.height + static_cast<int>(std::round(60 / zoom));
+		bool grown = view != nullptr
+			&& std::abs(view->content_box().width - want_w) <= 1
+			&& std::abs(view->content_box().height - want_h) <= 1;
+		if ((!state_answered() || !grown) && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the client's own resize request");
+		check(!resizing(), "the release ended the resize");
+		check(grown, std::format("the window grew by the drag ({}x{} to {}x{})",
+			resized_from.width, resized_from.height,
+			view != nullptr ? view->content_box().width : 0,
+			view != nullptr ? view->content_box().height : 0));
+		check(view != nullptr && far_edges_held(resized_from, view->content_box()),
+			"the right and bottom edges held, the top left corner having moved");
+		return 400;
+	}
+	case 93: {
+		View *view = titled("x11-ask");
+		check(view != nullptr && far_edges_held(resized_from, view->content_box()),
+			"and after the client's next commit");
+		reap_client(client);
+		return 300;
+	}
+	case last_step: {
 		finished = true;
 		wl_display_terminate(server->display);
 		return -1;
@@ -894,10 +1366,11 @@ int handle_timer() {
 
 int main() {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
-	if (std::getenv("CANVAS_X11_CLIENT") == nullptr) {
-		std::fprintf(stderr, "xwayland: $CANVAS_X11_CLIENT is not set "
-			"(meson passes it)\n");
-		return 2;
+	for (const char *name : {"CANVAS_X11_CLIENT", "CANVAS_LOCK_CLIENT", "WAYLAND_CANVAS_BIN"}) {
+		if (std::getenv(name) == nullptr) {
+			std::fprintf(stderr, "xwayland: $%s is not set (meson passes it)\n", name);
+			return 2;
+		}
 	}
 	const char *env = std::getenv("CANVAS_TMP");
 	std::string root = env && *env ? env : "tmp";
@@ -905,7 +1378,15 @@ int main() {
 	std::error_code ec;
 	std::filesystem::remove_all(shot_dir, ec);
 	mkdir_p(shot_dir);
-	setenv("XDG_CONFIG_HOME", std::format("{}/xdg-config", shot_dir).c_str(), 1);
+	// Nothing touches the real Pictures: the user dir points into the scratch
+	// tree. glib caches the user dirs, so this happens before the server exists.
+	pictures_dir = std::format("{}/pictures", shot_dir);
+	std::string config_home = std::format("{}/xdg-config", shot_dir);
+	mkdir_p(pictures_dir);
+	mkdir_p(config_home);
+	write_text(std::format("{}/user-dirs.dirs", config_home),
+		std::format("XDG_PICTURES_DIR=\"{}\"\n", pictures_dir));
+	setenv("XDG_CONFIG_HOME", config_home.c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();
@@ -924,6 +1405,7 @@ int main() {
 	}
 	reap_client(client);
 	reap_client(other);
+	reap_locker();
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);

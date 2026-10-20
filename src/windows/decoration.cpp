@@ -292,10 +292,9 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 // Clients that negotiate neither protocol (GTK4/libadwaita) draw their
 // own header bar; adding ours would double the title bar.
 void Decoration::refresh_mode() {
-	// An X11 window has no decoration protocol to negotiate with: the
-	// window manager decorates it, which here means our own title bar
-	// (docs/intents/windows/x11.md).
-	bool negotiated = view_.is_x11() && !view_.override_redirect;
+	// A shell with no decoration protocol (X11) leaves the window manager
+	// to decorate: our own title bar (docs/intents/windows/x11.md).
+	bool negotiated = view_.decorated_without_negotiating();
 	if (!negotiated) {
 		negotiated = xdg_decoration_ != nullptr
 			&& xdg_decoration_->current.mode

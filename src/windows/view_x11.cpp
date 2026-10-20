@@ -5,7 +5,6 @@
 // An X11 window is a view like any other — title bar, desktop, overview,
 // minimize, maximize, fullscreen, close (docs/intents/windows/x11.md).
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -14,7 +13,7 @@
 #include "core/config.h"
 #include "core/server.h"
 #include "platform/output.h"
-#include "windows/view.h"
+#include "windows/view_x11.h"
 
 #if CANVAS_HAVE_XWAYLAND
 
@@ -30,127 +29,148 @@ int16_t x11_coordinate(int value) {
 
 // Whether X stacks the window: wlroots puts it in its stack on X's
 // MapNotify, at the bottom, which can come after the surface maps here.
-bool x11_stacked(const View &view) {
-	return view.is_x11() && !view.override_redirect
-		&& !wl_list_empty(&view.x11->stack_link);
+bool x11_stacked(const X11View &view) {
+	return !view.override_redirect && !wl_list_empty(&view.wlr->stack_link);
 }
 
 } // namespace
 
-View::View(Server &server, wlr_xwayland_surface *x11)
-	: server(server), x11(x11), deco(*this) {
-	static std::atomic<uint64_t> next_session_id = 1;
-	session_id = next_session_id++;
-	listen_x11();
-}
-
-void View::listen_x11() {
-	x11->data = this;
+X11View::X11View(Server &server, wlr_xwayland_surface *wlr)
+	: View(server), wlr(wlr) {
+	wlr->data = static_cast<View *>(this);
 	// An X11 window exists before it has a wayland surface: the pair is
 	// made and broken by associate and dissociate, and only then are the
 	// surface's own events there to listen to.
-	x11_associate_.connect<&View::handle_x11_associate>(x11->events.associate, this);
-	x11_dissociate_.connect<&View::handle_x11_dissociate>(x11->events.dissociate, this);
-	destroy_.connect<&View::handle_destroy>(x11->events.destroy, this);
-	request_move_.connect<&View::handle_request_move>(x11->events.request_move, this);
-	x11_configure_.connect<&View::handle_x11_configure>(x11->events.request_configure, this);
-	x11_set_geometry_.connect<&View::handle_x11_set_geometry>(x11->events.set_geometry, this);
-	request_maximize_.connect<&View::handle_x11_request_maximize>(
-		x11->events.request_maximize, this);
-	request_minimize_.connect<&View::handle_x11_request_minimize>(
-		x11->events.request_minimize, this);
-	request_fullscreen_.connect<&View::handle_x11_request_fullscreen>(
-		x11->events.request_fullscreen, this);
-	set_title_.connect<&View::handle_set_title>(x11->events.set_title, this);
-	set_app_id_.connect<&View::handle_set_app_id>(x11->events.set_class, this);
+	x11_associate_.connect<&X11View::handle_x11_associate>(wlr->events.associate, this);
+	x11_dissociate_.connect<&X11View::handle_x11_dissociate>(wlr->events.dissociate, this);
+	destroy_.connect<&X11View::handle_destroy>(wlr->events.destroy, this);
+	request_move_.connect<&X11View::handle_request_move>(wlr->events.request_move, this);
+	request_resize_.connect<&X11View::handle_x11_request_resize>(
+		wlr->events.request_resize, this);
+	x11_configure_.connect<&X11View::handle_x11_configure>(
+		wlr->events.request_configure, this);
+	x11_set_geometry_.connect<&X11View::handle_x11_set_geometry>(
+		wlr->events.set_geometry, this);
+	request_maximize_.connect<&X11View::handle_x11_request_maximize>(
+		wlr->events.request_maximize, this);
+	request_minimize_.connect<&X11View::handle_x11_request_minimize>(
+		wlr->events.request_minimize, this);
+	request_fullscreen_.connect<&X11View::handle_x11_request_fullscreen>(
+		wlr->events.request_fullscreen, this);
+	set_title_.connect<&X11View::handle_set_title>(wlr->events.set_title, this);
+	set_app_id_.connect<&X11View::handle_set_app_id>(wlr->events.set_class, this);
 }
 
 // ---- what the shared code asks ----
 
-wlr_surface *View::x11_surface() const {
-	return x11->surface;
+wlr_surface *X11View::surface() const {
+	return wlr->surface;
 }
 
-wlr_box View::x11_geometry() const {
+wlr_box X11View::shell_geometry() const {
 	// X11 has no window geometry of its own: the window is its surface.
-	if (x11->surface != nullptr && x11->surface->mapped) {
-		return wlr_box{0, 0, x11->surface->current.width,
-			x11->surface->current.height};
+	if (wlr->surface != nullptr && wlr->surface->mapped) {
+		return wlr_box{0, 0, wlr->surface->current.width,
+			wlr->surface->current.height};
 	}
-	return wlr_box{0, 0, x11->width, x11->height};
+	return wlr_box{0, 0, wlr->width, wlr->height};
 }
 
-bool View::x11_initialized() const {
-	return x11->surface != nullptr;
+bool X11View::initialized() const {
+	return wlr->surface != nullptr;
 }
 
-void View::x11_send_close() {
-	wlr_xwayland_surface_close(x11);
+void X11View::send_close() {
+	wlr_xwayland_surface_close(wlr);
 }
 
-void View::x11_configure_size(int width, int height) {
+void X11View::configure_size(int width, int height) {
 	if (width <= 0 || height <= 0) {
 		return; // X11 has no "your own size": the window keeps what it has
 	}
 	x11_configure(x11_x(), x11_y(), static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 }
 
-void View::x11_tell_maximized(bool want) {
-	wlr_xwayland_surface_set_maximized(x11, want, want);
+void X11View::tell_maximized(bool want) {
+	wlr_xwayland_surface_set_maximized(wlr, want, want);
 }
 
-void View::x11_tell_fullscreen(bool want) {
-	wlr_xwayland_surface_set_fullscreen(x11, want);
+void X11View::tell_fullscreen(bool want) {
+	wlr_xwayland_surface_set_fullscreen(wlr, want);
 }
 
-void View::x11_tell_tiled(bool) {
+void X11View::tell_tiled(bool) {
 	// X11 has no tiled state to tell; the slice's size is the configure.
 }
 
-void View::x11_tell_activated(bool want) {
-	wlr_xwayland_surface_activate(x11, want);
+void X11View::tell_activated(bool want) {
+	wlr_xwayland_surface_activate(wlr, want);
 }
 
-const char *View::x11_title() const {
-	return x11->title;
+const char *X11View::shell_title() const {
+	return wlr->title;
 }
 
-const char *View::x11_app_id() const {
-	return x11->class_;
+const char *X11View::shell_app_id() const {
+	return wlr->class_;
 }
 
-pid_t View::x11_client_pid() const {
-	return static_cast<pid_t>(x11->pid);
+pid_t X11View::client_pid() const {
+	return static_cast<pid_t>(wlr->pid);
 }
 
-bool View::x11_wants_maximized() const {
-	return x11->maximized_horz && x11->maximized_vert;
+bool X11View::wants_maximized() const {
+	return wlr->maximized_horz && wlr->maximized_vert;
 }
 
-bool View::x11_wants_fullscreen() const {
-	return x11->fullscreen;
+bool X11View::wants_fullscreen() const {
+	return wlr->fullscreen;
 }
 
-View *View::x11_parent() const {
-	return x11->parent != nullptr ? static_cast<View *>(x11->parent->data) : nullptr;
+View *X11View::shell_parent() const {
+	return wlr->parent != nullptr ? static_cast<View *>(wlr->parent->data) : nullptr;
 }
 
 // _NET_WM_STATE_MODAL: the window holds its parent's input until it goes.
-bool View::x11_modal() const {
-	return x11->modal;
+bool X11View::modal() const {
+	return wlr->modal;
 }
 
-bool View::x11_resize_settled(uint32_t) const {
-	return true; // X11 acks nothing: the resize ends with the button
+bool X11View::client_placed() const {
+	return override_redirect;
 }
 
-void View::x11_for_each_surface(
+// There is no decoration protocol to negotiate with: the window manager
+// decorates, which here means our own title bar (docs/intents/windows/x11.md).
+bool X11View::decorated_without_negotiating() const {
+	return !override_redirect;
+}
+
+// wlroots reads WM_NORMAL_HINTS and leaves a limit the client did not state
+// at -1.
+SizeLimit X11View::min_size() const {
+	const xcb_size_hints_t *hints = wlr->size_hints;
+	if (hints == nullptr) {
+		return {};
+	}
+	return {std::max(hints->min_width, 0), std::max(hints->min_height, 0)};
+}
+
+SizeLimit X11View::max_size() const {
+	const xcb_size_hints_t *hints = wlr->size_hints;
+	if (hints == nullptr) {
+		return {};
+	}
+	return {std::max(hints->max_width, 0), std::max(hints->max_height, 0)};
+}
+
+void X11View::for_each_surface(
 		std::function_ref<void(wlr_surface *surface, int sx, int sy)> fn) const {
-	if (x11->surface == nullptr) {
+	if (wlr->surface == nullptr) {
 		return;
 	}
 	wlr_surface_for_each_surface(
-		x11->surface,
+		wlr->surface,
 		[](wlr_surface *surface, int sx, int sy, void *data) {
 			auto &callback =
 				*static_cast<std::function_ref<void(wlr_surface *, int, int)> *>(data);
@@ -159,75 +179,100 @@ void View::x11_for_each_surface(
 		&fn);
 }
 
-wlr_surface *View::x11_surface_at(double lx, double ly, double *sx, double *sy) const {
-	if (x11->surface == nullptr) {
+wlr_surface *X11View::surface_at(double lx, double ly, double *sx, double *sy) const {
+	if (wlr->surface == nullptr) {
 		return nullptr;
 	}
-	return wlr_surface_surface_at(x11->surface, lx, ly, sx, sy);
+	return wlr_surface_surface_at(wlr->surface, lx, ly, sx, sy);
 }
 
-View *View::from_x11_surface(wlr_surface *surface) {
+X11View *X11View::from_surface(wlr_surface *surface) {
 	wlr_xwayland_surface *xwl = wlr_xwayland_surface_try_from_wlr_surface(
 		wlr_surface_get_root_surface(surface));
-	return xwl != nullptr ? static_cast<View *>(xwl->data) : nullptr;
+	return xwl != nullptr ? static_cast<X11View *>(static_cast<View *>(xwl->data)) : nullptr;
 }
+
+// ---- an interactive resize ----
+
+void X11View::begin_interactive_resize(uint32_t) {
+	// Nothing is held: the new place and size go to X in one configure.
+}
+
+void X11View::resize_to(wlr_box content) {
+	move(content.x, content.y);
+	x11_configure(x11_x(), x11_y(), static_cast<uint16_t>(content.width),
+		static_cast<uint16_t>(content.height));
+}
+
+void X11View::end_interactive_resize() {
+	// X acks nothing: the resize ends with the button.
+}
+
+void X11View::drop_resize() {}
 
 // ---- the X11 window's own events ----
 
-void View::handle_x11_associate() {
+void X11View::handle_x11_associate() {
 	// A menu or a tooltip is placed by its own client, beside the window
 	// it belongs to, and is neither decorated nor listed.
-	override_redirect = x11->override_redirect;
+	override_redirect = wlr->override_redirect;
 	// The window now has a surface: from here it behaves as any view does.
-	map_.connect<&View::handle_map>(x11->surface->events.map, this);
-	unmap_.connect<&View::handle_unmap>(x11->surface->events.unmap, this);
-	commit_.connect<&View::handle_commit>(x11->surface->events.commit, this);
+	map_.connect<&X11View::handle_x11_map>(wlr->surface->events.map, this);
+	unmap_.connect<&X11View::handle_unmap>(wlr->surface->events.unmap, this);
+	commit_.connect<&X11View::handle_commit>(wlr->surface->events.commit, this);
 	handle_first_commit();
 	// A surface Xwayland drew on before wlroots paired it with its window
 	// maps only on its next commit, which a window that never redraws never
 	// makes: map it now, as wlroots' own role does for a commit with a buffer.
-	if (!x11->surface->mapped && wlr_surface_has_buffer(x11->surface)) {
-		wlr_surface_map(x11->surface);
+	if (!wlr->surface->mapped && wlr_surface_has_buffer(wlr->surface)) {
+		wlr_surface_map(wlr->surface);
 	}
 }
 
-void View::handle_x11_dissociate() {
+void X11View::handle_x11_dissociate() {
 	map_.disconnect();
 	unmap_.disconnect();
 	commit_.disconnect();
 }
 
+void X11View::handle_x11_map() {
+	if (override_redirect) {
+		x11_place_override_redirect();
+	}
+	handle_map();
+}
+
 // Where an override-redirect window asked to be: X11 places it itself, in
 // the space the compositor configures its windows in, the canvas less the
 // shared offset.
-void View::x11_place_override_redirect() {
-	x = x11->x + server.x11_offset_x;
-	y = x11->y + server.x11_offset_y;
+void X11View::x11_place_override_redirect() {
+	x = wlr->x + server.x11_offset_x;
+	y = wlr->y + server.x11_offset_y;
 }
 
-int16_t View::x11_x() const {
+int16_t X11View::x11_x() const {
 	return x11_coordinate(x - server.x11_offset_x);
 }
 
-int16_t View::x11_y() const {
+int16_t X11View::x11_y() const {
 	return x11_coordinate(y - server.x11_offset_y);
 }
 
-bool View::x11_follow_canvas() {
+bool X11View::x11_follow_canvas() {
 	int16_t want_x = x11_x(), want_y = x11_y();
-	if (x11->x == want_x && x11->y == want_y) {
+	if (wlr->x == want_x && wlr->y == want_y) {
 		return false;
 	}
-	x11_configure(want_x, want_y, x11->width, x11->height);
+	x11_configure(want_x, want_y, wlr->width, wlr->height);
 	return true;
 }
 
-void View::x11_configure(int16_t x, int16_t y, uint16_t width, uint16_t height) {
-	wlr_xwayland_surface_configure(x11, x, y, width, height);
+void X11View::x11_configure(int16_t x, int16_t y, uint16_t width, uint16_t height) {
+	wlr_xwayland_surface_configure(wlr, x, y, width, height);
 	server.x11_changed();
 }
 
-void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
+void X11View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
 	if (override_redirect) {
 		x11_configure(event->x, event->y, event->width, event->height);
 		damage();
@@ -247,7 +292,7 @@ void View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) {
 
 // An override-redirect window its client moved: the canvas follows. A
 // managed window's geometry is the compositor's own, echoed back.
-void View::handle_x11_set_geometry() {
+void X11View::handle_x11_set_geometry() {
 	if (!override_redirect || !mapped) {
 		return;
 	}
@@ -257,16 +302,20 @@ void View::handle_x11_set_geometry() {
 	server.visibility_dirty = true;
 }
 
-void View::handle_x11_request_maximize() {
-	set_maximized(x11->maximized_horz && x11->maximized_vert);
+void X11View::handle_x11_request_resize(wlr_xwayland_resize_event *event) {
+	handle_request_resize(event->edges);
 }
 
-void View::handle_x11_request_minimize() {
-	set_minimized(x11->minimized);
+void X11View::handle_x11_request_maximize() {
+	set_maximized(wlr->maximized_horz && wlr->maximized_vert);
 }
 
-void View::handle_x11_request_fullscreen() {
-	set_fullscreen(x11->fullscreen);
+void X11View::handle_x11_request_minimize() {
+	set_minimized(wlr->minimized);
+}
+
+void X11View::handle_x11_request_fullscreen() {
+	set_fullscreen(wlr->fullscreen);
 }
 
 // ---- the Xwayland server ----
@@ -306,7 +355,7 @@ void Server::handle_xwayland_ready() {
 }
 
 void Server::handle_new_xwayland_surface(wlr_xwayland_surface *surface) {
-	toplevels.push_back(std::make_unique<View>(*this, surface));
+	toplevels.push_back(std::make_unique<X11View>(*this, surface));
 }
 
 void Server::sync_x11() {
@@ -314,31 +363,33 @@ void Server::sync_x11() {
 		return;
 	}
 	// Bottom first: the minimized under everything, then the canvas's order.
-	std::vector<View *> stack;
+	std::vector<X11View *> stack;
 	bool moved = false;
 	for (View *view : views) {
-		if (!view->is_x11() || view->override_redirect) {
+		X11View *x11 = view->as_x11();
+		if (x11 == nullptr || x11->override_redirect) {
 			continue;
 		}
-		moved = view->x11_follow_canvas() || moved;
-		if (view->minimized && x11_stacked(*view)) {
-			stack.push_back(view);
+		moved = x11->x11_follow_canvas() || moved;
+		if (x11->minimized && x11_stacked(*x11)) {
+			stack.push_back(x11);
 		}
 	}
 	if (moved) {
 		x11_put_pointer();
 	}
 	for (View *view : std::views::reverse(views)) {
-		if (!view->minimized && x11_stacked(*view)) {
-			stack.push_back(view);
+		X11View *x11 = view->as_x11();
+		if (x11 != nullptr && !x11->minimized && x11_stacked(*x11)) {
+			stack.push_back(x11);
 		}
 	}
 	if (!std::ranges::equal(stack, x11_stack_, {}, &View::session_id)) {
 		x11_stack_.clear();
-		for (View *view : stack) {
+		for (X11View *x11 : stack) {
 			// Each goes above the managed windows already restacked.
-			wlr_xwayland_surface_restack(view->x11, nullptr, XCB_STACK_MODE_ABOVE);
-			x11_stack_.push_back(view->session_id);
+			wlr_xwayland_surface_restack(x11->wlr, nullptr, XCB_STACK_MODE_ABOVE);
+			x11_stack_.push_back(x11->session_id);
 		}
 		x11_changed();
 	}
@@ -351,7 +402,9 @@ void Server::sync_x11() {
 void Server::x11_follow_pointer() {
 	Output *output = output_at(cursor->x, cursor->y);
 	if (xwayland == nullptr || output == nullptr || !output->interactive()
-			|| std::ranges::none_of(views, &View::is_x11)) {
+			|| std::ranges::none_of(views, [](const View *view) {
+				return view->as_x11() != nullptr;
+			})) {
 		return;
 	}
 	wlr_box layout{};
@@ -386,8 +439,8 @@ void Server::x11_follow_pointer() {
 	x11_offset_x = dx;
 	x11_offset_y = dy;
 	for (View *each : views) {
-		if (each->is_x11()) {
-			each->x11_follow_canvas();
+		if (X11View *x11 = each->as_x11()) {
+			x11->x11_follow_canvas();
 		}
 	}
 	x11_put_pointer();
@@ -408,15 +461,16 @@ void Server::x11_put_pointer() {
 	}
 	Point p = output->local_to_canvas(cursor->x - output->lx, cursor->y - output->ly);
 	std::optional<ViewHit> hit = view_at(p.x, p.y, output->camera.drawn().zoom);
-	if (!hit.has_value() || !hit->view->is_x11()) {
+	if (!hit.has_value() || hit->view->as_x11() == nullptr) {
 		return;
 	}
+	const X11View &x11 = *hit->view->as_x11();
 	// Where Xwayland puts its pointer for the same event: the window's X
 	// position plus the whole pixels of the point on its surface.
 	int16_t x = x11_coordinate(
-		hit->view->x11_x() + wl_fixed_to_int(wl_fixed_from_double(hit->sx)));
+		x11.x11_x() + wl_fixed_to_int(wl_fixed_from_double(hit->sx)));
 	int16_t y = x11_coordinate(
-		hit->view->x11_y() + wl_fixed_to_int(wl_fixed_from_double(hit->sy)));
+		x11.x11_y() + wl_fixed_to_int(wl_fixed_from_double(hit->sy)));
 	xcb_window_t root = xcb_setup_roots_iterator(xcb_get_setup(conn)).data->root;
 	xcb_warp_pointer(conn, XCB_NONE, root, 0, 0, 0, 0, x, y);
 	xcb_flush(conn);
@@ -496,8 +550,12 @@ bool Server::x11_settled() {
 }
 void Server::x11_give_up() {}
 
-View *View::from_x11_surface(wlr_surface *) {
+X11View *X11View::from_surface(wlr_surface *) {
 	return nullptr;
 }
 
 #endif
+
+bool Server::on_x11_window(wlr_surface *surface) {
+	return surface != nullptr && X11View::from_surface(surface) != nullptr;
+}

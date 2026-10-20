@@ -5,6 +5,8 @@
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "windows/view_x11.h"
+#include "windows/view_xdg.h"
 
 namespace {
 
@@ -259,91 +261,6 @@ bool grab_allowed(const Server &server, const View &view) {
 		&& server.seat->pointer_state.button_count > 0;
 }
 
-// ---- popups ----
-
-// Owner view of a popup: walk the popup parent chain to its root surface.
-View *popup_owner_view(wlr_xdg_popup *popup) {
-	wlr_surface *surface = popup->parent;
-	if (surface == nullptr) {
-		return nullptr;
-	}
-	return View::from_surface(surface);
-}
-
-LayerSurface *popup_owner_layer(wlr_xdg_popup *popup) {
-	wlr_surface *surface = popup->parent;
-	if (surface == nullptr) {
-		return nullptr;
-	}
-	while (true) {
-		wlr_xdg_popup *parent = wlr_xdg_popup_try_from_wlr_surface(surface);
-		if (parent == nullptr || parent->parent == nullptr) {
-			break;
-		}
-		surface = parent->parent;
-	}
-	wlr_surface *root = wlr_surface_get_root_surface(surface);
-	wlr_layer_surface_v1 *layer_surface =
-		wlr_layer_surface_v1_try_from_wlr_surface(root);
-	if (layer_surface == nullptr) {
-		return nullptr;
-	}
-	return static_cast<LayerSurface *>(layer_surface->data);
-}
-
-// Constrain the popup to the area its owner is visible in; the box must be
-// in the root parent surface's coordinate space. Returns false when no
-// owner was found (the caller then replies with a bare configure).
-bool popup_unconstrain(Popup &popup) {
-	wlr_xdg_popup *xdg_popup = popup.wlr;
-
-	View *view = popup_owner_view(xdg_popup);
-	if (view != nullptr) {
-		Server &server = view->server;
-		// The output whose viewport shows the frame centre, else the one
-		// under the cursor.
-		Rect frame = view->frame_rect();
-		Output *picked = nullptr;
-		for (const std::unique_ptr<Output> &output : server.outputs) {
-			if (output->viewport().contains(frame.cx(), frame.cy())) {
-				picked = output.get();
-				break;
-			}
-		}
-		if (picked == nullptr) {
-			picked = server.output_under_cursor();
-		}
-		if (picked != nullptr) {
-			Rect viewport = picked->viewport();
-			wlr_box geo = view->shell_geometry();
-			// Canvas -> toplevel surface-local: the surface origin sits at
-			// (view->x - geo.x, view->y - geo.y) on the canvas.
-			wlr_box box{
-				static_cast<int>(std::floor(viewport.x - (view->x - geo.x))),
-				static_cast<int>(std::floor(viewport.y - (view->y - geo.y))),
-				static_cast<int>(std::ceil(viewport.w)),
-				static_cast<int>(std::ceil(viewport.h)),
-			};
-			wlr_xdg_popup_unconstrain_from_box(xdg_popup, &box);
-			return true;
-		}
-	}
-
-	LayerSurface *layer = popup_owner_layer(xdg_popup);
-	if (layer != nullptr) {
-		// Output-local rect shifted into the layer surface's space.
-		wlr_box box{
-			-layer->geo.x,
-			-layer->geo.y,
-			layer->output->width,
-			layer->output->height,
-		};
-		wlr_xdg_popup_unconstrain_from_box(xdg_popup, &box);
-		return true;
-	}
-	return false;
-}
-
 } // namespace
 
 // ---- geometry ----
@@ -432,8 +349,7 @@ void View::set_maximized(bool want) {
 	if (maximized == want) {
 		return;
 	}
-	resize_edges = 0; // a pending resize anchor must not fight the new box
-	resize_end_serial = 0;
+	drop_resize(); // a pending resize anchor must not fight the new box
 	if (want) {
 		if (!maximized && !fullscreen) {
 			saved = content_box();
@@ -487,8 +403,7 @@ void View::set_fullscreen(bool want) {
 	if (fullscreen == want) {
 		return;
 	}
-	resize_edges = 0;
-	resize_end_serial = 0;
+	drop_resize();
 	if (want) {
 		if (!maximized && !fullscreen) {
 			saved = content_box();
@@ -547,8 +462,7 @@ void View::set_fullscreen(bool want) {
 // Grid placement: sized to the cell and told it is tiled.
 void View::set_frame(wlr_box frame) {
 	int tb = deco.titlebar();
-	resize_edges = 0;
-	resize_end_serial = 0;
+	drop_resize();
 	int bw = deco.border();
 	wlr_box content{
 		frame.x + bw,
@@ -609,10 +523,10 @@ View *View::from_surface(wlr_surface *surface) {
 	if (surface == nullptr) {
 		return nullptr;
 	}
-	if (View *view = from_xdg_surface(surface)) {
+	if (XdgView *view = XdgView::from_surface(surface)) {
 		return view;
 	}
-	return from_x11_surface(surface);
+	return X11View::from_surface(surface);
 }
 
 // ---- foreign toplevel handle ----
@@ -718,17 +632,22 @@ const char *View::ext_toplevel_identifier() const {
 
 // ---- toplevel events ----
 
+View::View(Server &server)
+	: server(server), deco(*this) {
+	static std::atomic<uint64_t> next_session_id = 1;
+	session_id = next_session_id++;
+}
+
 View::~View() = default;
 
 void View::handle_map() {
 	mapped = true;
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
-	if (kind() == ViewKind::client_placed) {
+	if (client_placed()) {
 		// A menu or a tooltip belongs where its client put it, beside the
 		// window it hangs from; it joins no board and takes no focus
 		// unless it asks for one.
-		x11_place_override_redirect();
 		server.visibility_dirty = true;
 		damage();
 		return;
@@ -769,7 +688,7 @@ void View::handle_unmap() {
 	slice = std::nullopt;
 	settle_pending = false;
 	saved = wlr_box{0, 0, 0, 0};
-	resize_edges = 0;
+	drop_resize();
 	deco.hover = DecoPart::none;
 	deco.pressed = DecoPart::none;
 	server.visibility_dirty = true;
@@ -798,20 +717,6 @@ void View::handle_first_commit() {
 void View::handle_commit() {
 	if (!mapped) {
 		return;
-	}
-	if (resize_edges != 0) {
-		// Interactive resize: keep the opposite edge anchored.
-		wlr_box geo = shell_geometry();
-		if (resize_edges & WLR_EDGE_LEFT) {
-			x = resize_start.x + resize_start.width - geo.width;
-		}
-		if (resize_edges & WLR_EDGE_TOP) {
-			y = resize_start.y + resize_start.height - geo.height;
-		}
-		if (resize_end_serial != 0 && resize_settled(resize_end_serial)) {
-			resize_edges = 0;
-			resize_end_serial = 0;
-		}
 	}
 	if (settle_pending) {
 		settle_pending = false;
@@ -843,18 +748,15 @@ void View::handle_request_move() {
 	}
 }
 
-void View::handle_request_resize(wlr_xdg_toplevel_resize_event *event) {
+void View::handle_request_resize(uint32_t edges) {
 	if (!grab_allowed(server, *this)) {
 		return;
 	}
 	Output *output = server.output_under_cursor();
 	if (output != nullptr) {
-		server.input.grab.begin_resize(*this, *output, event->edges);
+		server.input.grab.begin_resize(*this, *output, edges);
 	}
 }
-
-
-
 
 void View::handle_set_title() {
 	if (foreign_ != nullptr && shell_title() != nullptr) {
@@ -884,28 +786,10 @@ void View::handle_set_app_id() {
 
 // ---- Server: views ----
 
-void Server::init_views() {
-	xdg_shell = wlr_xdg_shell_create(display, 6);
-	new_xdg_toplevel_.connect<&Server::handle_new_xdg_toplevel>(
-		xdg_shell->events.new_toplevel, this);
-	new_xdg_popup_.connect<&Server::handle_new_xdg_popup>(
-		xdg_shell->events.new_popup, this);
-}
-
 void Server::finish_views() {
-	new_xdg_toplevel_.disconnect();
-	new_xdg_popup_.disconnect();
 	// Release textures and foreign toplevel handles before the renderer and display go.
 	views.clear();
 	toplevels.clear();
-}
-
-void Server::handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel) {
-	toplevels.push_back(std::make_unique<View>(*this, toplevel));
-}
-
-void Server::handle_new_xdg_popup(wlr_xdg_popup *popup) {
-	popups.push_back(std::make_unique<Popup>(*this, popup));
 }
 
 std::optional<ViewHit> Server::view_at(double cx, double cy, double zoom) {
@@ -1020,27 +904,4 @@ void Server::focus_keyboard(wlr_surface *surface) {
 	}
 	wlr_seat_keyboard_notify_enter(seat, surface,
 		keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
-}
-
-// ---- popups ----
-
-Popup::Popup(Server &server, wlr_xdg_popup *wlr)
-	: wlr(wlr), server_(server) {
-	commit_.connect<&Popup::handle_commit>(wlr->base->surface->events.commit, this);
-	destroy_.connect<&Popup::handle_destroy>(wlr->events.destroy, this);
-}
-
-Popup::~Popup() = default;
-
-void Popup::handle_commit() {
-	if (wlr->base->initial_commit) {
-		if (!popup_unconstrain(*this)) {
-			wlr_xdg_surface_schedule_configure(wlr->base);
-		}
-	}
-	// Later commits damage through server.cpp's per-surface tracker.
-}
-
-void Popup::handle_destroy() {
-	destroy_owned(server_.popups, this);
 }

@@ -1737,7 +1737,7 @@ bool shot_pixel_is(const char *name, int x, int y, uint32_t want) {
 // The mapped view with this title, as the input scenario finds its windows.
 View *titled(const char *title) {
 	for (View *v : server->views) {
-		if (v->mapped && v->wlr->title && std::strcmp(v->wlr->title, title) == 0) {
+		if (v->mapped && v->shell_title() && std::strcmp(v->shell_title(), title) == 0) {
 			return v;
 		}
 	}
@@ -3480,7 +3480,7 @@ int mapped_views() {
 int mapped_views_of(std::string_view app_id) {
 	int n = 0;
 	for (View *v : server->views) {
-		if (v->mapped && v->wlr->app_id != nullptr && app_id == v->wlr->app_id) {
+		if (v->mapped && v->shell_app_id() != nullptr && app_id == v->shell_app_id()) {
 			n++;
 		}
 	}

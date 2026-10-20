@@ -203,6 +203,7 @@ core_lib = static_library(
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
 		'src/windows/launches.cpp',
+		'src/windows/popup.cpp',
 		'src/windows/view.cpp',
 		'src/windows/view_x11.cpp',
 		'src/windows/view_xdg.cpp',

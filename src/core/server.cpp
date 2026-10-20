@@ -446,6 +446,7 @@ Server::~Server() {
 	decorations.finish();
 	finish_layers();
 	finish_xwayland();
+	finish_xdg_shell();
 	finish_views();
 	finish_outputs();
 	new_surface_.disconnect();
@@ -554,7 +555,7 @@ bool Server::init(const Options &options) {
 	xcursor_mgr = wlr_xcursor_manager_create(getenv("XCURSOR_THEME"), cursor_size);
 
 	init_outputs();
-	init_views();
+	init_xdg_shell();
 	init_layers();
 	decorations.init();
 	input.init();

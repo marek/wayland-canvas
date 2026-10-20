@@ -1,10 +1,13 @@
 // An X11 client for the scenarios: maps one window of a known size, colour
 // and title through xcb (and with --dialog, on its first key, a modal dialog
-// transient for it), and says on stdout what reaches it —
+// transient for it; with --moveresize, on its first button, a
+// _NET_WM_MOVERESIZE request to size from the top left corner), and says on
+// stdout what reaches it —
 //
 //   MAPPED <w>x<h>         the window is up
 //   KEY <keycode> <state>  a key press arrived, with X's modifier mask
 //   BUTTON <n> <x>,<y>     a pointer button arrived at that point of the window
+//   MOVERESIZE             the resize request went to the window manager
 //   CONFIGURED <w>x<h>     the window manager resized it
 //   POPUP <x>,<y>          an override-redirect window was mapped there
 //   DIALOG <w>x<h>         the modal dialog is up, titled <title>-dialog
@@ -56,7 +59,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	const char *offer = NULL;
-	int popup = 0, paste = 0, paste_tries = 0, dialog = 0;
+	int popup = 0, paste = 0, paste_tries = 0, dialog = 0, moveresize = 0;
 	for (int i = 1; i < argc; i++) {
 		if (strncmp(argv[i], "--offer=", 8) == 0) {
 			offer = argv[i] + 8;
@@ -66,6 +69,8 @@ int main(int argc, char **argv) {
 			paste = 1;
 		} else if (strcmp(argv[i], "--dialog") == 0) {
 			dialog = 1;
+		} else if (strcmp(argv[i], "--moveresize") == 0) {
+			moveresize = 1;
 		}
 	}
 	int screen_number = 0;
@@ -211,6 +216,29 @@ int main(int argc, char **argv) {
 		case XCB_BUTTON_PRESS: {
 			xcb_button_press_event_t *press = (xcb_button_press_event_t *)event;
 			say("BUTTON %u %d,%d\n", press->detail, press->event_x, press->event_y);
+			if (moveresize == 1) {
+				// Toolkits ask the window manager to run a resize the user
+				// started in their own client area: a client message to the
+				// root (EWMH _NET_WM_MOVERESIZE, direction 0 is the top left
+				// corner, source 1 an application).
+				moveresize = 2;
+				xcb_client_message_event_t request = {
+					.response_type = XCB_CLIENT_MESSAGE,
+					.format = 32,
+					.window = window,
+					.type = intern(connection, "_NET_WM_MOVERESIZE"),
+				};
+				request.data.data32[0] = (uint32_t)press->root_x;
+				request.data.data32[1] = (uint32_t)press->root_y;
+				request.data.data32[2] = 0;
+				request.data.data32[3] = press->detail;
+				request.data.data32[4] = 1;
+				xcb_send_event(connection, 0, screen->root,
+					XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT
+					| XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, (const char *)&request);
+				xcb_flush(connection);
+				say("MOVERESIZE\n");
+			}
 			break;
 		}
 		case XCB_CONFIGURE_NOTIFY: {

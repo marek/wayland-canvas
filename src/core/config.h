@@ -12,6 +12,10 @@ inline constexpr int titlebar_height = 32;
 inline constexpr int button_width = 46;
 inline constexpr int border_width = 1;
 inline constexpr int resize_margin = 8; // invisible resize grab area outside the frame
+// The smallest content size an interactive resize leaves a window, canvas pixels; a
+// client's own minimum size, when larger, wins.
+inline constexpr int resize_min_width = 100;
+inline constexpr int resize_min_height = 60;
 inline constexpr const char *title_font = "Sans 10";
 inline constexpr int title_padding = 12;
 inline constexpr const char *ui_font = "Sans 10";

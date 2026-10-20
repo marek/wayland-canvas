@@ -259,7 +259,7 @@ void Tablets::handle_tip(wlr_tablet_tool_tip_event *event) {
 	// The tip down on an X11 window waits until X has taken in its window moves.
 	if (input_.waits<&Tablets::handle_tip>(this, event,
 			event->state == WLR_TABLET_TOOL_TIP_DOWN && tool->v2 != nullptr
-			&& Input::is_x11(tool->v2->focused_surface))) {
+			&& Server::on_x11_window(tool->v2->focused_surface))) {
 		return;
 	}
 	input_.contact_activity();
@@ -293,7 +293,7 @@ void Tablets::handle_button(wlr_tablet_tool_button_event *event) {
 	Tool *tool = tool_for(event->tool);
 	if (input_.waits<&Tablets::handle_button>(this, event,
 			event->state == WLR_BUTTON_PRESSED && tool->v2 != nullptr
-			&& Input::is_x11(tool->v2->focused_surface))) {
+			&& Server::on_x11_window(tool->v2->focused_surface))) {
 		return;
 	}
 	input_.contact_activity();

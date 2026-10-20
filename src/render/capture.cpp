@@ -193,12 +193,14 @@ bool render_view_offscreen(View &view, float scale, wlr_buffer *buffer) {
 		draw_rect(pass, frame.w - bw, tb, bw, frame.h - tb - bw, scale, border);
 	}
 
-	wlr_box geo = view.wlr->base->geometry;
+	wlr_box geo = view.shell_geometry();
 	if (wlr_box_empty(&geo)) {
 		// No window geometry set yet: the base surface fills it.
 		geo = {.x = 0, .y = 0,
-			.width = view.wlr->base->surface->current.width,
-			.height = view.wlr->base->surface->current.height};
+			.width = view.surface() != nullptr
+				? view.surface()->current.width : geo.width,
+			.height = view.surface() != nullptr
+				? view.surface()->current.height : geo.height};
 	}
 	double vx = view.x - geo.x, vy = view.y - geo.y; // canvas coords, tree origin
 	view.for_each_surface([&](wlr_surface *surface, int sx, int sy) {
