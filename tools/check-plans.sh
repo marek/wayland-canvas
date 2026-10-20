@@ -1,9 +1,10 @@
 #!/bin/bash
-# checks every plan in docs/plans: dated name, matching Date line, a checklist, a Context without quoted conversation, a row in the index with current counts
+# checks every plan in docs/plans: dated name, matching Date line, a checklist, a Context without quoted conversation, open boxes that wait for a person ending in the marker (the user) or (the user to decide), a row in the index with current counts
 # usage: check-plans.sh [--fix] [plans-dir]     --fix rewrites the Done and Open columns of README.md
 # env: ALLOW (space-separated file names exempt from the name rule)
 FIX=0; [ "$1" = "--fix" ] && { FIX=1; shift; }
-DIR=${1:-$(cd "$(dirname "$0")/.." && pwd)/docs/plans}
+HERE=$(cd "$(dirname "$0")" && pwd)
+DIR=${1:-$(dirname "$HERE")/docs/plans}
 ALLOW=${ALLOW-}
 FAIL=0
 bad(){ echo "FAIL $1: $2"; FAIL=1; }
@@ -20,6 +21,9 @@ for f in "$DIR"/*; do
   grep -qE '^[[:space:]]*- \[[ x]\]' "$f" || bad "$n" "no checkbox list"
   awk '/^## Context/{c=1; next} /^## /{c=0} c && /^>/' "$f" | grep -q . \
     && bad "$n" "Context quotes the conversation: state the goal instead (writing-context skill)"
+  while IFS=$'\t' read -r loc kind _; do
+    [ "$kind" = stray ] && bad "$loc" "a box that waits for a person or a decision ends with (the user) or (the user to decide), nothing else"
+  done < <("$HERE/plan-items.sh" "$f")
   d=$(grep -cE '^[[:space:]]*- \[x\]' "$f"); o=$(grep -cE '^[[:space:]]*- \[ \]' "$f")
   row=$(grep -F "]($n)" "$DIR/README.md" 2>/dev/null | head -1)
   if [ -z "$row" ]; then bad "$n" "not in README.md"; continue; fi

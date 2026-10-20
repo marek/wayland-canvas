@@ -2,9 +2,12 @@
 // (`settings.set`, the toggle action and canvas.conf), the temperature's
 // own multipliers, and the wlr gamma-control protocol answered by a client
 // of the scenarios' own (tests/clients/gamma-client.c). A headless output
-// holds no gamma ramp, so nothing here can show a warmed frame: that the
-// filter rides the ramp is the real backend's to prove. Writes only under
-// $CANVAS_TMP, with canvas.conf in its own scratch config dir.
+// holds no gamma ramp, so first nothing here warms a frame; then the output
+// is given a ramp and a record of the colour transforms committed with its
+// frames, as the DRM backend would take them, and the filter's life on it is
+// followed: the built-in filter, a client's table, the client letting go.
+// Writes only under $CANVAS_TMP, with canvas.conf in its own scratch config
+// dir.
 #include <cairo.h>
 #include <cerrno>
 #include <cstdio>
@@ -26,12 +29,15 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 #include "core/config.h"
 #include "core/server.h"
 #include "core/settings.h"
 #include "core/wlr.h"
+#include <wlr/interfaces/wlr_output.h>
+#include "platform/night_light.h"
+#include "platform/night_light_ramp.h"
 #include "platform/output.h"
-#include "render/night_light.h"
 
 namespace {
 
@@ -183,6 +189,68 @@ void set_session(std::string_view params) {
 // each other rather than against an absolute.
 double plain[3] = {0, 0, 0};
 
+// The headless output with a gamma ramp: its own test and commit, behind a
+// ramp size and a record of the colour transforms its commits carry. The
+// headless backend takes none, so the transform is dropped before it sees
+// the state.
+constexpr std::size_t ramp_size = 256;
+const wlr_output_impl *headless_impl = nullptr;
+wlr_output_impl ramp_impl{};
+std::vector<const wlr_color_transform *> ramp_commits;
+bool refuse_tables = false; // a test of a state that is only a transform fails
+
+bool forward(wlr_output *output, const wlr_output_state *state, bool commit) {
+	wlr_output_state bare;
+	wlr_output_state_init(&bare);
+	bool ok = wlr_output_state_copy(&bare, state);
+	bare.committed &= ~WLR_OUTPUT_STATE_COLOR_TRANSFORM;
+	if (ok) {
+		// The headless functions assert it is their own output.
+		output->impl = headless_impl;
+		ok = commit ? headless_impl->commit(output, &bare)
+			: headless_impl->test(output, &bare);
+		output->impl = &ramp_impl;
+	}
+	wlr_output_state_finish(&bare);
+	return ok;
+}
+
+bool ramp_test(wlr_output *output, const wlr_output_state *state) {
+	if (refuse_tables && state->committed == WLR_OUTPUT_STATE_COLOR_TRANSFORM) {
+		return false;
+	}
+	return forward(output, state, false);
+}
+
+bool ramp_commit(wlr_output *output, const wlr_output_state *state) {
+	if (!forward(output, state, true)) {
+		return false;
+	}
+	if (state->committed & WLR_OUTPUT_STATE_COLOR_TRANSFORM) {
+		ramp_commits.push_back(state->color_transform);
+	}
+	return true;
+}
+
+size_t ramp_gamma_size(wlr_output *) {
+	return ramp_size;
+}
+
+void ramp_destroy(wlr_output *output) {
+	output->impl = headless_impl;
+	headless_impl->destroy(output);
+}
+
+void give_a_ramp(wlr_output *output) {
+	headless_impl = output->impl;
+	ramp_impl = *headless_impl;
+	ramp_impl.test = ramp_test;
+	ramp_impl.commit = ramp_commit;
+	ramp_impl.get_gamma_size = ramp_gamma_size;
+	ramp_impl.destroy = ramp_destroy;
+	output->impl = &ramp_impl;
+}
+
 int run_step() {
 	switch (step) {
 	case 0: {
@@ -288,7 +356,86 @@ int run_step() {
 			"the built-in setting is untouched by a client coming and going");
 		return 300;
 	}
-	case 13: {
+	case 13: { // the headless output gains a ramp: the built-in filter reaches it
+		give_a_ramp(server->outputs.front()->wlr);
+		check(NightLight::holds_a_ramp(*server->outputs.front()),
+			"the output now holds a gamma ramp");
+		ramp_commits.clear();
+		server->damage_all();
+		return 600;
+	}
+	case 14: {
+		check(server->conf.night_light, "the night light is still on");
+		check(ramp_commits.size() == 1 && ramp_commits.back() != nullptr,
+			std::format("the built-in filter is committed once with the ramp ({} commits)",
+				ramp_commits.size()));
+		server->damage_all();
+		return 400;
+	}
+	case 15: {
+		check(ramp_commits.size() == 1,
+			std::format("frames with nothing new commit no transform ({} commits)",
+				ramp_commits.size()));
+		check(start_gamma_client(), "a gamma-control client started");
+		return 1500;
+	}
+	case 16: { // a client's table replaces the filter on its output
+		std::string_view said = gamma_said();
+		check(said.find(std::format("SIZE {}", ramp_size)) != std::string_view::npos
+				&& said.find("SET 1") != std::string_view::npos
+				&& said.find("FAILED") == std::string_view::npos,
+			std::format("the client was given the ramp's size and its table taken ({})",
+				said));
+		server->damage_all();
+		return 600;
+	}
+	case 17: {
+		check(ramp_commits.size() == 2 && ramp_commits.back() != nullptr,
+			std::format("the client's table is committed once ({} commits)",
+				ramp_commits.size()));
+		set_session("{\"nightLight\":false}");
+		return 1200;
+	}
+	case 18: { // the built-in filter is off, but the client's table is still shown
+		if (server->conf.night_light && retries++ < 100) {
+			return -100;
+		}
+		check(!server->conf.night_light, "the night light is off in canvas.conf");
+		check(ramp_commits.size() == 2,
+			std::format("a client holding the output keeps it ({} commits)",
+				ramp_commits.size()));
+		kill(gamma_pid, SIGUSR1);
+		return 1200;
+	}
+	case 19: { // the client let go: the compositor's own state, which is none
+		server->damage_all();
+		return 600;
+	}
+	case 20: {
+		check(ramp_commits.size() == 3 && ramp_commits.back() == nullptr,
+			std::format("with the client gone and the filter off, no transform is shown"
+				" ({} commits)", ramp_commits.size()));
+		reap_gamma();
+		refuse_tables = true;
+		check(start_gamma_client(), "a second gamma-control client started");
+		return 1500;
+	}
+	case 21: { // a table the output refuses: the client is told, nothing is committed
+		std::string_view said = gamma_said();
+		check(said.find("FAILED") != std::string_view::npos,
+			std::format("a table the output cannot hold is refused ({})", said));
+		refuse_tables = false;
+		server->damage_all();
+		return 600;
+	}
+	case 22: {
+		check(ramp_commits.size() == 3,
+			std::format("a refused table is never committed ({} commits)",
+				ramp_commits.size()));
+		reap_gamma();
+		return 300;
+	}
+	case 23: {
 		finished = true;
 		wl_display_terminate(server->display);
 		return -1;

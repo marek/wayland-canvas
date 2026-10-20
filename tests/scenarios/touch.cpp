@@ -5,7 +5,8 @@
 // drag reach a window as touch; one finger drags a window by its title bar;
 // a finger held still on the overview's empty canvas makes a desktop there,
 // as a right click does; two fingers on the canvas look away and pinch a
-// desktop's scale; three fingers hop. A finger on a window as the session
+// desktop's scale; three fingers hop, and not while the capture picker is
+// open. A finger on a window as the session
 // locks is cancelled for it, and locked, touch reaches the locker only - as
 // a click, the locker taking no touch. A client without touch support gets
 // a tap as a click. The pen reaches a tablet client with pressure and tilt,
@@ -523,7 +524,63 @@ int run_step() {
 		output().overview.exit();
 		return 800;
 	}
-	case 18: { // a finger on the window as the session locks is cancelled for it
+	case 18: { // the capture picker open: three fingers swiping do nothing
+		if (!settled() && retries++ < 100) {
+			return -100;
+		}
+		check(output().desktop_showing() == desk(1), "desktop 1 is shown before the picker opens");
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTSHIFT, true);
+		key(KEY_4, true);
+		key(KEY_4, false);
+		key(KEY_LEFTSHIFT, false);
+		key(KEY_LEFTMETA, false);
+		return 500;
+	}
+	case 19: {
+		check(server->capture_ui.owns_keyboard(), "Super+Shift+4 opened the capture picker");
+		const Point from[] = {{300, 620}, {360, 620}, {420, 620}};
+		fingers_drag(from, 240, 0);
+		return 900;
+	}
+	case 20: { // nor do four fingers up; Escape closes the picker
+		if (!settled() && retries++ < 100) {
+			return -100;
+		}
+		check(output().desktop_showing() == desk(1),
+			"three fingers swiping with the capture picker open did not hop");
+		check(server->capture_ui.owns_keyboard(), "and the picker is still open");
+		const Point from[] = {{300, 620}, {360, 620}, {420, 620}, {480, 620}};
+		fingers_drag(from, 0, -320);
+		return 900;
+	}
+	case 21: {
+		if (!settled() && retries++ < 100) {
+			return -100;
+		}
+		check(!output().overview.active(),
+			"four fingers swiping up with the capture picker open did not open the overview");
+		check(server->capture_ui.owns_keyboard(), "and the picker is still open");
+		key(KEY_ESC, true);
+		key(KEY_ESC, false);
+		return 500;
+	}
+	case 22: { // the picker closed: three fingers hop again
+		check(!server->capture_ui.owns_keyboard(), "Escape closed the capture picker");
+		const Point from[] = {{300, 620}, {360, 620}, {420, 620}};
+		fingers_drag(from, 240, 0);
+		return 900;
+	}
+	case 23: {
+		if (!settled() && retries++ < 100) {
+			return -100;
+		}
+		check(desk(3) != nullptr && output().desktop_showing() == desk(3),
+			"with the picker closed, three fingers swiping right hopped onto desktop 3");
+		super_key(KEY_1);
+		return 900;
+	}
+	case 24: { // a finger on the window as the session locks is cancelled for it
 		if (!settled() && retries++ < 100) {
 			return -100;
 		}
@@ -536,7 +593,7 @@ int run_step() {
 		check(start(locker, "CANVAS_LOCK_CLIENT", {}), "the scenarios' locker started");
 		return 800;
 	}
-	case 19: { // locked, touch reaches the locker only
+	case 25: { // locked, touch reaches the locker only
 		if ((!server->lock.locked() || !said_line(locker, "LOCKED")) && retries++ < 100) {
 			return -100;
 		}
@@ -559,7 +616,7 @@ int run_step() {
 		}
 		return 500;
 	}
-	case 20: {
+	case 26: {
 		View *view = titled("touch-app");
 		check(said(app).find("TOUCH", said_before) == std::string::npos,
 			std::format("locked, the window got no touch ({})", since(app, said_before)));
@@ -574,7 +631,7 @@ int run_step() {
 		}
 		return 800;
 	}
-	case 21: {
+	case 27: {
 		if (server->lock.locked() && retries++ < 100) {
 			return -100;
 		}
@@ -595,7 +652,7 @@ int run_step() {
 		}
 		return 500;
 	}
-	case 22: {
+	case 28: {
 		std::string got = since(app, said_before);
 		check(said_line(app, "TABLET IN", said_before) && said_line(app, "TABLET MOTION 120,90", said_before),
 			std::format("the pen came in range of the tablet client where it was ({})", got));
@@ -611,7 +668,7 @@ int run_step() {
 			"a client without touch or tablet support started");
 		return 1000;
 	}
-	case 23: {
+	case 29: {
 		View *view = titled("touch-plain");
 		if ((view == nullptr || !settled() || !said_line(plain, "MAPPED 300x200"))
 				&& retries++ < 200) {
@@ -634,7 +691,7 @@ int run_step() {
 		}
 		return 500;
 	}
-	case 24: {
+	case 30: {
 		check(said_line(plain, "POINTER BUTTON 272 pressed 40,30", said_before)
 				&& said_line(plain, "POINTER BUTTON 272 released 40,30", said_before),
 			std::format("to a client without touch support a tap is a click where it "
@@ -661,19 +718,19 @@ int run_step() {
 		pen_proximity(p.x - 150, p.y + 50, false);
 		return 500;
 	}
-	case 25: {
+	case 31: {
 		View *view = titled("touch-plain");
 		wlr_box now = view != nullptr ? view->frame_box() : wlr_box{};
 		check(view != nullptr && now.x - frame_before.x == -150 && now.y - frame_before.y == 50,
 			std::format("the pen's tip dragged a window by its title bar ({},{})",
 				now.x - frame_before.x, now.y - frame_before.y));
 		if (!start(x11, "CANVAS_X11_CLIENT", {"--size=300x200", "--title=x11-touch"})) {
-			step = 29; // this machine has no X11 client: the X11 steps are skipped
+			step = 35; // this machine has no X11 client: the X11 steps are skipped
 			return 300;
 		}
 		return 1500;
 	}
-	case 26: {
+	case 32: {
 		View *view = titled("x11-touch");
 		if ((view == nullptr || !settled()) && retries++ < 200) {
 			return -100;
@@ -687,7 +744,7 @@ int run_step() {
 		}
 		return 600;
 	}
-	case 27: {
+	case 33: {
 		check(said_button_near(x11, 1, {80, 60}, said_before),
 			std::format("a tap reached the X11 window as its press ({})", since(x11, said_before)));
 		said_before = said(x11).size();
@@ -701,7 +758,7 @@ int run_step() {
 		}
 		return 200;
 	}
-	case 28: {
+	case 34: {
 		View *view = titled("x11-touch");
 		if (view != nullptr) {
 			Point p = on_screen(*view, 120, 90);
@@ -710,7 +767,7 @@ int run_step() {
 		}
 		return 600;
 	}
-	case 29: {
+	case 35: {
 		if (x11.pid > 0) {
 			check(said_button_near(x11, 1, {120, 90}, said_before),
 				std::format("the pen's tip reached the X11 window as its press ({})",
@@ -721,7 +778,7 @@ int run_step() {
 		reap(app);
 		return 300;
 	}
-	case 30: { // a touchscreen naming an output acts on that one
+	case 36: { // a touchscreen naming an output acts on that one
 		wlr_backend *headless = nullptr;
 		wlr_multi_for_each_backend(server->backend,
 			[](wlr_backend *backend, void *data) {
@@ -737,7 +794,7 @@ int run_step() {
 			"a second output was added");
 		return 800;
 	}
-	case 31: {
+	case 37: {
 		// A quarter across: on the second output only if the touchscreen is
 		// mapped to it, not to the first or to the whole layout.
 		finger_down(50, screen_w / 4.0, screen_h / 2.0);

@@ -235,10 +235,10 @@ void Desktops::remove(DesktopId id) {
 	Desktop *desktop = find(id);
 	if (desktop != nullptr && desktop->tiling()) {
 		// Abandoning a tiled desktop leaves its windows where they are,
-		// no longer tiled.
+		// off its board.
 		for (View *view : server_.views) {
-			if (server_.canvas.desktop_of(*view) == desktop) {
-				view->set_tiled(false);
+			if (view->board == id) {
+				server_.canvas.leave_board(*view);
 			}
 		}
 	}

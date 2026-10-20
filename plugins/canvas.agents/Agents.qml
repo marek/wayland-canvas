@@ -12,8 +12,8 @@ BarButton {
 
 	property var providers: []
 
-	readonly property int refreshMs: (api && api.settings
-		&& api.settings.refreshIntervalSec || 900) * 1000
+	readonly property int refreshMs: (api !== null
+		? api.plugin.settings.refreshIntervalSec : 900) * 1000
 
 	text: providers.length > 0 ? "󱚣" : ""
 	active: anyLimitSpent()

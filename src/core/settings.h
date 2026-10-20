@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,6 +29,8 @@ enum class SwipePreset { three_finger_hops, four_finger_hops, off };
 // [session] bounds and defaults. The idle lock is in minutes, 0 for off;
 // the night light's temperature in kelvin, warm at the low end.
 inline constexpr int default_lock_idle_minutes = 5;
+// The idle timer takes milliseconds in an int.
+inline constexpr int max_lock_idle_minutes = std::numeric_limits<int>::max() / (60 * 1000);
 inline constexpr int night_light_min_k = 1000;
 inline constexpr int night_light_max_k = 6500;
 inline constexpr int default_night_light_k = 4000;

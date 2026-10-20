@@ -20,8 +20,13 @@ own the machine's Wayland display namespace and GPU.
   take the board's halves; off: they keep the board's positions and
   are told they are not; back on: a pinch-in combine then joins the
   incoming window by halving the left half),
-  overview desktop create/abandon, minimize/restore via the shelf, landing on
-  empty canvas, and the keyboard desktop-direction jump. Then a desktop's
+  overview desktop create/abandon, minimize/restore via the shelf, a click
+  of the fake pointer on the open overview's empty canvas landing on that
+  spot, and Super+Ctrl+Right on the fake keyboard jumping to the desktop
+  to the right. A gesture forwarded to a client is read from what
+  `tests/clients/gesture-client.c` reports, a corner square on the overlay
+  layer that binds `zwp_pointer_gestures_v1` and prints each swipe and pinch
+  it receives while the fake pointer is over it. Then a desktop's
   scale: the Super + 2-finger pinch following the fingers and settling on 5 %
   steps, clicks and typing through the camera at 80 %, settles that never
   re-place a boarded window or tell a client a scale, twelve settles
@@ -78,6 +83,18 @@ own the machine's Wayland display namespace and GPU.
   own gesture alone: with hops away four fingers up still open the
   overview, with the overview swipe down four fingers up go back in and
   down open it, and the pan switch alone turning Super + a scroll round.
+  Then frames allocating nothing: a window drag, the same drag with an IPC
+  client subscribed (the window list, compared rather than serialised, and
+  told when the focus changes it), and a 3-finger pinch over a desktop of the
+  overview with a minimized window on the shelf each run a hundred frames
+  after a warm-up while a malloc shim (`alloc-counter.c`, not built into
+  sanitizer runs, which own malloc) counts what C++ and the text and JSON
+  libraries allocate; wlroots', libwayland's and the GL driver's own frame
+  bookkeeping is the renderer's and not counted. A probe first proves the
+  counter counts an `operator new` and a `g_strdup`. Last, nine windows wider
+  than a third of the screen opening one after another cascade to the right
+  edge of the usable area, none passes it, and the next opens on the first
+  spot again.
 - **`input.cpp`** — device-level input through fake `wlr_keyboard`/`wlr_pointer`
   devices announced on `backend->events.new_input` (the same path libinput
   takes): title-bar drags, double-click maximize, restore/minimize/close
@@ -135,7 +152,9 @@ own the machine's Wayland display namespace and GPU.
   running nothing by default — the panel renders, search filters, Enter
   and result-click launch foot and close the launcher, the launcher's own
   chord closes the open launcher, logo-as-modifier does not open it,
-  Escape and outside-click close it, no-match queries, and a custom
+  Escape and outside-click close it, opening it running no `gsettings`
+  program (a stand-in first on PATH records any run; the icon theme is read
+  through gio from a keyfile settings backend), no-match queries, and a custom
   desktop entry installed into
   `$XDG_DATA_HOME/applications` before `Server::init`: found by typing its
   name, launched with Enter, and verified by the marker file its spec-quoted
@@ -197,7 +216,9 @@ own the machine's Wayland display namespace and GPU.
   one finger drags a window by its title bar; a finger held still on the
   overview's empty canvas makes a desktop there, as a right click does;
   two fingers on the canvas look away and spread to scale the shown
-  desktop; three fingers hop and four open the overview. A finger on a
+  desktop; three fingers hop and four open the overview, but with the
+  capture picker open (Super+Shift+4) neither does anything, the picker
+  staying until Escape closes it, after which the hop works again. A finger on a
   window as the session locks is cancelled for it, and locked, a tap
   reaches only the locker, as a click since it takes no touch. A window
   without touch support gets a tap as a click; the pen reaches a tablet
@@ -287,7 +308,8 @@ own the machine's Wayland display namespace and GPU.
   `CafeGuest` secured-unknown, `CorpNet` enterprise (802.1X), `LibraryFree`
   open),
   BlueZ with a powered adapter plus one paired and one unpaired device,
-  UPower with a discharging 55 % battery, power-profiles-daemon, and a
+  UPower with a discharging 55 % battery, power-profiles-daemon, a PipeWire
+  daemon of the run's own holding one null sink, and a
   status-notifier tray item with a five-item menu. The weather fetch stays
   in the private world too: a curl stand-in sits first on the PATH the bar
   inherits, answers wttr.in at once from a canned response captured once
@@ -325,11 +347,34 @@ own the machine's Wayland display namespace and GPU.
   "Power saver" makes the stand-in's active profile `power-saver`. No
   Enter is ever sent from the password field, and the Session rows
   (Suspend, Restart, Power off, Log out) are never clicked. Indicator
-  positions are read off the bar screenshot itself; brightness stays the
-  one machine-read widget (the bar hides it without a sysfs backlight, and
-  the scenario follows that rule). The weather widget and panel are
+  positions are read off the bar screenshot itself. The brightness widget
+  is always there, its `brightnessctl` a shim that keeps one backlight in
+  a state file. The weather widget and panel are
   therefore always checked: the widget shows beside the clock, and the
   panel lists the fixture's forecast days.
+
+  The wheel is proven on the audio and brightness indicators. The
+  PipeWire daemon's socket sits under `tmp/scenarios/bar/pipewire/`, named
+  to the bar by `PIPEWIRE_RUNTIME_DIR`; its sink is the default, at volume
+  0.50 in the widget's scale (Quickshell's volume is the cube root of
+  PipeWire's channel volume), and the backlight starts at 50 %. A 120-unit
+  wheel event over each indicator moves its control one step (0.55; 55 %,
+  one write), a 15-unit event moves neither, and eight 15-unit events add
+  up to one notch for each (0.60; 60 %).
+
+  The network panel's names and secrets are proven the same way. The
+  `qrencode` stand-in logs its argv as one line and the text it read from
+  its stdin as another, so the share-as-QR check finds the `WIFI:`
+  payload on the stdin line only and the password on no argv line. The
+  `nmcli` stand-in writes its terse output the way the real tool does,
+  with `:` and `\` behind a backslash, and the NetworkManager stand-in
+  has methods that move the machine to `cafe:5G` and to `Lounge;Guest`
+  (a password holding `;`, `:`, `"` and `\`): the panel must show the
+  colon network as connected on its band, pin it by its own profile
+  name, and share both networks as escaped payloads. The known network
+  `OldCafe` is saved under a profile named `Old Cafe profile`, so
+  Forget is proven by the profile's object leaving the stand-in and
+  `nmcli connection delete` never being called.
 
   The bar's other half is the plugin host it now runs on, proven in the
   same private world on scratch XDG dirs: a broken manifest sits in the
@@ -380,7 +425,9 @@ own the machine's Wayland display namespace and GPU.
   the toolbar stays; the pointer's resting place shows the button's
   label beside the strip on hover. The panel button opens the scratch
   panel through the common trigger, left of the strip and level with the
-  button, and Escape — the panel holds the keyboard — closes it. The
+  button; a click above the card closes it and nothing more, the toolbar
+  and the overview staying. The panel is opened again, and Escape — the
+  panel holds the keyboard — closes it. The
   menu button expands the flyout beside the toolbar; choosing an entry
   runs its action with its
   args and folds the flyout. Escape then leaves the overview — the
@@ -471,8 +518,13 @@ own the machine's Wayland display namespace and GPU.
   sign-in card and no meters, a tokens-only Fireworks tab with the star
   mark), the signed-out Claude tab after its credentials are removed
   (card and attention meta, figures kept), the reopen probing again past
-  the probe-reuse window, and both palettes — all on screenshots under
-  `tmp/scenarios/bar/agents*.png`.
+  the probe-reuse window, the panel keeping Fireworks when a day of
+  gateway tokens added between two refreshes moves the gateway above it
+  (the selected chip and the hero's star mark follow the provider, not
+  the position), the manifest's `refreshIntervalSec` reaching the widget
+  (written into the scratch `shell.json` as 2 s, the collector runs
+  again within 4 s on its own, counted by the fake `codex` app-server's log), and
+  both palettes — all on screenshots under `tmp/scenarios/bar/agents*.png`.
 
   Last, the `canvas.recording` plugin: Alt+Print opens the capture toolbar
   on its recordings and a click of its record-screen mode starts a real

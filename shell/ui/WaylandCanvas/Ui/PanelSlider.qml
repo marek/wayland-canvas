@@ -5,12 +5,15 @@ import "."
 // emit `moved` with the new value (0..1). The caller owns the value: bind it
 // to the real state and apply what `moved` delivers — the knob follows
 // `live`, the in-hand position, so a slow service never yanks it back
-// mid-drag.
+// mid-drag. A caller that must apply a value once per gesture, not once per
+// motion, uses `committed` instead: the last value, as the press ends (a
+// wheel step is a gesture of its own).
 Item {
 	id: root
 
 	property real value: 0
 	signal moved(real value)
+	signal committed(real value)
 
 	width: parent ? parent.width : 0
 	height: UiTheme.rowHeight
@@ -58,10 +61,23 @@ Item {
 
 	MouseArea {
 		id: mouse
+
+		// True from the press to the one commit: a release and the cancel a
+		// rebuilt page can bring right behind it commit the value once.
+		property bool gesture: false
+
+		function commit() {
+			if (gesture) {
+				gesture = false
+				root.committed(root.live)
+			}
+		}
+
 		anchors.fill: parent
 		hoverEnabled: true
 		cursorShape: Qt.PointingHandCursor
 		onPressed: function(m) {
+			gesture = true
 			root.live = root.at(m.x)
 			root.moved(root.live)
 		}
@@ -71,9 +87,12 @@ Item {
 				root.moved(root.live)
 			}
 		}
+		onReleased: commit()
+		onCanceled: commit()
 		onWheel: function(w) {
 			root.live = root.clamp(root.live + (w.angleDelta.y > 0 ? 0.05 : -0.05))
 			root.moved(root.live)
+			root.committed(root.live)
 		}
 	}
 }

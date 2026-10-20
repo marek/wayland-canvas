@@ -1,12 +1,12 @@
 #!/bin/bash
-# Stop hook: while autopilot is switched on, refuse to end the turn if a plan still has open items that do not need the user.
+# Stop hook: while autopilot is switched on, refuse to end the turn if a plan still has open items that do not need the user (the boxes ending in (the user) or (the user to decide) do; tools/plan-items.sh tells them apart).
 # On only while .claude/autopilot.on exists (the canvas-autopilot skill creates and removes it); .claude/autopilot.pause lets a turn end on a real blocker.
 ROOT=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)
 [ -d "$ROOT/docs/plans" ] || ROOT=${CLAUDE_PROJECT_DIR:-}
 [ -n "$ROOT" ] && [ -d "$ROOT/docs/plans" ] || exit 0
 [ -f "$ROOT/.claude/autopilot.on" ] || exit 0
 [ -f "$ROOT/.claude/autopilot.pause" ] && exit 0
-LIST=$(cd "$ROOT/docs/plans" && grep -HE '^[[:space:]]*- \[ \]' 2*.md 2>/dev/null | grep -viE 'user|deferred|waiting|\(later\)')
+LIST=$("$ROOT/tools/plan-items.sh" "$ROOT"/docs/plans/2*.md 2>/dev/null | awk -F'\t' '$2 != "user" { print $1 ": " $3 }')
 OPEN=$(printf '%s' "$LIST" | grep -c .)
 if [ "$OPEN" -gt 0 ]; then
   NEXT=$(printf '%s\n' "$LIST" | head -1 | sed "s/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g" | tr -d '\t' | cut -c1-240)

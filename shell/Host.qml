@@ -83,27 +83,49 @@ Item {
 		onFileChanged: host.requestReload()
 	}
 
+	// False while shell.json holds text that is not a JSON object: the user's
+	// file, mid-edit or mistyped, which a write would replace with the few
+	// keys the host knows. A missing or blank file has nothing to lose.
+	property bool configValid: true
+	property bool configSkipLogged: false
+
 	function loadConfig() {
 		config = {}
+		configValid = true
+		configSkipLogged = false
 		var raw = configFile.text()
-		if (raw !== "") {
-			try {
-				config = JSON.parse(raw)
-			} catch (e) {
-				console.warn("[plugins] the config is not valid JSON (" + configPath + "): " + e)
+		if (raw.trim() === "") {
+			return
+		}
+		try {
+			var parsed = JSON.parse(raw)
+			if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+				throw new Error("not an object")
 			}
+			config = parsed
+		} catch (e) {
+			configValid = false
+			console.warn("[plugins] the config is not valid JSON (" + configPath + "): " + e)
 		}
 	}
 
-	// Persists the config; the shell keeps running on the values it already
-	// applied, and the write is not mistaken for an edit. The parsed copy
-	// reassigns `config` — a var property mutated in place fires no change
-	// signal, and every binding on the config must run on the host's own
-	// writes just as on a load.
+	// Applies the config in memory and persists it; the shell keeps running
+	// on the values it already applied, and the write is not mistaken for an
+	// edit. A file that did not parse is left as the user wrote it: the
+	// change lives in this run only, until an edit that parses reloads the
+	// shell. The parsed copy reassigns `config` — a var property mutated in
+	// place fires no change signal, and every binding on the config must
+	// run on the host's own writes just as on a load.
 	function writeConfig() {
-		lastConfigWrite = Date.now()
 		var raw = JSON.stringify(config, null, "\t") + "\n"
-		configFile.setText(raw)
+		if (configValid) {
+			lastConfigWrite = Date.now()
+			configFile.setText(raw)
+		} else if (!configSkipLogged) {
+			configSkipLogged = true
+			console.warn("[plugins] the config is not valid JSON: changes apply in memory "
+				+ "only, and " + configPath + " is not written over")
+		}
 		config = JSON.parse(raw)
 	}
 
@@ -552,12 +574,11 @@ Item {
 					api: plugin.api,
 				})
 			} else if (kind === "panels") {
-				var instance = piece.createObject(host)
+				var instance = piece.createObject(host, {api: plugin.api})
 				if (instance == null) {
 					problem = "panel " + e.id + " did not instantiate"
 					break
 				}
-				instance.api = plugin.api
 				panels.register(plugin.id + "/" + e.id, instance)
 			} else if (kind === "actions") {
 				actions.register(plugin.id + "/" + e.id, piece, plugin.api)

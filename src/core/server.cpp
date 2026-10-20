@@ -416,27 +416,34 @@ Server::Server()
 }
 
 Server::~Server() {
+	// The reverse of init() and start(): what was made last is released
+	// first, and each subsystem lets go of what it made before what it
+	// hangs on goes. The signals are the one exception: nothing reads the
+	// loop from here on, so one that arrives now must take the process
+	// down, not wait in a source nobody dispatches.
 	sigint_source_.reset();
 	sigterm_source_.reset();
-	conf_inotify_source_.reset();
-	if (conf_inotify_fd_ >= 0) {
-		close(conf_inotify_fd_);
-		conf_inotify_fd_ = -1;
-	}
 	if (manages_services_) {
 		// The session ends: its services go with it. A crash runs nothing
 		// here, and the next login stops what it left behind.
 		spawn(session_services::stop_command().c_str());
 	}
+	logind.finish();
 	if (hand_over_.has_value()) {
 		hand_back_session_bus(*hand_over_);
 	}
+	conf_inotify_source_.reset();
+	if (conf_inotify_fd_ >= 0) {
+		close(conf_inotify_fd_);
+		conf_inotify_fd_ = -1;
+	}
+	// The clients go before the subsystems that listen to them.
 	if (display != nullptr) {
 		wl_display_destroy_clients(display);
 	}
 	ipc.finish();
+	finish_xwayland();
 	night_light.finish();
-	logind.finish();
 	lock.finish();
 	capture_ui.finish();
 	image_capture.finish();
@@ -447,7 +454,6 @@ Server::~Server() {
 	input.finish();
 	decorations.finish();
 	finish_layers();
-	finish_xwayland();
 	finish_xdg_shell();
 	finish_views();
 	finish_outputs();

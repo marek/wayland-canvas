@@ -1,13 +1,24 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+#include "canvas/desktop.h"
 #include "core/settings.h"
 #include "core/util.h"
+
+// One mapped window as the app bar sees it (docs/intents/shell/app-bar.md).
+struct WindowRow {
+	uint64_t id = 0;
+	std::string app_id, title;
+	std::optional<DesktopId> desktop;
+	bool minimized = false, focused = false;
+	bool operator==(const WindowRow &) const = default;
+};
 
 class Output;
 class Server;
@@ -133,6 +144,7 @@ private:
 	void surface_drag(Client &client, std::string_view id_json,
 		JsonObject *params, bool resize);
 	void push_event(std::string_view name, std::string_view params);
+	bool has_subscriber() const; // a live connection that asked for events
 	void queue(Client &client, std::string_view line); // append, flush, cap-check
 	void flush(Client &client); // nonblocking; keeps the remainder queued
 	void drop(Client &client, const char *reason); // close now, free in reap()
@@ -149,8 +161,13 @@ private:
 	// the id its response echoes. Cleared in ~Client when that client goes.
 	Client *pick_client_ = nullptr;
 	std::string pick_id_;
-	// The window list as it was last pushed: an identical one is no event.
-	std::string last_windows_;
+	// The window list as it was last pushed, and the rows each frame's list
+	// is read into: an identical list is no event. Both keep their rows'
+	// strings between frames, so comparing allocates nothing. Unset while no
+	// subscriber has heard a list, which is also what a list nobody listened
+	// for leaves behind.
+	std::vector<WindowRow> told_rows_, window_rows_;
+	bool windows_told_ = false;
 	// Likewise the pending `shortcut.capture` request.
 	Client *capture_client_ = nullptr;
 	std::string capture_id_;

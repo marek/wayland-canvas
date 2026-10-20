@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "core/theme.h"
 
 namespace theme_prefs {
@@ -12,5 +15,10 @@ namespace theme_prefs {
 // compositor's own answer to that, passed in so the rule itself can be
 // tested: theme_prefs.cpp holds the write, Server's caller holds the gate.
 void apply(ThemeMode mode, bool real_session);
+
+// The user's icon theme, org.gnome.desktop.interface icon-theme, read
+// through gio in this process: the compositor's loop never waits on a
+// program. Unset when the desktop ships no such schema or the key is empty.
+std::optional<std::string> icon_theme();
 
 }

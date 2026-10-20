@@ -42,6 +42,14 @@ for byte. SDDM (autologin and the remembered last session), GDM
 changes nothing and says how to start the compositor. Removing the package
 directly (`pacman -R`, `apt remove`) restores the default as well.
 
+With greetd the tool changes the session and never the login screen: when
+the command names the session with a flag (`--cmd`, `-c` or `--command`, as
+agreety, tuigreet and gtkgreet take it), only the flag's value becomes
+`wayland-canvas`; a command that starts a session with no login screen
+becomes `wayland-canvas` whole; a login screen that lists sessions (regreet
+or gtkgreet in cage) is left alone, and you pick wayland-canvas in its list.
+greetd's automatic login (`[initial_session]`) starts `wayland-canvas`.
+
 ## Build from source
 
 Needs clang (LLVM) — the compositor is C++26 and the wlroots subproject builds

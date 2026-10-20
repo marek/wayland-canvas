@@ -261,6 +261,11 @@ PanelCard {
 		&& secured(net) && !enterprise(net) && hasQrencode
 	readonly property bool canSpeedTest: iface !== "" && speedTool !== ""
 
+	// The WIFI: payload escapes \ ; , : and " in every field.
+	function wifiField(value) {
+		return String(value).replace(/[\\;,:"]/g, "\\$&")
+	}
+
 	function shareQr() {
 		if (profile === "") {
 			return
@@ -360,7 +365,7 @@ PanelCard {
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
-				var lines = String(text).split("\n")
+				var lines = root.terseLines(text)
 				root.profile = lines.length > 0 ? lines[0].trim() : ""
 				root.ipAddress = lines.length > 1 ? lines[1].split("/")[0].trim() : ""
 				root.gateway = lines.length > 2 ? lines[2].trim() : ""
@@ -439,10 +444,10 @@ PanelCard {
 					if (line === "") {
 						continue
 					}
-					var inUse = line.charAt(0) === "*"
-					var fields = line.split(":")
+					var fields = root.terseFields(line)
+					var inUse = fields[0] === "*"
 					var band = root.bandForFreq(parseInt(fields[1], 10))
-					var name = fields.slice(2).join(":")
+					var name = fields.length > 2 ? fields[2] : ""
 					if (band === "" || name !== ssid) {
 						continue
 					}
@@ -467,7 +472,7 @@ PanelCard {
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
-				root.bandSelected = root.bandFromNm(String(text).trim())
+				root.bandSelected = root.bandFromNm(root.terseUnescape(String(text)).trim())
 				root.pendingBand = ""
 			}
 		}
@@ -478,7 +483,7 @@ PanelCard {
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
-				var lines = String(text).split("\n")
+				var lines = root.terseLines(text)
 				var ignore = (lines.length > 1 ? lines[1].trim() : "no")
 					+ (lines.length > 3 ? lines[3].trim() : "no")
 				root.dnsProvider = root.classifyDns(
@@ -566,12 +571,9 @@ PanelCard {
 	}
 
 	function forget(network) {
-		if (network.connected || network.name === "") {
-			return
+		if (!network.connected) {
+			network.forget()
 		}
-		// fire-and-forget, like the copy: no output to collect
-		Quickshell.execDetached(["sh", "-c",
-			'nmcli connection delete "$1"', "forget", network.name])
 	}
 
 	Process {
@@ -592,22 +594,33 @@ PanelCard {
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
-				var secret = String(text).trim()
+				var secret = root.terseUnescape(String(text).replace(/\n$/, ""))
 				if (secret === "" || root.net == null) {
 					return
 				}
+				qr.payload = "WIFI:T:WPA;S:" + root.wifiField(root.net.name)
+					+ ";P:" + root.wifiField(secret) + ";;"
 				// ASCII with its quiet zone: the matrix is read back as
 				// rows, then drawn as modules — block text renders with
 				// the font's own spacing and stops scanning
-				qr.command = ["qrencode", "-t", "ASCII", "-m", "4",
-					"WIFI:T:WPA;S:" + root.net.name + ";P:" + secret + ";;"]
+				qr.command = ["qrencode", "-t", "ASCII", "-m", "4"]
+				qr.stdinEnabled = true
 				qr.running = true
 			}
 		}
 	}
 
+	// The payload carries the password, so it goes in on stdin and never
+	// on the command line; qrencode reads to the end of its stdin, which
+	// closes behind the write.
 	Process {
 		id: qr
+		property string payload: ""
+		onStarted: {
+			write(payload)
+			payload = ""
+			stdinEnabled = false
+		}
 		stdout: StdioCollector {
 			waitForEnd: true
 			onStreamFinished: {
@@ -710,6 +723,37 @@ PanelCard {
 	function bandOrder(a, b) {
 		var order = ["2.4", "5", "6"]
 		return order.indexOf(a) - order.indexOf(b)
+	}
+
+	// nmcli's terse output escapes ":" and "\" with a backslash in every
+	// value: a value is read by undoing the escapes, a line by cutting it
+	// at the colons that are not escaped.
+	function terseUnescape(value) {
+		return String(value).replace(/\\(.)/g, "$1")
+	}
+
+	function terseLines(text) {
+		return String(text).split("\n").map(function(line) {
+			return terseUnescape(line)
+		})
+	}
+
+	function terseFields(line) {
+		var fields = []
+		var field = ""
+		for (var i = 0; i < line.length; i++) {
+			var ch = line.charAt(i)
+			if (ch === "\\" && i + 1 < line.length) {
+				field += line.charAt(++i)
+			} else if (ch === ":") {
+				fields.push(field)
+				field = ""
+			} else {
+				field += ch
+			}
+		}
+		fields.push(field)
+		return fields
 	}
 
 	// NetworkManager names the bands "a", "bg" and — since 1.44 — "6GHz".

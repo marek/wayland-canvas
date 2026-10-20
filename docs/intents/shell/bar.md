@@ -68,7 +68,7 @@ Widgets and what a click does:
 
 | Widget | Shows | Left | Other |
 |---|---|---|---|
-| Logo | logo glyph | toggle the launcher (IPC) | right: open `$TERMINAL` |
+| Logo | logo glyph | toggle the launcher (IPC) | right: open `$TERMINAL`, a window of its own that a rebuild of the bar leaves open |
 | Clock | `dddd HH:mm` | open the calendar panel | right: cycle to `d MMMM 'W'ww yyyy` |
 | Weather | condition glyph + temperature (wttr.in) | open the forecast panel | middle/right: re-fetch |
 | Tray | system-tray items | activate the item | right: the item's menu |
@@ -94,7 +94,7 @@ anything else being clicked.
 
 | Panel | Offers |
 |---|---|
-| Network | the head: the connection's name (SSID, "Ethernet", "Wi-Fi off"), state and band in use, share-as-QR where `qrencode` exists (the PSK fetched through NetworkManager's secrets), a speed test where `speedtest`/`speedtest-cli` exists — a button whose tool is missing is hidden — and the Wi-Fi switch. Live figures while the panel is open, two columns: ping (to the gateway), packet loss, receiving, sending, downloaded, uploaded, IP address and gateway (each address copies itself via `wl-copy`). The Wi-Fi band in use with an Automatic switch; off, the lock pills for the bands the connection's network offers (2.4, 5, 6 GHz), applied to the connection through NetworkManager. The DNS provider — DHCP, Cloudflare, Google or custom servers typed in — applied to the active connection. The networks: known ones first, the connected one on top (a click on its row disconnects), then what the scan finds (the Wi-Fi device scans while the panel is open, never in the background); each row shows signal and a lock where credentials are needed, known ones not in use carry Forget. A row click joins: an open or known network connects at once, a secured unknown one asks for a password inline — an enterprise one for an identity and passphrase too, fed to NetworkManager over stdin — and nothing is tried without credentials; Enter in the field submits |
+| Network | the head: the connection's name (SSID, "Ethernet", "Wi-Fi off"), state and band in use, share-as-QR where `qrencode` exists (the PSK fetched through NetworkManager's secrets, the `WIFI:` payload with `\ ; , : "` escaped in the name and the password, and handed to `qrencode` on its stdin so the password is on no command line), a speed test where `speedtest`/`speedtest-cli` exists — a button whose tool is missing is hidden — and the Wi-Fi switch. Live figures while the panel is open, two columns: ping (to the gateway), packet loss, receiving, sending, downloaded, uploaded, IP address and gateway (each address copies itself via `wl-copy`). The Wi-Fi band in use with an Automatic switch; off, the lock pills for the bands the connection's network offers (2.4, 5, 6 GHz), applied to the connection through NetworkManager. The DNS provider — DHCP, Cloudflare, Google or custom servers typed in — applied to the active connection. The networks: known ones first, the connected one on top (a click on its row disconnects), then what the scan finds (the Wi-Fi device scans while the panel is open, never in the background); each row shows signal and a lock where credentials are needed, known ones not in use carry Forget, which removes the network's own saved connection through NetworkManager, whatever that connection is named. A row click joins: an open or known network connects at once, a secured unknown one asks for a password inline — an enterprise one for an identity and passphrase too, fed to NetworkManager over stdin — and nothing is tried without credentials; Enter in the field submits |
 | Bluetooth | the power switch; a scan switch; paired devices first, then found ones, each with its state. A device row's click is its natural action: connect or disconnect a paired device, pair a found one |
 | Audio | a volume slider for the default sink; mute; the output device to make default |
 | Brightness | a slider for the backlight, which never steps below the minimum |
@@ -127,13 +127,19 @@ families, but one model id written two ways (`openai/gpt-5.5`,
 `fireworks:…/glm-5p3-fast`) is one row.
 
 The figures come from `wayland-canvas-agent-usage`, a helper the widget
-runs by name on the manifest's refresh interval and on every panel open:
+runs by name on the manifest's refresh interval (`refreshIntervalSec`,
+which a user's `shell.json` overrides) and on every panel open:
 it reads the tools' own records (Claude Code transcripts, Codex session
 files, pi/omp session logs, the opencode database) under an incremental
 stat-keyed cache, and probes the two limits services only through the
 CLIs' own saved sign-ins — Anthropic's usage endpoint through curl, the
 Codex app-server's JSON-RPC — reusing a fresh answer for a short window
 so an opened-and-shut panel is never a probe per flick.
+
+The panel keeps the provider it shows by its id, never by its position:
+the collector orders the families after Claude and GPT by the week's
+tokens, so a refresh can move a family to another tab, and the selection
+moves with it. A provider that is gone puts the panel back on the first.
 
 ## Autostart
 

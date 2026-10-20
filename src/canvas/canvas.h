@@ -35,6 +35,9 @@ public:
 	// toggled, a move ended): it returns to its slice when it is still free,
 	// joins the board where it stands, or leaves the board behind.
 	void settle(View &view);
+	// Drops the view from its board: told it is no longer tiled, slice and
+	// membership dropped with it.
+	void leave_board(View &view);
 	// A tiled view's drag ended: inside its desktop it swaps slices with the
 	// window under the drop or takes the largest free slice under it; outside
 	// the desktop it leaves the board.
@@ -69,9 +72,6 @@ private:
 	// the largest slice when none is free. The view joins the board, unless
 	// its kind does not tile (windows/view_kind.h).
 	void join(Desktop &desktop, View &view);
-	// Drops the view from its board: told it is no longer tiled, slice and
-	// membership dropped with it.
-	void leave_board(View &view);
 
 	Server &server_;
 };

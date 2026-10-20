@@ -32,7 +32,9 @@ public:
 	// A surface whose name says it belongs on the plane. It is never
 	// given a place on a screen: until the plugin says where on the
 	// canvas it goes, it is not drawn at all — a surface meant for the
-	// plane must never end up centred on the screen instead.
+	// plane must never end up centred on the screen instead. Decided once,
+	// when the surface is made: the namespace never changes, and pointer
+	// motion asks for it.
 	bool belongs_on_canvas() const;
 	// Puts it at `box` on the plane, remembered under its name; the
 	// client is told a new size, and every output showing it repaints.
@@ -60,6 +62,7 @@ private:
 	// False once the owning output is destroying the wlroots object: map,
 	// unmap, commit and destroy must not arrange on it any more.
 	bool attached_ = true;
+	const bool on_canvas_;
 
 	friend class Output;
 

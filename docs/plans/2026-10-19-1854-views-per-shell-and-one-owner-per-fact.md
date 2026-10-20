@@ -459,8 +459,8 @@ Each split adds its new subsystems to cpp-standards.md's
 
 The compositor:
 
-- [ ] The night light reaches a real display and owns its transforms
-  (`src/render/night_light.cpp`)
+- [x] The night light reaches a real display and owns its transforms
+  (`src/platform/night_light.cpp`)
   - The built-in filter is a matrix (`wlr_color_transform_init_matrix`,
     89), but the DRM backend takes only 3×1D LUTs (wlroots
     `backend/drm/drm.c:882-886`).
@@ -491,7 +491,18 @@ The compositor:
     - The nightlight scenario is green, and clean under the sanitizer
       build.
     - On the TTY the panel warms when the switch is on; see Verify.
-- [ ] `settings.set` range-checks before narrowing
+  - Done: `NightLight` keeps one `Slot` per output: the client's table, the
+    built-in LUT and the sizes they were made for. Only `src/platform/` code
+    changes output state, so `night_light.*` moved there and the ramp
+    arithmetic is `night_light_ramp.*`, unit-tested by `night-light-ramp`.
+    The nightlight scenario gives the headless output a fake ramp and
+    records the transforms its commits carry. Under the sanitizer build the
+    old code leaked 12 LUT transforms there (9504 bytes); the new code
+    leaks none. The multipliers were not 1 at 6500 K (green 0.9965, blue
+    0.9806), against the intent; each channel is now taken relative to its
+    value at 6500 K. A control destroyed with its output no longer reaches
+    `output->data`, which was never cleared.
+- [x] `settings.set` range-checks before narrowing
   - The problem: ipc.cpp:1476 casts the int64 to `int` first, so
     `lockIdleMinutes: 4294967301` writes 5.
   - The fix: compare the int64 with the bounds first, then narrow.
@@ -499,13 +510,27 @@ The compositor:
     canvas.conf is unchanged.
   - Phase 6's settings table replaces this code. Whichever lands first
     carries the test.
-- [ ] A cascaded window stays inside the usable area (confirm first)
+  - Done: `lockIdleMinutes` had no upper bound at all, and the idle timer's
+    `minutes * 60 * 1000` overflows an int past 35791 minutes. Both the
+    `settings.set` check and the `lock-idle` parser now use
+    `settings::max_lock_idle_minutes`. The ipc scenario sends 4294967301
+    (2^32 + 5) and a temperature of 2^32 + 4000, each wrapping to a valid
+    value, and finds an error and canvas.conf unchanged; the old code fails
+    those three checks.
+- [x] A cascaded window stays inside the usable area (confirm first)
   - The suspected bug: `place` (view.cpp:160-246) clamps only the
     vertical position after cascading (235-244), with bare 32 and 64
     (215-234). A window cascaded near the right edge would then pass it.
   - Acceptance: a gestures or input step opens windows until the cascade
     reaches the right edge; each frame stays inside the usable box.
-- [ ] Per-frame paths allocate nothing, as cpp-standards.md says
+  - Done: the bug reproduced. A gestures step opened nine windows wider
+    than a third of the screen, one after another: three of the nine
+    reached 4555 px on an area ending at 4488. `place` now cascades by
+    `config::cascade_step` only as far as the whole frame stays inside the
+    area, and a window opening when that is used up takes the first spot
+    again. The step checks that none passes the edge, that the cascade
+    reached it, and that the next window opens at the first spot.
+- [x] Per-frame paths allocate nothing, as cpp-standards.md says
   - `emit_windows` (ipc.cpp:1641-1653) JSON-serialises every window on
     every frame of a drag (`View::move` marks the list dirty,
     view.cpp:388-389; output.cpp:420-423 flushes it), even with no
@@ -531,24 +556,76 @@ The compositor:
     `LD_PRELOAD` malloc counter in a scenario, shows zero allocations
     across 100 frames of a window drag and of a pinch. If neither can be
     built cleanly, review each path by reading and note that in the box.
-- [ ] The icon theme is read without blocking the compositor (confirm
+  - Done: three counted paths, each a hundred frames after a warm-up, in
+    the gestures scenario: a window drag, the same drag with an IPC client
+    subscribed, and a 3-finger pinch over a desktop of the overview with a
+    minimized window on the shelf. The counter is a malloc shim,
+    `tests/scenarios/alloc-counter.c`, linked into that scenario only
+    when the build is not sanitized (a sanitizer owns malloc; the step then
+    says SKIP). It counts what C++ (`operator new`) and glib, pango, cairo,
+    pixman, json-glib, harfbuzz, fontconfig and freetype allocate; what
+    wlroots, libwayland and the GL driver allocate for their own frame
+    bookkeeping is the renderer's and not counted. A probe first proves it
+    counts an `operator new` and a `g_strdup`. Before the fixes the drag
+    allocated 604 times, with a subscriber 965, and the pinch 603.
+    - `emit_windows` reads the list into reused `WindowRow`s and compares
+      them with the last pushed rows, and does nothing with no subscriber.
+    - `LayerSurface` decides `on_canvas_` once, in its constructor.
+    - A pinch keeps its previewed `PinchOutcome` and sets the hint only
+      when it changes; `Hint::set` of the same text only restarts the timer.
+    - Shelf titles come from `Painter::shelf_title`, a cache of their own
+      keyed by window and scale and redrawn when the title or the palette
+      changes, until phase 6's text cache; `overview_tab_layout` formats
+      the number with `to_chars`, not `snprintf`.
+    - A bug found on the way: `Decoration::update` compared the title's
+      presence the wrong way round (`title == nullptr` against
+      `has_value()`), so a window with a title redrew its title bar on
+      every frame.
+- [x] The icon theme is read without blocking the compositor (confirm
   first)
   - The suspected bug: `detect_theme` (icons.cpp:96-107) runs
     `gsettings` through `popen` and waits on it. Check whether it runs
     on the compositor's loop: at start, or when the launcher opens.
   - If it does, read the key through gio, which theme_prefs already
     links, or once at start before the loop runs.
-- [ ] Teardown runs in reverse order of creation
+  - Done: it did. The first icon lookup after start (the first launcher
+    open; the chain then lasts until teardown) ran `gsettings` through
+    `popen` on the loop: the launcher scenario with a `gsettings` stand-in
+    first on PATH failed "opening the launcher ran no gsettings program"
+    before the fix.
+    `theme_prefs::icon_theme()` now reads the key through gio in the
+    compositor's process, from the schema `theme_prefs::apply` already
+    owns, and `detect_theme` falls back to GTK's `settings.ini` as before.
+    The scenario runs the keyfile settings backend and the unit test
+    writes `icon-theme` into it and reads it back. What the icon chain then
+    holds is not read off the screen: no scenario step reads icon pixels.
+- [x] Teardown runs in reverse order of creation
   - The problem: logind finishes after ipc and night_light
     (server.cpp:435-437), though it starts last (632). cpp-standards'
     teardown rule says reverse order.
   - Make `~Server` exactly the reverse of `init` and `start`.
-- [ ] logind's sd-bus objects have owners and its calls are checked
+  - Done: `~Server` runs `start()` backwards (services, logind, the session
+    bus hand-back, the canvas.conf watch, ipc, Xwayland), then `init()`
+    backwards (night light, lock, image capture, input, decorations,
+    layers, the shell, outputs). The SIGINT and SIGTERM sources are released
+    first on purpose: nothing dispatches the loop during teardown, so a
+    signal then must take the process down, not wait in a source nobody
+    reads. Every suite and the sanitizer run pass.
+- [x] logind's sd-bus objects have owners and its calls are checked
   - logind.cpp frees sd-bus messages and errors by hand (48-57) and
     writes its own `Bus` destructor (21-30). Both become `Handle`s
     (cpp-standards: a C object with a destroy function).
   - The `sd_bus_match_signal` results (78-83) are checked and logged.
-- [ ] A removed tiled desktop releases its windows' board seats
+  - Done: the bus, messages and errors are `Handle`s (`BusPtr`,
+    `MessagePtr`, `ErrorPtr`); `GetSessionByPID`, `Inhibit`, the message
+    reads, `dup`, the three match signals, the bus fd and its event
+    source are all checked and logged. Two behaviours came with the checks:
+    a sleep delay is only held when the `PrepareForSleep` match took, and a
+    bus that fails in `handle_bus` is finished, since its fd stays readable
+    and would spin the loop. Built and run through every suite and the
+    sanitizer; the sd-bus paths themselves need a login session (the TTY
+    run under Verify), so no headless run reaches them.
+- [x] A removed tiled desktop releases its windows' board seats
   - The problem: `Desktops::remove` (desktop.cpp:234-248) un-tiles
     windows through a callback into `server_.canvas`. It leaves their
     `board` and `slice` naming the removed desktop: a second, partial
@@ -557,10 +634,15 @@ The compositor:
     then, call `leave_board` for each window.
   - Acceptance: a gestures step abandons a tiled desktop with two
     windows; afterwards neither window has a board.
+  - Done: `Desktops::remove` calls `Canvas::leave_board` (now public) for
+    every window whose board is the removed desktop, as `toggle_tiling`
+    does, instead of un-tiling the windows whose centre lies in it. The
+    gestures scenario's last step tiles a desktop with two windows and
+    abandons it; the old code fails that check and the new passes.
 
 The shell and its plugins:
 
-- [ ] A shell.json that does not parse is never written over
+- [x] A shell.json that does not parse is never written over
   - The problem:
     - `Host.qml:86-95` falls back to `{}` when the file does not parse.
     - The next host write then replaces the user's file with one key.
@@ -575,7 +657,14 @@ The shell and its plugins:
   - Acceptance: the bar scenario writes an invalid shell.json and flips
     the theme over IPC; the file stays byte-identical. Once the file is
     fixed, the next flip writes it.
-- [ ] The Wi-Fi share QR keeps the password off the command line
+  - Done: `loadConfig` sets `configValid` (false for text that is not a
+    JSON object; a blank or missing file stays valid), and `writeConfig`
+    applies the change in memory, skips the file and logs once while it
+    is false. The bar scenario cuts shell.json in half, reloads the
+    shell on it, flips the theme over IPC, and finds the file byte for
+    byte as left, the bar light all the same. Once the file is fixed the
+    next flips write `theme.mode` into it.
+- [x] The Wi-Fi share QR keeps the password off the command line
   - The problem: `NetworkPanel.qml:602-603` passes `WIFI:…;P:<secret>;;`
     to qrencode as an argument. Arguments are world-readable in /proc, as
     the file's own comment at 222-223 says.
@@ -589,7 +678,14 @@ The shell and its plugins:
     `tests/scenarios/bar-standins*` if missing) logs its argv and stdin.
     The secret appears only on stdin, and an SSID with `;` arrives
     escaped.
-- [ ] Network names containing `:` are read right
+  - Done: the payload is built by `wifiField`, which escapes `\ ; , : "`
+    in the SSID and the password, and goes to `qrencode -t ASCII -m 4` on
+    its stdin (the process's stdin closes behind the write). The bar
+    scenario's qrencode stand-in logs its argv as one line and its stdin
+    as another: the stdin line carries the payload, and no argv line
+    names the password; `Lounge;Guest` with the password `pa;ss:w"rd\x`
+    arrives as `S:Lounge\;Guest;P:pa\;ss\:w\"rd\\x`.
+- [x] Network names containing `:` are read right
   - The problem: nmcli's terse mode escapes `:` as `\:`, and
     NetworkPanel.qml:443-446 splits on every `:` without unescaping. An
     SSID containing a colon never matches.
@@ -597,7 +693,14 @@ The shell and its plugins:
     in every terse-mode parser of the plugin.
   - Acceptance: the bar scenario's nmcli stand-in lists an SSID
     `cafe:5G`; the panel shows it, with its band, as connected.
-- [ ] Forget removes the network's own connection
+  - Done: `terseFields` cuts a line at unescaped colons and unescapes each
+    field, `terseLines` and `terseUnescape` do the same for the
+    single-value reads (profile, addresses, band, DNS, secret). The nmcli
+    stand-in writes terse output with `:` and `\` escaped, and the
+    NetworkManager stand-in roams the machine to `cafe:5G`: the panel
+    shows it connected on 5 GHz, pins it by its own profile name and
+    shares it as `S:cafe\:5G`.
+- [x] Forget removes the network's own connection
   - The problem: "Forget" runs `nmcli connection delete <ssid>`
     (NetworkPanel.qml:568-575). A connection name can differ from the
     SSID, and the Network objects in use at 181-218 already have a
@@ -605,13 +708,22 @@ The shell and its plugins:
   - The fix: call `forget()`.
   - Acceptance: a bar step forgets a network whose connection name is not
     its SSID.
-- [ ] The agents widget reads its refresh setting
+  - Done: `forget` calls the Network object's `forget()`. The stand-in's
+    `OldCafe` profile is saved as "Old Cafe profile"; the bar step
+    forgets it and finds the profile gone from the settings, with no
+    `nmcli connection delete` in the tool log.
+- [x] The agents widget reads its refresh setting
   - The problem: `Agents.qml:15-16` reads `api.settings`, which the API
     does not have.
   - The fix: read `api.plugin.settings.refreshIntervalSec`.
   - Acceptance: in the bar scenario, `refreshIntervalSec` = 2 makes the
     collector stand-in run again within 4 s.
-- [ ] The agents panel keeps the provider it shows when providers
+  - Done: `refreshMs` reads `api.plugin.settings.refreshIntervalSec`, 900
+    s before the api arrives. The bar scenario writes `refreshIntervalSec`
+    = 2 into shell.json, watches the codex stand-in's initialize calls (one
+    per collector run) every 100 ms and requires the second run within 4
+    s of the first it sees.
+- [x] The agents panel keeps the provider it shows when providers
   reorder
   - The problem: AgentsPanel.qml:18-23 tracks the chosen tab by position,
     while the collector sorts the providers after Claude and GPT by
@@ -623,14 +735,24 @@ The shell and its plugins:
       (61-65).
   - Acceptance: a bar step whose stand-in swaps two providers between two
     refreshes keeps the chosen provider.
-- [ ] Notification settings apply at once
+  - Done: the panel keeps `currentId` and derives the position from it,
+    and a `marks` map by provider id gives the hero's logo. The bar
+    scenario adds a day of gateway tokens between two refreshes, checks
+    the collector's own order swapped Fireworks and the gateway, and
+    finds on the screenshot the selection on the fourth chip and the star
+    mark in the hero.
+- [x] Notification settings apply at once
   - The problem: `NotificationsState.qml:36-41` copies `popupSeconds`,
     `criticalNeverExpires`, `maxPopups` and `historyLimit` once.
     settings.md says a change from the settings window applies at once.
   - The fix: bind them to `api.plugin.settings`, as Lock.qml:19-22 does.
   - Acceptance: a bar step changes `maxPopups` from the settings window;
     the next burst shows the new number.
-- [ ] Every panel and action gets `api` when it is created
+  - Done: the four settings bind to `api.plugin.settings`, with the
+    declared defaults before the api arrives. The bar scenario drags
+    "Popups at once" to 2 in the settings window; the next burst of four
+    notifications shows two cards.
+- [x] Every panel and action gets `api` when it is created
   - The problem: Host.qml:555-560 assigns `api` after `createObject`,
     and so does ActionsRunner.qml:32. `BrightnessPanel`'s
     `Component.onCompleted: readSession()` (79) then runs without it,
@@ -640,22 +762,40 @@ The shell and its plugins:
     the null guards that only covered this.
   - Acceptance: a bar step opens the brightness panel; its night-light
     row shows the configured state at once.
-- [ ] One NotificationServer, not one per output (confirm first)
+  - Done: `createObject` takes `{api: …}` for panels (Host.qml) and
+    actions (ActionsRunner.qml). The null guards of the panel and action
+    components are gone. The bar scenario switches the night light on,
+    reloads the shell, opens the brightness panel and finds the switch
+    on.
+- [x] One NotificationServer, not one per output (confirm first)
   - The suspected bug: `Popups.qml:43-56` makes a server in a perOutput
     surface, and `NotificationsState.qml:80-110` never de-duplicates.
     With two outputs, each notification would land twice.
   - Confirm with a two-output bar step. If it reproduces, move the server
     into the `NotificationsState` singleton so Popups only shows. If it
     does not, note that here and close the box.
-- [ ] The logo's terminal outlives a bar rebuild (confirm first)
+  - Done, and it reproduced: with a second output up, one notification
+    made two history entries. The server now lives in the
+    `NotificationsState` singleton; Popups only shows. The bar scenario's
+    two-output step finds one entry for one notification.
+- [x] The logo's terminal outlives a bar rebuild (confirm first)
   - The suspected bug: the terminal is a child of the widget's `Process`
     (Logo.qml:13-21), so a widget rebuild would kill it.
   - The fix: `startDetached()`.
-- [ ] A plugin's number setting writes once per drag (confirm first)
+  - Done, and it reproduced: a shell reload closed the terminal. The
+    logo starts it with `startDetached()`; the bar scenario opens one
+    with a right click, reloads the shell twice, and finds it still
+    there.
+- [x] A plugin's number setting writes once per drag (confirm first)
   - The suspected bug: `PluginSettingRow.qml:52-66` writes shell.json and
     rebuilds the page on every slider move.
   - The fix: give PanelSlider a `committed` signal and write on it.
-- [ ] The wheel steps every bar control alike
+  - Done, and it reproduced: each move wrote shell.json and rebuilt the
+    page, which destroyed the slider under the pointer and cut the drag
+    short after two moves. `PanelSlider` has a `committed` signal, once
+    per press (or per wheel step), and the row writes on it. The bar
+    scenario drags the slider and counts one write of shell.json.
+- [x] The wheel steps every bar control alike
   - The problem: `BarButton` hands on the raw `angleDelta`. Audio.qml:25
     rounds it to notches, while Brightness.qml:42 steps once per event,
     so a smooth-scrolling wheel races brightness.
@@ -663,20 +803,44 @@ The shell and its plugins:
     them.
   - Acceptance: a bar step sends a 120-unit and a 15-unit wheel event;
     each control moves one step for the first and none for the second.
-- [ ] A click above a toolbar-anchored card closes it (confirm first)
+  - Done: `BarButton` adds the turn up and emits `wheeled(notches)`, one
+    per 120 units, a half-done turn kept until it completes and dropped
+    when the wheel turns back; Audio steps its volume by 0.05 and
+    Brightness by 5 % per notch. The bar scenario starts a PipeWire
+    daemon of its own with one null sink as the default and a
+    `brightnessctl` stand-in holding one backlight (so the brightness
+    widget is always there), sends 120-unit and 15-unit wheel events
+    through the fake pointer, and finds one step for the first, none
+    for the second, and one step for eight 15-unit events. Quickshell's
+    volume is the cube root of PipeWire's channel volume, so the
+    scenario reads the sink in that scale.
+- [x] A click above a toolbar-anchored card closes it (confirm first)
   - The suspected bug: PanelCard's input mask (PanelCard.qml:60-64)
     starts at the card's top edge, so such a click would pass through
     to the window below.
-- [ ] Touchscreen swipes respect the capture UI (confirm first)
+  - Done, and it reproduced: a click above the card closed it, and the
+    overview and its toolbar were gone too, the click having reached
+    the canvas. The mask starts at the card's top edge, so the output
+    above it was not the card's; a toolbar button's card now catches
+    the whole output (the toolbar strip is below the panel layer). The
+    bar scenario clicks above the open card and finds the card closed,
+    the toolbar mapped and the overview active.
+- [x] Touchscreen swipes respect the capture UI (confirm first)
   - The suspected bug: 3- and 4-finger touchscreen swipes start gestures
     while the capture picker is open. touch.cpp:120 checks only the lock,
     while the touchpad path drops them (input.cpp:1485).
   - Phase 6's UI-layer box removes the cause; until then, add the same
     check.
+  - Done, and it reproduced: with the picker open, three fingers
+    swiping right hopped to the next desktop and four swiping up opened
+    the overview. `Touch::join_gesture` starts no swipe while the
+    capture UI owns the pointer. The touch scenario opens the picker
+    with Super+Shift+4, finds both swipes do nothing, closes it with
+    Escape and finds the hop works again.
 
 Packaging and tools:
 
-- [ ] greetd `set-default` changes only the session, and never the login
+- [x] greetd `set-default` changes only the session, and never the login
   screen itself
   - The rule, settled; write it into packaging.md's greetd row (88) and
     the tool's header (lines 22-23) first:
@@ -725,12 +889,29 @@ Packaging and tools:
       `[default_session]`: both set.
   - The guide page that describes `set-default`, if one does, says the
     same.
-- [ ] The flake's build finds what the compositor runs
+  - Done: the tool reads `command` as shell words (quotes group, nothing
+    is evaluated) and a TOML string with `\"` and `\\`; a value with any
+    other TOML escape, or over several lines, is reported and never
+    rewritten. The packaging suite has a fake root for each case above,
+    and more: `--command=X`, a quoted value holding the flag's own name,
+    TOML escapes written back, a literal string, no `user`, an unknown
+    user, a system account, 65534, a `UID_MIN` from login.defs, and an
+    `[initial_session]` beside a list-based screen. `status` also shows
+    the initial session's command.
+- [x] The flake's build finds what the compositor runs
   - The problem: flake.nix:45-62 has no ffmpeg and no `qs`, yet the
     compositor runs both by name (config.h:199, 231).
   - The fix: `wrapProgram` the installed binary with both on PATH.
   - Acceptance: `nix build` passes, and the wrapper's PATH names both.
-- [ ] The autopilot hook tells "needs the user" by a marker, not a
+  - Done: `makeWrapper` and a `postFixup` `wrapProgram` put `ffmpeg` and
+    `quickshell` (which holds `qs`) on the installed binary's PATH.
+    `nix build .#wayland-canvas` passes with its unit suite, and the
+    wrapper's PATH names `quickshell-0.3.2/bin` (`qs`) and
+    `ffmpeg-9.0.1-bin/bin` (`ffmpeg`). The first build also stopped at
+    the link, `DSO missing from command line` for `xcb_get_input_focus`:
+    `core_lib` calls xcb and never named it, so meson.build now lists
+    `xcb` in its dependencies.
+- [x] The autopilot hook tells "needs the user" by a marker, not a
   substring
   - The problem: autopilot-stop.sh:9 drops any line containing `user`,
     `deferred` or `waiting`, file names included. It hides open items
@@ -740,20 +921,45 @@ Packaging and tools:
     matches exactly. Fix the existing plans that use other wording.
   - Acceptance: the hook lists touch-and-pen.md:65 as workable, and
     check-plans.sh passes.
-- [ ] Hook changes reach existing setups
+  - Done: `tools/plan-items.sh` lists every open box with its kind: `user`
+    (the title, joined over its wrapped lines, ends in the marker),
+    `stray` (any other wording of a wait) or `work`. The hook lists
+    `work` and check-plans.sh fails `stray`, so the two read one rule.
+    Ten plans were reworded to end in the marker. The hook now lists
+    touch-and-pen.md:65 as work, and check-plans.sh passes. The autopilot
+    and plan-checklists skills and the development guide say the same.
+    `tests/test_agent_tools.sh` (meson suite `packaging`) drives the tool,
+    the check and the hook on scratch plans.
+- [x] Hook changes reach existing setups
   - The problem: agent-setup.sh:21 writes `settings.local.json` only
     when it is missing, and hooks are wired in two places
     (`.claude/settings.json` and the local file).
   - The fix: wire hooks in one place, and have agent-setup.sh update an
     existing file's hooks section.
-- [ ] check-lock-pam.sh reads the lock plugin's manifest
+  - Done: the hooks are wired in `.claude/settings.json` only, the
+    tracked file. agent-setup.sh no longer writes `settings.local.json`
+    or links `.claude/hooks`: it removes those links, and takes the hook
+    groups it wrote out of an existing `settings.local.json`, leaving
+    other hooks, other keys and the file's mode alone, and deleting the
+    file when nothing else is in it (it says so when `jq` is missing).
+    Run again it changes nothing; the agent-tools suite proves the old
+    setup, a local file with other content, and the second run.
+- [x] check-lock-pam.sh reads the lock plugin's manifest
   - The problem: lines 8-14 hard-code the manifest's path and its
     setting keys.
   - The fix: take both from `plugins/canvas.lock/plugin.json`.
+  - Done: the script finds `plugins/canvas.lock/plugin.json` under the
+    package root by that path with no prefix, and fails on none or more
+    than one. `pamService` and `pamConfigDirectory` stay named in the
+    script: they are the lock plugin's own setting names, the ones
+    Lock.qml reads, so a rename stops the package build. A missing key
+    or a manifest that does not parse is reported with the key or the
+    reason and the manifest's path, not a traceback. Nine checks in
+    `tests/test_packaging.sh` cover it.
 
 Tests:
 
-- [ ] The bar scenario's early exits end the run, and every wait has a
+- [x] The bar scenario's early exits end the run, and every wait has a
   budget
   - Early exits:
     - Today `step = 99; return …` at bar.cpp:4140, 4220, 4430, 4457,
@@ -771,7 +977,18 @@ Tests:
   - Acceptance: a check made to fail on purpose in a scratch build stops
     the run with a FAIL line; it never runs on, and it never hangs to the
     timeout.
-- [ ] The scenarios check what their checks say
+  - Done: a step that cannot go on returns `end_run(why)`, which prints a
+    FAIL line naming the reason and the line, sets `run_aborted` and
+    leaves the next tick to print the summary: fifteen sites, the theme
+    phase's skip among them. The seven second waits (the six listed and
+    the agents panel's keyboard wait) count in `second_retries`, which
+    the timer resets when the step moves. Scratch builds of the run with
+    a check forced to fail: the exit at the bar-runs check ended the run
+    in ten seconds with one FAIL line, where the old code ran on through
+    the later phases; a keyboard check forced never to hold failed after
+    its twenty polls and the walk went on, where the old code repeated
+    the step until the timeout.
+- [x] The scenarios check what their checks say
   - "Forwarded to the client" (gestures.cpp:879, 1577, 1582) tests only
     `holds_alternative<Forwarded>`, and no test client binds pointer
     gestures.
@@ -783,6 +1000,25 @@ Tests:
     Drive them with the fake pointer and the fake keyboard.
   - Acceptance: each check fails when the path it names is broken, for
     example with the forwarding call removed in a scratch build.
+  - Done: `tests/clients/gesture-client.c` (meson `gesture-client`, found
+    through `CANVAS_GESTURE_CLIENT`) is a corner square on the overlay
+    layer that binds `zwp_pointer_gestures_v1` and prints each swipe and
+    pinch it receives. gestures.cpp starts it with the windows and, for
+    the four forwarded checks (the 2-finger pinch at 100 % and at 25 %,
+    the 3- and 4-finger swipes under `off`, the Super pinch with
+    pinch-scale off), parks the fake pointer on it, drives the gesture
+    through the device path and polls, with a budget, until the client
+    has said exactly the begin, update and end lines. The swipes now come
+    through the device path too. The overview click is a press and release
+    of the fake pointer on empty canvas in the open overview, and the
+    jump is Super+Ctrl+Right on the fake keyboard; both fake devices are
+    made in step 0. The old click check passed without any click:
+    restoring the window had already closed the overview, so the step
+    now opens it again before it clicks. Scratch builds, each with one
+    path broken: with every forwarding call a no-op the four client
+    checks failed (the `holds_alternative<Forwarded>` checks still
+    passed); with the hop binding a no-op the jump check failed; with
+    the overview's empty-canvas press a no-op the click check failed.
 - [ ] Exact checks wait for the state they check, not a fixed time
   - gestures.cpp:630-646 waits a fixed 700 or 600 ms and then requires
     the camera within 1 px, for a 280 ms animation (config.h:146).
@@ -791,6 +1027,17 @@ Tests:
   - Apply the same to every fixed wait followed by an exact camera or
     pixel check: bar has 416 fixed returns against 298 polled, and
     gestures 149 against 38. List what was changed in the commit body.
+  - Done in gestures.cpp: `camera_easing()` (panning or zooming), and
+    the 23 steps whose first check reads where the camera ended, or takes
+    the camera as a baseline, now poll on it with a budget before they
+    act. Checks that nothing moved, and checks of a scale or a frame, stay
+    after their fixed wait.
+  - Left, in bar.cpp: its camera checks already poll (`camera_settled`,
+    `overview_settled`), but 39 pixel checks still read a shot taken after
+    a fixed wait, without a re-shot until the picture holds as the
+    network panel's dots do (cases 3, 11, 44, 51, 118, 122, 126, 130, 141,
+    145, 186, 187, 230, 241, 424 and 615, and the 23 steps that take the
+    shot before a check).
 
 ### 6. One owner per fact: the compositor
 
@@ -1732,4 +1979,4 @@ Tests:
   - a resize by an edge and by Super+right-drag, of both kinds of window;
   - a second output.
 - [ ] On the TTY, the night light warms the panel, and a recording keeps
-  the desktop responsive (the user).
+  the desktop responsive (the user)

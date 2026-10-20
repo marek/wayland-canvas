@@ -71,7 +71,7 @@ settings window. An entry is the default value on its own, or an object:
 
 A setting written from the window goes through `api.plugin.setSetting`,
 which writes `plugins.<id>.settings` in the shell config and applies it at
-once.
+once. A slider writes once, when the drag ends, not on every motion of it.
 
 ### Where plugins are found
 
@@ -123,7 +123,8 @@ script or a keybinding can create a note without speaking to the shell.
 
 ### The API
 
-Every component a plugin contributes receives `api`:
+Every component a plugin contributes receives `api` as it is created, so
+its first bindings and its `Component.onCompleted` already have it:
 
 | Member | Offers |
 |---|---|

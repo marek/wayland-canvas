@@ -20,4 +20,4 @@ answer pinned above the input until it is dismissed; in other harnesses the answ
 
 - [x] An RPC run of omp in the repo: the extension loads, `answer` sends the pin, `/dismiss` removes it, the reminder reaches the model
 - [x] A TUI run: a question asked while work is under way is answered by a pin with nothing changed, the pin stays while the work goes on, Alt+X and `/dismiss` clear it
-- [ ] The transcript view of an answer (question as its title, the whole answer below) seen on screen (owed)
+- [ ] The transcript view of an answer (question as its title, the whole answer below) seen on screen (the user)

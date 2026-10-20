@@ -36,6 +36,7 @@
           depsBuildBuild = [ pkgs.pkg-config ];
 
           nativeBuildInputs = with pkgs; [
+            makeWrapper
             meson
             ninja
             pkg-config
@@ -70,6 +71,13 @@
           preCheck = ''
             export XDG_DATA_DIRS=${pkgs.glib.getSchemaDataDirPath pkgs.gsettings-desktop-schemas}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
             export TZDIR=${pkgs.tzdata}/share/zoneinfo
+          '';
+
+          # The compositor starts the bar's `qs` and the recorder's `ffmpeg` by
+          # name (config.h), so the wrapper puts both on its PATH.
+          postFixup = ''
+            wrapProgram $out/bin/wayland-canvas \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg pkgs.quickshell ]}
           '';
 
           meta = {

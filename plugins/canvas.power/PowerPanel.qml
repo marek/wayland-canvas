@@ -165,6 +165,6 @@ PanelCard {
 
 	PanelRow {
 		label: "Log out"
-		onClicked: if (api != null) api.compositor.call("quit")
+		onClicked: api.compositor.call("quit")
 	}
 }

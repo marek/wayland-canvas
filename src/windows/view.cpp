@@ -211,40 +211,35 @@ void place(View &view) {
 	px = clampd(px, area.x, std::fmax(area.x, area.x + area.w - fw));
 	py = clampd(py, area.y, std::fmax(area.y, area.y + area.h - fh));
 	// px/py place the frame; view.x/y is the content inside it.
-	int x = static_cast<int>(std::round(px)) + bw;
-	int y = static_cast<int>(std::round(py)) + tb + bw;
+	int left = static_cast<int>(std::round(px));
+	int top = static_cast<int>(std::round(py));
+	int x = left + bw;
+	int y = top + tb + bw;
 
-	// Cascade by 32px while another view occupies the chosen position.
-	int step = 0;
-	while (step < 64) {
-		bool clash = false;
+	// Cascade by a step while another view occupies the chosen position, as
+	// far as the frame stays inside the area; with every position that far
+	// taken, the window opens on the first again.
+	auto taken = [&](int step) {
 		for (View *other : view.server.views) {
-			if (other == &view || !other->mapped) {
-				continue;
-			}
-			if (other->x == x + 32 * step && other->y == y + 32 * step) {
-				clash = true;
-				break;
+			if (other != &view && other->mapped
+					&& other->x == x + config::cascade_step * step
+					&& other->y == y + config::cascade_step * step) {
+				return true;
 			}
 		}
-		if (!clash) {
-			break;
-		}
+		return false;
+	};
+	double room = std::fmin(area.x + area.w - (left + fw), area.y + area.h - (top + fh));
+	int last = room > 0 ? static_cast<int>(room) / config::cascade_step : 0;
+	int step = 0;
+	while (step <= last && taken(step)) {
 		step++;
 	}
-	x += 32 * step;
-	y += 32 * step;
-	// Keep the title bar on screen after cascading.
-	int frame_top = y - tb - bw;
-	int bottom = static_cast<int>(std::floor(area.y + area.h));
-	if (frame_top + tb > bottom) {
-		frame_top = bottom - tb;
+	if (step > last) {
+		step = 0;
 	}
-	if (frame_top < static_cast<int>(std::ceil(area.y))) {
-		frame_top = static_cast<int>(std::ceil(area.y));
-	}
-	view.x = x;
-	view.y = frame_top + tb + bw;
+	view.x = x + config::cascade_step * step;
+	view.y = y + config::cascade_step * step;
 }
 
 bool is_initialized(const View &view) {

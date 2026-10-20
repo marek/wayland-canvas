@@ -121,7 +121,8 @@ void leave_canvas(LayerSurface &layer) {
 } // namespace
 
 LayerSurface::LayerSurface(Server &server, Output &output, wlr_layer_surface_v1 *wlr)
-		: server(server), output(&output), wlr(wlr) {
+		: server(server), output(&output), wlr(wlr),
+		on_canvas_(name().starts_with(config::canvas_surface_prefix)) {
 	wlr->data = this;
 	map_.connect<&LayerSurface::handle_map>(wlr->surface->events.map, this);
 	unmap_.connect<&LayerSurface::handle_unmap>(wlr->surface->events.unmap, this);
@@ -227,7 +228,7 @@ std::string LayerSurface::name() const {
 }
 
 bool LayerSurface::belongs_on_canvas() const {
-	return name().starts_with(config::canvas_surface_prefix);
+	return on_canvas_;
 }
 
 void LayerSurface::place(wlr_box box) {

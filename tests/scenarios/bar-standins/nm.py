@@ -10,10 +10,14 @@ Wi-Fi world on one connected device:
     CorpNet      enterprise (802.1X), unknown — the identity join's network
     HomeNet      secured, known, connected
     LibraryFree  open, unknown — the click-join's network
-    OldCafe      secured, known, not connected — the forget action's network
+    OldCafe      secured, known, not connected — the forget action's network;
+                 its saved profile is named "Old Cafe profile", not by SSID
 
 The panel sorts connected first, then known, then signal, so the rows read
-HomeNet, OldCafe, CafeGuest, CorpNet, LibraryFree.
+HomeNet, OldCafe, CafeGuest, CorpNet, LibraryFree. Two more networks join
+the world on demand, when the scenario calls RoamColon or RoamSemicolon:
+`cafe:5G` and `Lounge;Guest`, each connected as the machine roams to it;
+RoamHome moves it back to HomeNet.
 """
 
 # noqa: F401,F403 — the star import is the point: AddTemplate wires every
@@ -38,6 +42,8 @@ ENTERPRISE = (nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_KEY_MGMT_802_1X
     | CCMP | GROUP)
 nm.NM80211ApSecurityFlags.NAME_MAP[ENTERPRISE] = {"key-mgmt": "wpa-eap"}
 OPEN = nm.NM80211ApSecurityFlags.NM_802_11_AP_SEC_NONE
+# the interface the scenario's roams are called on
+ROAM_IFACE = "org.waylandcanvas.barstandins.Wifi"
 
 
 def load(mock, parameters):
@@ -114,7 +120,11 @@ def load(mock, parameters):
     mock.AddAccessPoint(device, "library", "LibraryFree", "22:33:44:55:66:77", 2, 2462, 54000, 50, OPEN)
     mock.AddAccessPoint(device, "oldcafe", "OldCafe", "33:44:55:66:77:88", 2, 2462, 54000, 40, SECURED)
     home_conn = mock.AddWiFiConnection(device, "home", "HomeNet", "wpa-psk")
-    mock.AddWiFiConnection(device, "oldcafe", "OldCafe", "wpa-psk")
+    # OldCafe's saved profile is not named after its SSID, as a profile
+    # made by hand or by another tool is not: forgetting the network has to
+    # find the profile by what it holds, never by the SSID as a name.
+    oldcafe_conn = mock.AddWiFiConnection(device, "oldcafe", "OldCafe", "wpa-psk")
+    dbusmock.get_object(oldcafe_conn).settings["connection"]["id"] = "Old Cafe profile"
     mock.AddActiveConnection(
         [device],
         home_conn,
@@ -122,3 +132,30 @@ def load(mock, parameters):
         "home",
         nm.NMActiveConnectionState.NM_ACTIVE_CONNECTION_STATE_ACTIVATED,
     )
+
+    # The machine moves to a network the world did not list at the start;
+    # the scenario asks for each move over D-Bus. The access point and its
+    # saved profile appear, the old connection drops and the new one comes
+    # up, as when the daemon roams on its own. Their SSIDs are the two
+    # characters that nmcli's terse mode and the WIFI: payload both treat
+    # specially.
+    def roam(ap_name, ssid, hw_address, frequency):
+        disconnect(dbusmock.get_object(device_path))
+        ap = mock.AddAccessPoint(device, ap_name, ssid, hw_address, 2,
+            frequency, 54000, 85, SECURED)
+        conn = mock.AddWiFiConnection(device, ap_name, ssid, "wpa-psk")
+        activate(manager, conn, device_path, ap)
+
+    def roam_colon(self_):
+        roam("colon", "cafe:5G", "88:99:aa:bb:cc:01", 5180)
+
+    def roam_semicolon(self_):
+        roam("semicolon", "Lounge;Guest", "88:99:aa:bb:cc:02", 2437)
+
+    def roam_home(self_):
+        disconnect(dbusmock.get_object(device_path))
+        activate(manager, home_conn, device_path, home_ap)
+
+    manager.AddMethod(ROAM_IFACE, "RoamColon", "", "", roam_colon)
+    manager.AddMethod(ROAM_IFACE, "RoamSemicolon", "", "", roam_semicolon)
+    manager.AddMethod(ROAM_IFACE, "RoamHome", "", "", roam_home)

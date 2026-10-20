@@ -1,5 +1,7 @@
 #include "platform/logind.h"
 
+#include <cerrno>
+#include <cstring>
 #include <unistd.h>
 #include "core/config.h"
 #include "core/server.h"
@@ -14,19 +16,22 @@ constexpr const char *manager_path = "/org/freedesktop/login1";
 constexpr const char *manager_iface = "org.freedesktop.login1.Manager";
 constexpr const char *session_iface = "org.freedesktop.login1.Session";
 
+using BusPtr = Handle<sd_bus, sd_bus_flush_close_unref>;
+using MessagePtr = Handle<sd_bus_message, sd_bus_message_unref>;
+// Owns what a failed call left in the sd_bus_error it was given.
+using ErrorPtr = Handle<sd_bus_error, sd_bus_error_free>;
+
+// What a failed call says: sd-bus' own words when it has any.
+const char *why(const sd_bus_error &error, int ret) {
+	return error.message != nullptr ? error.message : std::strerror(-ret);
+}
+
 } // namespace
 
 // sd-bus gives a pollable fd, so the bus rides the compositor's own event
 // loop instead of a poll of its own.
 struct Logind::Bus {
-	sd_bus *bus = nullptr;
-	std::string session_path;
-
-	~Bus() {
-		if (bus != nullptr) {
-			sd_bus_flush_close_unref(bus);
-		}
-	}
+	BusPtr bus;
 };
 
 Logind::Logind(Server &server) : server_(server) {}
@@ -40,23 +45,30 @@ void Logind::init(bool login) {
 		return; // a nested or headless run leaves the user's session alone
 	}
 	auto bus = std::make_unique<Bus>();
-	if (sd_bus_default_system(&bus->bus) < 0 || bus->bus == nullptr) {
+	sd_bus *raw_bus = nullptr;
+	int ret = sd_bus_default_system(&raw_bus);
+	bus->bus.reset(raw_bus);
+	if (ret < 0 || raw_bus == nullptr) {
 		wlr_log(WLR_INFO, "no system bus: no logind lock triggers");
 		return;
 	}
 	// The session this process runs in; its object carries Lock and Unlock.
 	sd_bus_error error{}; // SD_BUS_ERROR_NULL is a C99 compound literal
-	sd_bus_message *reply = nullptr;
-	const char *path = nullptr;
-	int ret = sd_bus_call_method(bus->bus, login1, manager_path, manager_iface,
-		"GetSessionByPID", &error, &reply, "u", static_cast<uint32_t>(getpid()));
-	if (ret >= 0 && sd_bus_message_read(reply, "o", &path) >= 0 && path != nullptr) {
-		bus->session_path = path;
+	ErrorPtr error_owner(&error);
+	sd_bus_message *raw_reply = nullptr;
+	ret = sd_bus_call_method(raw_bus, login1, manager_path, manager_iface,
+		"GetSessionByPID", &error, &raw_reply, "u", static_cast<uint32_t>(getpid()));
+	MessagePtr reply(raw_reply);
+	if (ret < 0) {
+		wlr_log(WLR_INFO, "no logind session (%s): no lock triggers from it",
+			why(error, ret));
+		return;
 	}
-	sd_bus_error_free(&error);
-	sd_bus_message_unref(reply);
-	if (bus->session_path.empty()) {
-		wlr_log(WLR_INFO, "no logind session: no lock triggers from it");
+	const char *session_path = nullptr;
+	ret = sd_bus_message_read(reply.get(), "o", &session_path);
+	if (ret < 0 || session_path == nullptr) {
+		wlr_log(WLR_ERROR, "logind named no session path (%s): no lock triggers",
+			std::strerror(-ret));
 		return;
 	}
 
@@ -75,23 +87,46 @@ void Logind::init(bool login) {
 		}
 		return 0;
 	};
-	sd_bus_match_signal(bus->bus, nullptr, login1, bus->session_path.c_str(),
-		session_iface, "Lock", on_lock, this);
-	sd_bus_match_signal(bus->bus, nullptr, login1, bus->session_path.c_str(),
-		session_iface, "Unlock", on_unlock, this);
-	sd_bus_match_signal(bus->bus, nullptr, login1, manager_path, manager_iface,
-		"PrepareForSleep", on_sleep, this);
+	auto watch = [&](const char *path, const char *iface, const char *member,
+			sd_bus_message_handler_t handler) {
+		int matched = sd_bus_match_signal(raw_bus, nullptr, login1, path, iface, member,
+			handler, this);
+		if (matched < 0) {
+			wlr_log(WLR_ERROR, "logind: cannot watch %s: %s", member,
+				std::strerror(-matched));
+		}
+		return matched >= 0;
+	};
+	bool locks = watch(session_path, session_iface, "Lock", on_lock);
+	watch(session_path, session_iface, "Unlock", on_unlock);
+	bool sleeps = watch(manager_path, manager_iface, "PrepareForSleep", on_sleep);
+	if (!locks && !sleeps) {
+		wlr_log(WLR_ERROR, "logind: nothing to listen for: no lock triggers");
+		return;
+	}
 
-	int fd = sd_bus_get_fd(bus->bus);
+	int fd = sd_bus_get_fd(raw_bus);
 	if (fd < 0) {
-		wlr_log(WLR_ERROR, "the system bus has no pollable fd: no lock triggers");
+		wlr_log(WLR_ERROR, "the system bus has no pollable fd (%s): no lock triggers",
+			std::strerror(-fd));
+		return;
+	}
+	source_.reset(wl_event_loop_add_fd(server_.loop, fd, WL_EVENT_READABLE,
+		handle_bus, this));
+	if (source_ == nullptr) {
+		wlr_log(WLR_ERROR, "the system bus could not join the event loop: no lock triggers");
 		return;
 	}
 	bus_ = std::move(bus);
-	source_.reset(wl_event_loop_add_fd(server_.loop, fd, WL_EVENT_READABLE,
-		handle_bus, this));
 	wait_timer_.reset(wl_event_loop_add_timer(server_.loop, handle_wait_timeout, this));
-	take_sleep_inhibitor();
+	if (wait_timer_ == nullptr) {
+		wlr_log(WLR_ERROR, "logind: no timer for the sleep wait: the lock may draw late");
+	}
+	// A delay is held only for a sleep we are told of: unheard, it would
+	// make every sleep wait out logind's delay limit.
+	if (sleeps) {
+		take_sleep_inhibitor();
+	}
 }
 
 void Logind::finish() {
@@ -106,9 +141,19 @@ int Logind::handle_bus(int, uint32_t, void *data) {
 	if (self->bus_ == nullptr) {
 		return 0;
 	}
-	while (sd_bus_process(self->bus_->bus, nullptr) > 0) {
+	sd_bus *bus = self->bus_->bus.get();
+	int ret = 0;
+	while ((ret = sd_bus_process(bus, nullptr)) > 0) {
 	}
-	sd_bus_flush(self->bus_->bus);
+	if (ret >= 0) {
+		ret = sd_bus_flush(bus);
+	}
+	if (ret < 0) {
+		// A bus that failed stays readable: left in the loop, it would spin.
+		wlr_log(WLR_ERROR, "the system bus failed (%s): no more lock triggers",
+			std::strerror(-ret));
+		self->finish();
+	}
 	return 0;
 }
 
@@ -158,16 +203,27 @@ void Logind::take_sleep_inhibitor() {
 		return;
 	}
 	sd_bus_error error{}; // SD_BUS_ERROR_NULL is a C99 compound literal
-	sd_bus_message *reply = nullptr;
-	int ret = sd_bus_call_method(bus_->bus, login1, manager_path, manager_iface,
-		"Inhibit", &error, &reply, "ssss", "sleep", "wayland-canvas",
+	ErrorPtr error_owner(&error);
+	sd_bus_message *raw_reply = nullptr;
+	int ret = sd_bus_call_method(bus_->bus.get(), login1, manager_path, manager_iface,
+		"Inhibit", &error, &raw_reply, "ssss", "sleep", "wayland-canvas",
 		"Locking the screen before sleep", "delay");
-	int fd = -1;
-	if (ret >= 0 && sd_bus_message_read(reply, "h", &fd) >= 0 && fd >= 0) {
-		inhibitor_fd_ = dup(fd); // the message owns the one it handed over
+	MessagePtr reply(raw_reply);
+	if (ret < 0) {
+		wlr_log(WLR_ERROR, "logind refused a sleep delay (%s): the lock may draw late",
+			why(error, ret));
+		return;
 	}
-	sd_bus_error_free(&error);
-	sd_bus_message_unref(reply);
+	int fd = -1;
+	ret = sd_bus_message_read(reply.get(), "h", &fd);
+	if (ret < 0 || fd < 0) {
+		wlr_log(WLR_ERROR, "logind gave no sleep delay to hold (%s)", std::strerror(-ret));
+		return;
+	}
+	inhibitor_fd_ = dup(fd); // the message owns the one it handed over
+	if (inhibitor_fd_ < 0) {
+		wlr_log(WLR_ERROR, "cannot keep the sleep delay: %s", std::strerror(errno));
+	}
 }
 
 void Logind::release_sleep_inhibitor() {

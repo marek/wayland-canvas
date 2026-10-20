@@ -85,11 +85,24 @@ What "the default" means per manager:
 | SDDM | `Session` in `[Autologin]` of the config file that enables autologin (nothing when no autologin user is configured), and `Session` in `[Last]` of `/var/lib/sddm/state.conf` — the greeter's pre-selection — unless `RememberLastSession` is false |
 | GDM | `Session` in `[User]` of `/var/lib/AccountsService/users/<user>` — the pre-selected and the automatic-login session; `<user>` is `--user`, else the sudo caller, else the configured autologin user, else the current user |
 | LightDM | `autologin-session` in the config that enables autologin (value without the `.desktop` suffix), and `last-session` in `/var/lib/lightdm/.cache/lightdm-gtk-greeter-state`, the greeter's pre-selection |
-| greetd | `command` in `[default_session]`: the argument after `--cmd` when the current command is a greeter (agreety, gtkgreet, tuigreet), the whole command otherwise — greetd has no session list, its default is a command |
+| greetd | `command` in `[default_session]`, by what the command is (below), and `command` in `[initial_session]`, greetd's automatic login, whenever that section is present — the whole of it becomes `wayland-canvas`, as autologin does for SDDM and LightDM |
 
 SDDM and GDM session values are the session **file name**
 (`wayland-canvas.desktop`); LightDM and greetd name the session or command
 without the suffix.
+
+greetd has no session list; its default is a command, and what the command
+is decides what `set-default` may change in it:
+
+| The `[default_session]` command | set-default |
+|---|---|
+| names the session with a flag: `--cmd X`, `--cmd=X`, `-c X`, `--command X` or `--command=X`, as agreety, tuigreet and gtkgreet take it | only `X` becomes `wayland-canvas`; `X` may be a quoted string, and every other byte of the command stays |
+| has no such flag, and `user` names a login account | it is a session started with no login screen: the whole command becomes `wayland-canvas` |
+| anything else | a login screen that picks sessions from a list (regreet or gtkgreet in cage): untouched. The tool says the screen lists wayland-canvas and the session is picked there |
+
+A login account has a uid in `/etc/passwd` of at least `UID_MIN` (from
+`/etc/login.defs`, default 1000) and is not 65534. A missing `user` is
+greetd's own greeter account, not a login account.
 
 ### The change journal
 
@@ -104,8 +117,9 @@ any recorded default before applying, so running it twice is idempotent.
 
 A display manager that is supported but offers nothing to change (SDDM with
 no autologin and `RememberLastSession=false`, greetd without a
-`[default_session]` command) is reported, not guessed at; the tool exits
-non-zero and changes nothing.
+`[default_session]` command, or with a login screen that lists sessions and
+no `[initial_session]`) is reported, not guessed at; the tool exits non-zero
+and changes nothing.
 
 ## Install and uninstall
 
@@ -127,7 +141,7 @@ Root is for the package manager and nothing else:
 | The re-run through sudo | the root copy is given the step it has to do — `--package <artifact>` for an install, `--uninstall` for a removal — so an argument is never lost and nothing is built again as root. Run as root with no `--package`, `install.sh` says to run it as the user instead |
 | Which artifact | the one of this distro's format, newest first, whatever else `dist/` holds |
 | Building as root | `tools/package.sh` refuses, except with `--here` in the release container, where root is all there is. It never changes the owner of the checkout: only its own scratch directory and the output directory are handed to the unprivileged account makepkg runs as |
-| Proof | the packaging suite drives both copies of `install.sh` against a stub `sudo`, a stub package manager and a stub `package.sh`: the arguments reach the root copy, the root copy builds nothing, and a root `package.sh` without `--here` exits non-zero with the checkout untouched |
+| Proof | the packaging suite drives both copies of `install.sh` against a stub `sudo`, a stub package manager and a stub `package.sh`: the arguments reach the root copy, the root copy builds nothing, and a root `package.sh` without `--here` exits non-zero with the checkout untouched. `packaging/check-lock-pam.sh`, which both package builds run, finds `plugins/canvas.lock/plugin.json` under the package root, whatever the prefix, and fails unless the PAM service its `pamService` and `pamConfigDirectory` settings name is in the package; a missing, renamed or unreadable setting fails it naming the setting and the manifest |
 
 ## Cross-links
 

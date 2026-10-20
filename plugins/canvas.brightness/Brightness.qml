@@ -38,8 +38,8 @@ BarButton {
 
 	Component.onCompleted: readBrightness.running = true
 
-	onWheeled: function(delta) {
-		apply(percent + (delta > 0 ? 5 : -5))
+	onWheeled: function(notches) {
+		apply(percent + notches * 5)
 	}
 
 	// A step from the wheel or the panel slider. --min-value=1: the screen

@@ -50,7 +50,7 @@ view, and three or four fingers swipe as they do on the touchpad.
 | The compositor's UI, the finger held still | A right click, once the finger has stayed within the press-vs-drag travel for a compile-time time (`src/core/config.h`): what a right click does there, such as a new desktop on the overview's empty canvas |
 | Empty canvas, one finger | A tap is a click (in the overview it targets a free spot); a drag moves nothing |
 | Empty canvas, two fingers | A drag looks away, and in the overview pans, the content following the fingers; a pinch does what Super and a 2-finger pinch do on the touchpad, by its pinch-scale switch ([gestures.md](gestures.md)). Which comes first decides it: their spread changing by a compile-time fraction, or their middle travelling the press-vs-drag travel (`src/core/config.h`); fingers moving together count once all of them have moved |
-| Anywhere, three or four fingers | The touchpad's swipe for that count, by the preset ([gestures.md](gestures.md)); the fingers that had reached a client are cancelled for it. Under `off` every finger reaches the client under it |
+| Anywhere, three or four fingers | The touchpad's swipe for that count, by the preset ([gestures.md](gestures.md)); the fingers that had reached a client are cancelled for it. Under `off` every finger reaches the client under it. While the capture UI is open it owns the pointer, as it does for the touchpad's swipes: no swipe starts, and the fingers beyond the first are ignored |
 
 ### The pen
 

@@ -5,7 +5,8 @@ import "."
 // have no hover chrome — the bar paints glyphs only, colour telling state.
 // A widget whose manifest names a panel opens it on click without code of
 // its own: the bar sets `panel` to the panel's global name and `api` to the
-// plugin's, and a left click toggles it.
+// plugin's, and a left click toggles it. A wheel turn reaches the widget as
+// whole notches (`wheeled`), the small deltas of a smooth wheel adding up.
 Item {
 	id: root
 
@@ -17,7 +18,10 @@ Item {
 	property bool active: false // paint with the attention colour
 
 	signal pressed(int button)
-	signal wheeled(int delta)
+	signal wheeled(int notches) // positive up, one per notchUnits of turn
+
+	readonly property int notchUnits: 120 // angleDelta of one wheel notch
+	property real turned: 0 // the turn not yet a whole notch
 
 	visible: text !== ""
 	implicitWidth: icon
@@ -53,7 +57,20 @@ Item {
 			root.pressed(mouse.button)
 		}
 		onWheel: function(wheel) {
-			root.wheeled(wheel.angleDelta.y)
+			root.turn(wheel.angleDelta.y)
+		}
+	}
+
+	// A direction change drops the half-done turn of the other direction.
+	function turn(delta) {
+		if (delta * turned < 0) {
+			turned = 0
+		}
+		turned += delta
+		var notches = Math.trunc(turned / notchUnits)
+		turned -= notches * notchUnits
+		if (notches !== 0) {
+			wheeled(notches)
 		}
 	}
 }

@@ -54,13 +54,17 @@ PanelWindow {
 		right: true
 	}
 
-	// Everything below the bar strip is this panel's to catch; the strip
+	// Everything but the bar strip is this panel's to catch; the strip
 	// itself stays the bar's, which is what makes a second click of the
-	// indicator toggle the panel closed.
+	// indicator toggle the panel closed. A toolbar button's strip lies
+	// below the panel layer, so its card catches the whole output: a
+	// click above or beside the card closes it, never reaching the window
+	// below.
+	readonly property real maskTop: beside ? 0 : barH
 	mask: Region {
-		y: root.cardY
+		y: root.maskTop
 		width: root.screenW
-		height: root.screenH - root.cardY
+		height: root.screenH - root.maskTop
 	}
 
 	function showPanel() {

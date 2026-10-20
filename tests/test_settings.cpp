@@ -346,6 +346,23 @@ void gesture_directions() {
 		"an unknown way or direction is an error");
 }
 
+void lock_idle_has_a_range() {
+	settings::Parsed top = settings::parse(
+		std::format("[session]\nlock-idle = {}\n", settings::max_lock_idle_minutes));
+	check(!error_on_line(top, 2) && settings::resolve(top).lock_idle_minutes
+			== settings::max_lock_idle_minutes,
+		"the largest idle time the timer holds is accepted");
+	for (std::string_view past : {"35792", "4294967301", "0", "-3"}) {
+		settings::Parsed parsed = settings::parse(
+			std::format("[session]\nlock-idle = {}\n", past));
+		check(error_on_line(parsed, 2) && settings::resolve(parsed).lock_idle_minutes
+				== settings::default_lock_idle_minutes,
+			std::format("lock-idle = {} is an error and the default stays", past));
+	}
+	check(!error_on_line(settings::parse("[session]\nlock-idle = off\n"), 2),
+		"lock-idle = off is accepted");
+}
+
 void template_parses_back() {
 	std::string text = settings::template_text();
 	settings::Parsed parsed = settings::parse(text);
@@ -569,6 +586,7 @@ int main() {
 	errors_carry_line_numbers();
 	gesture_directions();
 	template_parses_back();
+	lock_idle_has_a_range();
 	edit_keeps_every_other_byte();
 	edit_appends_into_missing_section();
 	edit_reports_moved();

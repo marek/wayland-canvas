@@ -5,7 +5,9 @@
 #
 # Covers: set-default then restore leaves every file byte-identical; restore
 # with nothing recorded is a no-op; repeated set-default is idempotent; a
-# missing previous session is restored as it was; an unknown display manager
+# missing previous session is restored as it was; greetd changes the session
+# flag's value, the whole command of a session with no login screen, or
+# nothing for a login screen that lists sessions; an unknown display manager
 # changes nothing. Then the install flow against stub sudo, package managers
 # and package.sh: the step reaches the root copy, the root copy builds
 # nothing, the artifact matches the distro's format, and a root package.sh
@@ -198,16 +200,266 @@ check "greetd set-default keeps the greeter, switches its --cmd" env TOOL="$TOOL
 	grep -q "^command = \"agreety --cmd wayland-canvas\"$" "$ROOT/etc/greetd/config.toml"'
 check "greetd restore is byte-identical" restore_and_diff "$r" "$S/greetd.pristine"
 
-# greetd: bare compositor command
-r=$(root greetd-bare)
-mkdir -p "$r/etc/greetd"
-printf '[default_session]\ncommand = "sway"\n' >"$r/etc/greetd/config.toml"
-cp -a "$r" "$S/greetd-bare.pristine"
-check "greetd bare command replaced and restored" env TOOL="$TOOL" ROOT="$r" bash -c '
-	"$TOOL" --root "$ROOT" set-default &&
-	grep -q "^command = \"wayland-canvas\"$" "$ROOT/etc/greetd/config.toml" &&
-	"$TOOL" --root "$ROOT" restore &&
-	diff -r "$ROOT" "$(dirname "$ROOT")/greetd-bare.pristine"'
+# greetd: what a fake root's config.toml (on stdin) holds, as a fresh root
+greetd_root() { # greetd_root <name>
+	local r
+	r=$(root "$1")
+	mkdir -p "$r/etc/greetd"
+	cat >"$r/etc/greetd/config.toml"
+	printf '%s\n' "$r"
+}
+
+file_is() { # file_is <file> <content> — whole content, trailing newlines aside
+	test "$(cat "$1")" = "$2"
+}
+
+# set-default writes exactly <expected> and restore gives the root back byte for byte
+greetd_rewrites() { # greetd_rewrites <name> <root> <expected config.toml>
+	cp -a "$2" "$S/$1.pristine"
+	check "$1: set-default exits 0" "$TOOL" --root "$2" set-default
+	check "$1: only the session changed" file_is "$2/etc/greetd/config.toml" "$3"
+	check "$1: restore is byte-identical" restore_and_diff "$2" "$S/$1.pristine"
+}
+
+# set-default exits 1 saying the login screen lists wayland-canvas, and changes nothing
+greetd_untouched() { # greetd_untouched <name> <root>
+	cp -a "$2" "$S/$1.pristine"
+	run_check "$1: set-default exits 1 and says the screen lists wayland-canvas" 'lists wayland-canvas' \
+		env bash -c '"$1" --root "$2" set-default; test $? -eq 1' shell "$TOOL" "$2"
+	check "$1: nothing changed" same_tree "$2" "$S/$1.pristine"
+	check "$1: no state recorded" test ! -e "$2/var/lib/wayland-canvas"
+}
+
+passwd_text='root:x:0:0::/root:/bin/bash
+greeter:x:976:976::/var/lib/greeter:/usr/bin/nologin
+marek:x:1000:1000::/home/marek:/bin/bash
+karel:x:600:600::/home/karel:/bin/bash
+nobody:x:65534:65534::/:/usr/bin/nologin
+'
+
+r=$(greetd_root greetd-tuigreet <<'EOF'
+[terminal]
+vt = 1
+
+[default_session]
+command = "tuigreet --cmd sway --remember --time"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-tuigreet "$r" '[terminal]
+vt = 1
+
+[default_session]
+command = "tuigreet --cmd wayland-canvas --remember --time"
+user = "greeter"'
+
+r=$(greetd_root greetd-cmd-equals <<'EOF'
+[default_session]
+command = "agreety --cmd=sway"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-cmd-equals "$r" '[default_session]
+command = "agreety --cmd=wayland-canvas"
+user = "greeter"'
+
+r=$(greetd_root greetd-short-flag <<'EOF'
+[default_session]
+command = "agreety -c sway"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-short-flag "$r" '[default_session]
+command = "agreety -c wayland-canvas"
+user = "greeter"'
+
+r=$(greetd_root greetd-command-equals <<'EOF'
+[default_session]
+command = "gtkgreet --command=sway --style /etc/greetd/gtkgreet.css"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-command-equals "$r" '[default_session]
+command = "gtkgreet --command=wayland-canvas --style /etc/greetd/gtkgreet.css"
+user = "greeter"'
+
+r=$(greetd_root greetd-quoted <<'EOF'
+[default_session]
+command = "cage -s -- gtkgreet --command 'sway --unsupported-gpu'"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-quoted "$r" '[default_session]
+command = "cage -s -- gtkgreet --command wayland-canvas"
+user = "greeter"'
+
+# a quoted value that holds the flag's own name is one word
+r=$(greetd_root greetd-quoted-flag <<'EOF'
+[default_session]
+command = "cage -s -- gtkgreet --command 'sway --cmd x -c y' --style /etc/greetd/gtkgreet.css"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-quoted-flag "$r" '[default_session]
+command = "cage -s -- gtkgreet --command wayland-canvas --style /etc/greetd/gtkgreet.css"
+user = "greeter"'
+
+# TOML escapes are read and written back: " and \ keep their meaning
+r=$(greetd_root greetd-escapes <<'EOF'
+[default_session]
+command = "tuigreet --greeting \"back\\slash\" --cmd \"sway --unsupported-gpu\" --time"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-escapes "$r" '[default_session]
+command = "tuigreet --greeting \"back\\slash\" --cmd wayland-canvas --time"
+user = "greeter"'
+
+r=$(greetd_root greetd-literal-string <<'EOF'
+[default_session]
+command = 'tuigreet --cmd sway --time'
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-literal-string "$r" '[default_session]
+command = "tuigreet --cmd wayland-canvas --time"
+user = "greeter"'
+
+# a login screen that lists sessions stays as it is
+r=$(greetd_root greetd-list-greeter <<'EOF'
+[default_session]
+command = "cage -s -- regreet"
+user = "greeter"
+EOF
+)
+greetd_untouched greetd-list-greeter "$r"
+
+# no user: greetd's own greeter account, not a login account
+r=$(greetd_root greetd-bare <<'EOF'
+[default_session]
+command = "sway"
+EOF
+)
+greetd_untouched greetd-bare "$r"
+
+# a session started with no login screen: the whole command, for a login account
+r=$(greetd_root greetd-session-user <<'EOF'
+[default_session]
+command = "sway --unsupported-gpu"
+user = "marek"
+EOF
+)
+mkdir -p "$r/etc"
+printf '%s' "$passwd_text" >"$r/etc/passwd"
+greetd_rewrites greetd-session-user "$r" '[default_session]
+command = "wayland-canvas"
+user = "marek"'
+
+r=$(greetd_root greetd-system-user <<'EOF'
+[default_session]
+command = "sway"
+user = "greeter"
+EOF
+)
+mkdir -p "$r/etc"
+printf '%s' "$passwd_text" >"$r/etc/passwd"
+greetd_untouched greetd-system-user "$r"
+
+r=$(greetd_root greetd-nobody <<'EOF'
+[default_session]
+command = "sway"
+user = "nobody"
+EOF
+)
+mkdir -p "$r/etc"
+printf '%s' "$passwd_text" >"$r/etc/passwd"
+greetd_untouched greetd-nobody "$r"
+
+r=$(greetd_root greetd-unknown-user <<'EOF'
+[default_session]
+command = "sway"
+user = "stranger"
+EOF
+)
+mkdir -p "$r/etc"
+printf '%s' "$passwd_text" >"$r/etc/passwd"
+greetd_untouched greetd-unknown-user "$r"
+
+# UID_MIN comes from login.defs
+r=$(greetd_root greetd-uid-min <<'EOF'
+[default_session]
+command = "sway"
+user = "karel"
+EOF
+)
+mkdir -p "$r/etc"
+printf '%s' "$passwd_text" >"$r/etc/passwd"
+printf '# UID_MIN 1000\nUID_MIN\t\t500\nUID_MAX 60000\n' >"$r/etc/login.defs"
+greetd_rewrites greetd-uid-min "$r" '[default_session]
+command = "wayland-canvas"
+user = "karel"'
+
+r=$(greetd_root greetd-uid-min-default <<'EOF'
+[default_session]
+command = "sway"
+user = "karel"
+EOF
+)
+mkdir -p "$r/etc"
+printf '%s' "$passwd_text" >"$r/etc/passwd"
+greetd_untouched greetd-uid-min-default "$r"
+
+# the automatic login is a session too: both sections are set
+r=$(greetd_root greetd-initial <<'EOF'
+[initial_session]
+command = "sway"
+user = "marek"
+
+[default_session]
+command = "tuigreet --cmd sway"
+user = "greeter"
+EOF
+)
+greetd_rewrites greetd-initial "$r" '[initial_session]
+command = "wayland-canvas"
+user = "marek"
+
+[default_session]
+command = "tuigreet --cmd wayland-canvas"
+user = "greeter"'
+run_check "greetd status shows the initial session" 'initial session command: sway' \
+	"$TOOL" --root "$r" status
+
+# with a list-based login screen, the automatic login alone is the change
+r=$(greetd_root greetd-initial-list <<'EOF'
+[default_session]
+command = "cage -s -- regreet"
+user = "greeter"
+
+[initial_session]
+command = "sway"
+user = "marek"
+EOF
+)
+greetd_rewrites greetd-initial-list "$r" '[default_session]
+command = "cage -s -- regreet"
+user = "greeter"
+
+[initial_session]
+command = "wayland-canvas"
+user = "marek"'
+
+# a value the tool cannot read back is never rewritten
+r=$(greetd_root greetd-unreadable <<'EOF'
+[default_session]
+command = "tuigreet\t--cmd sway"
+user = "greeter"
+EOF
+)
+cp -a "$r" "$S/greetd-unreadable.pristine"
+run_check "greetd-unreadable: set-default exits 1 and rewrites nothing it cannot read" 'does not rewrite' \
+	env bash -c '"$1" --root "$2" set-default; test $? -eq 1' shell "$TOOL" "$r"
+check "greetd-unreadable: nothing changed" same_tree "$r" "$S/greetd-unreadable.pristine"
 
 # --- unknown display manager: nothing changed ----------------------------------
 
@@ -377,6 +629,52 @@ run_check "version.sh: a tree with no git of its own reads VERSION" '^3\.4\.5$' 
 rm "$V/tarball/VERSION"
 run_check "version.sh: neither a checkout nor a tarball fails" 'no git checkout' \
 	fails_with "$V/tarball/tools/version.sh"
+
+# check-lock-pam.sh finds the lock plugin's manifest under the package root by
+# its plugin-relative path, and reads the service from the manifest's settings
+LP=$REPO/packaging/check-lock-pam.sh
+L=$S/lockpam
+lock_pkg() { # lock_pkg <name> <prefix> — a package root with the real manifest under <prefix>
+	local r=$L/$1
+	rm -rf "$r"
+	mkdir -p "$r$2/plugins/canvas.lock" "$r/etc/pam.d"
+	cp "$REPO/plugins/canvas.lock/plugin.json" "$r$2/plugins/canvas.lock/"
+	echo "$r"
+}
+lp=$(lock_pkg shipped /usr/share/wayland-canvas)
+touch "$lp/etc/pam.d/wayland-canvas"
+run_check "check-lock-pam.sh: the shipped manifest and service pass" 'is in the package' "$LP" "$lp"
+lp=$(lock_pkg prefix /opt/canvas/share)
+touch "$lp/etc/pam.d/wayland-canvas"
+run_check "check-lock-pam.sh: no prefix is hard-coded" 'is in the package' "$LP" "$lp"
+lp=$(lock_pkg noservice /usr/share/wayland-canvas)
+run_check "check-lock-pam.sh: a service file the package lacks fails" 'does not install' \
+	fails_with "$LP" "$lp"
+lp=$(lock_pkg setting /usr/share/wayland-canvas)
+sed -i 's|"/etc/pam.d"|"/usr/lib/pam.d"|' "$lp/usr/share/wayland-canvas/plugins/canvas.lock/plugin.json"
+mkdir -p "$lp/usr/lib/pam.d"
+touch "$lp/usr/lib/pam.d/wayland-canvas"
+run_check "check-lock-pam.sh: the directory comes from the manifest" '/usr/lib/pam.d/wayland-canvas is in' "$LP" "$lp"
+lp=$(lock_pkg none /usr/share/wayland-canvas)
+rm -r "$lp/usr/share/wayland-canvas/plugins"
+run_check "check-lock-pam.sh: no manifest fails" 'found 0' fails_with "$LP" "$lp"
+lp=$(lock_pkg two /usr/share/wayland-canvas)
+mkdir -p "$lp/usr/lib/wayland-canvas/plugins/canvas.lock"
+cp "$lp/usr/share/wayland-canvas/plugins/canvas.lock/plugin.json" "$lp/usr/lib/wayland-canvas/plugins/canvas.lock/"
+run_check "check-lock-pam.sh: two manifests fail" 'found 2' fails_with "$LP" "$lp"
+lp=$(lock_pkg renamed /usr/share/wayland-canvas)
+touch "$lp/etc/pam.d/wayland-canvas"
+sed -i 's|"pamService"|"pamName"|' "$lp/usr/share/wayland-canvas/plugins/canvas.lock/plugin.json"
+run_check "check-lock-pam.sh: a renamed key names the key and the manifest" 'plugin.json has no string setting pamService' \
+	fails_with "$LP" "$lp"
+lp=$(lock_pkg broken /usr/share/wayland-canvas)
+printf '{ not json' >"$lp/usr/share/wayland-canvas/plugins/canvas.lock/plugin.json"
+run_check "check-lock-pam.sh: a manifest that does not parse fails without a traceback" 'cannot read' \
+	fails_with "$LP" "$lp"
+lacks() { # lacks <regex> <file>
+	! grep -q "$1" "$2"
+}
+check "check-lock-pam.sh: the unreadable-manifest message has no traceback" lacks Traceback "$S/out"
 
 # ------------------------------------------------------------------------------
 

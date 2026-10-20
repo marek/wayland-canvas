@@ -39,6 +39,7 @@ std::string shot_dir;
 std::string xdg_dir;
 std::string marker_path;
 std::string canvas_conf; // this run's scratch canvas.conf (written on start)
+std::string gsettings_marker; // written by the gsettings stand-in when anything runs it
 bool harness_ignores_sigpipe = false; // as this process was started; see main()
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -205,6 +206,10 @@ int run_step() {
 		return 500;
 	}
 	case 3:
+		// Opening drew the entries' icons: the icon theme is read in process,
+		// never by running a program the loop would wait on.
+		check(access(gsettings_marker.c_str(), F_OK) != 0,
+			"opening the launcher ran no gsettings program");
 		views_before = mapped();
 		tap(KEY_ENTER);
 		check(!server->launcher.is_open(), "Enter launched the selection and closed the launcher");
@@ -351,6 +356,36 @@ void install_custom_entry() {
 	std::fclose(f);
 }
 
+// A `gsettings` first on PATH that records that it ran, and the keyfile
+// settings backend holding the icon theme the compositor reads instead.
+void install_gsettings_stand_in(const std::string &scratch, const std::string &config) {
+	std::string shims = scratch + "/shims";
+	mkdir_p(shims);
+	gsettings_marker = scratch + "/gsettings-ran";
+	unlink(gsettings_marker.c_str());
+	std::string script = shims + "/gsettings";
+	FILE *f = std::fopen(script.c_str(), "w");
+	if (f == nullptr) {
+		std::fprintf(stderr, "fopen %s: %s\n", script.c_str(), std::strerror(errno));
+		std::exit(2);
+	}
+	std::fprintf(f, "#!/bin/sh\n: > %s\necho \"'Adwaita'\"\n", gsettings_marker.c_str());
+	std::fclose(f);
+	chmod(script.c_str(), 0755);
+	std::string path = std::getenv("PATH") != nullptr ? std::getenv("PATH") : "/usr/bin";
+	setenv("PATH", (shims + ":" + path).c_str(), 1);
+
+	setenv("GSETTINGS_BACKEND", "keyfile", 1);
+	mkdir_p(config + "/glib-2.0/settings");
+	f = std::fopen((config + "/glib-2.0/settings/keyfile").c_str(), "w");
+	if (f == nullptr) {
+		std::fprintf(stderr, "fopen the keyfile: %s\n", std::strerror(errno));
+		std::exit(2);
+	}
+	std::fprintf(f, "[org/gnome/desktop/interface]\nicon-theme='ScenarioTheme'\n");
+	std::fclose(f);
+}
+
 } // namespace
 
 int main() {
@@ -376,6 +411,7 @@ int main() {
 	// never in the user's real ~/.config.
 	setenv("XDG_CONFIG_HOME",
 		std::format("{}/scenarios/launcher/xdg-config", root).c_str(), 1);
+	install_gsettings_stand_in(shot_dir, std::format("{}/scenarios/launcher/xdg-config", root));
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();

@@ -19,26 +19,43 @@ Item {
 	property bool silent: false
 
 	property var api: null
-	property int popupSeconds: 5
-	property bool criticalNeverExpires: true
-	property int maxPopups: 4
-	property int historyLimit: 50
+	// The plugin's settings, live: a change from the settings window is
+	// read by the next popup, the way the declared defaults are before the
+	// first surface hands the api over.
+	readonly property int popupSeconds: api !== null
+		? api.plugin.settings.popupSeconds : 5
+	readonly property bool criticalNeverExpires: api !== null
+		? api.plugin.settings.criticalNeverExpires : true
+	readonly property int maxPopups: api !== null
+		? api.plugin.settings.maxPopups : 4
+	readonly property int historyLimit: api !== null
+		? api.plugin.settings.historyLimit : 50
 	// The live Notification objects by id, kept out of the lists: a model
 	// holding one dangles as soon as the sender closes it.
 	property var live: ({})
 
 	readonly property string storageName: "notifications.json"
 
+	// The shell's one server, however many outputs it has: each output's
+	// popups only draw what lands in `popups`.
+	NotificationServer {
+		keepOnReload: false
+		imageSupported: true
+		actionsSupported: true
+		bodyMarkupSupported: true
+		persistenceSupported: true
+
+		onNotification: function(notification) {
+			notification.tracked = true
+			root.add(notification)
+		}
+	}
+
 	function init(pluginApi) {
 		if (api !== null) {
 			return
 		}
 		api = pluginApi
-		var settings = api.plugin.settings
-		popupSeconds = settings.popupSeconds
-		criticalNeverExpires = settings.criticalNeverExpires
-		maxPopups = settings.maxPopups
-		historyLimit = settings.historyLimit
 		var stored = api.storage.read(storageName)
 		if (stored != null) {
 			silent = stored.silent === true

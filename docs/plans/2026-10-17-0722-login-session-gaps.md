@@ -121,7 +121,7 @@ The first lock on the SDDM login could check no password; that fix and what it t
 - [x] Build and package: wlroots with Xwayland; Arch `optdepends` xorg-xwayland, Debian `Recommends` xwayland
 - [x] Compositor: X11 windows as views: map, title bars, move and resize, maximize, minimize and fullscreen requests, close through `WM_DELETE_WINDOW`, focus
 - [x] Compositor: override-redirect windows placed beside their parent in canvas space and kept out of the window list, and the clipboard both ways between X11 and wayland clients
-- [ ] Hi-dpi: an X11 window drawn at scale 1 and enlarged on a scaled output (the user: it needs a hi-dpi screen)
+- [ ] Hi-dpi, which needs a hi-dpi screen: an X11 window drawn at scale 1 and enlarged on a scaled output (the user)
 - [x] Scenario: an xcb client built with the tests maps a window with a title bar where the user is looking, takes a click and a key, is maximized from its title bar and closed by its × through `WM_DELETE_WINDOW`
 - [x] Scenario: the popup beside its parent, the clipboard both ways, and `WLR_XWAYLAND` naming a missing binary leaving the compositor without X11
 

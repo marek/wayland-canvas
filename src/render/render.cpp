@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -636,16 +638,11 @@ void draw_shelf(const RenderCtx &ctx) {
 			draw_surface_logical(ctx, surface, x, y, cw * fit, ch * fit, 1.0f, true);
 		});
 
-		const char *title = view->shell_title();
-		if (title != nullptr && title[0] != '\0') {
-			TextTexture t = draw_text(ctx.output->server.renderer, title, config::ui_font,
-				ctx.output->server.theme.colors().panel_text, 0x00000000u, ctx.scale, 0, 0);
-			if (t.texture != nullptr && t.width > 0 && t.height > 0) {
-				double w = std::fmin(t.width, static_cast<double>(box.width));
-				draw_ui_texture(ctx, t.texture.get(),
-					box.x + (box.width - w) / 2.0,
-					box.y + box.height - t.height, w, t.height, w / t.width);
-			}
+		DesktopLabel title = ctx.output->server.painter.shelf_title(*view, ctx.scale);
+		if (title.texture != nullptr && title.w > 0 && title.h > 0) {
+			double w = std::fmin(title.w, static_cast<double>(box.width));
+			draw_ui_texture(ctx, title.texture, box.x + (box.width - w) / 2.0,
+				box.y + box.height - title.h, w, title.h, w / title.w);
 		}
 	}
 }
@@ -848,6 +845,29 @@ DesktopLabel Painter::desktop_label(const Desktop &desktop, float scale, bool on
 	return {image.texture.get(), image.w, image.h};
 }
 
+DesktopLabel Painter::shelf_title(const View &view, float scale) {
+	const char *title = view.shell_title();
+	if (title == nullptr || title[0] == '\0') {
+		return {};
+	}
+	auto entry = std::ranges::find_if(shelf_titles_, [&](const ShelfTitle &candidate) {
+		return candidate.view == &view && candidate.scale == scale;
+	});
+	if (entry == shelf_titles_.end()) {
+		entry = shelf_titles_.emplace(shelf_titles_.end());
+		entry->view = &view;
+		entry->scale = scale;
+	} else if (entry->texture != nullptr && entry->title == title) {
+		return {entry->texture.get(), entry->w, entry->h};
+	}
+	TextTexture t = draw_text(server_.renderer, title, config::ui_font,
+		server_.theme.colors().panel_text, 0x00000000u, scale, 0, 0);
+	entry->title.assign(title);
+	entry->texture = std::move(t.texture);
+	entry->w = t.width;
+	entry->h = t.height;
+	return {entry->texture.get(), entry->w, entry->h};
+}
 
 std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 		const Desktop &desktop) const {
@@ -858,12 +878,10 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 	double frame_left = (desktop.frame().x - left) * cam.zoom + offset;
 	double frame_top = (desktop.frame().y - top) * cam.zoom;
 
-	char buf[32];
-	int len = std::snprintf(buf, sizeof(buf), "Desktop %d", desktop.number());
-	const LabelSlot *slot = label_slot(desktop.id());
 	// The text's width from whichever image of it is current, else a guess
-	// until the first frame draws one.
-	int label_w = 9 * (len > 0 ? len : 0);
+	// of nine pixels a character until the first frame draws one.
+	const LabelSlot *slot = label_slot(desktop.id());
+	std::optional<int> label_w;
 	if (slot != nullptr) {
 		for (const LabelImage *image : {&slot->plain, &slot->accent}) {
 			if (image->current(desktop, o.wlr->scale)) {
@@ -872,6 +890,14 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 			}
 		}
 	}
+	if (!label_w.has_value()) {
+		char number[16];
+		std::to_chars_result digits = std::to_chars(number, number + sizeof(number),
+			desktop.number());
+		label_w = 9 * (static_cast<int>(sizeof("Desktop ") - 1)
+			+ static_cast<int>(digits.ptr - number));
+	}
+	int text_w = *label_w;
 
 	TabLayout layout;
 	layout.tab.x = static_cast<int>(std::round(frame_left));
@@ -879,10 +905,10 @@ std::optional<TabLayout> Painter::overview_tab_layout(const Output &o,
 	if (layout.tab.y < 4) {
 		layout.tab.y = static_cast<int>(std::round(frame_top)) + 4;
 	}
-	layout.tab.width = 12 + label_w + 8 + 2 * 24 + 6;
+	layout.tab.width = 12 + text_w + 8 + 2 * 24 + 6;
 	layout.tab.height = 28;
 
-	layout.tile_button.x = layout.tab.x + 12 + label_w + 8;
+	layout.tile_button.x = layout.tab.x + 12 + text_w + 8;
 	layout.tile_button.y = layout.tab.y + 2;
 	layout.tile_button.width = 24;
 	layout.tile_button.height = 24;
@@ -937,9 +963,24 @@ void Hint::set(std::string_view text) {
 		server_.damage_all();
 		return;
 	}
+	if (text == this->text) {
+		keep();
+		return;
+	}
 	this->text.assign(text);
 	texture.reset();
 	scale = 0; // regenerate at the output's scale
+	restart_timer();
+	server_.damage_all();
+}
+
+void Hint::keep() {
+	if (!text.empty()) {
+		restart_timer();
+	}
+}
+
+void Hint::restart_timer() {
 	if (!timer_) {
 		timer_.reset(wl_event_loop_add_timer(server_.loop,
 			[](void *data) -> int {
@@ -955,7 +996,6 @@ void Hint::set(std::string_view text) {
 	if (timer_) {
 		wl_event_source_timer_update(timer_.get(), 2000);
 	}
-	server_.damage_all();
 }
 
 void Hint::clear() {
@@ -1031,6 +1071,10 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 	// Drop the labels of desktops that are gone.
 	std::erase_if(label_cache_, [this](const LabelSlot &slot) {
 		return server_.canvas.desktops.find(slot.id) == nullptr;
+	});
+	// And the titles of windows that are gone.
+	std::erase_if(shelf_titles_, [this](const ShelfTitle &entry) {
+		return std::ranges::find(server_.views, entry.view) == server_.views.end();
 	});
 
 	// clear
@@ -1110,9 +1154,8 @@ void Painter::render(Output &output) {
 
 	wlr_output_state state;
 	wlr_output_state_init(&state);
-	// The night light rides the output's own gamma ramp where it can hold
-	// it, so a capture stays in true colours; where it cannot, the frame is
-	// rendered through the same transform instead.
+	// The night light rides the output's own gamma ramp, so a capture stays
+	// in true colours; an output with no ramp shows none.
 	server_.night_light.apply_to_output(output, state);
 	wlr_render_pass *pass = wlr_output_begin_render_pass(wlr_output, &state, nullptr);
 	if (pass == nullptr) {
@@ -1217,6 +1260,9 @@ void Painter::theme_changed() {
 		slot.plain.texture.reset();
 		slot.accent.texture.reset();
 	}
+	for (ShelfTitle &entry : shelf_titles_) {
+		entry.texture.reset();
+	}
 }
 
 void Painter::finish() {
@@ -1224,4 +1270,5 @@ void Painter::finish() {
 		slot.texture.reset();
 	}
 	label_cache_.clear();
+	shelf_titles_.clear();
 }

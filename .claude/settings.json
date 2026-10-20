@@ -13,6 +13,25 @@
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/tools/hooks/no-claude-branches.sh" }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/tools/hooks/autopilot-stop.sh" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "rm -f \"$CLAUDE_PROJECT_DIR\"/.claude/autopilot.pause" }
+        ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/tools/hooks/reinforce-collaboration-rules.sh" }
+        ]
+      }
     ]
   }
 }

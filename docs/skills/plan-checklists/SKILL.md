@@ -67,7 +67,10 @@ pull its content into `docs/plans/` as a file, not a link.
   fixing another, a follow-up worth doing: add it to the list when it
   is discovered instead of absorbing it into an existing box.
 - **Unverified stays unticked, with the reason.** "(nested check
-  owed)", "(needs real hardware — the user)", "(the user to decide)".
+  owed)" says why in the middle of a title; a box that only a person can
+  close ends its title with the marker `(the user)`, or `(the user to
+  decide)` for a decision. The autopilot hook skips exactly those, and
+  `tools/check-plans.sh` fails any other wording of the same note.
 - **Decisions for the user** go in the plan as open boxes that say so,
   and work continues on what does not depend on them.
 - **One box, one file.** A task lives in exactly one plan. When a topic

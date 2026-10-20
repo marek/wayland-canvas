@@ -150,6 +150,7 @@ inline constexpr double combine_overlap = 0.5; // dropping a frame this far onto
 inline constexpr double anim_ms = 280.0;
 inline constexpr int tile_gap = 8;
 inline constexpr int desktop_gap = 8; // canvas px between desktops made beside desktop 1
+inline constexpr int cascade_step = 32; // canvas px a window opening on a taken spot moves by
 inline constexpr double drag_threshold = 6.0; // px before a press becomes a drag
 // A finger held this long within drag_threshold on the compositor's UI is a
 // right click (docs/intents/input/touch-and-pen.md).

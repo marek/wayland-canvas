@@ -19,8 +19,13 @@
 #   lightdm  autologin-session= in the config that enables autologin, and the
 #            greeter's remembered last-session in
 #            /var/lib/lightdm/.cache/lightdm-gtk-greeter-state
-#   greetd   command in [default_session]: the argument after --cmd when the
-#            current command is a greeter, the whole command otherwise
+#   greetd   command in [default_session], by what it is: only the value of its
+#            session flag (--cmd, -c, --command) when it has one; the whole
+#            command when it has none and user is a login account (a session
+#            started with no login screen); a login screen that lists sessions
+#            stays as it is and lists wayland-canvas. command in
+#            [initial_session], when that section is present, is the whole of
+#            wayland-canvas
 #
 # Every change is recorded under /var/lib/wayland-canvas/session-default —
 # whole previous file contents, so restore returns each file byte for byte,
@@ -211,30 +216,140 @@ create_file() { # $1 path $2 mode $3 content — path must not exist
 	mv "$tmp" "$file"
 }
 
-greetd_set_command() { # $1 path $2 new command — replaces [default_session] command
-	local path=$1 new=$2 file=$root$1 tmp
-	record_file "$path"
-	tmp=$(mktemp "${file%/*}/.wayland-canvas-session.XXXXXX")
-	awk -v new="$new" '
-		BEGIN { insec = 0; done = 0 }
+toml_get() { # $1 path $2 section $3 key → its one-line string value, "" when absent; status 3 for a value this tool cannot rewrite
+	local file=$root$1
+	if [ ! -f "$file" ]; then
+		return 0
+	fi
+	awk -v sec="$2" -v key="$3" '
+		function decode(s,   quote, out, i, c) {
+			quote = substr(s, 1, 1)
+			if (quote != "\"" && quote != "\047") {
+				sub(/[[:space:]]*#.*$/, "", s)
+				return s
+			}
+			if (substr(s, 1, 3) == quote quote quote) exit 3
+			out = ""
+			for (i = 2; i <= length(s); i++) {
+				c = substr(s, i, 1)
+				if (c == quote) return out
+				if (c == "\\" && quote == "\"") {
+					c = substr(s, ++i, 1)
+					if (c != "\\" && c != "\"") exit 3
+				}
+				out = out c
+			}
+			exit 3
+		}
 		/^[[:space:]]*\[.*\][[:space:]]*$/ {
 			header = $0
 			sub(/^[[:space:]]*\[/, "", header)
 			sub(/\][[:space:]]*$/, "", header)
 			gsub(/^[[:space:]]+|[[:space:]]+$/, "", header)
-			insec = (header == "default_session")
+			insec = (header == sec)
+			next
+		}
+		insec && match($0, "^[[:space:]]*" key "[[:space:]]*=") {
+			v = substr($0, RSTART + RLENGTH)
+			sub(/^[[:space:]]+/, "", v)
+			print decode(v)
+			exit
+		}
+	' "$file"
+}
+
+toml_has_section() { # $1 path $2 section
+	grep -Eqs "^[[:space:]]*\\[[[:space:]]*$2[[:space:]]*\\][[:space:]]*\$" "$root$1"
+}
+
+toml_quote() { # $1 value → the TOML basic string holding it
+	local v=${1//\\/\\\\}
+	printf '"%s"' "${v//\"/\\\"}"
+}
+
+greetd_set_command() { # $1 path $2 section $3 command — set the section's command, adding the line when it has none
+	local path=$1 section=$2 file=$root$1 tmp
+	record_file "$path"
+	tmp=$(mktemp "${file%/*}/.wayland-canvas-session.XXXXXX")
+	CANVAS_COMMAND_LINE="command = $(toml_quote "$3")" awk -v sec="$section" '
+		BEGIN { insec = 0; done = 0; line = ENVIRON["CANVAS_COMMAND_LINE"] }
+		/^[[:space:]]*\[.*\][[:space:]]*$/ {
+			if (insec && !done) { print line; done = 1 }
+			header = $0
+			sub(/^[[:space:]]*\[/, "", header)
+			sub(/\][[:space:]]*$/, "", header)
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", header)
+			insec = (header == sec)
 			print
 			next
 		}
 		insec && !done && $0 ~ /^[[:space:]]*command[[:space:]]*=/ {
-			print "command = \"" new "\""
+			print line
 			done = 1
 			next
 		}
 		{ print }
+		END { if (insec && !done) print line }
 	' "$file" >"$tmp"
 	chmod --reference="$file" "$tmp"
 	mv "$tmp" "$file"
+}
+
+greetd_swap_session() { # $1 command → stdout: it with the value of its session flag replaced; status 1 without such a flag
+	local text=$1 n i=0 start c quote word value flag_pending=no
+	n=${#text}
+	while [ "$i" -lt "$n" ]; do
+		c=${text:i:1}
+		if [[ $c == [[:space:]] ]]; then
+			i=$((i + 1))
+			continue
+		fi
+		# one shell word: quotes group, a backslash escapes the next character
+		start=$i
+		quote=
+		while [ "$i" -lt "$n" ]; do
+			c=${text:i:1}
+			if [ -n "$quote" ]; then
+				if [ "$c" = "$quote" ]; then
+					quote=
+				elif [ "$c" = '\' ] && [ "$quote" = '"' ]; then
+					i=$((i + 1))
+				fi
+			else
+				case $c in
+					"'" | '"') quote=$c ;;
+					'\') i=$((i + 1)) ;;
+					[[:space:]]) break ;;
+				esac
+			fi
+			i=$((i + 1))
+		done
+		word=${text:start:i-start}
+		if [ "$flag_pending" = yes ]; then
+			printf '%s%s%s\n' "${text:0:start}" "$session_name" "${text:i}"
+			return 0
+		fi
+		case $word in
+			--cmd | -c | --command) flag_pending=yes ;;
+			--cmd=* | --command=*)
+				value=${word#*=}
+				start=$((start + ${#word} - ${#value}))
+				printf '%s%s%s\n' "${text:0:start}" "$session_name" "${text:i}"
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+login_account() { # $1 name — status 0 when it has a uid people log in with
+	local uid_min
+	uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' "$root/etc/login.defs" 2>/dev/null || true)
+	[[ $uid_min =~ ^[0-9]+$ ]] || uid_min=1000
+	awk -F: -v name="$1" -v min="$uid_min" '
+		$1 == name && $3 ~ /^[0-9]+$/ { found = ($3 + 0 >= min + 0 && $3 + 0 != 65534) }
+		END { exit !found }
+	' "$root/etc/passwd" 2>/dev/null
 }
 
 # --- display manager detection ----------------------------------------------
@@ -454,28 +569,53 @@ last-session=$session_name
 }
 
 status_greetd() {
-	local command
-	command=$(ini_get /etc/greetd/config.toml default_session command)
-	echo "  default session command: ${command:-<none>} (/etc/greetd/config.toml)"
+	local f=/etc/greetd/config.toml command
+	command=$(toml_get "$f" default_session command || echo '<not a one-line string>')
+	echo "  default session command: ${command:-<none>} ($f)"
+	if toml_has_section "$f" initial_session; then
+		command=$(toml_get "$f" initial_session command || echo '<not a one-line string>')
+		echo "  initial session command: ${command:-<none>} ($f)"
+	fi
 }
 
 set_default_greetd() {
-	local f=/etc/greetd/config.toml old new
-	old=$(ini_get "$f" default_session command)
+	local f=/etc/greetd/config.toml old account new initial=no
+	if ! old=$(toml_get "$f" default_session command) || ! account=$(toml_get "$f" default_session user); then
+		echo "wayland-canvas-session: greetd's [default_session] holds a value this tool does not rewrite"
+		echo "  nothing was changed; start wayland-canvas from a TTY: wayland-canvas"
+		return 1
+	fi
 	if [ -z "$old" ]; then
 		echo "wayland-canvas-session: greetd has no command in [default_session]"
 		echo "  start wayland-canvas from a TTY: wayland-canvas"
 		return 1
 	fi
-	if [[ $old == *--cmd* ]]; then
-		# a greeter picks the session: point its --cmd at wayland-canvas
-		new="${old%%--cmd*}--cmd $session_name"
+	if new=$(greetd_swap_session "$old"); then
+		: # a login screen that takes the session as a flag
+	elif login_account "$account"; then
+		new=$session_name # a session started with no login screen
 	else
-		new=$session_name
+		new= # a login screen that lists sessions
+	fi
+	if toml_has_section "$f" initial_session; then
+		initial=yes
+	fi
+	if [ -z "$new" ] && [ "$initial" = no ]; then
+		echo "wayland-canvas-session: greetd's login screen lists sessions, so it is left as it is"
+		echo "  it lists wayland-canvas: pick it at the login screen"
+		return 1
 	fi
 	journal_init
-	greetd_set_command "$f" "$new"
-	echo "  $f: [default_session] command = \"$new\""
+	if [ -n "$new" ]; then
+		greetd_set_command "$f" default_session "$new"
+		echo "  $f: [default_session] command = $(toml_quote "$new")"
+	else
+		echo "  [default_session] is a login screen that lists sessions: left as it is; it lists wayland-canvas, pick it there"
+	fi
+	if [ "$initial" = yes ]; then
+		greetd_set_command "$f" initial_session "$session_name"
+		echo "  $f: [initial_session] command = $(toml_quote "$session_name")"
+	fi
 }
 
 manual_start() {

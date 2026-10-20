@@ -20,6 +20,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <fcntl.h>
+#include <glib.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -30,6 +33,9 @@
 #include "render/render.h"
 #include "core/server.h"
 #include "core/wlr.h"
+
+// The allocation counter alloc-counter.c adds; absent in sanitizer builds.
+extern "C" unsigned long long canvas_allocations(void) __attribute__((weak));
 
 namespace {
 
@@ -59,6 +65,18 @@ wlr_pointer ptr{};
 wlr_keyboard kbd{};
 const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
 const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
+// The gesture client: what it has said, and the step's wait for it.
+struct Reporter {
+	pid_t pid = -1;
+	int out = -1;
+	std::string said;
+};
+Reporter reporter;
+int report_retries = 0; // the wait for the client's report; steps move, it resets
+bool acted = false; // the step's action is done and only its wait repeats
+std::size_t report_mark = 0; // how much the client had said before the action
+Point pointer_was{}; // where the pointer stood before it parked on the client
+std::optional<Point> overview_click; // the canvas point the overview click was made on
 std::string shot_dir;
 
 // Prints PASS/FAIL with the note; a failure counts and names its source line.
@@ -230,6 +248,133 @@ void scroll(double delta) {
 	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 }
 
+// A 3- or 4-finger swipe driven through the device path.
+void swipe_down(uint32_t fingers) {
+	t_ms += 8;
+	wlr_pointer_swipe_begin_event ev = {
+		.pointer = &ptr, .time_msec = t_ms, .fingers = fingers};
+	wl_signal_emit_mutable(&ptr.events.swipe_begin, &ev);
+}
+
+void swipe_move(uint32_t fingers, double dx, double dy) {
+	t_ms += 8;
+	wlr_pointer_swipe_update_event ev = {.pointer = &ptr, .time_msec = t_ms,
+		.fingers = fingers, .dx = dx, .dy = dy};
+	wl_signal_emit_mutable(&ptr.events.swipe_update, &ev);
+}
+
+void swipe_up(bool cancelled) {
+	t_ms += 8;
+	wlr_pointer_swipe_end_event ev = {
+		.pointer = &ptr, .time_msec = t_ms, .cancelled = cancelled};
+	wl_signal_emit_mutable(&ptr.events.swipe_end, &ev);
+}
+
+// The gesture client (tests/clients/gesture-client.c): a square in the
+// output's corner that says, on stdout, every swipe and pinch the compositor
+// forwards to it. A forwarded gesture is checked by what the client says.
+bool start_reporter() {
+	const char *bin = std::getenv("CANVAS_GESTURE_CLIENT");
+	int fds[2];
+	if (bin == nullptr || *bin == '\0' || pipe(fds) != 0) {
+		return false;
+	}
+	reporter.pid = fork();
+	if (reporter.pid == 0) {
+		sigset_t empty;
+		sigemptyset(&empty);
+		sigprocmask(SIG_SETMASK, &empty, nullptr);
+		close(fds[0]);
+		dup2(fds[1], 1);
+		close(fds[1]);
+		execl(bin, bin, static_cast<char *>(nullptr));
+		_exit(127);
+	}
+	close(fds[1]);
+	if (reporter.pid < 0) {
+		close(fds[0]);
+		return false;
+	}
+	fcntl(fds[0], F_SETFL, O_NONBLOCK);
+	reporter.out = fds[0];
+	return true;
+}
+
+void stop_reporter() {
+	if (reporter.pid > 0) {
+		kill(reporter.pid, SIGKILL);
+		waitpid(reporter.pid, nullptr, 0);
+		reporter.pid = -1;
+	}
+	if (reporter.out >= 0) {
+		close(reporter.out);
+		reporter.out = -1;
+	}
+}
+
+// Everything the client has said so far.
+const std::string &reported() {
+	char buf[512];
+	ssize_t got = 0;
+	while (reporter.out >= 0 && (got = read(reporter.out, buf, sizeof buf)) > 0) {
+		reporter.said.append(buf, static_cast<std::size_t>(got));
+	}
+	return reporter.said;
+}
+
+// Whether the client has said `line`, a whole line.
+bool client_said(std::string_view line) {
+	return ("\n" + reported()).find("\n" + std::string{line} + "\n") != std::string::npos;
+}
+
+// The swipe and pinch lines the client said from byte `from` on, joined by '|'.
+std::string gestures_reported(std::size_t from) {
+	const std::string &all = reported();
+	std::string lines;
+	for (std::size_t at = from; at < all.size();) {
+		std::size_t end = all.find('\n', at);
+		if (end == std::string::npos) {
+			break;
+		}
+		std::string_view line{all.data() + at, end - at};
+		if (line.starts_with("SWIPE ") || line.starts_with("PINCH ")) {
+			lines += lines.empty() ? "" : "|";
+			lines += line;
+		}
+		at = end + 1;
+	}
+	return lines;
+}
+
+// Puts the fake pointer over the client's square, so that what the
+// compositor forwards goes to it, and starts the count of what it says.
+void park_on_reporter() {
+	pointer_was = {server->cursor->x - out()->lx, server->cursor->y - out()->ly};
+	report_mark = reported().size();
+	move_to(2, 2);
+}
+
+void leave_reporter() {
+	move_to(pointer_was.x, pointer_was.y);
+}
+
+// Whether the step keeps waiting for the client to have said `want`.
+bool awaiting(const std::string &want) {
+	return gestures_reported(report_mark) != want && report_retries++ < 100;
+}
+
+void check_client_got(const std::string &want, std::string_view what,
+		std::source_location where = std::source_location::current()) {
+	std::string got = gestures_reported(report_mark);
+	check(got == want, got == want ? std::string{what}
+		: std::format("{} (the client said: {})", what, got), where);
+}
+
+// Whether the camera is still easing: a check of where it ended waits.
+bool camera_easing() {
+	return out()->camera.panning() || out()->camera.zooming();
+}
+
 bool inside(const Rect &r, const wlr_box &b) {
 	return r.x >= b.x - 0.5 && r.y >= b.y - 0.5 && r.x + r.w <= b.x + b.width + 0.5 &&
 		r.y + r.h <= b.y + b.height + 0.5;
@@ -250,19 +395,40 @@ std::optional<Point> window_on_screen() {
 	return std::nullopt;
 }
 
+// Whether a window (with a margin for its title bar) covers the canvas point.
+bool window_covers(const Point &c) {
+	for (View *v : server->views) {
+		Rect f = v->frame_rect();
+		if (v->mapped && c.x >= f.x - 16 && c.x <= f.x + f.w + 16
+				&& c.y >= f.y - 48 && c.y <= f.y + f.h + 16) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // An output-local point over the empty canvas: no window under it, with a
 // margin for its title bar.
 std::optional<Point> empty_spot() {
 	for (double y = 80; y < 680; y += 40) {
 		for (double x = 40; x < 1240; x += 40) {
-			Point c = out()->local_to_canvas(x, y);
-			bool covered = false;
-			for (View *v : server->views) {
-				Rect f = v->frame_rect();
-				covered = covered || (v->mapped && c.x >= f.x - 16 && c.x <= f.x + f.w + 16
-					&& c.y >= f.y - 48 && c.y <= f.y + f.h + 16);
+			if (!window_covers(out()->local_to_canvas(x, y))) {
+				return Point{x, y};
 			}
-			if (!covered) {
+		}
+	}
+	return std::nullopt;
+}
+
+// An output-local point on the open overview's empty canvas, left of
+// Desktop 1: under no desktop and no window, above the minimized shelf.
+std::optional<Point> empty_overview_spot() {
+	wlr_box frame = desk(d1)->frame();
+	for (double y = 80; y < 600; y += 40) {
+		for (double x = 40; x < 1240; x += 40) {
+			Point c = out()->local_to_canvas(x, y);
+			if (c.x < frame.x && server->canvas.desktops.at(c.x, c.y) == nullptr
+					&& !window_covers(c)) {
 				return Point{x, y};
 			}
 		}
@@ -389,19 +555,94 @@ void check_made_desktop(int number, const wlr_box &expected) {
 			number, number, expected.x, expected.y));
 }
 
+// The allocation steps: a drag and a pinch each run until `counted_frames`
+// frames have gone by after `warm_ticks` ticks (which open the hint's
+// texture, the first title of a shelf and the like). A tick's input damages
+// the output once, so a tick is about a frame.
+constexpr int warm_ticks = 5;
+constexpr unsigned long counted_frames = 100;
+constexpr int max_ticks = 1000; // a run whose frames never come ends anyway
+int tick = 0;
+unsigned long long allocations_before = 0;
+unsigned long frames_seen = 0, frames_before = 0;
+wl_listener frame_counter{};
+Point grab_point{};
+Rect dragged_from{};
+double drag_travel = 0; // the furthest the window got from where it began
+pid_t subscriber_pid = -1;
+
+// First in each tick of a run: opens the counted span after the warm-up and
+// reports, once it is over, the allocations and frames it held.
+bool run_over(unsigned long long &made, unsigned long &frames) {
+	if (tick == warm_ticks) {
+		allocations_before = canvas_allocations();
+		frames_before = frames_seen;
+	}
+	frames = frames_seen - frames_before;
+	if (tick <= warm_ticks || (frames < counted_frames && tick < max_ticks)) {
+		return false;
+	}
+	made = canvas_allocations() - allocations_before;
+	return true;
+}
+
+// The pointer holding the title bar walks a triangle wave from the grab point.
+void drag_tick(View &view) {
+	int phase = tick % 40;
+	double w = phase < 20 ? phase : 40 - phase;
+	move_to(grab_point.x + 6 * w, grab_point.y + 3 * w);
+	drag_travel = std::fmax(drag_travel, std::fabs(view.frame_rect().x - dragged_from.x));
+	tick++;
+}
+
+// Presses the left button on `view`'s title bar, at the camera it is shown by.
+void grab_title(View &view) {
+	wlr_box f = view.frame_box();
+	dragged_from = view.frame_rect();
+	drag_travel = 0;
+	grab_point = out()->canvas_to_local(f.x + 80, f.y + 16);
+	move_to(grab_point.x, grab_point.y);
+	click(BTN_LEFT, true);
+	tick = 0;
+}
+
+std::string file_text(const std::string &path) {
+	std::string text;
+	if (FILE *f = std::fopen(path.c_str(), "r")) {
+		char buf[4096];
+		std::size_t n;
+		while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+			text.append(buf, n);
+		}
+		std::fclose(f);
+	}
+	return text;
+}
+
+int cascade_before = 0;
+constexpr int cascade_windows = 9;
+
 int run_step() {
 	Output *o = out();
 	View *one = view_titled("one"), *two = view_titled("two"), *three = view_titled("three");
 	switch (step) {
 	case 0:
+		// The fake devices the checks drive: a keyboard that holds Super and
+		// presses chords, a pointer that clicks and parks.
+		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
+		wlr_keyboard_init(&kbd, &kbd_impl, "fake-keyboard");
+		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
+		check(start_reporter(), "the gesture client started");
 		spawn("foot -T one sh -c 'echo window one; exec sleep 600'");
 		spawn("foot -T two sh -c 'echo window two; exec sleep 600'");
 		spawn("foot -T three sh -c 'echo window three; exec sleep 600'");
 		return 300;
 	case 1:
-		if (mapped_views() < 3 && retries++ < 100) {
+		if ((mapped_views() < 3 || !client_said("MAPPED")) && retries++ < 100) {
 			return -100; // retry
 		}
+		check(client_said("MAPPED"), "the gesture client's square is mapped");
 		check(mapped_views() == 3, std::format("three foot windows mapped ({})", mapped_views()));
 		check(server->canvas.desktops.size() == 1, "Desktop 1 exists at start");
 		d1 = server->canvas.desktops.all().front().id();
@@ -426,6 +667,9 @@ int run_step() {
 		return 500;
 	}
 	case 3: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Rect fr = three->frame_rect();
 		Rect vp = o->viewport();
 		check(std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.w - vp.w) < 1 &&
@@ -436,6 +680,9 @@ int run_step() {
 		return 400;
 	}
 	case 4:
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		three->set_maximized(false);
 		cam0 = o->camera.current();
 		// A swipe short of the hop threshold moves nothing: no free pan.
@@ -473,6 +720,9 @@ int run_step() {
 		swipe(4, 0, -300, 20); // 4 fingers up: overview
 		return 700;
 	case 8:
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(o->overview.active(), "4-finger swipe up opened the overview");
 		check(o->camera.current().zoom < 0.5,
 			std::format("overview is zoomed out (zoom {:.3f})",
@@ -605,6 +855,9 @@ int run_step() {
 		swipe(4, 0, 300, 20); // 4-finger down: zoom into the target
 		return 700;
 	case 22: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(!o->overview.active() && o->camera.current().zoom == 1,
 			"4-finger down returned to normal mode");
 		Camera want = camera_for_box(desk(d1)->frame());
@@ -623,23 +876,57 @@ int run_step() {
 	case 24:
 		shot("11-overview-shelf");
 		return 400;
-	case 25:
-		one->activate();
-		check(!one->minimized, "restore from minimized");
-		o->overview.target_point(desk(d1)->frame().x - 3000, desk(d1)->frame().y + 2000);
-		o->overview.exit();
+	case 25: {
+		if (!acted) {
+			acted = true;
+			one->activate();
+			check(!one->minimized, "restore from minimized");
+			// Restoring a window leaves the overview: open it again to click.
+			if (!o->overview.active()) {
+				o->overview.enter();
+			}
+			return -600;
+		}
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		// A click on the overview's empty canvas, left of Desktop 1.
+		std::optional<Point> spot = empty_overview_spot();
+		check(o->overview.active() && spot.has_value(),
+			"the overview shows empty canvas left of Desktop 1");
+		if (spot.has_value()) {
+			overview_click = o->local_to_canvas(spot->x, spot->y);
+			move_to(spot->x, spot->y);
+			click(BTN_LEFT, true);
+			click(BTN_LEFT, false);
+		}
 		return 700;
+	}
 	case 26: {
-		check(!o->overview.active() && !o->overview.target().desktop.has_value() &&
-			std::fabs(o->camera.current().cx - (desk(d1)->frame().x - 3000)) < 1,
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		check(overview_click.has_value() && !o->overview.active()
+				&& !o->overview.target().desktop.has_value()
+				&& std::fabs(o->camera.current().cx - overview_click->x) < 1
+				&& std::fabs(o->camera.current().cy - overview_click->y) < 1,
 			"clicking empty overview canvas lands on a free area");
 		shot("12-free-area");
 		return 400;
 	}
 	case 27:
-		o->goto_direction(1, 0); // Super+Ctrl+Right: nearest desktop to the right
+		// Super+Ctrl+Right on the keyboard: the nearest desktop to the right.
+		key(KEY_LEFTMETA, true);
+		key(KEY_LEFTCTRL, true);
+		key(KEY_RIGHT, true);
+		key(KEY_RIGHT, false);
+		key(KEY_LEFTCTRL, false);
+		key(KEY_LEFTMETA, false);
 		return 600;
 	case 28: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
 		Camera want = camera_for_box(desk(d1)->frame());
 		check(std::fabs(o->camera.current().cx - want.cx) < 1
 			&& std::fabs(o->camera.current().cy - want.cy) < 1,
@@ -647,12 +934,7 @@ int run_step() {
 		return 400; // the scale scenario continues from here
 	}
 	case 29:
-		// Fake devices for the Super pinch: a keyboard that can hold
-		// Super, a pointer that parks the cursor off-centre.
-		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
-		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
-		wlr_keyboard_init(&kbd, &kbd_impl, "fake-keyboard");
-		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
+		// A pointer that parks the cursor off-centre, for the Super pinch.
 		move_to(900, 300);
 		check(std::fabs(server->cursor->x - 900) < 0.5
 			&& std::fabs(server->cursor->y - 300) < 0.5,
@@ -662,6 +944,9 @@ int run_step() {
 		frame0 = desk(d1)->frame();
 		return 300;
 	case 30: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		// Super + 2-finger pinch from the normal view: the shown desktop
 		// scales with the fingers. Held open a step for a mid-pinch shot.
 		key(KEY_LEFTMETA, true);
@@ -694,6 +979,9 @@ int run_step() {
 		return 400;
 	}
 	case 32: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Camera want = camera_for_box(desk(d1)->frame(), desk(d1)->scale());
 		check(std::fabs(o->camera.current().zoom - want.zoom) < 1e-9
 			&& std::fabs(o->camera.current().cx - want.cx) < 1
@@ -715,6 +1003,9 @@ int run_step() {
 			tmp_root).c_str());
 		return 300;
 	case 34: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		// A window opened on the 80 % desktop: the pointer reaches it
 		// through the camera, landing where it points.
 		View *marker = view_titled("marker");
@@ -793,6 +1084,9 @@ int run_step() {
 		return 400;
 	}
 	case 37: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(o->camera.current().zoom == 1 && o->interactive(),
 			"back at 100 %: zoom 1, interactive");
 		std::string changed = changed_boxes();
@@ -809,6 +1103,9 @@ int run_step() {
 		return 400;
 	}
 	case 38: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(std::fabs(o->camera.current().zoom - 1.25) < 1e-9 && o->interactive()
 			&& desk(d1)->frame().width == std::lround(o->width / 1.25),
 			"the desktop rests at 125 %, its frame the base size over 1.25");
@@ -872,19 +1169,34 @@ int run_step() {
 		return 400;
 	}
 	case 44: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		// Without Super a 2-finger pinch still belongs to the client.
-		Camera start = o->camera.current();
-		pinch_down(2);
-		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
-			"2-finger pinch without Super forwards to the client");
-		pinch_move(1.5);
-		pinch_move(0.6);
-		pinch_up(false);
-		check(std::holds_alternative<Gestures::Idle>(server->gestures.state()),
-			"the forwarded pinch ended cleanly");
-		check(std::fabs(o->camera.current().zoom - start.zoom) < 1e-9
-			&& std::fabs(o->camera.current().cx - start.cx) < 1e-9,
-			"without Super the canvas did not scale");
+		if (!acted) {
+			acted = true;
+			Camera start = o->camera.current();
+			park_on_reporter();
+			pinch_down(2);
+			check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+				"2-finger pinch without Super forwards to the client");
+			pinch_move(1.5);
+			pinch_move(0.6);
+			pinch_up(false);
+			leave_reporter();
+			check(std::holds_alternative<Gestures::Idle>(server->gestures.state()),
+				"the forwarded pinch ended cleanly");
+			check(std::fabs(o->camera.current().zoom - start.zoom) < 1e-9
+				&& std::fabs(o->camera.current().cx - start.cx) < 1e-9,
+				"without Super the canvas did not scale");
+		}
+		const std::string want = "PINCH BEGIN 2|PINCH UPDATE 0.0 0.0 1.50 0.0"
+			"|PINCH UPDATE 0.0 0.0 0.60 0.0|PINCH END 0";
+		if (awaiting(want)) {
+			return -50;
+		}
+		check_client_got(want, "the client under the pointer received the 2-finger"
+			" pinch without Super");
 		shot("19-pinch-without-super");
 		return 400; // the tiled-scale scenario continues
 	}
@@ -894,6 +1206,9 @@ int run_step() {
 		o->goto_desktop(*desk(d1));
 		return 700;
 	case 46: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Camera want = camera_for_box(desk(d1)->frame(), desk(d1)->scale());
 		check(std::fabs(o->camera.current().cx - want.cx) < 1
 			&& std::fabs(o->camera.current().cy - want.cy) < 1
@@ -938,6 +1253,9 @@ int run_step() {
 		three->set_maximized(true);
 		return 500;
 	case 50: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Rect fr = three->frame_rect();
 		Rect vp = o->viewport();
 		check(three->maximized && std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
@@ -995,6 +1313,9 @@ int run_step() {
 		return 700;
 	}
 	case 53: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Camera want = camera_for_box(desk(d1)->frame(), 1.0);
 		check(o->camera.current().zoom == 1 && o->interactive()
 			&& std::fabs(o->camera.current().cx - want.cx) < 1
@@ -1034,6 +1355,9 @@ int run_step() {
 		return 700;
 	}
 	case 56: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Camera want = camera_for_box(desk(d1)->frame(), 1.0);
 		check(!o->overview.active() && o->camera.current().zoom == 1 && o->interactive()
 			&& std::fabs(o->camera.current().cx - want.cx) < 1
@@ -1153,19 +1477,33 @@ int run_step() {
 		return 300;
 	}
 	case 66: {
-		Camera cam = o->camera.current();
-		check(cam.zoom == 0.25 && o->interactive() && std::fabs(cam.cy - scrolled_from.cy) > 100,
-			std::format("a Super 2-finger scroll over a window pans the 25 % view at its"
-				" zoom and leaves it interactive (zoom {:.2f}, panned {:.0f})", cam.zoom,
-				cam.cy - scrolled_from.cy));
-		// A 2-finger pinch without Super belongs to the client under the
-		// pointer at any zoom, and never zooms the view.
-		pinch_down(2);
-		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
-			"a 2-finger pinch without Super is forwarded at 25 %");
-		pinch_move(1.6);
-		pinch_up(false);
-		check(o->camera.current().zoom == 0.25, "the plain pinch left the zoom at 25 %");
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		if (!acted) {
+			acted = true;
+			Camera cam = o->camera.current();
+			check(cam.zoom == 0.25 && o->interactive() && std::fabs(cam.cy - scrolled_from.cy) > 100,
+				std::format("a Super 2-finger scroll over a window pans the 25 % view at its"
+					" zoom and leaves it interactive (zoom {:.2f}, panned {:.0f})", cam.zoom,
+					cam.cy - scrolled_from.cy));
+			// A 2-finger pinch without Super belongs to the client under the
+			// pointer at any zoom, and never zooms the view.
+			park_on_reporter();
+			pinch_down(2);
+			check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+				"a 2-finger pinch without Super is forwarded at 25 %");
+			pinch_move(1.6);
+			pinch_up(false);
+			leave_reporter();
+			check(o->camera.current().zoom == 0.25, "the plain pinch left the zoom at 25 %");
+		}
+		const std::string want = "PINCH BEGIN 2|PINCH UPDATE 0.0 0.0 1.60 0.0|PINCH END 0";
+		if (awaiting(want)) {
+			return -50;
+		}
+		check_client_got(want, "at 25 % the client under the pointer received the"
+			" 2-finger pinch");
 		// A 3-finger swipe left off the 25 % desktop, where no desktop lies.
 		hop_from = o->camera.destination();
 		swipe(3, -900, 0, 30);
@@ -1190,6 +1528,9 @@ int run_step() {
 		o->overview.enter();
 		return 700;
 	case 69:
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(o->overview.active() && o->camera.current().zoom < 0.25,
 			std::format("the overview opens further out than the 25 % view (zoom {:.3f})",
 				o->camera.current().zoom));
@@ -1197,6 +1538,9 @@ int run_step() {
 		key(KEY_ENTER, false);
 		return 800;
 	case 70:
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(!o->overview.active() && std::fabs(o->camera.current().zoom - 0.25) < 1e-9
 			&& o->interactive(),
 			std::format("leaving the overview into the free view it came from keeps its zoom"
@@ -1207,6 +1551,9 @@ int run_step() {
 		key(KEY_LEFTMETA, false);
 		return 700;
 	case 71:
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(o->camera.current().zoom == 1 && o->interactive()
 			&& server->hint.text == "Free area · 100 %",
 			std::format("Super+0 returns a free view to 100 % (zoom {:.2f}, hint {})",
@@ -1472,6 +1819,9 @@ int run_step() {
 		return 700;
 	}
 	case 97:
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(o->overview.active() && o->camera.current().zoom < 0.5,
 			std::format("a 3-finger swipe up opened the overview (zoom {:.3f})",
 				o->camera.current().zoom));
@@ -1484,6 +1834,9 @@ int run_step() {
 		swipe(3, 0, 300, 20); // 3 fingers down: into the target
 		return 800;
 	case 99: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		Camera b = camera_for_box(desk(hop_b)->frame(), desk(hop_b)->scale());
 		check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
 				&& std::fabs(o->camera.current().cx - b.cx) < 1
@@ -1493,6 +1846,9 @@ int run_step() {
 		return 700;
 	}
 	case 100: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		check(o->overview.active() && o->overview.target().desktop == hop_b,
 			"the overview opened over B again");
 		// A 3-finger sideways swipe abandons: a fresh desktop, the pointer
@@ -1513,6 +1869,9 @@ int run_step() {
 		return 500;
 	}
 	case 101: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		std::optional<DesktopId> doomed = o->overview.target().desktop;
 		check(doomed.has_value()
 				&& server->canvas.desktops.find(doomed) == nullptr,
@@ -1562,36 +1921,51 @@ int run_step() {
 		if (o->camera.panning() && retries++ < 100) {
 			return -100;
 		}
-		Camera b = camera_for_box(desk(hop_b)->frame(), desk(hop_b)->scale());
-		check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
-				&& std::fabs(o->camera.current().cx - b.cx) < 1,
-			"back on B in the normal view");
-		// `off`: no 3- or 4-finger compositor gesture; the client under the
-		// pointer gets them, like 2-finger ones.
-		server->gestures.set_options({.swipes = SwipePreset::off, .pinch_scale = true});
-		check(!help_names("finger"),
-			"with the preset off the help line names only keys");
-		Camera before = o->camera.current();
-		server->gestures.swipe_begin(t_ms += 8, 3);
-		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
-			"a 3-finger swipe in the normal view is forwarded to the client");
-		server->gestures.swipe_update(t_ms += 8, 60, 0);
-		server->gestures.swipe_end(t_ms += 8, false);
-		server->gestures.swipe_begin(t_ms += 8, 4);
-		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
-			"a 4-finger swipe in the normal view is forwarded to the client");
-		server->gestures.swipe_update(t_ms += 8, 0, -60);
-		server->gestures.swipe_end(t_ms += 8, false);
-		Camera now = o->camera.current();
-		check(!o->overview.active() && now.cx == before.cx && now.cy == before.cy
-				&& now.zoom == before.zoom && !o->camera.panning()
-				&& o->desktop_showing() == desk(hop_b),
-			"with the preset off, 3- and 4-finger swipes left the camera and"
-				" the overview state alone");
+		if (!acted) {
+			acted = true;
+			Camera b = camera_for_box(desk(hop_b)->frame(), desk(hop_b)->scale());
+			check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
+					&& std::fabs(o->camera.current().cx - b.cx) < 1,
+				"back on B in the normal view");
+			// `off`: no 3- or 4-finger compositor gesture; the client under the
+			// pointer gets them, like 2-finger ones.
+			server->gestures.set_options({.swipes = SwipePreset::off, .pinch_scale = true});
+			check(!help_names("finger"),
+				"with the preset off the help line names only keys");
+			Camera before = o->camera.current();
+			park_on_reporter();
+			swipe_down(3);
+			check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+				"a 3-finger swipe in the normal view is forwarded to the client");
+			swipe_move(3, 60, 0);
+			swipe_up(false);
+			swipe_down(4);
+			check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+				"a 4-finger swipe in the normal view is forwarded to the client");
+			swipe_move(4, 0, -60);
+			swipe_up(false);
+			leave_reporter();
+			Camera now = o->camera.current();
+			check(!o->overview.active() && now.cx == before.cx && now.cy == before.cy
+					&& now.zoom == before.zoom && !o->camera.panning()
+					&& o->desktop_showing() == desk(hop_b),
+				"with the preset off, 3- and 4-finger swipes left the camera and"
+					" the overview state alone");
+		}
+		const std::string want = "SWIPE BEGIN 3|SWIPE UPDATE 60.0 0.0|SWIPE END 0"
+			"|SWIPE BEGIN 4|SWIPE UPDATE 0.0 -60.0|SWIPE END 0";
+		if (awaiting(want)) {
+			return -50;
+		}
+		check_client_got(want, "with the preset off, the client under the pointer"
+			" received the 3- and the 4-finger swipe");
 		o->overview.enter();
 		return 700;
 	}
 	case 104: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		// In the overview the compositor owns every gesture: with no preset,
 		// 3- and 4-finger gestures do nothing at all.
 		check(o->overview.active(), "the overview opened with the preset off");
@@ -1630,32 +2004,46 @@ int run_step() {
 		if (o->camera.panning() && retries++ < 100) {
 			return -100;
 		}
-		check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
-				&& o->interactive(), "back on B for the pinch-scale switch");
-		server->gestures.set_options(
-			{.swipes = SwipePreset::three_finger_hops, .pinch_scale = false});
-		Camera before = o->camera.current();
-		double scale_before = desk(hop_b)->scale();
-		key(KEY_LEFTMETA, true);
-		pinch_down(2);
-		check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
-			"with pinch-scale off, a Super + 2-finger pinch is forwarded to the"
-				" client");
-		pinch_move(1.5);
-		pinch_up(false);
-		key(KEY_LEFTMETA, false);
-		Camera now = o->camera.current();
-		check(now.cx == before.cx && now.cy == before.cy && now.zoom == before.zoom
-				&& desk(hop_b)->scale() == scale_before
-				&& !server->launcher.is_open(),
-			"with pinch-scale off, the Super pinch scaled no desktop and opened"
-				" no launcher");
+		if (!acted) {
+			acted = true;
+			check(!o->overview.active() && o->desktop_showing() == desk(hop_b)
+					&& o->interactive(), "back on B for the pinch-scale switch");
+			server->gestures.set_options(
+				{.swipes = SwipePreset::three_finger_hops, .pinch_scale = false});
+			Camera before = o->camera.current();
+			double scale_before = desk(hop_b)->scale();
+			park_on_reporter();
+			key(KEY_LEFTMETA, true);
+			pinch_down(2);
+			check(std::holds_alternative<Gestures::Forwarded>(server->gestures.state()),
+				"with pinch-scale off, a Super + 2-finger pinch is forwarded to the"
+					" client");
+			pinch_move(1.5);
+			pinch_up(false);
+			key(KEY_LEFTMETA, false);
+			leave_reporter();
+			Camera now = o->camera.current();
+			check(now.cx == before.cx && now.cy == before.cy && now.zoom == before.zoom
+					&& desk(hop_b)->scale() == scale_before
+					&& !server->launcher.is_open(),
+				"with pinch-scale off, the Super pinch scaled no desktop and opened"
+					" no launcher");
+		}
+		const std::string want = "PINCH BEGIN 2|PINCH UPDATE 0.0 0.0 1.50 0.0|PINCH END 0";
+		if (awaiting(want)) {
+			return -50;
+		}
+		check_client_got(want, "with pinch-scale off, the client under the pointer"
+			" received the Super + 2-finger pinch");
 		return 400;
 	}
 	case 107:
 		o->overview.enter();
 		return 700;
 	case 108: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
 		// In the overview the same pinch zooms the overview camera.
 		check(o->overview.active(), "the overview opened for the pinch-scale switch");
 		double zoom_before = o->camera.current().zoom;
@@ -2085,6 +2473,226 @@ int run_step() {
 		server->conf.pan_traditional = false;
 		return 300;
 	}
+	case 142: {
+		// A tiled desktop with two windows on its board, on a row of its own.
+		int w = o->width, h = o->height;
+		int x0 = 200000, y0 = 200000;
+		check(one != nullptr && two != nullptr && one->mapped && two->mapped
+				&& !one->minimized && !two->minimized
+				&& !one->maximized && !two->maximized
+				&& !one->fullscreen && !two->fullscreen,
+			"two plain windows are left to carry onto a board");
+		if (one == nullptr || two == nullptr) {
+			return 0;
+		}
+		DesktopId boarded = server->canvas.desktops.create(wlr_box{x0, y0, w, h}).id();
+		one->move(x0 + 100, y0 + 100);
+		two->move(x0 + w / 2, y0 + 100);
+		server->canvas.toggle_tiling(boarded);
+		check(desk(boarded)->tiling() && one->board == boarded && two->board == boarded
+				&& one->slice.has_value() && two->slice.has_value()
+				&& one->tiled && two->tiled,
+			"tiling the desktop put both windows on its board");
+		o->overview.abandon(boarded);
+		check(server->canvas.desktops.find(boarded) == nullptr,
+			"the tiled desktop is abandoned");
+		check(!one->board.has_value() && !two->board.has_value()
+				&& !one->slice.has_value() && !two->slice.has_value()
+				&& !one->tiled && !two->tiled,
+			"abandoning a tiled desktop released its windows' board seats");
+		return 300;
+	}
+	case 143: {
+		// Frames allocate nothing (cpp-standards.md): a window drag, one
+		// with a client subscribed, and a pinch, each over a hundred frames.
+		if (canvas_allocations == nullptr) {
+			std::println("SKIP: allocations per frame (no counter in a sanitizer build)");
+			step = 153;
+			return 1;
+		}
+		{
+			// The counter sees what C++ and glib allocate, or its zeros mean nothing.
+			unsigned long long probe = canvas_allocations();
+			char *plain = new char[64];
+			char *glib_text = g_strdup("counted");
+			asm volatile("" : : "r"(plain), "r"(glib_text) : "memory");
+			delete[] plain;
+			g_free(glib_text);
+			check(canvas_allocations() - probe == 2,
+				"the allocation counter counts an operator new and a g_strdup");
+		}
+		frame_counter.notify = [](wl_listener *, void *) { frames_seen++; };
+		wl_signal_add(&o->wlr->events.frame, &frame_counter);
+		if (o->overview.active()) {
+			o->overview.exit();
+		}
+		server->hint.set({});
+		check(one != nullptr && one->mapped && !one->minimized
+				&& two != nullptr && two->mapped && !two->minimized,
+			"two windows are left to drag and to shelve");
+		return 700;
+	}
+	case 144: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		Rect f = one->frame_rect();
+		o->camera.jump(Camera{.cx = f.x + f.w / 2, .cy = f.y + f.h / 2, .zoom = 1});
+		return 300;
+	}
+	case 145:
+		grab_title(*one);
+		return 100;
+	case 146: {
+		unsigned long long made = 0;
+		unsigned long frames = 0;
+		if (!run_over(made, frames)) {
+			drag_tick(*one);
+			return -17;
+		}
+		click(BTN_LEFT, false);
+		check(drag_travel >= 60, std::format("the window followed the drag ({:.0f} px)",
+			drag_travel));
+		check(frames >= counted_frames && made == 0,
+			std::format("a window drag allocated {} times over {} frames", made, frames));
+		return 300;
+	}
+	case 147: {
+		// The same drag with a client subscribed: the window list, which a
+		// drag does not change, is compared and never serialised.
+		std::string path = shot_dir + "/subscriber.out";
+		subscriber_pid = fork();
+		if (subscriber_pid == 0) {
+			sigset_t empty; // the compositor blocks SIGTERM for its signal source
+			sigemptyset(&empty);
+			sigprocmask(SIG_SETMASK, &empty, nullptr);
+			int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if (fd < 0 || dup2(fd, STDOUT_FILENO) < 0) {
+				_exit(126);
+			}
+			execlp(std::getenv("WAYLAND_CANVAS_BIN"), "wayland-canvas", "msg",
+				"subscribe", static_cast<char *>(nullptr));
+			_exit(127);
+		}
+		return 600;
+	}
+	case 148:
+		server->focus_view(three); // the subscriber is told; activate() would pan the camera
+		grab_title(*one);
+		return 100;
+	case 149: {
+		unsigned long long made = 0;
+		unsigned long frames = 0;
+		if (!run_over(made, frames)) {
+			drag_tick(*one);
+			return -17;
+		}
+		click(BTN_LEFT, false);
+		kill(subscriber_pid, SIGTERM);
+		waitpid(subscriber_pid, nullptr, 0);
+		check(file_text(shot_dir + "/subscriber.out").find("\"event\":\"windows\"")
+				!= std::string::npos,
+			"the subscriber was told the window list changed with the focus");
+		check(drag_travel >= 60, std::format("the window followed the drag ({:.0f} px)",
+			drag_travel));
+		check(frames >= counted_frames && made == 0,
+			std::format("a window drag with a subscriber allocated {} times over {} frames",
+				made, frames));
+		return 300;
+	}
+	case 150:
+		// A pinch over a desktop of the overview, with a minimized window on
+		// the shelf: tabs, shelf title and the release preview are drawn.
+		server->hint.set({});
+		two->set_minimized(true);
+		o->overview.enter();
+		return 800;
+	case 151: {
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		const Desktop &pinched = server->canvas.desktops.all().front();
+		o->overview.set_target(pinched.frame(), pinched.id(), false);
+		Camera cam = o->camera.drawn();
+		double left = cam.cx - o->width / (2.0 * cam.zoom);
+		double top = cam.cy - o->height / (2.0 * cam.zoom);
+		move_to((pinched.frame().x + pinched.frame().width / 2.0 - left) * cam.zoom,
+			(pinched.frame().y + pinched.frame().height / 2.0 - top) * cam.zoom);
+		pinch_down(3);
+		tick = 0;
+		return 100;
+	}
+	case 152: {
+		unsigned long long made = 0;
+		unsigned long frames = 0;
+		if (!run_over(made, frames)) {
+			pinch_move(1.35 + 0.0004 * (tick % 100));
+			tick++;
+			return -17;
+		}
+		bool previewing = server->gestures.pinch() != nullptr && !server->hint.text.empty();
+		pinch_up(true);
+		check(previewing, "the pinch previewed what release would do");
+		check(frames >= counted_frames && made == 0,
+			std::format("a pinch allocated {} times over {} frames", made, frames));
+		return 300;
+	}
+	case 153:
+		wl_list_remove(&frame_counter.link);
+		o->overview.exit();
+		two->set_minimized(false);
+		return 700;
+	case 154: {
+		// New windows wider than a third of the screen cascade to its right
+		// edge in a few steps; nine of them go past it.
+		if (o->camera.panning() && retries++ < 100) {
+			return -100;
+		}
+		cascade_before = mapped_views();
+		for (int i = 0; i < cascade_windows; i++) {
+			spawn("foot -T cascade -w 900x200 sh -c 'exec sleep 600'");
+		}
+		return 500;
+	}
+	case 155: {
+		if (mapped_views() < cascade_before + cascade_windows && retries++ < 100) {
+			return -100;
+		}
+		Rect vp = o->viewport();
+		wlr_box area = {static_cast<int>(std::round(vp.x)), static_cast<int>(std::round(vp.y)),
+			static_cast<int>(std::round(vp.w)), static_cast<int>(std::round(vp.h))};
+		wlr_box usable = o->usable_canvas_box(area, o->camera.drawn().zoom);
+		int opened = 0, outside = 0, apart = 0;
+		double furthest = usable.x;
+		std::vector<Point> spots;
+		for (View *v : server->views) {
+			if (!v->mapped || v->shell_title() == nullptr
+					|| std::strcmp(v->shell_title(), "cascade") != 0) {
+				continue;
+			}
+			Rect f = v->frame_rect();
+			opened++;
+			outside += !inside(f, usable);
+			furthest = std::fmax(furthest, f.x + f.w);
+			bool taken = std::ranges::any_of(spots, [&](const Point &p) {
+				return p.x == f.x && p.y == f.y;
+			});
+			apart += !taken;
+			spots.push_back({f.x, f.y});
+		}
+		check(opened == cascade_windows,
+			std::format("{} wide windows opened ({})", cascade_windows, opened));
+		check(outside == 0, std::format("{} of {} cascaded windows are outside the usable area "
+			"(furthest right edge {:.0f}, the area ends at {})", outside, opened, furthest,
+			usable.x + usable.width));
+		check(furthest > usable.x + usable.width - config::cascade_step,
+			std::format("the cascade went to the right edge (furthest right edge {:.0f} of {})",
+				furthest, usable.x + usable.width));
+		check(apart < opened,
+			"once the edge is reached, the next window opens at the first spot again");
+		shot("38-cascade");
+		return 300;
+	}
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
@@ -2111,6 +2719,8 @@ int handle_timer() {
 	}
 	step++;
 	retries = 0;
+	report_retries = 0;
+	acted = false;
 	wl_event_source_timer_update(timer, delay > 0 ? delay : 1);
 	return 0;
 }
@@ -2175,6 +2785,7 @@ int main() {
 		check(false, std::format("the run ended at step {}, before its last step", step));
 	}
 	wl_event_source_remove(timer);
+	stop_reporter();
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);
 	server.reset();

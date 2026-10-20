@@ -420,7 +420,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
 		}
 		if (fingers == counts.hop) {
 			// A null target is allowed: tile then acts on the target box.
-			state_ = Pinch{out, desktop_under(*out), std::nullopt, 1, false};
+			state_ = Pinch{out, desktop_under(*out), std::nullopt, 1, {}};
 			return;
 		}
 		if (fingers == counts.overview
@@ -450,19 +450,38 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
 	state_ = Ignored{};
 }
 
-void Gestures::pinch_preview(Pinch &pinch, std::string_view text) {
-	server_.hint.set(text);
-	pinch.hinted = true;
-}
-
-void Gestures::pinch_clear_preview(Pinch &pinch, bool clear_merge) {
-	if (clear_merge) {
-		pinch.merge_from = std::nullopt;
+void Gestures::preview_pinch(Pinch &pinch, const PinchOutcome &outcome) {
+	using Kind = PinchOutcome::Kind;
+	if (outcome == pinch.previewed) {
+		if (outcome.kind != Kind::none) {
+			server_.hint.keep();
+		}
+		return;
 	}
-	if (pinch.hinted) {
+	pinch.previewed = outcome;
+	char text[80];
+	switch (outcome.kind) {
+	case Kind::none:
 		server_.hint.set({});
-		pinch.hinted = false;
+		return;
+	case Kind::tile:
+		std::snprintf(text, sizeof(text), "Release to tile Desktop %d", outcome.number);
+		break;
+	case Kind::untile:
+		std::snprintf(text, sizeof(text), "Release to untile Desktop %d", outcome.number);
+		break;
+	case Kind::tile_windows:
+		std::snprintf(text, sizeof(text), "Release to tile windows here");
+		break;
+	case Kind::combine_pick:
+		std::snprintf(text, sizeof(text), "Pinch over a desktop to combine");
+		break;
+	case Kind::combine:
+		std::snprintf(text, sizeof(text), "Release to combine Desktop %d into Desktop %d",
+			outcome.merge, outcome.number);
+		break;
 	}
+	server_.hint.set(text);
 }
 
 void Gestures::pinch_update(uint32_t time, double dx, double dy,
@@ -506,42 +525,28 @@ void Gestures::pinch_update(uint32_t time, double dx, double dy,
 		return;
 	}
 	if (auto *pinch = std::get_if<Pinch>(&state_)) {
+		using Kind = PinchOutcome::Kind;
 		pinch->scale = scale;
+		pinch->merge_from = std::nullopt;
 		Desktop *pinched = server_.canvas.desktops.find(pinch->desktop);
+		PinchOutcome outcome;
 		if (scale > config::pinch_tile_scale) {
-			pinch->merge_from = std::nullopt;
-			if (pinched != nullptr) {
-				char buf[64];
-				std::snprintf(buf, sizeof(buf), pinched->tiling()
-					? "Release to untile Desktop %d"
-					: "Release to tile Desktop %d",
-					pinched->number());
-				pinch_preview(*pinch, buf);
+			if (pinched == nullptr) {
+				outcome.kind = Kind::tile_windows;
 			} else {
-				pinch_preview(*pinch, "Release to tile windows here");
+				outcome = {.kind = pinched->tiling() ? Kind::untile : Kind::tile,
+					.number = pinched->number()};
 			}
 		} else if (scale < config::pinch_combine_scale) {
 			if (pinched == nullptr) {
-				pinch->merge_from = std::nullopt;
-				pinch_preview(*pinch, "Pinch over a desktop to combine");
-			} else {
-				Desktop *merge = server_.canvas.desktops.nearest(pinched->id());
-				pinch->merge_from = merge != nullptr
-					? std::optional<DesktopId>{merge->id()} : std::nullopt;
-				if (merge != nullptr) {
-					char buf[80];
-					std::snprintf(buf, sizeof(buf),
-						"Release to combine Desktop %d into Desktop %d",
-						merge->number(), pinched->number());
-					pinch_preview(*pinch, buf);
-				} else {
-					pinch_clear_preview(*pinch, false);
-				}
+				outcome.kind = Kind::combine_pick;
+			} else if (Desktop *merge = server_.canvas.desktops.nearest(pinched->id())) {
+				pinch->merge_from = merge->id();
+				outcome = {.kind = Kind::combine, .number = pinched->number(),
+					.merge = merge->number()};
 			}
-		} else {
-			// Back in the neutral range: drop the preview.
-			pinch_clear_preview(*pinch, true);
 		}
+		preview_pinch(*pinch, outcome);
 		pinch->output->damage();
 		last_time_ = time;
 		return;
@@ -570,7 +575,7 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 			}
 			o->damage();
 		}
-		pinch_clear_preview(*pinch, true);
+		preview_pinch(*pinch, {});
 		state_ = Idle{};
 		return;
 	}

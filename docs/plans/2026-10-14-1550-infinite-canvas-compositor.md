@@ -51,7 +51,7 @@ What was decided is in the intents: [canvas/infinite-canvas.md](../intents/canva
 
 ## Owed
 
-- [ ] On-screen run on real hardware from a TTY: touchpad gestures, the 2x panel, a real Super key (the user, on their machine)
+- [ ] On-screen run on real hardware, on their machine, from a TTY: touchpad gestures, the 2x panel, a real Super key (the user)
 - [ ] Nested run inside Hyprland (the user)
 
 ## Decisions for the user

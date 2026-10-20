@@ -38,7 +38,18 @@ public:
 	// A hop-finger swipe in either mode: one hop past the travel threshold.
 	struct Hop { Output *output; double ax, ay; bool done; };
 	struct Abandon { Output *output; DesktopId desktop; double offset; };
-	struct Pinch { Output *output; std::optional<DesktopId> desktop, merge_from; double scale; bool hinted; };
+	// What releasing a pinch would do, as its hint says: the outcome and the
+	// numbers of the desktops the text names.
+	struct PinchOutcome {
+		enum class Kind { none, tile, untile, tile_windows, combine_pick, combine };
+		Kind kind = Kind::none;
+		int number = 0; // the desktop the pinch is over
+		int merge = 0; // the desktop that would join it
+		bool operator==(const PinchOutcome &) const = default;
+	};
+	// `previewed` is the outcome the hint shows now.
+	struct Pinch { Output *output; std::optional<DesktopId> desktop, merge_from; double scale;
+		PinchOutcome previewed; };
 	struct OverviewZoom { Output *output; double scale; };
 	// Super + 2-finger pinch: scales a desktop, following the fingers.
 	struct DesktopScale {
@@ -86,8 +97,9 @@ private:
 	// The desktop under the cursor (canvas coords), or the overview target
 	// desktop; nullopt once it is gone.
 	std::optional<DesktopId> desktop_under(Output &output);
-	void pinch_preview(Pinch &pinch, std::string_view text);
-	void pinch_clear_preview(Pinch &pinch, bool clear_merge);
+	// Shows `outcome` as the hint when it differs from what the pinch shows;
+	// otherwise only keeps the hint showing.
+	void preview_pinch(Pinch &pinch, const PinchOutcome &outcome);
 
 	Server &server_;
 	State state_ = Idle{};

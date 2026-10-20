@@ -201,5 +201,5 @@ Ctrl+D duplicate, Ctrl+G group, arrows nudge, Escape leaves.
 - [ ] Scenario: sheets, groups and an inserted image come back after a shell restart
 - [ ] Scenario: the plugin disabled — no palette, no drawings, no draw mode, the compositor otherwise identical
 - [ ] Screenshots of the palette, the layers panel, the stack strip mid-drag, and drawings in the normal view and the overview, inspected
-- [ ] Nested and TTY runs: the feel of drawing, the depth drag, and the palette at 2x (owed on screen — the user)
+- [ ] Nested and TTY runs, owed on screen: the feel of drawing, the depth drag, and the palette at 2x (the user)
 - [ ] Warning-free build, every suite green, `tools/check.sh` clean

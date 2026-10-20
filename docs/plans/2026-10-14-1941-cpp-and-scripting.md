@@ -33,5 +33,5 @@ headers written first, rather than one module at a time.
 
 ## Scripting, once decided
 
-- [ ] ext-workspace-v1 so an external bar can show and switch desktops (waiting on the bar decision)
-- [ ] The embedded interpreter and the API a layout script sees (windows, desktops, outputs, the canvas), written into intents first (waiting on the language decision)
+- [ ] ext-workspace-v1 so an external bar can show and switch desktops, once the bar is decided (the user to decide)
+- [ ] The embedded interpreter and the API a layout script sees (windows, desktops, outputs, the canvas), written into intents first, once the language is decided (the user to decide)

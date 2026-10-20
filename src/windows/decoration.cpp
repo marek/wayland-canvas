@@ -139,7 +139,7 @@ void Decoration::update(float scale) {
 	bool changed = texture_ == nullptr || width_ != width || scale_ != scale
 		|| active_ != active || maximized_ != view_.maximized
 		|| hover_ != hover || pressed_ != pressed
-		|| (title == nullptr) != title_.has_value()
+		|| (title != nullptr) != title_.has_value()
 		|| (title != nullptr && title_.has_value() && *title_ != title);
 	if (!changed) {
 		return;

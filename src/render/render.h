@@ -89,7 +89,8 @@ struct RenderCtx {
 	unsigned *help_clock;
 };
 
-// A desktop tab's label texture and its size, drawn at `scale`.
+// A cached text texture and its size, drawn at some scale: a desktop tab's
+// label, a shelf title.
 struct DesktopLabel {
 	wlr_texture *texture = nullptr; // null when the text failed to render
 	int w = 0, h = 0; // logical px
@@ -103,8 +104,11 @@ public:
 	Hint(const Hint &) = delete;
 	Hint &operator=(const Hint &) = delete;
 
-	// Shows `text` for about 2 s; empty clears.
+	// Shows `text` for about 2 s; empty clears. The text already showing
+	// only has its 2 s restarted: nothing is redrawn.
 	void set(std::string_view text);
+	// Restarts the 2 s of the text showing; nothing when none shows.
+	void keep();
 	// Drops the cached texture so the next frame redraws it in the new palette.
 	void theme_changed();
 	void finish(); // releases the timer and texture before the display and renderer go
@@ -116,6 +120,7 @@ public:
 
 private:
 	void clear();
+	void restart_timer();
 
 	Server &server_;
 	EventSourcePtr timer_;
@@ -143,7 +148,7 @@ public:
 	// draw_view an on-screen frame uses. False (logged) when the pass cannot
 	// begin, the view is not mapped, the session is locked or no output exists.
 	bool render_view(View &view, float scale, wlr_buffer *target);
-	void theme_changed(); // drops the help-line and tab-label textures
+	void theme_changed(); // drops the help-line, tab-label and shelf-title textures
 	void finish(); // releases cached textures before the renderer goes
 
 	// Regenerates the cached label when the desktop's number or scale, the
@@ -156,6 +161,9 @@ public:
 	std::optional<TabLayout> overview_tab_layout(const Output &output,
 		const Desktop &desktop) const;
 
+	// `view`'s title for the overview shelf, drawn at `scale` and redrawn
+	// only when the title, the scale or the palette changed.
+	DesktopLabel shelf_title(const View &view, float scale);
 	// The item's card at `scale` (the output's scale times the zoom it is
 	// shown at). Re-rendered when its content changed, or once `settled`
 	// when the shown scale changed; a moving camera stretches the cached
@@ -194,11 +202,21 @@ private:
 	LabelSlot *label_slot(DesktopId id);
 	const LabelSlot *label_slot(DesktopId id) const;
 
+	// A minimized window's title on the shelf, and what it was drawn from.
+	struct ShelfTitle {
+		const View *view = nullptr;
+		std::string title;
+		float scale = 0;
+		TexturePtr texture;
+		int w = 0, h = 0;
+	};
+
 	Server &server_;
 	std::vector<DrawnSurface> drawn_; // surfaces drawn this frame, reused
 	std::vector<DrawnSurface> capture_drawn_; // the same for captures, reused
 	std::array<HelpSlot, help_slots> help_cache_{}; // help-line texture, one per scale
 	std::vector<LabelSlot> label_cache_; // desktop tab labels, dropped with their desktops
+	std::vector<ShelfTitle> shelf_titles_; // dropped with their windows
 	unsigned help_clock_ = 0; // round-robin over help_cache_
 
 

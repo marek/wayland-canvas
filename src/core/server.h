@@ -16,7 +16,7 @@
 #include "apps/launcher.h"
 #include "apps/capture_ui.h"
 #include "core/theme.h"
-#include "render/night_light.h"
+#include "platform/night_light.h"
 #include "render/render.h"
 #include "core/util.h"
 #include "platform/session_bus.h"

@@ -18,10 +18,12 @@ on, not a standing state.
 
 - **On**: when the user says to work through the plans (or "continue",
   "keep going" about plan work), create `.claude/autopilot.on`. While
-  it exists, the Stop hook (`tools/hooks/autopilot-stop.sh`, linked as
-  `.claude/hooks/autopilot-stop.sh`) refuses to end a turn if any plan
-  in `docs/plans/` has an open box that does not need the user, and
-  names the next one.
+  it exists, the Stop hook (`tools/hooks/autopilot-stop.sh`, wired in
+  `.claude/settings.json`) refuses to end a turn if any plan in
+  `docs/plans/` has an open box that does not wait for a person, and
+  names the next one. A box waits for a person when its title ends in
+  `(the user)` or `(the user to decide)`; `tools/check-plans.sh` fails
+  any other wording.
 - **A question while on** ("what is left?", "progress check", "why X?"):
   answer it as the `answering-questions` skill says, from the plan
   files where it is about progress, and keep working in the same turn.
@@ -37,7 +39,7 @@ on, not a standing state.
 
 1. Read `docs/plans/README.md`, then the plans with open boxes. Pick
    the next open box that does not need a decision from the user (skip
-   ones marked for the user, deferred, waiting).
+   the ones ending in `(the user)` or `(the user to decide)`).
 2. Read the intent doc nearest the item (`docs/intents/README.md`
    finds it). If the item settles something the doc does not say,
    update the doc first (the `intent-docs` skill).

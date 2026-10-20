@@ -18,11 +18,11 @@ BarButton {
 	icon: true
 	text: muted ? "\ueee8" : sinkGlyph()
 
-	onWheeled: function(delta) {
+	onWheeled: function(notches) {
 		if (sink == null || sink.audio == null) {
 			return
 		}
-		var volume = sink.audio.volume + Math.round(delta / 120) * 0.05
+		var volume = sink.audio.volume + notches * 0.05
 		sink.audio.volume = Math.max(0, Math.min(1, volume))
 	}
 

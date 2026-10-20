@@ -26,7 +26,8 @@ it opens.
 
 Icon lookup, in order:
 
-1. The user's icon theme, read from gsettings.
+1. The user's icon theme, read from gsettings in the compositor's own
+   process: the loop never waits on a program for it.
 2. That theme's `Inherits` chain.
 3. `hicolor`.
 4. Pixmaps.

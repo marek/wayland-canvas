@@ -1,14 +1,14 @@
 import Quickshell
-import Quickshell.Services.Notifications
 import Quickshell.Wayland
 import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// The notification server and its popups: a column down the top-right of
-// every output, newest first, each a card with the sender, the summary,
-// the body, its image and its action buttons. A popup never takes the
-// keyboard (docs/intents/shell/notifications.md).
+// The notification popups: a column down the top-right of every output,
+// newest first, each a card with the sender, the summary, the body, its
+// image and its action buttons; the server and the state they draw live in
+// NotificationsState. A popup never takes the keyboard
+// (docs/intents/shell/notifications.md).
 PanelWindow {
 	id: root
 
@@ -38,22 +38,6 @@ PanelWindow {
 	// windows' and the canvas's.
 	mask: Region {
 		item: column
-	}
-
-	// The server lives with the popups: one per shell, named by the first
-	// surface to come up.
-	NotificationServer {
-		id: server
-		keepOnReload: false
-		imageSupported: true
-		actionsSupported: true
-		bodyMarkupSupported: true
-		persistenceSupported: true
-
-		onNotification: function(notification) {
-			notification.tracked = true
-			Notifications.add(notification)
-		}
 	}
 
 	Column {

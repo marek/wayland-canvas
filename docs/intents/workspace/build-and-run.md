@@ -33,7 +33,7 @@ A C++26 compiler — LLVM's clang, selected by
 | Protocol header | the layer-shell protocol header is generated at build time from `protocols/wlr-layer-shell-unstable-v1.xml` |
 | Unit tests | `meson test -C build`; the scenario suite and everything at once run through `tools/check.sh`, which configures through the native file and re-creates a build dir that was configured with GCC |
 | Packages | `tools/package.sh` builds both formats; `ninja -C build packages` / `package-arch` / `package-deb` are the same thing through meson. Artifacts land in `dist/` at the repo root (ignored) ([packaging.md](packaging.md) owns the formats and the guarantees) |
-| Nix | `nix build` builds the compositor against nixpkgs' own wlroots 0.20 and runs the unit suite in its check phase — the packaging suite drives the Arch and Debian install flows and the scenarios need a display; `nix develop` is a shell with the same inputs. The flake names every library meson asks for, the optional logind and X11 ones included, installs everything under its own prefix, and takes the untagged version from its revision ([packaging.md](packaging.md)) |
+| Nix | `nix build` builds the compositor against nixpkgs' own wlroots 0.20 and runs the unit suite in its check phase — the packaging suite drives the Arch and Debian install flows and the scenarios need a display; `nix develop` is a shell with the same inputs. The flake names every library meson asks for, the optional logind and X11 ones included, installs everything under its own prefix, wraps the installed binary with `qs` and `ffmpeg` on its PATH (the compositor starts the bar and the recorder by those names), and takes the untagged version from its revision ([packaging.md](packaging.md)) |
 
 ### Running
 

@@ -56,7 +56,7 @@ Column {
 			width: 120
 			value: root.span <= 0 ? 0
 				: (Number(root.entry.value) - root.entry.min) / root.span
-			onMoved: function(fraction) {
+			onCommitted: function(fraction) {
 				if (root.entry == null) {
 					return
 				}

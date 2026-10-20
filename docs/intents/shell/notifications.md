@@ -19,6 +19,12 @@ reaches, and popups can be silenced without losing them.
   `NotificationServer` in the `canvas.notifications` plugin: the
   compositor speaks no notification protocol, so another daemon (mako,
   dunst) can serve the session instead by taking the bus name first.
+- **There is one server per shell**, held by the plugin's state and
+  shared by the popup surfaces of every output: a notification is stored
+  once however many outputs draw it.
+- **The plugin's settings apply at once**: a popup count, a timeout or a
+  history limit changed in the settings window holds for the next
+  notification, with no reload.
 - **A popup is an overlay layer surface that never asks for the
   keyboard**, so typing is never interrupted; only the card takes clicks,
   the rest of the output stays the windows' and the canvas's.

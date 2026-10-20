@@ -15,12 +15,28 @@ PanelCard {
 	panelWidth: 360
 	panelName: "agents"
 
-	// The tab the switch is on; the panel opens on the first provider and
-	// keeps its tab across refreshes while it still exists.
-	property int current: 0
+	// The provider the switch is on, by id: the collector reorders the
+	// families after Claude and GPT by their week's tokens, so a position
+	// would show another family after a refresh. The panel opens on the
+	// first provider and keeps its choice while that provider exists.
+	property string currentId: ""
 	readonly property var providers: model ? model.providers : []
-	readonly property var provider: current >= 0 && current < providers.length
+	readonly property int current: {
+		for (var i = 0; i < providers.length; i++) {
+			if (providers[i].id === currentId) {
+				return i
+			}
+		}
+		return 0
+	}
+	readonly property var provider: current < providers.length
 		? providers[current] : null
+	// The hero's mark per provider id; any other family gets the star.
+	readonly property var marks: ({
+		"claude": claudeMark,
+		"anthropic": claudeMark,
+		"gpt": gptMark
+	})
 	// The countdowns' clock: bumped every half minute while the panel is
 	// open, so "Resets in 4h 12m" stays true without a re-probe.
 	property real nowMs: Date.now()
@@ -28,9 +44,6 @@ PanelCard {
 	onOpenChanged: if (open) refreshOnOpen()
 
 	function refreshOnOpen() {
-		if (current >= providers.length) {
-			current = Math.max(providers.length - 1, 0)
-		}
 		nowMs = Date.now()
 		if (model != null) {
 			model.refresh()
@@ -59,11 +72,7 @@ PanelCard {
 		metaAttention: root.provider != null
 			&& root.provider.usageStatusText !== ""
 		iconComponent: root.provider == null ? null
-			: root.provider.id === "claude" || root.provider.id === "anthropic"
-			? claudeMark
-			: root.provider.id === "gpt" ? gptMark
-			: glyphMark
-
+			: root.marks[root.provider.id] || glyphMark
 	}
 
 	// The provider switch: a full-width row of equal chips, so any number
@@ -111,7 +120,7 @@ PanelCard {
 
 				MouseArea {
 					anchors.fill: parent
-					onClicked: root.current = chip.index
+					onClicked: root.currentId = chip.modelData.id
 				}
 			}
 		}

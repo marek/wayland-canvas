@@ -26,7 +26,7 @@ or after that commit):
 | Dialog | a window with a parent — an xdg toplevel given one, an X11 window transient for another — is centred over it (by the rules above when it has none). A modal one — X11's `_NET_WM_STATE_MODAL`, or a wayland dialog made modal through xdg-dialog-v1 — floats there even on a tiled desktop: it never joins the board, so it sits over the window it blocks. A dialog that leaves its window usable tiles like any window |
 | Bars | inside the area not covered by layer-shell exclusive zones |
 | Title bar | clamped so the title bar is fully on screen |
-| Taken spot | if another window already occupies the position, cascade by 32 px |
+| Taken spot | if another window already occupies the position, cascade by 32 px, as far as the whole frame stays inside the area the bars leave; with every such position taken, the window opens on the first again |
 | Initial size | the client chooses, unless it asked to start maximized or fullscreen |
 
 Focus and stacking — the pointer model (click-to-focus, focusing

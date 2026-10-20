@@ -57,7 +57,7 @@ PanelCard {
 	}
 
 	Connections {
-		target: api != null ? api.compositor : null
+		target: api.compositor
 		function onEvent(name, params) {
 			if (name === "settings") {
 				settingsError = ""
@@ -376,40 +376,28 @@ PanelCard {
 
 	// ---- the Toolbar and Bar tabs, through api.shell ----
 
-	readonly property string toolbarPosition: api != null && api.shell != null
-		? api.shell.toolbarPosition : "right"
-	readonly property var barWidgets: api != null && api.shell != null
-		? api.shell.barWidgets : []
+	readonly property string toolbarPosition: api.shell.toolbarPosition
+	readonly property var barWidgets: api.shell.barWidgets
 
 	function setEdge(edge) {
-		if (api != null && api.shell != null) {
-			api.shell.setToolbarPosition(edge)
-		}
+		api.shell.setToolbarPosition(edge)
 	}
 
 	// The app bar shares this page: it is the other strip of the overview
 	// (docs/intents/shell/app-bar.md).
-	readonly property string appBarPosition: api != null && api.shell != null
-		? api.shell.appBarPosition : "left"
-	readonly property bool appBarEnabled: api == null || api.shell == null
-		|| api.shell.appBarEnabled !== false
+	readonly property string appBarPosition: api.shell.appBarPosition
+	readonly property bool appBarEnabled: api.shell.appBarEnabled !== false
 
 	function setAppBarEdge(edge) {
-		if (api != null && api.shell != null) {
-			api.shell.setAppBarPosition(edge)
-		}
+		api.shell.setAppBarPosition(edge)
 	}
 
 	function setAppBarEnabled(on) {
-		if (api != null && api.shell != null) {
-			api.shell.setAppBarEnabled(on)
-		}
+		api.shell.setAppBarEnabled(on)
 	}
 
 	function setHidden(name, hidden) {
-		if (api != null && api.shell != null) {
-			api.shell.setBarHidden(name, hidden)
-		}
+		api.shell.setBarHidden(name, hidden)
 	}
 	// The most the scrollable list may take: the tall card is clamped to
 	// the output's top, so what is left beside the tabs, the separator
@@ -423,14 +411,10 @@ PanelCard {
 
 	// The pages plugins declare, each a tab of its own after the fixed ones
 	// (docs/intents/shell/plugins.md): the window knows no plugin by name.
-	readonly property var pluginPages: api != null && api.shell != null
-		&& api.shell.pluginSettingsPages !== undefined
-		? api.shell.pluginSettingsPages : []
+	readonly property var pluginPages: api.shell.pluginSettingsPages
 
 	function setPluginSetting(id, key, value) {
-		if (api != null && api.shell != null) {
-			api.shell.setPluginSetting(id, key, value)
-		}
+		api.shell.setPluginSetting(id, key, value)
 	}
 
 	PanelTabs {
@@ -566,7 +550,7 @@ PanelCard {
 			elide: Text.ElideRight
 			dim: true
 			font.pixelSize: UiTheme.fontSmall
-			text: api != null && api.shell != null ? api.shell.configPath : ""
+			text: api.shell.configPath
 		}
 	}
 

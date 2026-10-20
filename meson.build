@@ -97,6 +97,7 @@ foreach xml : [
 	wl_protocol_dir / 'unstable/idle-inhibit/idle-inhibit-unstable-v1.xml',
 	wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
 	wl_protocol_dir / 'stable/tablet/tablet-v2.xml',
+	wl_protocol_dir / 'unstable/pointer-gestures/pointer-gestures-unstable-v1.xml',
 	wl_protocol_dir / 'unstable/xdg-decoration/xdg-decoration-unstable-v1.xml',
 	wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
 	wl_protocol_dir / 'staging/ext-image-capture-source/ext-image-capture-source-v1.xml',
@@ -165,6 +166,15 @@ settings_lib = static_library(
 	dependencies: [xkbcommon],
 )
 
+# The night light's gamma ramp for a colour temperature: pure arithmetic,
+# unit-tested on its own.
+night_light_ramp_lib = static_library(
+	'canvas-night-light-ramp',
+	'src/platform/night_light_ramp.cpp',
+	include_directories: src_inc,
+	dependencies: [xkbcommon],
+)
+
 # The AI usage collector the agents panel's widget runs: pure logic over
 # the tools' own records, unit-tested on its own, and a thin helper
 # executable installed beside the compositor for the widget to run by
@@ -217,10 +227,10 @@ core_lib = static_library(
 		'src/platform/lock.cpp',
 		'src/platform/logind.cpp',
 		'src/platform/layer.cpp',
+		'src/platform/night_light.cpp',
 		'src/platform/output.cpp',
 		'src/render/capture.cpp',
 		'src/render/draw.cpp',
-		'src/render/night_light.cpp',
 		'src/render/render.cpp',
 		'src/windows/decoration.cpp',
 		'src/windows/launches.cpp',
@@ -232,9 +242,9 @@ core_lib = static_library(
 	protocol_headers,
 	include_directories: src_inc,
 	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib,
-		settings_lib, capture_toolbar_layout_lib],
+		settings_lib, capture_toolbar_layout_lib, night_light_ramp_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
-		glib, gio, json_glib, libinput, libdrm, libsystemd],
+		glib, gio, json_glib, libinput, libdrm, libsystemd, xcb],
 )
 
 wayland_canvas = executable(
@@ -390,6 +400,17 @@ test(
 )
 
 test(
+	'night-light-ramp',
+	executable(
+		'test-night-light-ramp',
+		'tests/test_night_light_ramp.cpp',
+		include_directories: src_inc,
+		link_with: night_light_ramp_lib,
+	),
+	suite: 'unit',
+)
+
+test(
 	'session-services',
 	executable(
 		'test-session-services',
@@ -414,7 +435,8 @@ test(
 # End-to-end scenarios: the real compositor on the headless backend, real
 # foot clients, fake input devices, grim screenshots. Registered only when
 # foot and grim are on PATH; the bar scenario additionally needs qs (the
-# bar's own client), dbus-daemon and the dbusmock stand-in environment.
+# bar's own client), dbus-daemon, the dbusmock stand-in environment and
+# PipeWire's daemon and tools (its audio stand-in).
 # They still need a GPU render node at run time (headless GLES2 rendering).
 # Serial: each owns the display namespace.
 foot_prog = find_program('foot', required: false)
@@ -483,6 +505,18 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [wayland_client],
 	)
 	scenario_env.set('CANVAS_TOUCH_CLIENT', touch_client.full_path())
+	# A pointer-gestures client of the scenarios' own: a small layer-shell
+	# square in the output's corner reports every swipe and pinch the
+	# compositor forwards to it, so "forwarded to the client" is read from
+	# what a client received.
+	gesture_client = executable(
+		'gesture-client',
+		'tests/clients/gesture-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_GESTURE_CLIENT', gesture_client.full_path())
 	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
 		'nightlight', 'touch', 'viewgone']
 	# An X11 client of the scenarios' own: this machine has no xterm or
@@ -502,15 +536,20 @@ if foot_prog.found() and grim_prog.found()
 	scenarios += ['sharing']
 	# The bar scenario drives the real bar client against stand-in services,
 	# so it also needs qs, a dbus-daemon to build its private buses from,
-	# and the dbusmock stand-in environment (provisioned under tmp/ by the
-	# ensure script at configure time).
+	# the dbusmock stand-in environment (provisioned under tmp/ by the
+	# ensure script at configure time) and a PipeWire of its own to run as
+	# the audio widget's sink.
 	qs_prog = find_program('qs', required: false)
 	dbus_daemon_prog = find_program('dbus-daemon', required: false)
+	pipewire_found = true
+	foreach tool : ['pipewire', 'pw-dump', 'pw-cli', 'pw-metadata']
+		pipewire_found = pipewire_found and find_program(tool, required: false).found()
+	endforeach
 	bar_standins = run_command(
 		'tests/scenarios/ensure-bar-standins.sh',
 		check: false,
 	)
-	if qs_prog.found() and dbus_daemon_prog.found() and bar_standins.returncode() == 0
+	if qs_prog.found() and dbus_daemon_prog.found() and pipewire_found and bar_standins.returncode() == 0
 		scenarios += ['bar']
 		# The session scenario needs the same private world: the shell's
 		# notification server, locker and polkit agent may only ever run on
@@ -528,11 +567,18 @@ if foot_prog.found() and grim_prog.found()
 		scenario_env.set('WAYLAND_CANVAS_AGENT_USAGE', agent_usage.full_path())
 	endif
 	foreach scenario : scenarios
+		scenario_sources = ['tests/scenarios/' + scenario + '.cpp']
+		# The gestures scenario counts the allocations of its drag and pinch
+		# frames. A sanitizer owns malloc, so its builds leave the counter
+		# out and the scenario says so.
+		if scenario == 'gestures' and get_option('b_sanitize') == 'none'
+			scenario_sources += 'tests/scenarios/alloc-counter.c'
+		endif
 		test(
 			scenario,
 			executable(
 				'scenario-' + scenario,
-				'tests/scenarios/' + scenario + '.cpp',
+				scenario_sources,
 				protocol_headers,
 				include_directories: src_inc,
 				link_with: core_lib,
@@ -542,11 +588,13 @@ if foot_prog.found() and grim_prog.found()
 			suite: 'scenarios',
 			is_parallel: false,
 			# The bar scenario also walks every panel, the plugin reloads,
-			# the idle watch, the theme phase, the Wi-Fi phase and the
-			# agents phase: its 200-odd steps (step 90's reload check alone
-			# waits out up to 105 s of retries by design, the agents phase's
-			# probe-reuse window 20 s) need the wider budget.
-			timeout: scenario == 'bar' ? 420 : 180,
+			# the idle watch, the theme phase, the Wi-Fi phase (with the
+			# escaped names' roams) and the agents phase: its 200-odd steps
+			# (step 90's reload check alone waits out up to 105 s of
+			# retries by design, the agents phase's probe-reuse window
+			# 20 s, its refresh-setting reload 10 s) need the wider
+			# budget; the whole walk takes about 400 s.
+			timeout: scenario == 'bar' ? 600 : 180,
 			env: scenario_env,
 		)
 	endforeach
@@ -572,6 +620,16 @@ packaging_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 test(
 	'packaging',
 	find_program('tests/test_packaging.sh'),
+	suite: 'packaging',
+	is_parallel: false,
+	timeout: 120,
+	env: packaging_env,
+)
+
+# The plan tools, the autopilot hook and agent-setup.sh against scratch copies.
+test(
+	'agent-tools',
+	find_program('tests/test_agent_tools.sh'),
 	suite: 'packaging',
 	is_parallel: false,
 	timeout: 120,

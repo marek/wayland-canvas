@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <print>
@@ -46,6 +47,7 @@ std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
 long long free_window_id = 0; // the window moved onto free canvas, for its jump
+std::string conf_before; // canvas.conf's text before a settings.set that must change nothing
 bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
 pid_t grim_pid = -1;
@@ -1302,6 +1304,47 @@ int run_step() {
 			std::format("window.focus centred the view on a window with no"
 				" desktop (off by {:.0f},{:.0f} at zoom {:.2f})",
 				off_x, off_y, cam.zoom));
+		return 300;
+	}
+	case 78: { // settings.set compares the number with its range before narrowing it
+		conf_before = server->conf_text;
+		// 4294967301 is 2^32 + 5 and 4294971296 is 2^32 + 4000: as an int,
+		// the first is a valid idle time and the second a valid temperature.
+		run_client("settings.set", R"({"lockIdleMinutes":4294967301})", "idle-wraps");
+		run_client("settings.set", R"({"nightLightTemperature":4294971296})",
+			"temperature-wraps");
+		return 400;
+	}
+	case 79: {
+		for (const char *name : {"idle-wraps", "temperature-wraps"}) {
+			if (!client_done(name) && retries++ < 50) {
+				return -100;
+			}
+		}
+		retries = 0;
+		check(client_code("idle-wraps") == 1
+				&& client_err("idle-wraps").find("lockIdleMinutes") != std::string::npos,
+			std::format("`settings.set` of a lockIdleMinutes past an int is an error ({})",
+				client_err("idle-wraps")));
+		check(client_code("temperature-wraps") == 1
+				&& client_err("temperature-wraps").find("nightLightTemperature")
+					!= std::string::npos,
+			std::format("`settings.set` of a temperature past an int is an error ({})",
+				client_err("temperature-wraps")));
+		check(server->conf_text == conf_before
+				&& server->conf.lock_idle_minutes == settings::default_lock_idle_minutes
+				&& server->conf.night_light_k == settings::default_night_light_k,
+			"canvas.conf and the settings in force are unchanged");
+		run_client("settings.set", R"({"lockIdleMinutes":7})", "idle-seven");
+		return 400;
+	}
+	case 80: {
+		if ((!client_done("idle-seven") || server->conf.lock_idle_minutes != 7)
+				&& retries++ < 100) {
+			return -100;
+		}
+		check(client_code("idle-seven") == 0 && server->conf.lock_idle_minutes == 7,
+			"a lockIdleMinutes in range is still written");
 		finished = true; // the quit is the run's end
 		run_client("quit", "", "quit");
 		return 300;
@@ -1349,8 +1392,12 @@ int main() {
 	shot_dir = std::format("{}/scenarios/ipc", root);
 	mkdir_p(shot_dir);
 	// Before the server starts: canvas.conf lives in this run's scratch,
-	// never in the user's real ~/.config.
-	setenv("XDG_CONFIG_HOME", std::format("{}/scenarios/ipc/xdg-config", root).c_str(), 1);
+	// never in the user's real ~/.config, and starts as the defaults: the
+	// settings.set of an earlier run must not be this run's.
+	std::string xdg_config = std::format("{}/scenarios/ipc/xdg-config", root);
+	std::error_code ec;
+	std::filesystem::remove_all(xdg_config, ec);
+	setenv("XDG_CONFIG_HOME", xdg_config.c_str(), 1);
 	setenv("WLR_BACKENDS", "headless", 1);
 	setenv("WLR_RENDERER", "gles2", 1);
 	server.emplace();

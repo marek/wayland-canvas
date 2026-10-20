@@ -21,6 +21,8 @@
 // $CANVAS_TMP (meson passes the repo's tmp/).
 #include <cairo.h>
 #include <json-glib/json-glib.h>
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <csignal>
@@ -40,6 +42,7 @@
 #include <source_location>
 #include <span>
 #include <string>
+#include <sys/inotify.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -63,6 +66,8 @@ std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
 bool finished = false; // the run reached its end; see main()
+bool run_aborted = false; // a step ended the run; see end_run()
+int second_retries = 0; // a step's second wait counts apart: the first wait's reset runs again on each re-entry
 uint32_t t = 90000;
 pid_t grim_pid = -1;
 wlr_pointer ptr{};
@@ -82,6 +87,7 @@ constexpr int idle_sample_count = 1000; // 10 s of samples
 constexpr int idle_sample_ms = 10;
 constexpr double widen_px = 20; // how much the edited widget must grow
 double theme_x = 0; // the theme switch's centre: the right-most bar run
+double logo_x = 0; // the logo's centre: the left-most bar run
 double power_x = 0; // the power indicator's centre: the theme phase's panel
 std::string shell_config; // the scratch shell.json the theme switch writes
 std::string scheme_start; // the machine's real color-scheme, read before the run
@@ -131,6 +137,9 @@ double bt_x = 0;      // the bluetooth indicator's run centre, to find it
 std::size_t agents_base_runs = 0;
 int usage_requests_base = 0; // the stand-in's log lines before the reopen
 LayerSurface *agents_bar_before_reload = nullptr;
+std::string agents_config_kept; // shell.json before the refresh setting went in
+int agents_runs_before = 0;     // the collector's runs before it did
+long long agents_first_run_ms = 0; // when the first run after the reload showed
 std::string scratch_home;
 int shots_before = 0; // screenshots on disk before the chord under test
 
@@ -271,6 +280,15 @@ void check(bool cond, std::string_view note,
 	}
 }
 
+// Ends the run at a step that cannot go on, because a position it needs
+// cannot be read: a FAIL line says why, and the next tick prints the summary.
+int end_run(std::string_view why,
+	std::source_location where = std::source_location::current()) {
+	check(false, std::format("the run ends here: {}", why), where);
+	run_aborted = true;
+	return 100;
+}
+
 // Reads a small text file whole (the msg clients' captured output).
 std::string read_file(const std::string &path) {
 	FILE *f = std::fopen(path.c_str(), "r");
@@ -321,34 +339,6 @@ void replace_file(const std::string &path, std::string_view text) {
 		std::fprintf(stderr, "cannot rename %s: %s\n", sibling.c_str(),
 			std::strerror(errno));
 	}
-}
-
-
-// ---- machine state: which indicators the bar shows ----
-
-// The stand-ins decide almost all of it: their world always has a battery
-// (UPower's discharging display device), a Wi-Fi device (NetworkManager)
-// and a Bluetooth adapter (BlueZ), so those indicators are unconditional.
-// The backlight is the one real-machine signal left — no stand-in can
-// provide sysfs, and the bar's brightness widget checks for one with
-// brightnessctl before it shows.
-
-// Any entry under /sys/class/<name> besides the dot entries.
-bool has_sysfs_class(const char *name) {
-	std::string root = std::format("/sys/class/{}", name);
-	DIR *d = opendir(root.c_str());
-	if (d == nullptr) {
-		return false;
-	}
-	bool found = false;
-	for (dirent *e = readdir(d); e != nullptr; e = readdir(d)) {
-		if (e->d_name[0] != '.') {
-			found = true;
-			break;
-		}
-	}
-	closedir(d);
-	return found;
 }
 
 
@@ -707,14 +697,16 @@ void fixture_online(bool on) {
 }
 
 // The tool stand-ins: the network panel shells out to nmcli, ping,
-// qrencode, speedtest and wl-copy, and the scenario's world must answer
-// them deterministically without ever reaching the machine's services.
-// Wrappers go first on the PATH the bar inherits: nmcli, ping, qrencode
-// and speedtest answer from the fixture world — nmcli keeps the panel's
-// changes in a state file, so its reads follow its writes — and wl-copy
-// passes through to the real one under the scenario's own display. Every
-// invocation lands in one log, so a run can prove what was asked for and
-// that nothing named the machine's own network.
+// qrencode, speedtest and wl-copy, the brightness widget to brightnessctl,
+// and the scenario's world must answer them deterministically without ever
+// reaching the machine's services. Wrappers go first on the PATH the bar
+// inherits: nmcli, ping, qrencode and speedtest answer from the fixture
+// world — nmcli keeps the panel's changes in a state file, so its reads
+// follow its writes — brightnessctl holds one backlight in a state file
+// the same way, and wl-copy passes through to the real one under the
+// scenario's own display. Every invocation lands in one log, so a run can
+// prove what was asked for and that nothing named the machine's own
+// network or backlight.
 bool start_tool_standins() {
 	std::string dir = shot_dir + "/tool-bin";
 	mkdir_p(dir);
@@ -741,24 +733,33 @@ bool start_tool_standins() {
 		"state=${CANVAS_TMP:-tmp}/scenarios/bar/nmcli-state\n"
 		"printf 'nmcli %s\\n' \"$*\" >>\"$log\" 2>/dev/null\n"
 		"key(){ grep \"$1\" \"$state\" 2>/dev/null | tail -n 1 | cut -d= -f2-; }\n"
+		"# nmcli's terse mode writes the colon and the backslash of a\n"
+		"# value behind a backslash\n"
+		"esc(){ printf '%s' \"$1\" | sed 's/[\\\\:]/\\\\&/g'; }\n"
 		"case \"$*\" in\n"
 		"*\"device show\"*)\n"
 		"\t# the scenario marks the world offline once the walk's click\n"
-		"\t# disconnects the fixture: the reads agree with the mock then\n"
+		"\t# disconnects the fixture: the reads agree with the mock then; a\n"
+		"\t# roam names the network the machine moved to instead\n"
 		"\tif [ \"$(key '^offline=')\" = 1 ]; then\n"
 		"\t\tprintf '\\n\\n\\n'\n"
+		"\telif [ -n \"$(key '^roam_ssid=')\" ]; then\n"
+		"\t\tprintf '%s\\n" + std::string(wifi_ip) + "/24\\n" + std::string(wifi_gateway)
+		+ "\\n' \"$(esc \"$(key '^roam_ssid=')\")\"\n"
 		"\telse\n"
 		"\t\tprintf '" + std::string(wifi_ssid) + "\\n" + std::string(wifi_ip)
 		+ "/24\\n" + std::string(wifi_gateway) + "\\n'\n"
 		"\tfi\n"
 		"\t;;\n"
 		"*\"dev wifi list\"*)\n"
-		"\tif [ \"$(key '^offline=')\" = 1 ]; then\n"
-		"\t\tprintf ':2437:" + std::string(wifi_ssid) + "\\n:5180:" + std::string(wifi_ssid)
-		+ "\\n:6175:" + std::string(wifi_ssid) + "\\n'\n"
-		"\telse\n"
-		"\t\tprintf '*:2437:" + std::string(wifi_ssid) + "\\n:5180:" + std::string(wifi_ssid)
-		+ "\\n:6175:" + std::string(wifi_ssid) + "\\n'\n"
+		"\thome='*'\n"
+		"\tif [ \"$(key '^offline=')\" = 1 ] || [ -n \"$(key '^roam_ssid=')\" ]; then\n"
+		"\t\thome=\n"
+		"\tfi\n"
+		"\tprintf '%s:2437:" + std::string(wifi_ssid) + "\\n:5180:" + std::string(wifi_ssid)
+		+ "\\n:6175:" + std::string(wifi_ssid) + "\\n' \"$home\"\n"
+		"\tif [ -n \"$(key '^roam_ssid=')\" ]; then\n"
+		"\t\tprintf '*:%s:%s\\n' \"$(key '^roam_freq=')\" \"$(esc \"$(key '^roam_ssid=')\")\"\n"
 		"\tfi\n"
 		"\tprintf ':2437:CafeGuest\\n:5240:CorpNet\\n:2462:LibraryFree\\n:2462:OldCafe\\n'\n"
 		"\t;;\n"
@@ -766,7 +767,11 @@ bool start_tool_standins() {
 		"\tkey '^band='\n"
 		"\t;;\n"
 		"*\"802-11-wireless-security.psk connection show\"*)\n"
-		"\tprintf '" + std::string(wifi_psk) + "\\n'\n"
+		"\tif [ -n \"$(key '^roam_ssid=')\" ]; then\n"
+		"\t\tprintf '%s\\n' \"$(esc \"$(key '^roam_psk=')\")\"\n"
+		"\telse\n"
+		"\t\tprintf '" + std::string(wifi_psk) + "\\n'\n"
+		"\tfi\n"
 		"\t;;\n"
 		"*\"connection modify\"*)\n"
 		"\tprev=\n"
@@ -780,18 +785,6 @@ bool start_tool_standins() {
 		"\t\tesac\n"
 		"\t\tprev=$arg\n"
 		"\tdone\n"
-		"\t;;\n"
-		"*\"connection delete\"*)\n"
-		"\t# the stand-in world's connection objects, by SSID\n"
-		"\tcase \"$3\" in\n"
-		"\tOldCafe) obj=oldcafe ;;\n"
-		"\tHomeNet) obj=home ;;\n"
-		"\t*) exit 0 ;;\n"
-		"\tesac\n"
-		"\tbusctl --address \"$DBUS_SYSTEM_BUS_ADDRESS\" call "
-		"org.freedesktop.NetworkManager \"/org/freedesktop/NetworkManager/"
-		"Settings/$obj\" org.freedesktop.NetworkManager.Settings."
-		"Connection Delete >/dev/null 2>&1\n"
 		"\t;;\n"
 		"*\"ipv4.dns\"*)\n"
 		"\tprintf '%s\\n%s\\n%s\\n%s\\n' \"$(key '^dns4=')\" \"$(key '^ignore4=' || :)\""
@@ -822,13 +815,30 @@ bool start_tool_standins() {
 	write_file(dir + "/ping", ping);
 	std::string qrencode = "#!/bin/sh\n"
 		"# Generated by tests/scenarios/bar.cpp: the bar scenario's\n"
-		"# qrencode stand-in: the call is logged, and a real encoded\n"
-		"# matrix of the fixture's payload answers — the drawn code\n"
-		"# has to scan, not just show ink. The matrix is the ASCII\n"
-		"# type that the panel itself parses: two characters a module,\n"
-		"# quiet zone included, so the run's reader is the panel's own.\n"
+		"# qrencode stand-in. Like the real tool it encodes its last\n"
+		"# argument that is not an option, and reads its stdin to the\n"
+		"# end when there is none. The argv is logged as one line, the\n"
+		"# text read from stdin as another, so a run can prove which of\n"
+		"# the two carried a payload. A real encoded matrix of the\n"
+		"# fixture's payload answers — the drawn code has to scan, not\n"
+		"# just show ink. The matrix is the ASCII type that the panel\n"
+		"# itself parses: two characters a module, quiet zone included,\n"
+		"# so the run's reader is the panel's own.\n"
 		"log=${CANVAS_TMP:-tmp}/scenarios/bar/tool-standin.log\n"
 		"printf 'qrencode %s\\n' \"$*\" >>\"$log\" 2>/dev/null\n"
+		"text=\n"
+		"skip=\n"
+		"for arg in \"$@\"; do\n"
+		"\tif [ -n \"$skip\" ]; then skip=; continue; fi\n"
+		"\tcase \"$arg\" in\n"
+		"\t-t|-m) skip=1 ;;\n"
+		"\t-*) ;;\n"
+		"\t*) text=$arg ;;\n"
+		"\tesac\n"
+		"done\n"
+		"if [ -z \"$text\" ]; then\n"
+		"\tprintf 'qrencode-stdin %s\\n' \"$(cat)\" >>\"$log\" 2>/dev/null\n"
+		"fi\n"
 		"# the matrix's lines carry their light modules as trailing\n"
 		"# spaces, which nothing downstream may rely on: awk pads every\n"
 		"# line back out to the matrix's full width, 37 modules of two\n"
@@ -892,12 +902,158 @@ bool start_tool_standins() {
 		"printf 'wl-copy\\n' >>\"$log\" 2>/dev/null\n"
 		"exec " + real + " \"$@\"\n";
 	write_file(dir + "/wl-copy", wlcopy);
-	for (const char *name : {"nmcli", "ping", "qrencode", "speedtest", "wl-copy"}) {
+	write_file(shot_dir + "/brightness-state", "50\n");
+	std::string brightnessctl = "#!/bin/sh\n"
+		"# Generated by tests/scenarios/bar.cpp: the bar scenario's\n"
+		"# brightnessctl stand-in. One backlight at a percentage kept in a\n"
+		"# state file: `set N%` stores it, and every call prints the machine\n"
+		"# line (name,class,current,max,percent) the widget parses. Every\n"
+		"# call is logged.\n"
+		"log=${CANVAS_TMP:-tmp}/scenarios/bar/tool-standin.log\n"
+		"state=${CANVAS_TMP:-tmp}/scenarios/bar/brightness-state\n"
+		"printf 'brightnessctl %s\\n' \"$*\" >>\"$log\" 2>/dev/null\n"
+		"for arg in \"$@\"; do\n"
+		"\tcase \"$arg\" in\n"
+		"\t*%) printf '%s\\n' \"${arg%\\%}\" >\"$state\" ;;\n"
+		"\tesac\n"
+		"done\n"
+		"pct=$(cat \"$state\" 2>/dev/null || printf 50)\n"
+		"printf 'standin,backlight,%s,100,%s%%\\n' \"$pct\" \"$pct\"\n"
+		"exit 0\n";
+	write_file(dir + "/brightnessctl", brightnessctl);
+	for (const char *name : {"nmcli", "ping", "qrencode", "speedtest", "wl-copy", "brightnessctl"}) {
 		chmod((dir + "/" + name).c_str(), 0755);
 	}
 	const char *path = std::getenv("PATH");
 	setenv("PATH", std::format("{}:{}", dir, path != nullptr ? path : "").c_str(), 1);
 	return true;
+}
+
+// The PipeWire stand-in: the audio widget follows the default sink of the
+// PipeWire the environment names, which on a real session is the machine's
+// own speakers. A daemon of the run's own, on a socket under the scratch,
+// holds one null sink as the default, at half volume, so a wheel turn can
+// only ever move that. PipeWire keeps a linear volume per channel, and
+// Quickshell's `volume`, the one the widget steps, is its cube root:
+// everything here speaks the widget's scale, and the cube is taken only
+// where the daemon is written to.
+pid_t pipewire_pid = -1;
+constexpr const char *standin_sink = "standin-sink";
+constexpr double standin_sink_start = 0.5;
+
+void pause_ms(int ms) {
+	timespec ts = {.tv_sec = 0, .tv_nsec = ms * 1'000'000L};
+	nanosleep(&ts, nullptr);
+}
+
+JsonObject *object_member(JsonObject *parent, const char *name) {
+	return parent != nullptr && json_object_has_member(parent, name)
+			&& JSON_NODE_HOLDS_OBJECT(json_object_get_member(parent, name))
+		? json_object_get_object_member(parent, name) : nullptr;
+}
+
+// The stand-in sink as `pw-dump` shows it: its object id and the volume of
+// its first channel in the widget's scale. False when the daemon does not
+// answer or the sink is not there yet.
+bool pw_sink(int &id, double &volume) {
+	std::string dump = shot_dir + "/pipewire/dump.json";
+	if (std::system(std::format("timeout 5 pw-dump >'{}' 2>/dev/null", dump).c_str()) != 0) {
+		return false;
+	}
+	JsonParser *parser = json_parser_new();
+	JsonNode *root = json_parser_load_from_file(parser, dump.c_str(), nullptr)
+		? json_parser_get_root(parser) : nullptr;
+	bool found = false;
+	JsonArray *objects = root != nullptr && JSON_NODE_HOLDS_ARRAY(root)
+		? json_node_get_array(root) : nullptr;
+	for (guint i = 0; objects != nullptr && i < json_array_get_length(objects) && !found; i++) {
+		JsonObject *object = json_array_get_object_element(objects, i);
+		JsonObject *info = object_member(object, "info");
+		JsonObject *props = object_member(info, "props");
+		if (props == nullptr || !json_object_has_member(props, "node.name")
+				|| std::string_view{json_object_get_string_member(props, "node.name")}
+					!= standin_sink) {
+			continue;
+		}
+		JsonObject *params = object_member(info, "params");
+		JsonArray *list = params != nullptr && json_object_has_member(params, "Props")
+			? json_object_get_array_member(params, "Props") : nullptr;
+		JsonObject *first = list != nullptr && json_array_get_length(list) > 0
+			? json_array_get_object_element(list, 0) : nullptr;
+		JsonArray *volumes = first != nullptr && json_object_has_member(first, "channelVolumes")
+			? json_object_get_array_member(first, "channelVolumes") : nullptr;
+		if (volumes != nullptr && json_array_get_length(volumes) > 0) {
+			id = static_cast<int>(json_object_get_int_member(object, "id"));
+			volume = std::cbrt(json_array_get_double_element(volumes, 0));
+			found = true;
+		}
+	}
+	g_object_unref(parser);
+	return found;
+}
+
+// The stand-in sink's volume now, or -1 when it cannot be read.
+double sink_volume() {
+	int id = 0;
+	double volume = -1;
+	return pw_sink(id, volume) ? volume : -1;
+}
+
+bool start_pipewire_standin() {
+	std::string dir = shot_dir + "/pipewire";
+	std::error_code ec;
+	std::filesystem::remove_all(dir, ec); // a stale socket from a killed run
+	mkdir_p(dir);
+	write_file(dir + "/pipewire.conf",
+		"context.properties = {\n\tcore.daemon = true\n\tcore.name = pipewire-0\n}\n"
+		"context.spa-libs = {\n\taudio.convert.* = audioconvert/libspa-audioconvert\n"
+		"\taudio.adapt = audioconvert/libspa-audioconvert\n"
+		"\tsupport.* = support/libspa-support\n}\n"
+		"context.modules = [\n\t{ name = libpipewire-module-protocol-native }\n"
+		"\t{ name = libpipewire-module-metadata }\n"
+		"\t{ name = libpipewire-module-access args = { } }\n"
+		"\t{ name = libpipewire-module-spa-node-factory }\n"
+		"\t{ name = libpipewire-module-client-node }\n"
+		"\t{ name = libpipewire-module-adapter }\n"
+		"\t{ name = libpipewire-module-link-factory }\n]\n"
+		"context.objects = [\n\t{ factory = metadata args = { metadata.name = default } }\n"
+		"\t{ factory = spa-node-factory args = { factory.name = support.node.driver\n"
+		"\t\tnode.name = Dummy-Driver node.group = pipewire.dummy\n"
+		"\t\tpriority.driver = 20000 } }\n"
+		"\t{ factory = adapter args = { factory.name = support.null-audio-sink\n"
+		"\t\tnode.name = " + std::string{standin_sink} + "\n"
+		"\t\tnode.description = \"Stand-in speakers\" media.class = Audio/Sink\n"
+		"\t\taudio.position = [ FL FR ] object.linger = true } }\n]\n");
+	setenv("PIPEWIRE_RUNTIME_DIR", dir.c_str(), 1);
+	unsetenv("PIPEWIRE_REMOTE");
+	unsetenv("PIPEWIRE_CORE");
+	std::string launch = std::format(
+		"exec pipewire -c '{0}/pipewire.conf' >'{0}/pipewire.log' 2>&1", dir);
+	const char *const argv[] = {"sh", "-c", launch.c_str(), static_cast<const char *>(nullptr)};
+	Spawned child = spawn(argv);
+	if (child.pid <= 0) {
+		return false;
+	}
+	close(child.out);
+	pipewire_pid = child.pid;
+	// Once the daemon has made the sink: it becomes the default, at half volume.
+	for (int tries = 0; tries < 50; tries++) {
+		int id = 0;
+		double volume = 0;
+		if (pw_sink(id, volume)
+				&& std::system(std::format(
+					"timeout 5 pw-metadata -n default 0 default.audio.sink "
+					"'{{\"name\":\"{0}\"}}' Spa:String:JSON >/dev/null 2>&1 && "
+					"timeout 5 pw-cli set-param {1} Props "
+					"'{{ channelVolumes: [ {2}, {2} ] }}' >/dev/null 2>&1",
+					standin_sink, id, std::pow(standin_sink_start, 3)).c_str()) == 0) {
+			return true;
+		}
+		pause_ms(100);
+	}
+	std::fprintf(stderr, "the PipeWire stand-in did not come up (see %s/pipewire.log)\n",
+		dir.c_str());
+	return false;
 }
 
 // What this machine's own Wi-Fi is called, asked of the real nmcli in a
@@ -934,6 +1090,42 @@ std::string machine_wifi_ssid() {
 // one.
 std::string standin_log() {
 	return read_file(shot_dir + "/tool-standin.log");
+}
+
+// The lines of a tool log.
+std::vector<std::string_view> split_log(std::string_view log) {
+	std::vector<std::string_view> lines;
+	std::size_t at = 0;
+	while (at < log.size()) {
+		std::size_t end = log.find('\n', at);
+		if (end == std::string_view::npos) {
+			end = log.size();
+		}
+		lines.push_back(log.substr(at, end - at));
+		at = end + 1;
+	}
+	return lines;
+}
+
+// True when the log holds exactly this line.
+bool log_has_line(std::string_view log, std::string_view line) {
+	for (std::string_view each : split_log(log)) {
+		if (each == line) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// True when a line of the log that starts with `prefix` also holds `needle`.
+bool log_line_names(std::string_view log, std::string_view prefix,
+	std::string_view needle) {
+	for (std::string_view each : split_log(log)) {
+		if (each.starts_with(prefix) && each.find(needle) != std::string_view::npos) {
+			return true;
+		}
+	}
+	return false;
 }
 
 int standin_calls(std::string_view text, std::string_view needle) {
@@ -1083,6 +1275,10 @@ bool dns_pill_lit(const char *name, int pill) {
 // Everything the scenario started, in reverse order: the launcher (which
 // terminates the dbusmock mocks with it), then the buses.
 void stop_isolation() {
+	if (pipewire_pid > 0) {
+		kill(pipewire_pid, SIGTERM);
+	}
+	reap(pipewire_pid);
 	reap(usage_standin_pid);
 	reap(private_system.pid);
 	reap(private_session.pid);
@@ -1252,22 +1448,67 @@ void park(double x, double y) {
 	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 }
 
-// Wheel clicks over (x, y): positive scrolls the content down, negative
-// up. A physical wheel, not touchpad fingers: the shell's flickable moves
-// by the discrete steps without a begin/end phase.
+// One wheel event of `units` at the pointer, positive toward the user: 120
+// is one notch, a smaller one a step of a smooth wheel. A physical wheel,
+// not touchpad fingers: the shell's flickable moves by the discrete steps
+// without a begin/end phase.
+void wheel_turn(int units) {
+	t += 8;
+	wlr_pointer_axis_event ev = {.pointer = &ptr, .time_msec = t,
+		.source = WL_POINTER_AXIS_SOURCE_WHEEL,
+		.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+		.delta = 15.0 * units / 120, .delta_discrete = units};
+	wl_signal_emit_mutable(&ptr.events.axis, &ev);
+	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+// Wheel clicks over (x, y): positive scrolls the content down, negative up.
 void scroll(double x, double y, int clicks) {
 	park(x, y);
 	int sign = clicks < 0 ? -1 : 1;
 	for (int i = 0; i < std::abs(clicks); i++) {
-		t += 8;
-		wlr_pointer_axis_event ev = {.pointer = &ptr, .time_msec = t,
-			.source = WL_POINTER_AXIS_SOURCE_WHEEL,
-			.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
-			.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
-			.delta = 15.0 * sign, .delta_discrete = 120 * sign};
-		wl_signal_emit_mutable(&ptr.events.axis, &ev);
-		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+		wheel_turn(120 * sign);
 	}
+}
+
+// `events` wheel events of `units` over the bar at x, turned away from the
+// user: the direction that raises a volume.
+void wheel_over_bar(double x, int units, int events = 1) {
+	park(x, 13);
+	for (int i = 0; i < events; i++) {
+		wheel_turn(-units);
+	}
+}
+
+// The centre of the bar run that opens the named indicator's panel, 0
+// before the walk found it.
+double indicator_x(const char *name) {
+	for (const Indicator &ind : indicators) {
+		if (std::strcmp(ind.name, name) == 0) {
+			return ind.x;
+		}
+	}
+	return 0;
+}
+
+// The stand-in backlight's percentage, and how many times the widget set it.
+int backlight_percent() {
+	return std::atoi(read_file(shot_dir + "/brightness-state").c_str());
+}
+
+int backlight_sets() {
+	std::string log = standin_log();
+	int sets = 0;
+	for (std::size_t at = 0; at < log.size();) {
+		std::size_t end = std::min(log.find('\n', at), log.size());
+		std::string_view line{log.data() + at, end - at};
+		if (line.starts_with("brightnessctl ") && line.contains(" set ")) {
+			sets++;
+		}
+		at = end + 1;
+	}
+	return sets;
 }
 
 // The scratch plugin's storage file, read back as text: the proof an
@@ -1592,6 +1833,23 @@ bool mock_called(const char *name, const char *path, const char *method,
 std::string mock_property(const char *name, const char *path, const char *interface,
 	const char *property) {
 	return busctl("get-property", name, path, interface, property);
+}
+
+// The stand-in world's move to another network: the nmcli stand-in reads
+// `roam_ssid`, `roam_freq` and `roam_psk` from its state file, and the
+// NetworkManager mock moves the device under the method named, so the
+// panel sees the same network through both. The names are raw, as the
+// daemon holds them; the nmcli stand-in escapes them as terse mode does.
+// An empty `ssid` puts the world back on HomeNet.
+int roam_list_base = 0; // the nmcli stand-in's list reads before a roam
+
+void roam_to(const char *method, const char *ssid, int freq, const char *psk) {
+	FILE *f = std::fopen((shot_dir + "/nmcli-state").c_str(), "a");
+	if (f != nullptr) {
+		std::fprintf(f, "roam_ssid=%s\nroam_freq=%d\nroam_psk=%s\n", ssid, freq, psk);
+		std::fclose(f);
+	}
+	busctl("call", NM_NAME, NM_MANAGER, "org.waylandcanvas.barstandins.Wifi", method);
 }
 
 // The keyboard is on a surface of the bar client (so panel keystrokes land).
@@ -2246,10 +2504,10 @@ int walk() {
 		// seat enters an on-demand layer surface on its own): no click may
 		// be needed before its field is typeable, so check before poking.
 		if (server->seat->keyboard_state.focused_surface != panel->wlr->surface
-				&& retries++ < 20) {
+				&& second_retries++ < 20) {
 			return -100;
 		}
-		retries = 0;
+		second_retries = 0;
 		check(server->seat->keyboard_state.focused_surface == panel->wlr->surface,
 			std::format("the {} panel holds the keyboard as it opens", ind.name));
 		popup_box = card_box(ind.x, ind.width);
@@ -2599,6 +2857,9 @@ constexpr uint32_t attention_dark = 0xf7768eff; // UiTheme.attention, dark
 constexpr uint32_t attention_light = 0xf52a65ff; // UiTheme.attention, light
 constexpr uint32_t claude_mark = 0xd97757ff;   // the starburst's clay
 constexpr uint32_t muted_dark = 0x565f89ff;    // UiTheme.muted, dark
+// A selected chip's body in the agents panel's switch: the accent at 22 %
+// over UiTheme.panel, dark.
+constexpr uint32_t chip_selected_dark = 0x2f3954ff;
 constexpr uint32_t muted_light = 0x8489a3ff;   // UiTheme.muted, light
 constexpr uint32_t panel_light = 0xf4f5f8ff;   // UiTheme.panel, light
 
@@ -2748,6 +3009,31 @@ void drop_usage_fixtures() {
 			"\n", d1, d1));
 }
 
+// The collector ranks the families after Claude and GPT by the week's
+// tokens: a day's work through the gateway puts it above Fireworks, so
+// the two swap places between two refreshes.
+void swap_usage_providers() {
+	std::string path = scratch_home + "/.omp/agent/sessions/fixture/usage.jsonl";
+	// read_file drops the last newline, which the appended line needs
+	write_file(path, read_file(path) + "\n"
+		+ usage_line("g2", day_iso(0), "19:30:00",
+			"anthropic-250k-prefer-using-this-one", "claude-opus-5-5",
+			5000000, 0));
+}
+
+// The collector's runs so far: each one starts the fake codex app-server,
+// whose log holds one initialize call per run.
+int codex_runs() {
+	return standin_calls(read_file(std::format("{}/codex-standin.log", shot_dir)),
+		R"("method":"initialize")");
+}
+
+long long monotonic_ms() {
+	timespec now{};
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return static_cast<long long>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+}
+
 // The whole fixture world removed: the panel's own quiet-world check.
 void remove_usage_fixtures() {
 	std::error_code ec;
@@ -2829,6 +3115,21 @@ int colour_count(cairo_surface_t *s, const wlr_box &rect, uint32_t want) {
 		}
 	}
 	return count;
+}
+
+// The chip of the agents panel's switch that holds the selection, by the
+// tint of its body, or -1. Each chip is read about its text's centre, the
+// run the bar scan found, at the heights where only its own fill is drawn.
+int selected_chip(cairo_surface_t *s) {
+	for (std::size_t i = 0; i < agents_chip_runs.size(); i++) {
+		wlr_box span{agents_box.x + 8
+			+ static_cast<int>(agents_chip_runs[i].centre()) - 38,
+			agents_box.y + 66, 76, 12};
+		if (colour_count(s, span, chip_selected_dark) > 150) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
 }
 
 // ---- the recording-dot phase ----
@@ -2999,13 +3300,11 @@ int settings_card_height(int column) {
 		+ settings_sep + settings_footer;
 }
 
-// The Bar tab's column of content: the three sections, this machine's
-// own backlight deciding whether the brightness widget has a row.
+// The Bar tab's column of content: the three sections.
 int settings_bar_column() {
-	int backlight = has_sysfs_class("backlight") ? 1 : 0;
 	return settings_section_height(1, 0)              // Left: the logo
 		+ settings_section_height(2, 0)                // Center: clock, weather
-		+ settings_section_height(8 + backlight, 1)    // Right: tray to theme
+		+ settings_section_height(9, 1)                // Right: tray to theme
 		+ 2 * settings_gap;
 }
 
@@ -3193,14 +3492,13 @@ bool settings_switch_is(cairo_surface_t *s, double y, bool on) {
 // The Bar tab's widget rows from the card's top: each row's centre, top
 // to bottom, in the bar's own section order.
 std::vector<double> settings_bar_rows(int card_y) {
-	int backlight = has_sysfs_class("backlight") ? 1 : 0;
 	std::vector<std::vector<int>> sections = {
 		{settings_row},                                   // Left: the logo
 		{settings_row, settings_row},                     // Center: clock, weather
 		{settings_row, settings_choice},                  // Right: tray, agents
 	};
-	// bluetooth, network, audio, [brightness], notifications, power, theme
-	for (int i = 0; i < 7 + backlight; i++) {
+	// bluetooth, network, audio, brightness, notifications, power, theme
+	for (int i = 0; i < 8; i++) {
 		sections[2].push_back(settings_row);
 	}
 	std::vector<double> centres;
@@ -3327,6 +3625,162 @@ int settings_chip_width(cairo_surface_t *s, int y) {
 // an address or a protocol id can come back for the new surface.
 bool settings_shell_kept() {
 	return bar_layer() != nullptr && bar_surfaces_made == bar_surfaces_remembered;
+}
+
+// The shell reloaded since watch_remember_bar(), its bar up again.
+bool shell_reloaded() {
+	return bar_layer() != nullptr && bar_surfaces_made != bar_surfaces_remembered;
+}
+
+std::string config_good;   // the scratch shell.json before the edit that breaks it
+std::string config_broken; // and as that edit leaves it: cut short, not JSON
+
+// The mapped foot windows; the terminal the logo opens is one of them.
+std::vector<View *> foot_views() {
+	std::vector<View *> found;
+	for (View *v : server->views) {
+		if (v->mapped && v->shell_app_id() != nullptr
+				&& std::strcmp(v->shell_app_id(), "foot") == 0) {
+			found.push_back(v);
+		}
+	}
+	return found;
+}
+
+std::vector<View *> foots_known; // the foot windows before the logo's right click
+double night_x = 0; // the brightness indicator's centre on the bar; 0 without one
+
+// The foot window the logo opened: the one that is not among the known.
+View *logo_terminal() {
+	for (View *v : foot_views()) {
+		if (std::ranges::find(foots_known, v) == foots_known.end()) {
+			return v;
+		}
+	}
+	return nullptr;
+}
+
+// notify-send on the private session bus, where the shell's own server is
+// the only one listening. A sender's own timeout of a minute keeps a card
+// up for the shot, and an urgent one carries the attention border that
+// popup_cards counts.
+void notify_send(const char *summary) {
+	const char *const argv[] = {"notify-send", "-a", "Tests", "-u", "critical",
+		"-t", "60000", summary, static_cast<const char *>(nullptr)};
+	Spawned child = spawn(argv);
+	if (child.pid > 0) {
+		msg_children.push_back(child.pid);
+	}
+	if (child.out >= 0) {
+		close(child.out);
+	}
+}
+
+// The notifications the bell's history keeps, from the plugin's own
+// storage; -1 while there is none.
+int notification_history_length() {
+	const char *state = std::getenv("XDG_STATE_HOME");
+	if (state == nullptr) {
+		return -1;
+	}
+	std::string path = std::format(
+		"{}/wayland-canvas/plugins/canvas.notifications/notifications.json", state);
+	JsonParser *parser = json_parser_new();
+	int length = -1;
+	if (json_parser_load_from_file(parser, path.c_str(), nullptr)
+			&& json_node_get_node_type(json_parser_get_root(parser)) == JSON_NODE_OBJECT) {
+		JsonObject *stored = json_node_get_object(json_parser_get_root(parser));
+		if (json_object_has_member(stored, "history")
+				&& json_node_get_node_type(json_object_get_member(stored, "history"))
+					== JSON_NODE_ARRAY) {
+			length = int(json_array_get_length(
+				json_node_get_array(json_object_get_member(stored, "history"))));
+		}
+	}
+	g_object_unref(parser);
+	return length;
+}
+
+// The popup cards a shot of the first output shows. An urgent card has a
+// one-pixel attention border (Popups.qml), so the rows of that colour down
+// a line inside the cards' left padding come two to a card. The line is
+// the column's: the edge margin and the width Popups.qml gives it.
+int popup_cards(cairo_surface_t *s) {
+	if (s == nullptr) {
+		return -1;
+	}
+	int x = screen_w - 8 - 340 + 40;
+	int rows = 0;
+	for (int y = bar_h() + 2; y < screen_h; y++) {
+		if (pixel_is(s, x, y, attention_dark)) {
+			rows++;
+		}
+	}
+	return rows / 2;
+}
+
+// The notification plugin's popup surfaces on screen: one per output.
+int notification_layers() {
+	int n = 0;
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (auto &vec : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &l : vec) {
+				if (l->mapped && l->wlr->namespace_ != nullptr
+						&& std::strcmp(l->wlr->namespace_,
+							"wayland-canvas-notifications") == 0) {
+					n++;
+				}
+			}
+		}
+	}
+	return n;
+}
+
+// The writes shell.json gets, counted by an inotify watch on its directory:
+// start before the action, read (and stop) after it.
+int shell_json_watch = -1;
+
+void shell_json_watch_start() {
+	if (shell_json_watch >= 0) {
+		close(shell_json_watch);
+	}
+	shell_json_watch = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	std::string dir = std::filesystem::path(shell_config).parent_path().string();
+	inotify_add_watch(shell_json_watch, dir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
+}
+
+int shell_json_watch_writes() {
+	int writes = 0;
+	alignas(inotify_event) char buffer[4096];
+	ssize_t len = 0;
+	while (shell_json_watch >= 0 && (len = read(shell_json_watch, buffer, sizeof buffer)) > 0) {
+		for (ssize_t at = 0; at < len;) {
+			const auto *event = reinterpret_cast<const inotify_event *>(buffer + at);
+			if (event->len > 0 && std::strcmp(event->name, "shell.json") == 0) {
+				writes++;
+			}
+			at += ssize_t(sizeof(inotify_event) + event->len);
+		}
+	}
+	if (shell_json_watch >= 0) {
+		close(shell_json_watch);
+		shell_json_watch = -1;
+	}
+	return writes;
+}
+
+// The Plugins page's number slider (PluginSettingRow.qml) and where its
+// row lies: the n-th row of the first group, from the card's own metrics.
+constexpr int plugin_slider_w = 120;
+double slider_left = 0, slider_y = 0;
+int history_before = 0; // the history's length before the last notification
+
+double plugins_row_y(int index) {
+	int column = settings_plugins_column();
+	int card_y = settings_card_top(settings_card_height(column), settings_gear_y);
+	int first_top = card_y + settings_pad + settings_tabs_h + settings_gap
+		+ settings_header + settings_gap;
+	return first_top + index * (settings_choice + settings_gap) + settings_choice / 2.0;
 }
 
 // canvas.conf's value on `name`'s line, "" when the file gives it none:
@@ -3659,6 +4113,39 @@ std::string plugin_setting_text(const char *id, const char *key) {
 	}
 	g_object_unref(parser);
 	return out;
+}
+
+// Writes one number of one plugin's settings into the scratch shell.json,
+// keeping everything else it holds: an edit the host sees, so the shell
+// reloads with it.
+bool set_plugin_setting(const char *id, const char *key, int value) {
+	JsonParser *parser = json_parser_new();
+	std::string text = read_file(shell_config);
+	bool ok = !text.empty()
+		&& json_parser_load_from_data(parser, text.c_str(),
+			static_cast<gssize>(text.size()), nullptr)
+		&& json_node_get_node_type(json_parser_get_root(parser))
+			== JSON_NODE_OBJECT;
+	if (ok) {
+		JsonObject *at = json_node_get_object(json_parser_get_root(parser));
+		for (const char *step : {"plugins", id, "settings"}) {
+			JsonNode *held = json_object_get_member(at, step);
+			if (held == nullptr
+					|| json_node_get_node_type(held) != JSON_NODE_OBJECT) {
+				json_object_set_object_member(at, step, json_object_new());
+			}
+			at = json_node_get_object(json_object_get_member(at, step));
+		}
+		json_object_set_int_member(at, key, value);
+		JsonGenerator *generator = json_generator_new();
+		json_generator_set_root(generator, json_parser_get_root(parser));
+		gchar *out = json_generator_to_data(generator, nullptr);
+		write_file(shell_config, out);
+		g_free(out);
+		g_object_unref(generator);
+	}
+	g_object_unref(parser);
+	return ok;
 }
 
 // The toolbar.position the scratch shell.json names now.
@@ -4020,7 +4507,19 @@ bool flyout_folded_checks(const char *shot_name) {
 }
 
 
+// The summary and the end of the run: reached after the last step, or at the
+// tick after a step ended the run.
+int finish() {
+	finished = true;
+	std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
+	wl_display_terminate(server->display);
+	return -1;
+}
+
 int run_step() {
+	if (run_aborted) {
+		return finish();
+	}
 	switch (step) {
 	case 0:
 		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
@@ -4086,22 +4585,21 @@ int run_step() {
 
 		// Which indicators the bar shows, right to left, in the order the
 		// right section lays them out. The stand-ins' fixed world carries a
-		// battery, a Wi-Fi device and a Bluetooth adapter; only the
-		// backlight comes from this machine.
+		// battery, a Wi-Fi device, a Bluetooth adapter, a backlight and a
+		// sink.
 		std::vector<Indicator> mandatory;
 		mandatory.push_back({"power", power_panel});
 		// The notifications bell sits between the backlight and the
 		// battery; its history panel is always there, like the bell.
 		mandatory.push_back({"history", history_panel});
-		if (has_sysfs_class("backlight")) {
-			mandatory.push_back({"brightness", brightness_panel});
-		}
+		mandatory.push_back({"brightness", brightness_panel});
 		mandatory.push_back({"audio", audio_panel});
 		mandatory.push_back({"network", network_panel});
 		mandatory.push_back({"bluetooth", bluetooth_panel});
 
 		// The logo is the leftmost run. drop it before matching the rest.
 		if (!runs.empty()) {
+			logo_x = runs.front().centre();
 			runs.erase(runs.begin());
 		}
 		// The theme switch (canvas.theme) is the right-most widget of all:
@@ -4116,8 +4614,8 @@ int run_step() {
 				"({} runs past the logo and the theme switch; the clock, the "
 				"weather and {} indicators)", runs.size(), mandatory.size()));
 		if (runs.size() < 2 + mandatory.size()) {
-			step = 99; // positions cannot be trusted; nothing more to check
-			return 300;
+			return end_run("the bar's runs are not all there, so no position "
+				"can be trusted");
 		}
 
 		// The right section's indicators are the rightmost runs: `mandatory`
@@ -4196,8 +4694,7 @@ int run_step() {
 			click(clock_x, 13);
 			return 400;
 		}
-		step = 99;
-		return 100;
+		return end_run("the walk found no clock and network indicator to click");
 	case 6: {
 		if (panel_layer("clock") == nullptr && retries++ < 20) {
 			return -100;
@@ -4245,7 +4742,7 @@ int run_step() {
 		if (!runs.empty()) { // the theme switch, right-most of all
 			runs.pop_back();
 		}
-		std::size_t mandatory = 5 + (has_sysfs_class("backlight") ? 1 : 0);
+		std::size_t mandatory = 6;
 		std::size_t keep = runs.size() >= 1 + mandatory ? runs.size() - 1 - mandatory : 0;
 		std::size_t centre = 0;
 		for (std::size_t i = 1; i < 1 + keep; i++) {
@@ -4406,8 +4903,7 @@ int run_step() {
 		retries = 0;
 		check(panel != nullptr, "the bar opens a panel inside the overview");
 		if (panel == nullptr) {
-			step = 99;
-			return 100;
+			return end_run("the overview's network panel did not open");
 		}
 		shot("overview-network-first");
 		click(60.0, 700.0); // the panel's overlay takes it, not the canvas
@@ -4433,16 +4929,15 @@ int run_step() {
 		check(panel != nullptr, "the network indicator reopened its panel after "
 			"the panel closed itself");
 		if (panel == nullptr) {
-			step = 99;
-			return 100;
+			return end_run("the network panel did not reopen");
 		}
 		check(wl_resource_get_client(panel->wlr->surface->resource) == bar_client(),
 			"the overview's network panel belongs to the bar client");
 		if (server->seat->keyboard_state.focused_surface != panel->wlr->surface
-				&& retries++ < 20) {
+				&& second_retries++ < 20) {
 			return -100;
 		}
-		retries = 0;
+		second_retries = 0;
 		check(server->seat->keyboard_state.focused_surface == panel->wlr->surface,
 			"the panel holds the keyboard while the overview is active");
 		popup_box = card_box(network_x, network_panel);
@@ -4465,8 +4960,8 @@ int run_step() {
 		// a taller panel means the walk's disconnect never landed: the
 		// fixture is still connected, and no row can be trusted
 		if (rows.size() < 8 || rows.size() > 9) {
-			step = 99; // the panel moved on without us
-			return 100;
+			return end_run("the overview's panel is not the disconnected "
+				"stand-in's list");
 		}
 		check(rows.size() >= 8 && rows.size() <= 9, std::format("the panel "
 			"lists the stand-in's five networks in the overview ({} rows: "
@@ -4490,8 +4985,7 @@ int run_step() {
 		bool armed = rows.size() > wifi_base
 			|| (rows.size() == wifi_base && rows.back().top > wifi_last_top + 25);
 		if (!armed) { // the panel moved on without us
-			step = 99;
-			return 100;
+			return end_run("the secured network's password field did not arm");
 		}
 		check(armed, "clicking the secured network armed its password field "
 			"in the overview (the rows below shifted)");
@@ -4605,8 +5099,8 @@ int run_step() {
 		check(best.size() >= 3, std::format("the toolbar holds every registered "
 			"button ({} glyph bands in its column: act, panel, menu)", best.size()));
 		if (best.size() < 3) {
-			step = 99; // positions cannot be trusted; nothing more to check
-			return 300;
+			return end_run("the toolbar does not hold its three buttons, so no "
+				"position can be trusted");
 		}
 		check(std::abs((best.front().top + best.back().bottom) / 2.0
 				- screen_h / 2.0) <= toolbar_button,
@@ -4682,19 +5176,25 @@ int run_step() {
 			check(std::abs(level - tb_buttons[1].centre()) <= 32,
 				"the panel is level with the panel button");
 		}
-		// Escape closes the panel itself (it holds the keyboard); a click
-		// on the empty canvas would instead leave the overview.
-		tap(KEY_ESC);
+		// A click above the card is outside it: it closes the card and
+		// nothing more, the overview and the toolbar staying as they are.
+		tb_x = strip_left - beside_gap - scratch_card / 2.0;
+		tb_y = tb_buttons[1].centre() - 80 - 30;
+		click(tb_x, tb_y);
 		return 400;
 	}
-	case 47: {
+	case 47: { // the click above the card closed it, and only it
 		if (panel_layers() > 0 && retries++ < 20) {
 			return -100;
 		}
 		retries = 0;
-		check(panel_layers() == 0, "the toolbar's panel closed on Escape");
-		// The menu button is the third (order 2).
-		click(strip_left + toolbar_button / 2.0, tb_buttons[2].centre());
+		Output *o = out();
+		check(panel_layers() == 0, "a click above the toolbar's card closed it");
+		check(toolbar_layer() != nullptr && o != nullptr && o->overview.active(),
+			"and only the card: the toolbar stays and the overview stays open");
+		// The panel again, for Escape.
+		click(strip_left + toolbar_button / 2.0, tb_buttons[1].centre());
+		step = 52; // on to 53
 		return 400;
 	}
 	case 48: // the flyout, out of the toolbar to the left of the button
@@ -4765,12 +5265,29 @@ int run_step() {
 		step = 60; // on to the theme phase: the switch, both palettes, the reload
 		return -100; // without the advance: every other step moves on alone
 	}
+	case 53: { // the panel reopened; Escape closes the panel itself (it holds the keyboard)
+		if (panel_layer("scratch") == nullptr && retries++ < 40) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layer("scratch") != nullptr, "the panel button opened the panel again");
+		tap(KEY_ESC);
+		return 400;
+	}
+	case 54: {
+		if (panel_layers() > 0 && retries++ < 20) {
+			return -100;
+		}
+		retries = 0;
+		check(panel_layers() == 0, "the toolbar's panel closed on Escape");
+		// The menu button is the third (order 2).
+		click(strip_left + toolbar_button / 2.0, tb_buttons[2].centre());
+		step = 47; // on to 48
+		return 400;
+	}
 	case 60: // the theme phase: a window for its title bar, then both modes
 		if (theme_x <= 0) {
-			std::println("note: the theme switch was not found on the bar; "
-				"the theme phase is skipped");
-			step = 99;
-			return 100;
+			return end_run("the theme switch was not found on the bar");
 		}
 		::spawn("foot -T themed sh -c 'exec sleep 600'"); // Server's double-forked spawn
 		return 500;
@@ -4965,11 +5482,11 @@ int run_step() {
 			"from {} to {} px)", before, after));
 		bool light = l != nullptr
 			&& shot_pixel_is("light-reloaded", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
-		if (!light && retries++ < 40) {
+		if (!light && second_retries++ < 40) {
 			shot("light-reloaded");
 			return -700;
 		}
-		retries = 0;
+		second_retries = 0;
 		check(light, "the reloaded shell kept the light mode (the bar stayed #e1e2e7)");
 		click(theme_x, 13); // and back: light -> dark
 		return 500;
@@ -5117,11 +5634,11 @@ int run_step() {
 			"from {} to {} px)", before, after));
 		bool light = l != nullptr
 			&& shot_pixel_is("adopt-reloaded", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
-		if (!light && retries++ < 40) {
+		if (!light && second_retries++ < 40) {
 			shot("adopt-reloaded");
 			return -700;
 		}
-		retries = 0;
+		second_retries = 0;
 		check(light, "the reloaded shell kept the adopted mode (the bar stayed #e1e2e7)");
 		return 300;
 	}
@@ -5285,6 +5802,271 @@ int run_step() {
 				"the rename-over after the host's second write")) {
 			return -400;
 		}
+		step = 599; // on to the shell.json that does not parse
+		return 100; // without the advance: every other step moves on alone
+	}
+	// The shell.json that does not parse, the night light on a shell that
+	// reloaded, and the logo's terminal across that reload: a step range of
+	// its own (600-619), after the config watcher's. The shell must never
+	// write over a file it could not read, even for a theme change the
+	// compositor reports; its panels are made with their api; and a
+	// terminal the logo opens belongs to the user, not to the bar widget.
+	case 600: { // shell.json cut short, as a half-saved editor buffer leaves it
+		config_good = read_file(shell_config);
+		check(config_good.size() > 8, "the scratch shell.json is there to break");
+		// Half of it: an object never closed, ending on a character
+		// read_file keeps, so the file reads back as written.
+		config_broken = config_good.substr(0, config_good.size() / 2);
+		while (!config_broken.empty() && std::isspace(static_cast<unsigned char>(config_broken.back()))) {
+			config_broken.pop_back();
+		}
+		watch_remember_bar();
+		replace_file(shell_config, config_broken);
+		return 700;
+	}
+	case 601: { // the shell reloaded on that edit; starting on it wrote nothing back
+		if (!shell_reloaded() && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(shell_reloaded(), "the shell reloaded on the edit that left shell.json unparsable");
+		watch_remember_bar();
+		check(read_file(shell_config) == config_broken,
+			"the shell started on shell.json that does not parse and left it as it was");
+		return 1500; // its start tells the compositor its mode: let that land first
+	}
+	case 602: // an outside theme.set: the change the shell adopts, and used to write one key over the file
+		outside_theme_set("light");
+		return 800;
+	case 603: {
+		bool light = server->theme.mode() == ThemeMode::light;
+		if (!light && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(light, "the outside theme.set switched the compositor to light");
+		shot("config-broken-bar");
+		return 700;
+	}
+	case 604: { // adopted in memory; the file is byte for byte as it was left
+		LayerSurface *l = bar_layer();
+		bool adopted = l != nullptr
+			&& shot_pixel_is("config-broken-bar", l->geo.x + 3, l->geo.y + 13, shell_bg_light);
+		if (!adopted && retries++ < 40) {
+			shot("config-broken-bar");
+			return -700;
+		}
+		retries = 0;
+		check(adopted, "the shell applied the switch in memory (the bar is #e1e2e7)");
+		check(read_file(shell_config) == config_broken,
+			"the theme change left the shell.json that does not parse byte-identical");
+		watch_remember_bar();
+		replace_file(shell_config, config_good); // fixed: it parses again
+		return 700;
+	}
+	case 605: { // the fixed file reloaded the shell; the next flip is written
+		if (!shell_reloaded() && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(shell_reloaded(), "the shell reloaded once shell.json parsed again");
+		watch_remember_bar();
+		return 1500;
+	}
+	case 606:
+		outside_theme_set("light");
+		return 500;
+	case 607: {
+		bool written = read_file(shell_config).find("\"mode\": \"light\"") != std::string::npos;
+		if (!written && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "once shell.json parsed again, the next theme flip wrote theme.mode: light into it");
+		outside_theme_set("dark");
+		return 500;
+	}
+	case 608: {
+		bool written = read_file(shell_config).find("\"mode\": \"dark\"") != std::string::npos;
+		if (!written && retries++ < 50) {
+			return -300;
+		}
+		retries = 0;
+		check(written, "and the flip back wrote theme.mode: dark");
+		step = 609; // on to the night light on a reloaded shell
+		return 200;
+	}
+	case 610: // the night light on in the compositor, before the shell reloads
+		run_msg("settings.set", R"({"nightLight":true})", "night-on");
+		return 500;
+	case 611: {
+		if (!msg_done("night-on") && retries++ < 50) {
+			return -200;
+		}
+		retries = 0;
+		check(msg_done("night-on") && msg_code("night-on") == 0,
+			"the night light was switched on in the compositor");
+		watch_remember_bar();
+		// The reload makes every panel again, with the night light already on
+		// and no settings event to follow.
+		replace_file(shell_config, with_hello(true));
+		return 700;
+	}
+	case 612: { // reloaded; the logo's terminal opens, to be there for the next reload
+		if (!shell_reloaded() && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(shell_reloaded(), "the shell reloaded with the night light already on");
+		watch_remember_bar();
+		foots_known = foot_views();
+		click(logo_x, 13, BTN_RIGHT);
+		return 1500;
+	}
+	case 613: { // the terminal is up; the brightness panel opens
+		if (logo_terminal() == nullptr && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(logo_terminal() != nullptr, "a right click on the logo opened a terminal window");
+		night_x = 0;
+		for (const Indicator &ind : indicators) {
+			if (std::strcmp(ind.name, "brightness") == 0) {
+				night_x = ind.x;
+			}
+		}
+		check(night_x != 0, "the bar shows the brightness widget");
+		if (night_x == 0) {
+			step = 615; // no panel to open: on to the reload
+			return 100;
+		}
+		click(night_x, 13);
+		return 700;
+	}
+	case 614: {
+		if (panel_layer("brightness") == nullptr && retries++ < 40) {
+			return -200;
+		}
+		retries = 0;
+		check(panel_layer("brightness") != nullptr, "the brightness widget opened its panel");
+		shot("brightness-night");
+		return 700;
+	}
+	case 615: { // the night-light row of a panel made with the night light on
+		// The switch's track is the only accent below the backlight slider
+		// when it is on; the temperature slider's own fill ends short of it.
+		cairo_surface_t *s = load_png("brightness-night");
+		wlr_box card = card_box(night_x, brightness_panel);
+		int track = colour_count(s, {card.x + brightness_panel - 56, bar_h() + 72, 42, 118},
+			accent_dark);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		check(track > 200, std::format("the brightness panel, made while the night light is on, "
+			"shows its switch on ({} accent pixels)", track));
+		click(60.0, 700.0); // outside the card: the panel closes
+		return 600;
+	}
+	case 616: // the night light off again, then the reload that returns the bar
+		run_msg("settings.set", R"({"nightLight":false})", "night-off");
+		return 400;
+	case 617: {
+		if (!msg_done("night-off") && retries++ < 50) {
+			return -200;
+		}
+		retries = 0;
+		watch_remember_bar();
+		replace_file(shell_config, with_hello(false));
+		return 700;
+	}
+	case 618: { // reloaded again: the terminal the logo opened is still there
+		if (!shell_reloaded() && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(shell_reloaded(), "the shell reloaded with the logo's terminal open");
+		watch_remember_bar();
+		View *terminal = logo_terminal();
+		check(terminal != nullptr, "the terminal the logo opened outlives the bar's rebuild");
+		if (terminal != nullptr) {
+			terminal->close();
+		}
+		return 800;
+	}
+	case 619: { // the terminal gone; on to the wheel
+		if (logo_terminal() != nullptr && retries++ < 40) {
+			return -250;
+		}
+		return 100;
+	}
+	case 620: { // the wheel: the stand-in world at its start, then one notch over Audio
+		int sink = 0;
+		double volume = 0;
+		bool read = pw_sink(sink, volume);
+		check(read && std::abs(volume - standin_sink_start) < 0.005 && backlight_percent() == 50,
+			std::format("the stand-in sink starts at {:.2f} and the backlight at {} %",
+				volume, backlight_percent()));
+		check(indicator_x("audio") != 0 && indicator_x("brightness") != 0,
+			"the bar shows the audio and the brightness indicators");
+		wheel_over_bar(indicator_x("audio"), 120);
+		return 600;
+	}
+	case 621: { // Audio stepped once and Brightness not at all; one notch over Brightness
+		double volume = sink_volume();
+		if (std::abs(volume - 0.55) > 0.005 && retries++ < 20) {
+			return -200;
+		}
+		check(std::abs(volume - 0.55) <= 0.005,
+			std::format("a 120-unit wheel event over Audio moved the volume one step "
+				"(0.50 to {:.3f})", volume));
+		check(backlight_percent() == 50 && backlight_sets() == 0,
+			"and left the backlight alone");
+		wheel_over_bar(indicator_x("brightness"), 120);
+		return 600;
+	}
+	case 622: { // Brightness stepped once; a small event over Audio
+		if (backlight_percent() != 55 && retries++ < 20) {
+			return -200;
+		}
+		check(backlight_percent() == 55 && backlight_sets() == 1,
+			std::format("a 120-unit wheel event over Brightness moved the backlight one "
+				"step ({} %, {} writes)", backlight_percent(), backlight_sets()));
+		check(std::abs(sink_volume() - 0.55) <= 0.005, "and left the volume alone");
+		wheel_over_bar(indicator_x("audio"), 15);
+		return 600;
+	}
+	case 623: { // a 15-unit event moved Audio not at all; one over Brightness
+		double volume = sink_volume();
+		check(std::abs(volume - 0.55) <= 0.005,
+			std::format("a 15-unit wheel event moved the volume not at all ({:.3f})", volume));
+		wheel_over_bar(indicator_x("brightness"), 15);
+		return 600;
+	}
+	case 624: { // nor Brightness; the other seven eighths of a notch over Audio
+		check(backlight_percent() == 55 && backlight_sets() == 1,
+			std::format("a 15-unit wheel event moved the backlight not at all ({} %, "
+				"{} writes)", backlight_percent(), backlight_sets()));
+		wheel_over_bar(indicator_x("audio"), 15, 7);
+		return 600;
+	}
+	case 625: { // eight small events are one notch for Audio; the same over Brightness
+		double volume = sink_volume();
+		if (std::abs(volume - 0.60) > 0.005 && retries++ < 20) {
+			return -200;
+		}
+		check(std::abs(volume - 0.60) <= 0.005,
+			std::format("eight 15-unit wheel events add up to one notch for Audio "
+				"(0.55 to {:.3f})", volume));
+		wheel_over_bar(indicator_x("brightness"), 15, 7);
+		return 600;
+	}
+	case 626: { // and for Brightness; on to the notes
+		if (backlight_percent() != 60 && retries++ < 20) {
+			return -200;
+		}
+		check(backlight_percent() == 60 && backlight_sets() == 2,
+			std::format("eight 15-unit wheel events add up to one notch for Brightness "
+				"({} %, {} writes)", backlight_percent(), backlight_sets()));
 		step = 110;
 		return -100; // without the advance: every other step moves on alone
 	}
@@ -6042,10 +6824,10 @@ int run_step() {
 		if (panel != nullptr
 				&& server->seat->keyboard_state.focused_surface
 					!= panel->wlr->surface
-				&& retries++ < 20) {
+				&& second_retries++ < 20) {
 			return -100;
 		}
-		retries = 0;
+		second_retries = 0;
 		check(server->seat->keyboard_state.focused_surface
 				== (panel != nullptr ? panel->wlr->surface : nullptr),
 			"the network panel holds the keyboard as it opens");
@@ -6065,8 +6847,8 @@ int run_step() {
 			"opened on the disconnected stand-in with its five networks "
 			"({} rows: head, two headers, 5 rows)", rows.size()));
 		if (rows.size() < 8 || rows.size() > 9) {
-			step = 99; // no row to click safely: the run ends at its checks
-			return 100;
+			return end_run("the panel does not list the disconnected stand-in's "
+				"networks, so no row can be clicked safely");
 		}
 		click(popup_box.x + popup_box.width / 2.0, popup_box.y + off.home);
 		return 500;
@@ -6288,8 +7070,7 @@ int run_step() {
 		check(armed, std::format("the Custom pill opened its servers field "
 			"({} rows, was {}; the rows below shifted)", rows.size(), wifi_base));
 		if (!armed) {
-			step = 99;
-			return 100;
+			return end_run("the Custom pill did not open its servers field");
 		}
 		WifiRows editing = wifi_rows(false, true);
 		click(popup_box.x + popup_box.width / 2.0,
@@ -6355,15 +7136,18 @@ int run_step() {
 		std::string log = standin_log();
 		bool shared = log.find("-s -g 802-11-wireless-security.psk connection show "
 				+ std::string(wifi_ssid)) != std::string::npos
-			&& log.find(std::format(
-				"qrencode -t ASCII -m 4 WIFI:T:WPA;S:{};P:{};;",
-				wifi_ssid, wifi_psk)) != std::string::npos;
+			&& log_has_line(log, "qrencode -t ASCII -m 4")
+			&& log_has_line(log, std::format(
+				"qrencode-stdin WIFI:T:WPA;S:{};P:{};;", wifi_ssid, wifi_psk));
 		if (!shared && retries++ < 100) {
 			return -400; // the secrets read and the encode are in flight
 		}
 		retries = 0;
 		check(shared, "the share button fetched the PSK through the "
-			"connection's secrets and encoded the WIFI: payload");
+			"connection's secrets and handed qrencode the WIFI: payload on "
+			"its stdin");
+		check(!log_line_names(log, "qrencode ", wifi_psk),
+			"the password never travelled on qrencode's command line");
 		if (!settle_advance("wifi-qr")) {
 			return -400; // the QR settles into the panel
 		}
@@ -6376,8 +7160,7 @@ int run_step() {
 			"and quiet zone light, the modules dark)", ink));
 		std::vector<Band> rows = panel_rows("wifi-qr");
 		if (rows.size() < 2) { // no Back row to click: nothing more to drive
-			step = 99;
-			return 100;
+			return end_run("the QR view has no Back row to click");
 		}
 		click(popup_box.x + popup_box.width / 2.0,
 			last_content_row(rows).centre());
@@ -6409,8 +7192,7 @@ int run_step() {
 			"rows ({} rows: header, download, upload, ping, back)",
 			rows.size()));
 		if (rows.size() < 2) { // no Back row to click
-			step = 99;
-			return 100;
+			return end_run("the speed test view has no Back row to click");
 		}
 		click(popup_box.x + popup_box.width / 2.0,
 			last_content_row(rows).centre());
@@ -6439,8 +7221,7 @@ int run_step() {
 			"password field ({} rows, was {}; the rows below shifted)",
 			rows.size(), wifi_base));
 		if (!armed) {
-			step = 99;
-			return 100;
+			return end_run("the secured network's password field did not arm");
 		}
 		WifiRows wifi = wifi_rows(false, false);
 		field_box = wlr_box{popup_box.x,
@@ -6481,8 +7262,7 @@ int run_step() {
 			"shifted)",
 			rows.size(), wifi_base));
 		if (!armed) {
-			step = 99;
-			return 100;
+			return end_run("the enterprise network's identity field did not arm");
 		}
 		WifiRows wifi = wifi_rows(false, false);
 		click(popup_box.x + popup_box.width / 2.0, popup_box.y + wifi.corp + 37);
@@ -6523,7 +7303,7 @@ int run_step() {
 		std::vector<Band> rows = panel_rows("wifi-enterprise");
 		bool folded = rows.size() <= wifi_base + 1
 			&& rows.back().top < wifi_last_top + 15;
-		if (!folded && retries++ < 210) {
+		if (!folded && second_retries++ < 210) {
 			return -400; // the prompt folds as the join's write lands
 		}
 		// the join made CorpNet known: the list re-sorted and the open
@@ -6547,6 +7327,13 @@ int run_step() {
 		if (!settle_advance("wifi-library")) {
 			return -400; // the joined row settles
 		}
+		// the known network's profile is not named after its SSID, so
+		// Forget has to find it by what it holds
+		std::string profile = busctl("call", NM_NAME,
+			"/org/freedesktop/NetworkManager/Settings/oldcafe",
+			"org.freedesktop.NetworkManager.Settings.Connection", "GetSettings");
+		check(profile.find("Old Cafe profile") != std::string::npos,
+			"the forgotten network's profile has a name other than its SSID");
 		WifiRows wifi = wifi_rows(false, false);
 		click(popup_box.x + 315, popup_box.y + wifi.oldcafe);
 		return 500;
@@ -6564,6 +7351,151 @@ int run_step() {
 		}
 		retries = 0;
 		check(gone, "Forget removed the known network from the settings");
+		check(standin_log().find("nmcli connection delete") == std::string::npos,
+			"Forget went to NetworkManager itself, not to nmcli by a name");
+		step = 700; // the names that need escaping: the machine roams
+		return -300;
+	}
+	// ---- the network panel on names that need escaping: 700-709 ----
+	// The machine roams to a network named `cafe:5G`, which nmcli's terse
+	// mode writes as `cafe\:5G`, then to `Lounge;Guest`, whose password
+	// carries characters of both kinds. The panel reads each through the
+	// stand-ins' tools — the profile by its own name, the band beside the
+	// SSID, the secret unescaped — and shares them as WIFI: payloads that
+	// escape every special character and reach qrencode on stdin.
+	case 700: { // roam to the colon network
+		roam_list_base = standin_calls(standin_log(), "dev wifi list");
+		roam_to("RoamColon", "cafe:5G", 5180, wifi_psk);
+		return 500;
+	}
+	case 701: { // the status read names the profile, the list read finds
+		// the band: Automatic off then pins it
+		bool moved = mock_called(NM_NAME, NM_MANAGER, "RoamColon");
+		int reads = standin_calls(standin_log(), "dev wifi list")
+			- roam_list_base;
+		if ((!moved || reads < 3) && retries++ < 60) {
+			return -500; // the reads of the new world are in flight
+		}
+		retries = 0;
+		check(moved, "the machine roamed to the network named cafe:5G");
+		click(popup_box.x + 311, popup_box.y + wifi_rows(false, false).band);
+		return 600;
+	}
+	case 702: { // the pin names the profile as the status read spelled it,
+		// with the band the list read found beside the colon name
+		bool pinned = standin_log().find(
+			"connection modify cafe:5G 802-11-wireless.band a")
+			!= std::string::npos;
+		if (!pinned && retries++ < 12) {
+			// a click before the list read named the band does nothing
+			click(popup_box.x + 311, popup_box.y + wifi_rows(false, false).band);
+			return -1500;
+		}
+		retries = 0;
+		check(pinned, "the colon network's band was read beside its escaped "
+			"name: Automatic off pinned cafe:5G to 5 GHz");
+		click(popup_box.x + 241, popup_box.y + wifi_rows(false, false).hero);
+		return 500;
+	}
+	case 703: { // the share view: the secret read by the profile's own
+		// name, the payload on stdin with the colon escaped
+		std::string log = standin_log();
+		bool shared = log.find("-s -g 802-11-wireless-security.psk "
+				"connection show cafe:5G") != std::string::npos
+			&& log_has_line(log, std::format(
+				"qrencode-stdin WIFI:T:WPA;S:cafe\\:5G;P:{};;", wifi_psk));
+		if (!shared && retries++ < 100) {
+			return -400; // the secrets read and the encode are in flight
+		}
+		retries = 0;
+		check(shared, "the colon network shared as WIFI:T:WPA;S:cafe\\:5G on "
+			"qrencode's stdin, its secret read by the profile cafe:5G");
+		if (!settle_advance("wifi-qr-colon")) {
+			return -400;
+		}
+		std::vector<Band> rows = panel_rows("wifi-qr-colon");
+		if (rows.size() < 2) { // no Back row to click: close, nothing more
+			tap(KEY_ESC);
+			step = 179;
+			return -400;
+		}
+		click(popup_box.x + popup_box.width / 2.0,
+			last_content_row(rows).centre());
+		return 500;
+	}
+	case 704: { // the normal view back; Automatic on again
+		if (!settle_advance("wifi-open-colon")) {
+			return -400;
+		}
+		click(popup_box.x + 311, popup_box.y + wifi_rows(false, false).band);
+		return 500;
+	}
+	case 705: { // the pin released; the machine roams on
+		int modifies = standin_calls(standin_log(),
+			"connection modify cafe:5G 802-11-wireless.band");
+		if (modifies < 2 && retries++ < 100) {
+			return -400; // the release is in flight under load
+		}
+		retries = 0;
+		check(modifies >= 2, "Automatic back on released the colon "
+			"network's pin");
+		roam_list_base = standin_calls(standin_log(), "dev wifi list");
+		roam_to("RoamSemicolon", "Lounge;Guest", 2437, R"(pa;ss:w"rd\x)");
+		return 500;
+	}
+	case 706: { // the semicolon network shares
+		bool moved = mock_called(NM_NAME, NM_MANAGER, "RoamSemicolon");
+		int reads = standin_calls(standin_log(), "dev wifi list")
+			- roam_list_base;
+		if ((!moved || reads < 3) && retries++ < 60) {
+			return -500; // the reads of the new world are in flight
+		}
+		retries = 0;
+		check(moved, "the machine roamed to the network named Lounge;Guest");
+		click(popup_box.x + 241, popup_box.y + wifi_rows(false, false).hero);
+		return 500;
+	}
+	case 707: { // the payload escaped in both fields, on stdin only
+		std::string log = standin_log();
+		bool shared = log.find("-s -g 802-11-wireless-security.psk "
+				"connection show Lounge;Guest") != std::string::npos
+			&& log_has_line(log, R"(qrencode-stdin WIFI:T:WPA;S:Lounge\;Guest;)"
+				R"(P:pa\;ss\:w\"rd\\x;;)");
+		if (!shared && retries++ < 100) {
+			return -400; // the secrets read and the encode are in flight
+		}
+		retries = 0;
+		check(shared, "the semicolon network shared with its name and its "
+			"password escaped, the password read back unescaped from "
+			"nmcli's terse output");
+		check(!log_line_names(log, "qrencode ", "Lounge")
+				&& !log_line_names(log, "qrencode ", "pa;ss"),
+			"neither the name nor the password travelled on qrencode's "
+			"command line");
+		if (!settle_advance("wifi-qr-lounge")) {
+			return -400;
+		}
+		std::vector<Band> rows = panel_rows("wifi-qr-lounge");
+		if (rows.size() < 2) { // no Back row to click: close, nothing more
+			tap(KEY_ESC);
+			step = 179;
+			return -400;
+		}
+		click(popup_box.x + popup_box.width / 2.0,
+			last_content_row(rows).centre());
+		return 500;
+	}
+	case 708: { // the normal view back; the machine returns to HomeNet
+		if (!settle_advance("wifi-open-lounge")) {
+			return -400;
+		}
+		roam_to("RoamHome", "", 0, "");
+		return 1500;
+	}
+	case 709: { // the walk's last proofs: the machine's real NetworkManager
+		// was never asked anything
+		check(mock_called(NM_NAME, NM_MANAGER, "RoamHome"),
+			"the machine returned to HomeNet");
 		std::string log = standin_log();
 		// The machine's own interface and the SSID it is on, read here and
 		// never written down: had the panel reached the real
@@ -6576,7 +7508,8 @@ int run_step() {
 			"no real interface or SSID in any call");
 		shot("wifi-final");
 		tap(KEY_ESC); // close the panel: the run leaves nothing open
-		return 400;
+		step = 179;
+		return -400;
 	}
 	case 179: { // the panel closed behind the run
 		if (panel_layers() > 0 && retries++ < 20) {
@@ -6781,10 +7714,10 @@ int run_step() {
 				== bar_client(),
 			"the agents panel belongs to the bar client");
 		if (server->seat->keyboard_state.focused_surface
-				!= panel->wlr->surface && usage_retries++ < 20) {
+				!= panel->wlr->surface && second_retries++ < 20) {
 			return -100;
 		}
-		usage_retries = 0;
+		second_retries = 0;
 		check(server->seat->keyboard_state.focused_surface
 				== panel->wlr->surface,
 			"the agents panel holds the keyboard as it opens");
@@ -6940,18 +7873,47 @@ int run_step() {
 		usage_retries = 0;
 		check(panel_layers() == 0, "the agents panel closed");
 		write_usage_payload("95.0", "72.0");
+		// Between the two refreshes the gateway outranks Fireworks: the
+		// collector's own order is read, so the swap is known to be real.
+		swap_usage_providers();
+		std::vector<JsonObject *> ranked = collector_providers();
+		check(ranked.size() == 4 && json_string(ranked[2], "id") == "anthropic"
+				&& json_string(ranked[3], "id") == "fireworks",
+			"the collector now ranks the gateway above Fireworks");
 		return 20000; // past the probe-reuse window, so a reopen re-asks
 	}
 	case 193: // reopen: the panel-open refresh
 		click(agents_x, 13);
 		return 400;
-	case 194: { // the panel kept its tab (Fireworks, tokens-only); the
-		// refreshed limits live on the Claude tab, so switch to it
+	case 194: { // the panel kept the provider it was on, Fireworks. The
+		// collector ranked the gateway above it between the refreshes, so
+		// Fireworks is the fourth chip now and the selection has to have
+		// moved with it, not stayed on the third place
 		LayerSurface *panel = panel_layer("agents");
 		if (panel == nullptr && usage_retries++ < 20) {
 			return -100;
 		}
+		if (!shot_landed("agents-reordered")) {
+			return -100;
+		}
+		cairo_surface_t *s = load_png("agents-reordered");
+		int selected = selected_chip(s);
+		wlr_box mark{agents_box.x + UiThemePadding, agents_box.y + 16, 32, 32};
+		bool star = colour_count(s, mark, accent_dark) > 20
+			&& colour_count(s, mark, claude_mark) < 10;
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		if (selected != 3 && usage_retries++ < 60) {
+			return -400; // the panel-open refresh is still running
+		}
 		usage_retries = 0;
+		check(selected == 3, std::format("the selection moved with Fireworks "
+			"to the fourth chip when the refresh reordered the families "
+			"(chip {} holds it)", selected));
+		check(star, "the hero still shows Fireworks, not the gateway that "
+			"took its place");
+		// the refreshed limits live on the Claude tab, so switch to it
 		click(agents_box.x + 8 + agents_chip_runs[0].centre(),
 			agents_box.y + 72);
 		return 400;
@@ -7118,7 +8080,52 @@ int run_step() {
 		}
 		usage_retries = 0;
 		run_msg("theme.set", R"({"mode":"dark"})", "agents-dark-again");
-		return 900; // the palette settles before the reload joins it
+		step = 710; // the widget's refresh setting, before the world empties
+		return -900; // the palette settles before the reload joins it
+	}
+	// ---- the agents widget's refresh setting: 710-712 ----
+	// refreshIntervalSec reaches the widget through api.plugin.settings: a
+	// short one makes it run its collector again on its own, where the
+	// manifest's default is a quarter of an hour. Every run of the
+	// collector starts the codex stand-in, whose log counts the runs.
+	case 710: { // the setting written into shell.json; the shell reloads
+		agents_config_kept = read_file(shell_config);
+		agents_runs_before = codex_runs();
+		agents_first_run_ms = 0;
+		agents_bar_before_reload = bar_layer();
+		check(set_plugin_setting("canvas.agents", "refreshIntervalSec", 2),
+			"refreshIntervalSec: 2 written into the scratch shell.json");
+		usage_retries = 0;
+		return 100;
+	}
+	case 711: { // the reloaded widget runs at its start, and again within
+		// 4 s on its own: the runs are watched every 100 ms from the write
+		int runs = codex_runs() - agents_runs_before;
+		long long now = monotonic_ms();
+		if (runs >= 1 && agents_first_run_ms == 0) {
+			agents_first_run_ms = now;
+		}
+		if (runs < 2 && usage_retries++ < 200) {
+			return -100;
+		}
+		usage_retries = 0;
+		check(runs >= 2 && now - agents_first_run_ms <= 4000,
+			std::format("the collector ran again within 4 s on the 2 s "
+				"refreshIntervalSec ({} runs after the reload, the last {} ms "
+				"after the first seen)", runs, now - agents_first_run_ms));
+		agents_bar_before_reload = bar_layer();
+		write_file(shell_config, agents_config_kept); // the setting out again
+		step = 712;
+		return -700;
+	}
+	case 712: { // the bar reloaded on the restored config
+		if ((bar_layer() == nullptr || bar_layer() == agents_bar_before_reload
+				|| bar_layer()->geo.height < 20) && usage_retries++ < 100) {
+			return -100;
+		}
+		usage_retries = 0;
+		step = 206; // the world empties
+		return -300;
 	}
 	case 206: { // empty the world, reload: the widget hides again
 		remove_usage_fixtures();
@@ -7419,8 +8426,8 @@ int run_step() {
 		check(buttons.size() >= 5, std::format("the toolbar holds the settings "
 			"gear beside its own buttons ({} glyph bands)", buttons.size()));
 		if (buttons.size() < 5) {
-			step = 99; // positions cannot be trusted; nothing more to check
-			return 300;
+			return end_run("the toolbar does not hold the settings gear, so no "
+				"position can be trusted");
 		}
 		settings_gear_y = buttons[4].centre();
 		click(strip_left + toolbar_button / 2.0, settings_gear_y);
@@ -8663,10 +9670,92 @@ int run_step() {
 		check(held == "false", std::format("the switch wrote"
 			" plugins.canvas.notifications.settings.criticalNeverExpires"
 			" into shell.json ({})", held.empty() ? "absent" : held));
+		// The Popups group's third row is a number, "Popups at once": one
+		// drag of its slider is one write of shell.json, and the next burst
+		// of notifications shows the new number.
+		step = 629; // the slider's own steps
+		return 300;
+	}
+	case 630: { // the panel still open on the Plugins page
+		slider_left = settings_card_x + settings_panel - settings_pad - 8 - plugin_slider_w;
+		slider_y = plugins_row_y(2);
+		cairo_surface_t *s = load_png("settings-plugins-tab");
+		// The knob rests a third along the track (4 of 1 to 10): the fill
+		// runs from the track's left to it. Its rows give the slider's own
+		// centre, whatever the page's metrics.
+		int top = -1, bottom = -1;
+		for (int y = int(slider_y) - 12; s != nullptr && y <= int(slider_y) + 12; y++) {
+			if (pixel_is(s, int(slider_left) + 10, y, accent_dark)) {
+				if (top < 0) {
+					top = y;
+				}
+				bottom = y;
+			}
+		}
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		check(top >= 0, std::format("the Popups-at-once slider sits where the page lays "
+			"it (its fill found at {}-{}, the row centred at {})", top, bottom, slider_y));
+		if (top >= 0) {
+			slider_y = (top + bottom + 1) / 2.0;
+		}
+		shell_json_watch_start();
+		park(slider_left + 40, slider_y); // onto the knob
+		return 400;
+	}
+	case 631: // the press stays held while the client answers it
+		left_button(true);
+		return 400;
+	case 632: // the knob dragged left to the second of ten
+		travel(slider_left + 40, slider_y, slider_left + 14, slider_y);
+		return 400;
+	case 633:
+		left_button(false);
+		return 800;
+	case 634: { // one drag, one write, and the value the drag ended on
+		std::string held = plugin_setting_text("canvas.notifications", "maxPopups");
+		if (held != "2" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		int writes = shell_json_watch_writes();
+		check(held == "2", std::format("the drag wrote plugins.canvas.notifications"
+			".settings.maxPopups: 2 into shell.json ({})", held.empty() ? "absent" : held));
+		check(writes == 1, std::format("one drag of a number setting wrote shell.json "
+			"once ({} writes)", writes));
+		tap(KEY_ESC); // the settings panel closes; the overview stays
+		return 600;
+	}
+	case 635: // a burst of four notifications
+		for (const char *summary : {"Burst one", "Burst two", "Burst three", "Burst four"}) {
+			notify_send(summary);
+		}
+		return 1500;
+	case 636:
+		shot("popups-burst");
+		return 700;
+	case 637: {
+		cairo_surface_t *s = load_png("popups-burst");
+		int cards = popup_cards(s);
+		if (s != nullptr) {
+			cairo_surface_destroy(s);
+		}
+		if (cards != 2 && retries++ < 4) { // the cards may still be arriving
+			shot("popups-burst");
+			return -700;
+		}
+		retries = 0;
+		check(cards == 2, std::format("the burst shows the two popups the setting now "
+			"allows ({} cards)", cards));
+		run_msg("action.run", R"({"name":"canvas.notifications/dismiss-all"})",
+			"popups-dismiss-all");
+		return 800;
+	}
+	case 638: { // the cards gone; back to the app bar
 		// Back to the app bar, on its own default edge this time: the hover
 		// label and the jump are the two things a user touches
 		// (docs/intents/shell/app-bar.md).
-		tap(KEY_ESC); // the settings panel closes; the overview stays
 		check(set_app_bar_enabled(true) && set_app_bar_position("left"),
 			"the app bar switched back on, on its default left edge");
 		step = 540;
@@ -9083,12 +10172,39 @@ int run_step() {
 			return -100;
 		}
 		retries = 0;
+		// Two servers would each take the notification: with the second
+		// output's popups up, one notification must make one history entry.
+		history_before = notification_history_length();
+		notify_send("Handover A");
+		step = 558; // on to the second output's popups
+		return 1200;
+	}
+	case 559: { // the notification landed, and both outputs draw it
+		int layers = notification_layers();
+		if (notification_history_length() <= history_before && retries++ < 60) {
+			return -250;
+		}
+		retries = 0;
+		check(layers == 2, std::format("the notification is drawn on both outputs "
+			"({} popup surfaces)", layers));
+		return 1000; // a second server's entry would land in the same moment: let it
+	}
+	case 560: {
+		int length = notification_history_length();
+		check(length == history_before + 1, std::format("with two outputs, one "
+			"notification made one history entry ({} entries, was {})",
+			length, history_before));
+		run_msg("action.run", R"({"name":"canvas.notifications/dismiss-all"})",
+			"popups-dismiss-handover");
+		return 800;
+	}
+	case 561:
 		run_msg("action.run",
 			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
 				+ R"("}})",
 			"note-create-handover");
+		step = 552; // on to the note it makes
 		return 1200;
-	}
 	case 553: {
 		LayerSurface *made = note_surface();
 		if (made == nullptr && retries++ < 100) {
@@ -9138,10 +10254,7 @@ int run_step() {
 		return 100; // done: the summary prints and the run ends
 	}
 	default:
-		finished = true;
-		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
-		wl_display_terminate(server->display);
-		return -1;
+		return finish();
 	}
 }
 
@@ -9168,6 +10281,7 @@ int handle_timer() {
 	if (before != 4) {
 		step++;
 		retries = 0;
+		second_retries = 0;
 	}
 	wl_event_source_timer_update(timer, delay > 0 ? delay : 1);
 	return 0;
@@ -9228,6 +10342,11 @@ int main() {
 	}
 	if (!start_tool_standins()) {
 		std::println("FAILED: the tool stand-ins did not start; the bar did not run");
+		stop_isolation();
+		return 2;
+	}
+	if (!start_pipewire_standin()) {
+		std::println("FAILED: the PipeWire stand-in did not start; the bar did not run");
 		stop_isolation();
 		return 2;
 	}

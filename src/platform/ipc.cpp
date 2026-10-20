@@ -345,37 +345,56 @@ void add_desktops_array(JsonBuilder *builder, Server &server) {
 	}
 	json_builder_end_array(builder);
 }
-// The open windows, in the order they opened: what the app bar draws
-// (docs/intents/shell/app-bar.md).
-void add_windows_array(JsonBuilder *builder, Server &server) {
-	json_builder_set_member_name(builder, "windows");
-	json_builder_begin_array(builder);
+
+// Reads the open windows into `rows`, in the order they opened. The rows
+// already there are overwritten in place, so a list read every frame
+// allocates only while it grows.
+void collect_windows(Server &server, std::vector<WindowRow> &rows) {
+	std::size_t count = 0;
 	// toplevels is creation order; views is the stacking order.
 	for (const std::unique_ptr<View> &owned : server.toplevels) {
 		View *view = owned.get();
 		if (!view->mapped) {
 			continue; // nothing to go to before it maps
 		}
+		if (count == rows.size()) {
+			rows.emplace_back();
+		}
+		WindowRow &row = rows[count++];
 		const Desktop *desktop = server.canvas.desktop_of(*view);
+		row.id = view->session_id;
+		row.app_id.assign(view->shell_app_id() != nullptr ? view->shell_app_id() : "");
+		row.title.assign(view->shell_title() != nullptr ? view->shell_title() : "");
+		row.desktop = desktop != nullptr ? std::optional{desktop->id()} : std::nullopt;
+		row.minimized = view->minimized;
+		row.focused = server.focused_view == view;
+	}
+	rows.resize(count);
+}
+
+// The windows report, as the app bar draws it
+// (docs/intents/shell/app-bar.md).
+void add_windows_array(JsonBuilder *builder, const std::vector<WindowRow> &rows) {
+	json_builder_set_member_name(builder, "windows");
+	json_builder_begin_array(builder);
+	for (const WindowRow &row : rows) {
 		json_builder_begin_object(builder);
 		json_builder_set_member_name(builder, "id");
-		json_builder_add_int_value(builder, static_cast<gint64>(view->session_id));
+		json_builder_add_int_value(builder, static_cast<gint64>(row.id));
 		json_builder_set_member_name(builder, "appId");
-		json_builder_add_string_value(builder, view->shell_app_id() != nullptr
-			? view->shell_app_id() : "");
+		json_builder_add_string_value(builder, row.app_id.c_str());
 		json_builder_set_member_name(builder, "title");
-		json_builder_add_string_value(builder, view->shell_title() != nullptr
-			? view->shell_title() : "");
+		json_builder_add_string_value(builder, row.title.c_str());
 		json_builder_set_member_name(builder, "desktop");
-		if (desktop != nullptr) {
-			json_builder_add_int_value(builder, static_cast<int>(desktop->id()));
+		if (row.desktop.has_value()) {
+			json_builder_add_int_value(builder, static_cast<int>(*row.desktop));
 		} else {
 			json_builder_add_null_value(builder);
 		}
 		json_builder_set_member_name(builder, "minimized");
-		json_builder_add_boolean_value(builder, view->minimized);
+		json_builder_add_boolean_value(builder, row.minimized);
 		json_builder_set_member_name(builder, "focused");
-		json_builder_add_boolean_value(builder, server.focused_view == view);
+		json_builder_add_boolean_value(builder, row.focused);
 		json_builder_end_object(builder);
 	}
 	json_builder_end_array(builder);
@@ -936,7 +955,9 @@ std::expected<std::string, std::string> Ipc::m_state(Client &, JsonObject *) {
 			json_builder_add_null_value(builder);
 		}
 		add_desktops_array(builder, server_);
-		add_windows_array(builder, server_);
+		std::vector<WindowRow> windows;
+		collect_windows(server_, windows);
+		add_windows_array(builder, windows);
 		json_builder_set_member_name(builder, "theme");
 		std::string mode = std::string{theme_name(server_.theme.mode())};
 		json_builder_add_string_value(builder, mode.c_str());
@@ -1474,12 +1495,15 @@ std::expected<std::string, std::string> Ipc::m_settings_set(Client &,
 				|| json_node_get_value_type(node) != G_TYPE_INT64) {
 			return std::unexpected(std::format("params: {} must be a number", name));
 		}
-		int value = static_cast<int>(json_node_get_int(node));
+		// Compared as the int64 it arrived as: narrowing first would wrap a
+		// number past an int into a valid one.
+		long long value = json_node_get_int(node);
 		if (has_idle) {
 			// 0 is the user's "never"; the file writes it as `off`.
-			if (value < 0) {
-				return std::unexpected(std::string{
-					"params: lockIdleMinutes must be 0 (never) or more"});
+			if (value < 0 || value > settings::max_lock_idle_minutes) {
+				return std::unexpected(std::format(
+					"params: lockIdleMinutes must be 0 (never) to {} minutes",
+					settings::max_lock_idle_minutes));
 			}
 			edit = file.set_session("lock-idle",
 				value == 0 ? std::string{"off"} : std::to_string(value));
@@ -1614,6 +1638,12 @@ void Ipc::push_event(std::string_view name, std::string_view params) {
 	}
 }
 
+bool Ipc::has_subscriber() const {
+	return std::ranges::any_of(clients_, [](const std::unique_ptr<Client> &client) {
+		return client->subscribed && !client->doomed;
+	});
+}
+
 void Ipc::emit_overview(const Output &output, bool active) {
 	std::string name = output.wlr->name; // NUL-terminated for the C API
 	push_event("overview", object_text([&](JsonBuilder *builder) {
@@ -1640,17 +1670,22 @@ void Ipc::emit_desktops() {
 }
 
 void Ipc::emit_windows() {
-	// The list is rebuilt from state that changes far more often than it
-	// reads differently (a drag damages per frame): an unchanged list is no
-	// event at all.
-	std::string params = object_text([&](JsonBuilder *builder) {
-		add_windows_array(builder, server_);
-	});
-	if (params == last_windows_) {
+	// Called every frame a window moves (a drag marks the list dirty per
+	// frame), though the list reads differently far less often: with no
+	// subscriber nothing is read, and an identical list is no event.
+	if (!has_subscriber()) {
+		windows_told_ = false;
 		return;
 	}
-	last_windows_ = params;
-	push_event("windows", params);
+	collect_windows(server_, window_rows_);
+	if (windows_told_ && window_rows_ == told_rows_) {
+		return;
+	}
+	windows_told_ = true;
+	told_rows_.swap(window_rows_);
+	push_event("windows", object_text([&](JsonBuilder *builder) {
+		add_windows_array(builder, told_rows_);
+	}));
 }
 
 void Ipc::emit_theme() {

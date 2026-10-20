@@ -133,7 +133,8 @@ std::optional<int> parse_minutes(std::string_view value) {
 	}
 	int out = 0;
 	auto [end, err] = std::from_chars(value.data(), value.data() + value.size(), out);
-	if (err != std::errc{} || end != value.data() + value.size() || out < 1) {
+	if (err != std::errc{} || end != value.data() + value.size() || out < 1
+			|| out > max_lock_idle_minutes) {
 		return std::nullopt;
 	}
 	return out;
@@ -580,8 +581,8 @@ Parsed parse(std::string_view text) {
 		case Section::session:
 			if (name == "lock-idle") {
 				if (!parse_minutes(value).has_value()) {
-					out.errors.push_back({.line = line_no, .text =
-						"lock-idle must be minutes (1 or more) or off"});
+					out.errors.push_back({.line = line_no, .text = std::format(
+						"lock-idle must be 1 to {} minutes or off", max_lock_idle_minutes)});
 				} else {
 					out.session.push_back({.line = line_no, .name = std::string{name},
 						.value = std::string{value}});

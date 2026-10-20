@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <source_location>
 #include <string>
 #include <cstdlib>
@@ -63,6 +64,13 @@ int main() {
 		check(std::string(read) == "prefer-light",
 			"the real-session write set color-scheme to prefer-light");
 		g_free(read);
+		// The compositor's icon lookup reads the same schema without a child
+		// process: what the user's settings hold is what it gets.
+		check(g_settings_set_string(settings, "icon-theme", "Papirus"),
+			"icon-theme is writable in the private backend");
+		g_settings_sync();
+		check(theme_prefs::icon_theme() == std::optional<std::string>{"Papirus"},
+			"icon_theme reads the icon-theme key through gio");
 		g_object_unref(settings);
 		g_settings_schema_unref(schema);
 	}

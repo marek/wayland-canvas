@@ -25,11 +25,10 @@ Item {
 			}
 			return
 		}
-		var instance = entry.component.createObject(this)
+		var instance = entry.component.createObject(this, {api: entry.api})
 		if (instance == null) {
 			return
 		}
-		instance.api = entry.api
 		instance.run(args)
 		instance.destroy()
 	}

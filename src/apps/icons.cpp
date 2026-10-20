@@ -5,6 +5,7 @@
 #include <glib.h>
 #include <librsvg/rsvg.h>
 #include "apps/icons.h"
+#include "core/theme_prefs.h"
 
 // Only these directory kinds matter here; per-theme data and the loaded
 // surfaces are cached for the process lifetime and dropped by clear().
@@ -50,7 +51,7 @@ std::string path_join(std::string_view a, std::string_view b) {
 	return s;
 }
 
-// Strips surrounding whitespace and quotes (gsettings output, settings.ini values).
+// Strips surrounding whitespace and quotes (settings.ini values).
 void strip_quotes(std::string &s) {
 	while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '
 			|| s.back() == '\t' || s.back() == '\'' || s.back() == '"'))
@@ -93,17 +94,8 @@ std::optional<std::string> theme_from_ini(const std::string &path) {
 }
 
 std::optional<std::string> detect_theme() {
-	// pclose's status decides whether the output counts, so it runs inline
-	if (FILE *f = popen("gsettings get org.gnome.desktop.interface icon-theme", "r")) {
-		char buf[256] = "";
-		bool got = fgets(buf, sizeof(buf), f) != nullptr;
-		int status = pclose(f);
-		if (got && status == 0) {
-			std::string theme = buf;
-			strip_quotes(theme);
-			if (!theme.empty())
-				return theme;
-		}
+	if (std::optional<std::string> theme = theme_prefs::icon_theme()) {
+		return theme;
 	}
 
 	std::optional<std::string> base;
