@@ -90,9 +90,11 @@ public:
 	// moves if X's pointer would leave X's screen.
 	void sync_x11();
 	void x11_follow_pointer();
+#if CANVAS_HAVE_XWAYLAND
 	// A move, a resize or a restack went to X: input for an X11 window waits
 	// until X has taken it in.
 	void x11_changed();
+#endif
 	// Whether X has taken in every change sent to it; asks X to say so when
 	// changes went out since the last ask.
 	bool x11_settled();
@@ -118,7 +120,9 @@ public:
 	wlr_compositor *compositor = nullptr;
 	wlr_output_layout *output_layout = nullptr;
 	wlr_xdg_shell *xdg_shell = nullptr;
+#if CANVAS_HAVE_XWAYLAND
 	wlr_xwayland *xwayland = nullptr;
+#endif
 	wlr_layer_shell_v1 *layer_shell = nullptr;
 	wlr_foreign_toplevel_manager_v1 *foreign_mgr = nullptr;
 	wlr_pointer_gestures_v1 *pointer_gestures = nullptr;
@@ -147,9 +151,11 @@ public:
 	// when the list really reads differently (docs/intents/shell/app-bar.md).
 	bool windows_dirty = false;
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame
+#if CANVAS_HAVE_XWAYLAND
 	// X positions are canvas positions less this offset, one for every X11
 	// window, so they keep their places relative to each other.
 	int x11_offset_x = 0, x11_offset_y = 0;
+#endif
 
 	Input input;
 	Bindings bindings;
@@ -208,6 +214,7 @@ private:
 	// view_x11.cpp: Xwayland and the X11 windows it brings
 	void init_xwayland();
 	void finish_xwayland();
+#if CANVAS_HAVE_XWAYLAND
 	void handle_xwayland_ready();
 	void handle_new_xwayland_surface(wlr_xwayland_surface *surface);
 	Listener new_xwayland_surface_, xwayland_ready_;
@@ -223,6 +230,7 @@ private:
 	void x11_ask_settled();
 	std::optional<unsigned int> x11_settle_ask_;
 	bool x11_unasked_ = false;
+#endif
 
 	// layer.cpp
 	void init_layers();

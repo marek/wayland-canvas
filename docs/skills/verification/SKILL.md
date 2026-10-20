@@ -33,7 +33,7 @@ All tools live in `tools/`; scenario sources in `tests/scenarios/`.
 
 | Venue | Command | Proves |
 |---|---|---|
-| Everything | `tools/check.sh` | Builds and runs all three suites: unit, packaging, scenarios |
+| Everything | `tools/check.sh` | Builds and runs all three suites: unit, packaging, scenarios; and compiles a second tree without Xwayland (`build-no-xwayland/`) with its unit suite |
 | Unit | `meson test -C build --suite unit` | The pure canvas math (direction choice, tiling, zoom paths) and desktop-entry parsing |
 | Packaging | `meson test -C build --suite packaging` | The default-session tool against fake roots, one per supported display manager: set-default then restore byte-identical, no-op restore, idempotent set-default, missing previous session restored; the package checks; the plan tools, the autopilot hook and `agent-setup.sh` against scratch copies |
 | Scenarios | `meson test -C build --suite scenarios` | The real compositor on the headless backend: real foot clients, gestures injected through the same entry points libinput events reach, keyboard and pointer driven through fake devices announced to the backend, screenshots with grim via screencopy, wtype for the virtual keyboard |

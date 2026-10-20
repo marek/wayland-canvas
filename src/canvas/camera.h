@@ -1,5 +1,6 @@
 #pragma once
 
+#include <variant>
 #include "core/geometry.h"
 #include "core/util.h"
 
@@ -30,19 +31,25 @@ public:
 	bool zooming() const; // a zoom transition running
 
 private:
-	enum class AnimKind {
-		none,
-		lerp, // a -> b
-		zoom, // camera_zoom_path(a = near, b = far, p0 -> p1)
+	struct Still {};
+	// An eased pan between two cameras, both zoom and centre.
+	struct Pan {
+		Camera from, to;
+		double start = 0, duration = 0; // ms
+		Camera at(double eased) const;
+		Camera end() const;
 	};
-	struct Anim {
-		AnimKind kind = AnimKind::none;
-		Camera a, b;
+	// camera_zoom_path from `near` to `far`, over progress p0 -> p1.
+	struct Zoom {
+		Camera near, far;
 		double p0 = 0, p1 = 0;
 		double start = 0, duration = 0; // ms
+		Camera at(double eased) const;
+		Camera end() const;
 	};
+	using Motion = std::variant<Still, Pan, Zoom>;
 
 	Output &output_;
 	Camera cam_;
-	Anim anim_;
+	Motion motion_ = Still{};
 };

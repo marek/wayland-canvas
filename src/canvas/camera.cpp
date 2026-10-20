@@ -1,6 +1,7 @@
 #include "canvas/camera.h"
 
 #include <cmath>
+#include <type_traits>
 
 #include "core/config.h"
 #include "platform/output.h"
@@ -30,7 +31,7 @@ Camera CameraMotion::drawn() const {
 }
 
 void CameraMotion::stop() {
-	anim_.kind = AnimKind::none;
+	motion_ = Still{};
 }
 
 void CameraMotion::jump(const Camera &to) {
@@ -42,54 +43,59 @@ void CameraMotion::jump(const Camera &to) {
 }
 
 void CameraMotion::animate_to(const Camera &to) {
-	stop();
-	anim_.kind = AnimKind::lerp;
-	anim_.a = cam_;
-	anim_.b = to;
-	anim_.start = now_ms();
-	anim_.duration = config::anim_ms;
+	motion_ = Pan{.from = cam_, .to = to, .start = now_ms(), .duration = config::anim_ms};
 	output_.damage();
 }
 
 void CameraMotion::animate_zoom(const Camera &near, const Camera &far,
 		double p0, double p1) {
-	stop();
-	anim_.kind = AnimKind::zoom;
-	anim_.a = near;
-	anim_.b = far;
-	anim_.p0 = p0;
-	anim_.p1 = p1;
-	anim_.start = now_ms();
-	anim_.duration = config::anim_ms * clampd(std::fabs(p1 - p0), 0.4, 1);
+	motion_ = Zoom{
+		.near = near,
+		.far = far,
+		.p0 = p0,
+		.p1 = p1,
+		.start = now_ms(),
+		.duration = config::anim_ms * clampd(std::fabs(p1 - p0), 0.4, 1),
+	};
 	output_.damage();
+}
+
+Camera CameraMotion::Pan::at(double eased) const {
+	return camera_lerp(from, to, eased);
+}
+
+Camera CameraMotion::Pan::end() const {
+	return to;
+}
+
+Camera CameraMotion::Zoom::at(double eased) const {
+	return camera_zoom_path(near, far, p0 + (p1 - p0) * eased);
+}
+
+// Exactly the end camera, no float drift from the path.
+Camera CameraMotion::Zoom::end() const {
+	if (p1 >= 1) {
+		return far;
+	}
+	if (p1 <= 0) {
+		return near;
+	}
+	return camera_zoom_path(near, far, p1);
 }
 
 bool CameraMotion::tick(double now) {
 	Camera next = cam_;
 	bool busy = false;
 
-	if (anim_.kind != AnimKind::none) {
-		double t = (now - anim_.start) / anim_.duration;
-		if (t >= 1) {
-			// Land exactly on the end camera, no float drift.
-			if (anim_.kind == AnimKind::lerp || anim_.p1 >= 1) {
-				next = anim_.b;
-			} else if (anim_.p1 <= 0) {
-				next = anim_.a;
-			} else {
-				next = camera_zoom_path(anim_.a, anim_.b, anim_.p1);
-			}
-			anim_.kind = AnimKind::none;
-		} else {
-			double e = ease_out_cubic(t);
-			if (anim_.kind == AnimKind::lerp) {
-				next = camera_lerp(anim_.a, anim_.b, e);
-			} else {
-				double p = anim_.p0 + (anim_.p1 - anim_.p0) * e;
-				next = camera_zoom_path(anim_.a, anim_.b, p);
-			}
-			busy = true;
+	std::visit([&]<typename Running>(const Running &motion) {
+		if constexpr (!std::is_same_v<Running, Still>) {
+			double t = (now - motion.start) / motion.duration;
+			busy = t < 1;
+			next = busy ? motion.at(ease_out_cubic(t)) : motion.end();
 		}
+	}, motion_);
+	if (!busy) {
+		motion_ = Still{};
 	}
 
 	bool cam_changed = next.cx != cam_.cx || next.cy != cam_.cy || next.zoom != cam_.zoom;
@@ -108,29 +114,21 @@ bool CameraMotion::tick(double now) {
 }
 
 bool CameraMotion::panning() const {
-	return anim_.kind == AnimKind::lerp;
+	return std::holds_alternative<Pan>(motion_);
 }
 
 bool CameraMotion::zooming() const {
-	return anim_.kind == AnimKind::zoom;
+	return std::holds_alternative<Zoom>(motion_);
 }
 
 Camera CameraMotion::destination() const {
-	switch (anim_.kind) {
-	case AnimKind::lerp:
-		return anim_.b;
-	case AnimKind::zoom:
-		if (anim_.p1 >= 1) {
-			return anim_.b;
+	return std::visit([this]<typename Running>(const Running &motion) {
+		if constexpr (std::is_same_v<Running, Still>) {
+			return cam_;
+		} else {
+			return motion.end();
 		}
-		if (anim_.p1 <= 0) {
-			return anim_.a;
-		}
-		return camera_zoom_path(anim_.a, anim_.b, anim_.p1);
-	case AnimKind::none:
-		break;
-	}
-	return cam_;
+	}, motion_);
 }
 
 Camera camera_for_box(wlr_box box, double zoom) {

@@ -13,11 +13,11 @@
 #include "core/config.h"
 #include "core/server.h"
 #include "platform/output.h"
-#include "windows/view_x11.h"
 
 #if CANVAS_HAVE_XWAYLAND
 
 #include <xcb/xcbext.h>
+#include "windows/view_x11.h"
 
 namespace {
 
@@ -531,31 +531,28 @@ void Server::x11_give_up() {
 	x11_settle_ask_.reset();
 }
 
+bool Server::on_x11_window(wlr_surface *surface) {
+	return surface != nullptr && X11View::from_surface(surface) != nullptr;
+}
+
 #else // CANVAS_HAVE_XWAYLAND
 
-// Built without Xwayland: the compositor runs, and a machine with no
-// Xwayland simply has no X11 (docs/intents/windows/x11.md).
+// Built without Xwayland: no X11View and no X window manager exist, and
+// View::as_x11() is never non-null (docs/intents/windows/x11.md).
 void Server::init_xwayland() {
 	wlr_log(WLR_INFO, "built without Xwayland: this session has no X11");
 }
 
 void Server::finish_xwayland() {}
-void Server::handle_xwayland_ready() {}
 void Server::sync_x11() {}
 void Server::x11_follow_pointer() {}
-void Server::x11_put_pointer() {}
-void Server::x11_changed() {}
 bool Server::x11_settled() {
 	return true;
 }
 void Server::x11_give_up() {}
 
-X11View *X11View::from_surface(wlr_surface *) {
-	return nullptr;
+bool Server::on_x11_window(wlr_surface *) {
+	return false;
 }
 
 #endif
-
-bool Server::on_x11_window(wlr_surface *surface) {
-	return surface != nullptr && X11View::from_surface(surface) != nullptr;
-}

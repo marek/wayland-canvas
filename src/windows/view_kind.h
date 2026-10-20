@@ -13,6 +13,12 @@ enum class ViewKind {
 	client_placed, // an X11 menu, tooltip or drag icon, placed by its own client
 };
 
+// Its client says where it goes: the compositor neither places it nor
+// settles it on a board when it maps.
+constexpr bool placed_by_client(ViewKind kind) {
+	return kind == ViewKind::client_placed;
+}
+
 // Opens centred over the window it belongs to.
 constexpr bool opens_over_parent(ViewKind kind) {
 	return kind == ViewKind::dialog || kind == ViewKind::modal;

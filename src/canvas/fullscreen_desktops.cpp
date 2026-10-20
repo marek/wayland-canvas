@@ -14,7 +14,7 @@ namespace {
 // its own dialogs, not a menu or tooltip its client places.
 bool covered_by(const View &other, const View &view) {
 	return &other != &view && other.shell_parent() != &view
-		&& other.kind() != ViewKind::client_placed;
+		&& !placed_by_client(other.kind());
 }
 
 // The window's own dialogs move by (dx, dy), their saved boxes with them.

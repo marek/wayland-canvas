@@ -1928,13 +1928,13 @@ Tests:
 
 ### 11. State shapes and dead code
 
-- [ ] Touch's recognizer is a variant
+- [x] Touch's recognizer is a variant
   - Today `press_`, `two_` (five doubles) and `swiping_` (four fields)
     are mutually exclusive only by convention (touch.h:64-67, 102-108),
     and `begin_swipe` clears the others by hand (touch.cpp:351-357).
   - Make them a `std::variant<Idle, Press, TwoFinger, Swipe>`.
   - Acceptance: the touch scenario is green.
-- [ ] CameraMotion is a variant
+- [x] CameraMotion is a variant
   - Today it is a kind enum plus shared fields (camera.h:33-43), and its
     end-of-path rule is written twice (camera.cpp:75-81, 122-129).
   - Make it a `std::variant<Still, Pan, Zoom>`, with the end rule written
@@ -1972,7 +1972,7 @@ Tests:
     - the ±0.5 velocity threshold (314, 323);
     - `/400`, and `/200` at input.cpp:1441.
   - Acceptance: the gestures scenario is green.
-- [ ] Window kinds are read through their predicates
+- [x] Window kinds are read through their predicates
   - fullscreen_desktops.cpp:17 and view.cpp:727 compare
     `ViewKind::client_placed` directly, though view_kind.h:3-8 says
     every rule goes through its predicates.
@@ -1990,7 +1990,7 @@ Tests:
     - Network.qml's unread `networks` (20-21).
   - Acceptance: grep finds none of these names, `-Wunused` is clean, and
     the suites are green.
-- [ ] The build without Xwayland builds
+- [x] The build without Xwayland builds
   - The problem: view_x11.cpp's `#else` branch (480-502) provides none of
     the members the rest calls, so `CANVAS_HAVE_XWAYLAND=0` cannot
     compile. meson.build:43 always builds the subproject with Xwayland,

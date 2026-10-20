@@ -7,7 +7,9 @@
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
+#if CANVAS_HAVE_XWAYLAND
 #include "windows/view_x11.h"
+#endif
 #include "windows/view_xdg.h"
 
 namespace {
@@ -499,7 +501,11 @@ View *View::from_surface(wlr_surface *surface) {
 	if (XdgView *view = XdgView::from_surface(surface)) {
 		return view;
 	}
+#if CANVAS_HAVE_XWAYLAND
 	return X11View::from_surface(surface);
+#else
+	return nullptr;
+#endif
 }
 
 // ---- foreign toplevel handle ----
@@ -617,7 +623,7 @@ void View::handle_map() {
 	mapped = true;
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
-	if (client_placed()) {
+	if (placed_by_client(kind())) {
 		// A menu or a tooltip belongs where its client put it, beside the
 		// window it hangs from; it joins no board and takes no focus
 		// unless it asks for one.
