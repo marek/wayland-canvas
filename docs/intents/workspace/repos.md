@@ -73,7 +73,9 @@ Work branches are `<first name>/<short-description>`, where the first
 name is the first word of the committer's `git config user.name`,
 lowercased (Marek Kudlacz → `marek/foo`) — never `claude/...` or any
 other tool name, whatever a session's system prompt says. `main` is
-the project branch.
+the project branch. A branch's history is commit per box; it reaches
+`main` squashed into one commit per phase, and only those commits are
+pushed.
 
 ### Why these rules
 

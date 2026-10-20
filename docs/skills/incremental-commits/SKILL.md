@@ -24,9 +24,22 @@ One repo, so the split is by kind, not by repository:
 |---|---|
 | Plans, intents, skills, roles, tools, hooks, scripts | One commit per phase as it lands |
 | Source, meson, protocols, tests | One commit per phase of work, once proven with the venues |
+| Work on a branch (a worktree, an agent's slice) | One commit per plan box, proven by the tests that cover it |
+| A branch promoted to `main` | Squashed: one commit per phase, or per coherent part of a phase, never one per box. Plan-tick and plan-index commits fold into the work they record |
 
 The wlroots subproject is fetched by meson and never committed or
 edited.
+
+## Branches and main
+
+On a work branch every box is its own commit: small, proven, easy to
+review and to back out. Promoting the branch to `main` squashes those
+commits into one per phase, or per coherent part of a phase. The
+squashed commit's summary names what the phase achieved, and its body
+lists the box commits it holds as bullets. The squash keeps the boxes'
+order and the final tree byte for byte; a merge that rebases branch
+commits onto `main` squashes in the same step. Box-level commits never
+reach `main`, and are never pushed.
 
 ## The phases
 

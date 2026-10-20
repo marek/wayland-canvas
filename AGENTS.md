@@ -203,6 +203,9 @@ runs never leave a compositor or client process behind — see the
   scoped by explicit pathspec.
 - Source, meson and protocols: one commit per phase of work, made once
   the phase is proven with the venues above.
+- On a work branch one commit per plan box; promoting it to `main`
+  squashes the branch into one commit per phase. Box-level commits never
+  reach `main`.
 - See the `incremental-commits` skill.
 
 ---
