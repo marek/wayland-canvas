@@ -16,6 +16,7 @@
 
 #include "apps/capture_files.h"
 #include "core/config.h"
+#include "core/fs.h"
 #include "core/server.h"
 #include "platform/output.h"
 #include "render/capture.h"
@@ -52,7 +53,7 @@ void Recorder::start(Output &output, const std::optional<wlr_box> &area) {
 		return;
 	}
 	std::string dir = user_dir(G_USER_DIRECTORY_VIDEOS, "Videos");
-	mkdir_p(dir);
+	fs::mkdir_p(dir);
 	path_ = std::format("{}/Screen Recording {}.mp4", dir, timestamp());
 
 	// ffmpeg reads raw BGRA frames from the pipe and does the encoding;

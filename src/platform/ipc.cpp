@@ -19,6 +19,7 @@
 
 #include "canvas/desktop.h"
 #include "core/config.h"
+#include "core/text.h"
 #include "core/theme.h"
 #include "core/wlr.h"
 #include "platform/ipc.h"
@@ -107,34 +108,6 @@ std::string object_text(Build &&build) {
 	std::string text = root != nullptr ? node_text(root) : std::string{"{}"};
 	json_node_unref(root);
 	return text;
-}
-
-// A JSON string literal, for splicing text into a response or request.
-// Hand-rolled: json-glib builders cannot hold a bare string as the root.
-std::string quote(std::string_view text) {
-	std::string out;
-	out.reserve(text.size() + 2);
-	out += '"';
-	for (const char ch : text) {
-		switch (ch) {
-		case '"': out += "\\\""; break;
-		case '\\': out += "\\\\"; break;
-		case '\b': out += "\\b"; break;
-		case '\f': out += "\\f"; break;
-		case '\n': out += "\\n"; break;
-		case '\r': out += "\\r"; break;
-		case '\t': out += "\\t"; break;
-		default:
-			if (static_cast<unsigned char>(ch) < 0x20) {
-				std::format_to(std::back_inserter(out), "\\u{:04x}",
-					static_cast<unsigned char>(ch));
-			} else {
-				out += ch;
-			}
-		}
-	}
-	out += '"';
-	return out;
 }
 
 // A byte count the way the messages and the docs say it: "1 MiB", "64 KiB".
@@ -760,7 +733,7 @@ Request parse_line(std::string_view line) {
 void Ipc::handle_line(Client &client, std::string_view line) {
 	Request request = parse_line(line);
 	if (!request.error.empty()) {
-		queue(client, response(request.id_json, quote(request.error), true));
+		queue(client, response(request.id_json, text::json_quote(request.error), true));
 		return;
 	}
 	if (request.method == "capture.pick") {
@@ -779,13 +752,14 @@ void Ipc::handle_line(Client &client, std::string_view line) {
 	std::expected<std::string, std::string> result =
 		dispatch_method(client, request.method, request.params);
 	queue(client, response(request.id_json,
-		result.has_value() ? *result : quote(result.error()), !result.has_value()));
+		result.has_value() ? *result : text::json_quote(result.error()),
+		!result.has_value()));
 }
 
 void Ipc::capture_pick(Client &client, std::string_view id_json,
 		JsonObject *params) {
 	auto bail = [&](std::string_view error) {
-		queue(client, response(id_json, quote(error), true));
+		queue(client, response(id_json, text::json_quote(error), true));
 	};
 	constexpr std::string_view usage =
 		R"(params: what must be "region", "window", "output" or "any")";
@@ -844,13 +818,13 @@ void Ipc::answer_pick(bool ok, std::string_view payload) {
 	std::string id = pick_id_;
 	pick_client_ = nullptr;
 	pick_id_.clear();
-	queue(client, response(id, ok ? payload : quote(payload), !ok));
+	queue(client, response(id, ok ? payload : text::json_quote(payload), !ok));
 }
 
 void Ipc::shortcut_capture(Client &client, std::string_view id_json,
 		JsonObject *params) {
 	auto bail = [&](std::string_view error) {
-		queue(client, response(id_json, quote(error), true));
+		queue(client, response(id_json, text::json_quote(error), true));
 	};
 	// The scope is only named for what settings.set will decide; the
 	// capture reports the chord as pressed.
@@ -1173,7 +1147,7 @@ std::expected<std::string, std::string> Ipc::m_surface_unplace(Client &,
 void Ipc::surface_drag(Client &client, std::string_view id_json,
 		JsonObject *params, bool resize) {
 	auto bail = [&](std::string_view error) {
-		queue(client, response(id_json, quote(error), true));
+		queue(client, response(id_json, text::json_quote(error), true));
 	};
 	std::string_view usage = resize
 		? "params: surface (a layer surface's name), edges (a list of left, "
@@ -1238,7 +1212,8 @@ void Ipc::answer_surface_drag(std::optional<wlr_box> box) {
 	drag_client_ = nullptr;
 	drag_id_.clear();
 	if (!box.has_value()) {
-		queue(client, response(id, quote("the drag ended with its surface gone"), true));
+		queue(client, response(id,
+			text::json_quote("the drag ended with its surface gone"), true));
 		return;
 	}
 	std::string payload = object_text([&](JsonBuilder *builder) {
@@ -1706,7 +1681,7 @@ void Ipc::run_action(std::string_view name, std::string_view args_json) {
 void Ipc::emit_action(std::string_view name, std::string_view args_json) {
 	// Spliced by hand: a builder cannot hold a bare object as a value.
 	std::string params = "{\"name\":";
-	params += quote(name);
+	params += text::json_quote(name);
 	params += ",\"args\":";
 	params += args_json;
 	params += "}";
@@ -1755,7 +1730,8 @@ int Ipc::handle_client(int, uint32_t mask, void *data) {
 			break;
 		}
 		if (line.empty()) {
-			ipc.queue(*client, response("null", quote("not a JSON object"), true));
+			ipc.queue(*client,
+				response("null", text::json_quote("not a JSON object"), true));
 		} else {
 			ipc.handle_line(*client, line);
 		}
@@ -1769,7 +1745,8 @@ int Ipc::handle_client(int, uint32_t mask, void *data) {
 	}
 	if (oversized) {
 		std::string cap = size_text(config::ipc_max_line);
-		ipc.queue(*client, response("null", quote(std::format("line over {}", cap)), true));
+		ipc.queue(*client,
+			response("null", text::json_quote(std::format("line over {}", cap)), true));
 		ipc.drop(*client, std::format("a line over the {} cap", cap).c_str());
 		ipc.reap();
 		return 0;
@@ -1940,7 +1917,7 @@ int msg_command(int argc, char *argv[]) {
 	if (fd < 0) {
 		return 1;
 	}
-	std::string request = std::format(R"({{"id":1,"method":{})", quote(argv[1]));
+	std::string request = std::format(R"({{"id":1,"method":{})", text::json_quote(argv[1]));
 	if (!params_json.empty()) {
 		request += std::format(R"(,"params":{})", params_json);
 	}

@@ -1,51 +1,10 @@
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 #include "apps/desktop_entry.h"
+#include "core/text.h"
 
 namespace {
-
-constexpr char ascii_lower(char c) {
-	return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 'a' - 'A') : c;
-}
-
-// Trims leading/trailing spaces and tabs.
-constexpr std::string_view trim(std::string_view s) {
-	while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
-		s.remove_prefix(1);
-	while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
-		s.remove_suffix(1);
-	return s;
-}
-
-constexpr bool bool_val(std::string_view v) {
-	constexpr std::string_view true_ = "true";
-	if (v.size() != true_.size())
-		return false;
-	for (size_t i = 0; i < v.size(); i++)
-		if (ascii_lower(v[i]) != true_[i])
-			return false;
-	return true;
-}
-
-constexpr bool ci_starts_with(std::string_view s, std::string_view q) {
-	if (s.size() < q.size())
-		return false;
-	for (size_t i = 0; i < q.size(); i++)
-		if (ascii_lower(s[i]) != ascii_lower(q[i]))
-			return false;
-	return true;
-}
-
-constexpr bool ci_contains(std::string_view s, std::string_view q) {
-	if (q.empty() || s.size() < q.size())
-		return false;
-	for (size_t i = 0; i + q.size() <= s.size(); i++)
-		if (ci_starts_with(s.substr(i), q))
-			return true;
-	return false;
-}
 
 std::string unescape(std::string_view v) {
 	std::string out;
@@ -68,20 +27,9 @@ std::string unescape(std::string_view v) {
 	return out;
 }
 
-// ---- key/value storage for one file ----
-
-using Kvs = std::vector<std::pair<std::string, std::string>>; // key "Name" or "Name[de_DE]"
-
-const std::string *kv_get(const Kvs &kvs, std::string_view key) {
-	for (const auto &kv : kvs)
-		if (std::string_view(kv.first) == key)
-			return &kv.second;
-	return nullptr;
-}
-
-bool bool_kv(const Kvs &kvs, std::string_view key) {
-	const std::string *v = kv_get(kvs, key);
-	return v && bool_val(*v);
+bool bool_key(const text::IniGroup &entry, std::string_view key) {
+	const std::string *v = entry.get(key);
+	return v && text::ci_equal(*v, "true");
 }
 
 /*
@@ -142,14 +90,14 @@ std::vector<std::string> locale_variants(std::string_view lang) {
 }
 
 // Best value for `key`: Name[locale] variants in order, then plain Name.
-const std::string *kv_localized(const Kvs &kvs, std::string_view key,
+const std::string *kv_localized(const text::IniGroup &entry, std::string_view key,
 	const std::vector<std::string> &lc) {
 	for (const std::string &v : lc) {
 		std::string localized = std::string(key) + '[' + v + ']';
-		if (const std::string *val = kv_get(kvs, localized))
+		if (const std::string *val = entry.get(localized))
 			return val;
 	}
-	return kv_get(kvs, key);
+	return entry.get(key);
 }
 
 constexpr bool is_field_code(char c) {
@@ -212,19 +160,19 @@ int App::match(std::string_view query) const {
 
 	std::string_view name = this->name;
 
-	if (ci_starts_with(name, query))
+	if (text::ci_starts_with(name, query))
 		return 400;
 	// a word of the name starts with the query (words break on space,
 	// '-', '_' and '.')
 	for (size_t i = 1; i < name.size(); i++) {
 		char prev = name[i - 1];
 		if ((prev == ' ' || prev == '-' || prev == '_' || prev == '.')
-				&& ci_starts_with(name.substr(i), query))
+				&& text::ci_starts_with(name.substr(i), query))
 			return 300;
 	}
-	if (ci_contains(name, query))
+	if (text::ci_contains(name, query))
 		return 200;
-	if (ci_contains(generic, query) || ci_contains(keywords, query))
+	if (text::ci_contains(generic, query) || text::ci_contains(keywords, query))
 		return 100;
 	if (!exec.empty()) {
 		size_t wl = exec.find(' ');
@@ -234,7 +182,7 @@ int App::match(std::string_view query) const {
 		for (size_t i = 0; i < word.size(); i++)
 			if (word[i] == '/')
 				base = i + 1;
-		if (ci_contains(word.substr(base), query))
+		if (text::ci_contains(word.substr(base), query))
 			return 50;
 	}
 	return -1;
@@ -242,62 +190,35 @@ int App::match(std::string_view query) const {
 
 std::optional<App> App::parse(std::string_view contents, std::string_view id,
 	std::string_view lang) {
-	if (size_t nul = contents.find('\0'); nul != std::string_view::npos)
-		contents = contents.substr(0, nul); // a NUL ends the file
+	const text::Ini ini = text::parse_ini(contents);
+	// the spec makes [Desktop Entry] the file's first group; the groups after it
+	// ([Desktop Action ...]) describe actions, not the entry
+	if (ini.groups.empty() || ini.groups.front().name != "Desktop Entry")
+		return std::nullopt;
+	const text::IniGroup &entry = ini.groups.front();
 	const std::vector<std::string> lc = locale_variants(lang);
 
-	Kvs kvs;
-	bool in_group = false;
-	size_t pos = 0;
-	while (pos < contents.size()) {
-		size_t eol = contents.find('\n', pos);
-		std::string_view line = eol == std::string_view::npos
-			? contents.substr(pos) : contents.substr(pos, eol - pos);
-		pos = eol == std::string_view::npos ? contents.size() : eol + 1;
-		if (!line.empty() && line.back() == '\r')
-			line.remove_suffix(1); // CRLF files
-
-		std::string_view s = trim(line);
-		if (s.empty() || s.front() == '#')
-			continue;
-		if (s.front() == '[') {
-			if (!in_group && s == "[Desktop Entry]")
-				in_group = true;
-			else
-				break; // the next group header ends the entry
-		}
-		if (!in_group)
-			continue;
-		size_t eq = s.find('=');
-		if (eq == std::string_view::npos)
-			continue;
-		std::string_view key = trim(s.substr(0, eq));
-		std::string_view val = trim(s.substr(eq + 1));
-		if (!key.empty() && !val.empty())
-			kvs.emplace_back(key, val);
-	}
-
-	const std::string *type = kv_get(kvs, "Type");
-	const std::string *exec = kv_get(kvs, "Exec");
-	const std::string *name = kv_localized(kvs, "Name", lc);
+	const std::string *type = entry.get("Type");
+	const std::string *exec = entry.get("Exec");
+	const std::string *name = kv_localized(entry, "Name", lc);
 	if (!type || *type != "Application"
-			|| bool_kv(kvs, "NoDisplay")
-			|| bool_kv(kvs, "Hidden")
+			|| bool_key(entry, "NoDisplay")
+			|| bool_key(entry, "Hidden")
 			|| !name || !exec)
 		return std::nullopt;
 
 	App app;
 	app.id = id;
 	app.name = unescape(*name);
-	if (const std::string *generic = kv_localized(kvs, "GenericName", lc))
+	if (const std::string *generic = kv_localized(entry, "GenericName", lc))
 		app.generic = unescape(*generic);
-	if (const std::string *keywords = kv_localized(kvs, "Keywords", lc))
+	if (const std::string *keywords = kv_localized(entry, "Keywords", lc))
 		app.keywords = unescape(*keywords);
 	app.exec = clean_exec(unescape(*exec));
-	if (const std::string *icon = kv_get(kvs, "Icon"))
+	if (const std::string *icon = entry.get("Icon"))
 		app.icon = unescape(*icon);
-	if (const std::string *try_exec = kv_get(kvs, "TryExec"))
+	if (const std::string *try_exec = entry.get("TryExec"))
 		app.try_exec = unescape(*try_exec);
-	app.terminal = bool_kv(kvs, "Terminal");
+	app.terminal = bool_key(entry, "Terminal");
 	return app;
 }

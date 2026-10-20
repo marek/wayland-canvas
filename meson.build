@@ -133,10 +133,23 @@ geometry_lib = static_library(
 	'src/core/geometry.cpp',
 	include_directories: src_inc,
 )
+# Text and file helpers the compositor and the agent usage collector share.
+text_lib = static_library(
+	'canvas-text',
+	'src/core/text.cpp',
+	include_directories: src_inc,
+)
+fs_lib = static_library(
+	'canvas-fs',
+	'src/core/fs.cpp',
+	include_directories: src_inc,
+	dependencies: [glib, json_glib],
+)
 desktop_entry_lib = static_library(
 	'canvas-desktop-entry',
 	'src/apps/desktop_entry.cpp',
 	include_directories: src_inc,
+	link_with: text_lib,
 )
 
 theme_prefs_lib = static_library(
@@ -188,6 +201,7 @@ agent_usage_lib = static_library(
 	'canvas-agent-usage',
 	'src/shell/agent_usage.cpp',
 	include_directories: src_inc,
+	link_with: fs_lib,
 	dependencies: [glib, json_glib, sqlite3],
 )
 
@@ -249,7 +263,8 @@ core_lib = static_library(
 	protocol_headers,
 	include_directories: src_inc,
 	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib,
-		settings_lib, capture_toolbar_layout_lib, night_light_ramp_lib],
+		settings_lib, capture_toolbar_layout_lib, night_light_ramp_lib, fs_lib,
+		text_lib],
 	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
 		glib, gio, json_glib, libinput, libdrm, libsystemd, xcb],
 )
@@ -364,6 +379,21 @@ test(
 		include_directories: src_inc,
 		link_with: desktop_entry_lib,
 	),
+	suite: 'unit',
+)
+
+fs_text_env = environment()
+fs_text_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
+test(
+	'fs-text',
+	executable(
+		'test-fs-text',
+		'tests/test_fs_text.cpp',
+		include_directories: src_inc,
+		link_with: [fs_lib, text_lib],
+		dependencies: [glib, json_glib],
+	),
+	env: fs_text_env,
 	suite: 'unit',
 )
 

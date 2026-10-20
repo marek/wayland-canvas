@@ -48,12 +48,16 @@ in `~/.local/share/applications` and checked with
 - **Re-reading on open keeps the launcher honest** for the price of
   one directory scan; a cached list would need invalidation hooks
   that a file drop has none of.
+- **One key-file reader** (`text::parse_ini`) serves desktop entries and
+  icon-theme `index.theme` files, and it reads the way the desktop
+  entry specification does: the `[Desktop Entry]` group alone counts,
+  `#` comments and CRLF line ends are skipped, a NUL ends the file.
 
 ## Error states, corner cases
 
 - `index.theme` directory lists are comma-separated; a reader that
-  splits them on the GKeyFile default `;` finds no theme directories
-  at all and only pixmaps icons appear.
+  splits them on `;` finds no theme directories at all and only
+  pixmaps icons appear.
 - An entry that fails its rules — hidden, or TryExec missing — is
   simply absent from the list; it is not an error to surface.
 

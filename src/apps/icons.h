@@ -5,10 +5,8 @@
 #include <string_view>
 #include <vector>
 #include <cairo.h>
+#include "core/text.h"
 #include "core/util.h"
-
-// glib's own declaration: the header stays free of glib for everything including launcher.h.
-using GKeyFile = struct _GKeyFile;
 
 // freedesktop icon theme lookup.
 class Icons {
@@ -56,7 +54,7 @@ private:
 
 	void add_base_dir(std::string_view path);
 	void ensure_base_dirs();
-	void add_icon_dir(Theme &th, GKeyFile *kf, const char *dir);
+	void add_icon_dir(Theme &th, const text::Ini &ini, const std::string &dir);
 	static void add_inherit(Theme &th, std::string_view name);
 	void load_theme_index(Theme &th);
 	Theme &theme_get(std::string_view name);

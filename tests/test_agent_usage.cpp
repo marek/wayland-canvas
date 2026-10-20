@@ -28,6 +28,8 @@
 #include <ctime>
 #include <vector>
 
+#include "core/json.h"
+
 namespace {
 
 using namespace agent_usage;
@@ -69,17 +71,6 @@ std::string join(std::initializer_list<std::string_view> pieces) {
 	}
 	return out;
 }
-
-// A JsonParser held by unique_ptr: json-glib parsers are GObjects.
-struct ParserDelete {
-	void operator()(JsonParser *parser) const {
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-	}
-};
-
-using ParserPtr = std::unique_ptr<JsonParser, ParserDelete>;
 
 void restore_mtime(const std::string &path, const struct stat &st) {
 	timespec times[2] = {st.st_atim, st.st_mtim};
@@ -689,15 +680,12 @@ void test_opencode_null_columns() {
 void test_record_json() {
 	Fixture fixture = make_fixture();
 	std::string json = record_json(collect_fixture(fixture));
-	ParserPtr parser(json_parser_new());
-	bool parsed = json_parser_load_from_data(parser.get(), json.c_str(),
-		static_cast<gssize>(json.size()), nullptr);
-	check(parsed, "the record is valid JSON");
-	if (!parsed) {
+	JsonParserPtr parser = parse_json(json);
+	JsonObject *object = root_object(parser);
+	check(object != nullptr, "the record is valid JSON");
+	if (object == nullptr) {
 		return;
 	}
-	JsonNode *root = json_parser_get_root(parser.get());
-	JsonObject *object = json_node_get_object(root);
 	check(json_object_has_member(object, "updatedAt")
 		&& json_object_has_member(object, "providers"),
 		"the record carries its stamp and providers");

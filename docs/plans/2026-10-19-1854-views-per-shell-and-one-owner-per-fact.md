@@ -639,6 +639,32 @@ The compositor:
     does, instead of un-tiling the windows whose centre lies in it. The
     gestures scenario's last step tiles a desktop with two windows and
     abandons it; the old code fails that check and the new passes.
+- [ ] An X11 modal dialog is laid out as a dialog every time
+  - The problem:
+    - The xwayland scenario's modal-dialog checks fail now and then:
+      "its modal dialog floats, off the board", "centred over the window
+      it blocks" and "tiling leaves the modal dialog floating".
+    - The dialog is laid out as a plain tiled window, as if its
+      `WM_TRANSIENT_FOR` and `_NET_WM_STATE_MODAL` were not read yet when
+      it maps.
+    - Seen once in 27 runs during the touch-and-pen work, and again in a
+      `tools/check.sh` run on main with four suites loading the machine;
+      the rerun passed. This box moved here from
+      2026-10-19-1203-touch-and-pen.md.
+  - The fix:
+    - Find the order in which wlroots' Xwayland reports the parent, the
+      modal state and the map: `associate`, the `set_parent` and
+      `set_window_type` events, and the `_NET_WM_STATE` updates.
+    - Then lay the window out again when one of those arrives after the
+      map, the way the first commit does for a wayland dialog. Do not
+      wait or poll for them.
+  - Acceptance:
+    - A scenario step reproduces the late properties deterministically,
+      for example an x11-client mode that sets the transient and modal
+      hints after mapping.
+    - That step fails before the fix and passes after.
+    - The modal-dialog checks pass 20 runs in a row under a loaded
+      machine.
 
 The shell and its plugins:
 
@@ -1345,7 +1371,7 @@ Tests:
     written once.
   - Acceptance: each is defined once (grep), and the unit and scenario
     suites are green.
-- [ ] File, text and ownership helpers live in one wlroots-free place
+- [x] File, text and ownership helpers live in one wlroots-free place
   - `Handle` and `destroy_owned` move to a wlroots-free `core/handle.h`;
     util.h keeps `Listener` and includes it. agent_usage's hand-written
     `ParserDelete` (agent_usage.cpp:29-37, agent_usage_main.cpp:43-51)

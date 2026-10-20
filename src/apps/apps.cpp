@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
-#include <fstream>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,6 +14,7 @@
 
 #include "apps/apps.h"
 #include "core/config.h"
+#include "core/fs.h"
 #include "core/server.h"
 
 namespace {
@@ -48,25 +49,6 @@ bool id_seen(const Scan &sc, std::string_view id) {
 		}
 	}
 	return false;
-}
-
-std::string read_file(const std::string &path) {
-	std::ifstream f(path, std::ios::binary);
-	if (!f) {
-		return {};
-	}
-	f.seekg(0, std::ios::end);
-	const std::streamoff sz = f.tellg();
-	if (sz < 0 || sz > static_cast<std::streamoff>(max_file)) {
-		return {};
-	}
-	f.seekg(0, std::ios::beg);
-	std::string buf(static_cast<std::size_t>(sz), '\0');
-	f.read(buf.data(), sz);
-	if (f.gcount() != sz) {
-		return {};
-	}
-	return buf;
 }
 
 // TryExec present? Absolute path: executable file. Else: on $PATH.
@@ -142,7 +124,7 @@ void scan_dir(Scan &sc, const std::string &base, const std::string &dir, int dep
 			continue;
 		}
 
-		std::string contents = read_file(full);
+		const std::string contents = fs::read_text_file(full, max_file).value_or("");
 		if (std::optional<App> app = App::parse(contents, id, sc.lang)) {
 			if (app->try_exec.empty() || try_exec_ok(app->try_exec)) {
 				sc.items.push_back(std::move(*app));

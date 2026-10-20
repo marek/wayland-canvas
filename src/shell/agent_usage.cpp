@@ -23,40 +23,26 @@
 #include <unistd.h>
 #include <utility>
 
+#include "core/fs.h"
+#include "core/json.h"
+
 namespace agent_usage {
 namespace {
 
-struct ParserDelete {
-	void operator()(JsonParser *parser) const {
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-	}
-};
-
-using ParserPtr = std::unique_ptr<JsonParser, ParserDelete>;
-
-ParserPtr make_parser() {
-	return ParserPtr(json_parser_new());
+// The compact text of what `builder` built.
+std::string builder_text(JsonBuilder *builder) {
+	JsonNodePtr root(json_builder_get_root(builder));
+	GCharPtr text(json_to_string(root.get(), false));
+	return text != nullptr ? text.get() : "";
 }
 
-// Parses one JSON document; null when it is not valid JSON.
-ParserPtr parse_json(const std::string &text) {
-	ParserPtr parser = make_parser();
-	if (!json_parser_load_from_data(parser.get(), text.c_str(),
-		    static_cast<gssize>(text.size()), nullptr)) {
-		return nullptr;
+// Writes what `builder` built to `path` atomically, the directory made first. A cache
+// that cannot be written is a cache miss for the next run, so the failure is not reported.
+void write_json_cache(const std::string &path, JsonBuilder *builder) {
+	const std::string dir = std::filesystem::path(path).parent_path().string();
+	if (dir.empty() || fs::mkdir_p(dir)) {
+		fs::write_text_atomic(path, builder_text(builder));
 	}
-	return parser;
-}
-
-JsonObject *root_object(const ParserPtr &parser) {
-	if (parser == nullptr) {
-		return nullptr;
-	}
-	JsonNode *root = json_parser_get_root(parser.get());
-	return root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
-		? json_node_get_object(root) : nullptr;
 }
 
 JsonObject *obj_member(JsonObject *object, const char *name) {
@@ -422,7 +408,7 @@ std::optional<Counted> transcript_message(const std::string &line,
 	if (line.find("\"usage\"") == std::string::npos) {
 		return std::nullopt;
 	}
-	ParserPtr parser = parse_json(line);
+	JsonParserPtr parser = parse_json(line);
 	JsonObject *entry = root_object(parser);
 	if (entry == nullptr) {
 		return std::nullopt;
@@ -489,7 +475,7 @@ std::optional<Counted> agent_message(const std::string &line,
 			|| line.find("\"assistant\"") == std::string::npos) {
 		return std::nullopt;
 	}
-	ParserPtr parser = parse_json(line);
+	JsonParserPtr parser = parse_json(line);
 	JsonObject *entry = root_object(parser);
 	if (entry == nullptr || str_member(entry, "type") != "message") {
 		return std::nullopt;
@@ -544,7 +530,7 @@ FileEntry scan_codex_file(const std::string &path) {
 	std::ifstream file(path);
 	std::string line;
 	for (int line_no = 1; std::getline(file, line); line_no++) {
-		ParserPtr parser = parse_json(line);
+		JsonParserPtr parser = parse_json(line);
 		JsonObject *root = root_object(parser);
 		if (root == nullptr) {
 			continue;
@@ -651,7 +637,7 @@ FileEntry scan_opencode_db(const std::string &db) {
 				continue;
 			}
 			std::string session = session_text;
-			ParserPtr parser = parse_json(raw);
+			JsonParserPtr parser = parse_json(raw);
 			JsonObject *message = root_object(parser);
 			if (message == nullptr
 					|| str_member(message, "role") != "assistant") {
@@ -808,13 +794,7 @@ std::map<std::string, FileEntry> read_cache(const std::string &path) {
 	if (path.empty()) {
 		return files;
 	}
-	std::ifstream file(path);
-	if (!file.good()) {
-		return files;
-	}
-	std::string text((std::istreambuf_iterator<char>(file)),
-		std::istreambuf_iterator<char>());
-	ParserPtr parser = parse_json(text);
+	JsonParserPtr parser = fs::read_json_file(path);
 	JsonObject *root = root_object(parser);
 	if (root == nullptr || int_member(root, "version") != cache_version) {
 		return files; // a cache that is not the shape we write is a miss
@@ -828,17 +808,14 @@ std::map<std::string, FileEntry> read_cache(const std::string &path) {
 	return files;
 }
 
-// Atomic: a writer-unique temp file in the same directory, renamed over
-// the target, so a reader never sees a half-written cache.
+// Atomic, so a reader never sees a half-written cache.
 void write_cache(const std::string &path,
 	const std::map<std::string, FileEntry> &files) {
 	if (path.empty()) {
 		return;
 	}
-	std::filesystem::path target(path);
-	std::error_code ec;
-	std::filesystem::create_directories(target.parent_path(), ec);
-	JsonBuilder *builder = json_builder_new();
+	JsonBuilderPtr owned(json_builder_new());
+	JsonBuilder *builder = owned.get();
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "version");
 	json_builder_add_int_value(builder, cache_version);
@@ -861,27 +838,7 @@ void write_cache(const std::string &path,
 	}
 	json_builder_end_object(builder);
 	json_builder_end_object(builder);
-	JsonNode *root = json_builder_get_root(builder);
-	char *text = json_to_string(root, false);
-	std::string tmp = (target.parent_path()
-		/ ("." + target.filename().string() + "."
-			+ std::to_string(getpid()) + ".tmp")).string();
-	FILE *f = std::fopen(tmp.c_str(), "w");
-	bool written = f != nullptr;
-	if (written) {
-		std::fwrite(text, 1, std::strlen(text), f);
-		std::fclose(f);
-	}
-	std::free(text);
-	json_node_free(root);
-	g_object_unref(builder);
-	if (written) {
-		std::filesystem::rename(tmp, target, ec);
-		if (!ec) {
-			return;
-		}
-	}
-	std::filesystem::remove(tmp, ec);
+	write_json_cache(path, builder);
 }
 
 bool same_cache(const std::map<std::string, FileEntry> &a,
@@ -1103,7 +1060,7 @@ std::string plan_label(std::string_view tier, std::string_view subscription) {
 
 std::vector<Limit> parse_anthropic_limits(const std::string &payload) {
 	std::vector<Limit> limits;
-	ParserPtr parser = parse_json(payload);
+	JsonParserPtr parser = parse_json(payload);
 	JsonObject *root = root_object(parser);
 	if (root == nullptr) {
 		return limits;
@@ -1158,11 +1115,11 @@ Limit codex_window(JsonObject *window, int duration_mins) {
 CodexLimits parse_codex_limits(const std::string &account_result,
 	const std::string &rate_limits_result) {
 	CodexLimits out;
-	ParserPtr limits_parser = parse_json(rate_limits_result);
+	JsonParserPtr limits_parser = parse_json(rate_limits_result);
 	JsonObject *limits_root = root_object(limits_parser);
 	JsonObject *rate_limits = obj_member(
 		obj_member(limits_root, "result"), "rateLimits");
-	ParserPtr account_parser = parse_json(account_result);
+	JsonParserPtr account_parser = parse_json(account_result);
 	JsonObject *account = obj_member(
 		obj_member(root_object(account_parser), "result"), "account");
 	if (rate_limits != nullptr) {
@@ -1350,7 +1307,8 @@ Record collect(const Paths &paths,
 }
 
 std::string record_json(const Record &record) {
-	JsonBuilder *builder = json_builder_new();
+	JsonBuilderPtr owned(json_builder_new());
+	JsonBuilder *builder = owned.get();
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "updatedAt");
 	json_builder_add_string_value(builder, record.updated_at.c_str());
@@ -1431,13 +1389,7 @@ std::string record_json(const Record &record) {
 	}
 	json_builder_end_array(builder);
 	json_builder_end_object(builder);
-	JsonNode *root = json_builder_get_root(builder);
-	char *text = json_to_string(root, false);
-	std::string out{text != nullptr ? text : ""};
-	std::free(text);
-	json_node_free(root);
-	g_object_unref(builder);
-	return out;
+	return builder_text(builder);
 }
 
 // ------------------------------------------------------------ probe cache
@@ -1471,13 +1423,7 @@ std::optional<LimitsCache> read_limits_cache(const std::string &path) {
 	if (path.empty()) {
 		return std::nullopt;
 	}
-	std::ifstream file(path);
-	if (!file.good()) {
-		return std::nullopt;
-	}
-	std::string text((std::istreambuf_iterator<char>(file)),
-		std::istreambuf_iterator<char>());
-	ParserPtr parser = parse_json(text);
+	JsonParserPtr parser = fs::read_json_file(path);
 	JsonObject *root = root_object(parser);
 	LimitsCache cache;
 	cache.fetched_at_ms = int_member(root, "fetchedAtMs");
@@ -1502,10 +1448,8 @@ void write_limits_cache(const std::string &path, const LimitsCache &cache) {
 	if (path.empty()) {
 		return;
 	}
-	std::filesystem::path target(path);
-	std::error_code ec;
-	std::filesystem::create_directories(target.parent_path(), ec);
-	JsonBuilder *builder = json_builder_new();
+	JsonBuilderPtr owned(json_builder_new());
+	JsonBuilder *builder = owned.get();
 	json_builder_begin_object(builder);
 	json_builder_set_member_name(builder, "fetchedAtMs");
 	json_builder_add_int_value(builder, cache.fetched_at_ms);
@@ -1516,27 +1460,7 @@ void write_limits_cache(const std::string &path, const LimitsCache &cache) {
 	}
 	json_builder_end_array(builder);
 	json_builder_end_object(builder);
-	JsonNode *root = json_builder_get_root(builder);
-	char *text = json_to_string(root, false);
-	std::string tmp = (target.parent_path()
-		/ ("." + target.filename().string() + "."
-			+ std::to_string(getpid()) + ".tmp")).string();
-	FILE *f = std::fopen(tmp.c_str(), "w");
-	bool written = f != nullptr;
-	if (written) {
-		std::fwrite(text, 1, std::strlen(text), f);
-		std::fclose(f);
-	}
-	std::free(text);
-	json_node_free(root);
-	g_object_unref(builder);
-	if (written) {
-		std::filesystem::rename(tmp, target, ec);
-		if (!ec) {
-			return;
-		}
-	}
-	std::filesystem::remove(tmp, ec);
+	write_json_cache(path, builder);
 }
 
 std::vector<Limit> open_limits(const std::vector<Limit> &limits) {

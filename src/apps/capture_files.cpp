@@ -1,7 +1,5 @@
 #include "apps/capture_files.h"
 
-#include <sys/stat.h>
-
 #include <cstdlib>
 #include <ctime>
 
@@ -20,16 +18,6 @@ std::string user_dir(GUserDirectory which, const char *fallback) {
 		return dir;
 	}
 	return home_dir() + "/" + fallback;
-}
-
-void mkdir_p(const std::string &path) {
-	std::string built;
-	for (std::size_t i = 0; i < path.size(); i++) {
-		built += path[i];
-		if (path[i] == '/' || i + 1 == path.size()) {
-			mkdir(built.c_str(), 0755); // EEXIST is fine; the write reports the rest
-		}
-	}
 }
 
 std::string timestamp() {

@@ -16,32 +16,12 @@
 #include "apps/capture_ui.h"
 #include "core/config.h"
 #include "core/server.h"
+#include "core/text.h"
 #include "platform/output.h"
 #include "render/draw.h"
 #include "render/render.h"
 
 namespace {
-
-// A JSON string literal, for splicing names into a pick answer.
-std::string quote_json(const std::string &text) {
-	std::string out = "\"";
-	for (const char ch : text) {
-		switch (ch) {
-		case '"': out += "\\\""; break;
-		case '\\': out += "\\\\"; break;
-		case '\n': out += "\\n"; break;
-		case '\r': out += "\\r"; break;
-		case '\t': out += "\\t"; break;
-		default:
-			if (static_cast<unsigned char>(ch) < 0x20) {
-				out += std::format("\\u{:04x}", static_cast<unsigned char>(ch));
-			} else {
-				out += ch;
-			}
-		}
-	}
-	return out + "\"";
-}
 
 // One hollow rectangle of the capture overlay: four thin fills. The
 // horizontal edges carry the corners.
@@ -130,20 +110,21 @@ void CaptureUi::answer_ipc(const CapturePicker::Pick &pick) {
 		std::string name = pick.output->wlr->name;
 		server_.ipc.answer_pick(true, std::format(
 			R"({{"output":{},"x":{},"y":{},"w":{},"h":{}}})",
-			quote_json(name), pick.area.x, pick.area.y, pick.area.width,
+			text::json_quote(name), pick.area.x, pick.area.y, pick.area.width,
 			pick.area.height));
 		return;
 	}
 	case CapturePicker::Pick::Kind::window: {
 		const char *identifier = pick.view->ext_toplevel_identifier();
 		server_.ipc.answer_pick(true, std::format(R"({{"window":{},"identifier":{}}})",
-			pick.view->session_id, quote_json(identifier != nullptr ? identifier : "")));
+			pick.view->session_id,
+			text::json_quote(identifier != nullptr ? identifier : "")));
 		return;
 	}
 	case CapturePicker::Pick::Kind::output: {
 		std::string name = pick.output->wlr->name;
 		server_.ipc.answer_pick(true,
-			std::format(R"({{"output":{}}})", quote_json(name)));
+			std::format(R"({{"output":{}}})", text::json_quote(name)));
 		return;
 	}
 	}

@@ -16,6 +16,8 @@
 #include <unistd.h>
 
 #include "core/config.h"
+#include "core/fs.h"
+#include "core/text.h"
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "platform/session_bus.h"
@@ -115,51 +117,6 @@ std::string config_home() {
 	return {};
 }
 
-// Reads a whole file; empty when missing or unreadable, so every default
-// applies (docs/intents/input/config-file.md).
-std::string read_text_file(const std::string &path) {
-	std::FILE *file = std::fopen(path.c_str(), "rb");
-	if (file == nullptr) {
-		return {};
-	}
-	std::string text;
-	char chunk[4096];
-	std::size_t n = 0;
-	while ((n = std::fread(chunk, 1, sizeof chunk, file)) > 0) {
-		text.append(chunk, n);
-	}
-	std::fclose(file);
-	return text;
-}
-
-// Writes a whole file; false when it cannot.
-bool write_text_file(const std::string &path, const std::string &text) {
-	std::FILE *file = std::fopen(path.c_str(), "wb");
-	if (file == nullptr) {
-		return false;
-	}
-	bool ok = text.empty() || std::fwrite(text.data(), 1, text.size(), file) == text.size();
-	ok = std::fflush(file) == 0 && ok;
-	if (std::fclose(file) != 0) {
-		ok = false;
-	}
-	return ok;
-}
-
-// mkdir -p.
-void mkdir_p(const std::string &path) {
-	for (std::size_t slash = path.find('/'); ; slash = path.find('/', slash + 1)) {
-		std::string made = path.substr(0, slash == std::string::npos
-			? path.size() : slash);
-		if (!made.empty() && mkdir(made.c_str(), 0755) != 0 && errno != EEXIST) {
-			return; // the write that follows fails and is logged there
-		}
-		if (slash == std::string::npos) {
-			return;
-		}
-	}
-}
-
 // The gesture code's own options from the settings' own preset enum: the
 // settings library links no wlroots, so it carries its own (the values
 // match one for one).
@@ -180,20 +137,6 @@ GestureOptions gesture_options(const settings::Resolved &conf) {
 	options.overview_down = conf.overview_down;
 	options.hops_away = conf.hops_away;
 	return options;
-}
-
-// Single-quotes `text` for /bin/sh.
-std::string shell_quote(std::string_view text) {
-	std::string out = "'";
-	for (char c : text) {
-		if (c == '\'') {
-			out += "'\\''";
-		} else {
-			out += c;
-		}
-	}
-	out += '\'';
-	return out;
 }
 
 // Keeps the idle notifier inhibited while at least one inhibitor is alive;
@@ -277,7 +220,7 @@ void hand_back_session_bus(const session_bus::HandOver &hand_over) {
 	std::string set, unset;
 	auto add = [&set, &unset](const char *name, const std::optional<std::string> &value) {
 		if (value.has_value()) {
-			set += " " + shell_quote(std::format("{}={}", name, *value));
+			set += " " + text::shell_quote(std::format("{}={}", name, *value));
 			return;
 		}
 		unset += std::format(" {}", name);
@@ -609,8 +552,8 @@ bool Server::start() {
 	conf_path = config_home() + "/wayland-canvas/canvas.conf";
 	if (config_home().size() > 0) {
 		if (access(conf_path.c_str(), F_OK) != 0) {
-			mkdir_p(config_home() + "/wayland-canvas");
-			if (!write_text_file(conf_path, settings::template_text())) {
+			fs::mkdir_p(config_home() + "/wayland-canvas");
+			if (!fs::write_text_atomic(conf_path, settings::template_text())) {
 				wlr_log(WLR_ERROR, "could not write %s: the defaults apply",
 					conf_path.c_str());
 			}
@@ -677,13 +620,13 @@ void Server::start_bar() {
 			"no bar config beside the binary or at $WAYLAND_CANVAS_SHELL_DIR: no top bar");
 		return;
 	}
-	std::string cmd = "QML_IMPORT_PATH=" + shell_quote(*dir + "/ui")
+	std::string cmd = "QML_IMPORT_PATH=" + text::shell_quote(*dir + "/ui")
 		+ "${QML_IMPORT_PATH:+:$QML_IMPORT_PATH} " + config::bar_program
-		+ " -p " + shell_quote(*dir);
+		+ " -p " + text::shell_quote(*dir);
 	// The shell's helpers (its msg client among them) sit beside the
 	// compositor: its own directory comes first on the shell's PATH.
 	if (std::optional<std::string> self = self_dir()) {
-		cmd = "PATH=" + shell_quote(*self) + ":$PATH " + cmd;
+		cmd = "PATH=" + text::shell_quote(*self) + ":$PATH " + cmd;
 	}
 	spawn(cmd.c_str());
 }
@@ -694,7 +637,9 @@ void Server::start_bar() {
 // emits the settings event; later ones only when something changed, so
 // the watch's own echo of a write_conf is silent.
 void Server::load_conf(bool first) {
-	std::string text = read_text_file(conf_path);
+	// a missing or unreadable file reads as empty: every default applies
+	// (docs/intents/input/config-file.md)
+	std::string text = fs::read_text_file(conf_path).value_or("");
 	settings::Parsed parsed = settings::parse(text);
 	settings::Resolved resolved = settings::resolve(parsed);
 	bool changed = !first && !(resolved == conf);
@@ -729,12 +674,9 @@ void Server::load_conf(bool first) {
 // at once. False, logged, when the file cannot be written: the running
 // settings stay.
 bool Server::write_conf(const std::string &text) {
-	std::string tmp = conf_path + ".tmp-" + std::to_string(getpid());
-	if (!write_text_file(tmp, text)
-			|| rename(tmp.c_str(), conf_path.c_str()) != 0) {
+	if (!fs::write_text_atomic(conf_path, text)) {
 		wlr_log(WLR_ERROR, "could not write %s: the running settings stay",
 			conf_path.c_str());
-		unlink(tmp.c_str());
 		return false;
 	}
 	load_conf(false); // the settings event leaves with it; the watch echoes

@@ -13,6 +13,7 @@
 #include "apps/capture_geometry.h"
 #include "apps/clipboard_image.h"
 #include "apps/shot_thumbnail.h"
+#include "core/fs.h"
 #include "core/server.h"
 #include "platform/output.h"
 #include "render/capture.h"
@@ -55,7 +56,7 @@ void ShotTaker::take_shot(Output &output, const std::optional<wlr_box> &area, Vi
 		return;
 	}
 	std::string dir = user_dir(G_USER_DIRECTORY_PICTURES, "Pictures") + "/Screenshots";
-	mkdir_p(dir);
+	fs::mkdir_p(dir);
 	std::string path = std::format("{}/Screenshot {}.png", dir, timestamp());
 	for (int n = 2; access(path.c_str(), F_OK) == 0; n++) { // never overwrite
 		path = std::format("{}/Screenshot {} {}.png", dir, timestamp(), n);

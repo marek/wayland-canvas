@@ -1,10 +1,12 @@
+#include <algorithm>
 #include <climits>
-#include <cstdio>
-#include <cstring>
+#include <cstdlib>
 #include <unistd.h>
 #include <glib.h>
 #include <librsvg/rsvg.h>
 #include "apps/icons.h"
+#include "core/fs.h"
+#include "core/text.h"
 #include "core/theme_prefs.h"
 
 // Only these directory kinds matter here; per-theme data and the loaded
@@ -12,31 +14,7 @@
 
 namespace {
 
-constexpr char ascii_lower(char c) {
-	return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 'a' - 'A') : c;
-}
-
-constexpr bool ci_contains(std::string_view s, std::string_view needle) {
-	if (needle.empty() || s.size() < needle.size())
-		return false;
-	for (size_t i = 0; i + needle.size() <= s.size(); i++) {
-		size_t j = 0;
-		while (j < needle.size() && ascii_lower(s[i + j]) == ascii_lower(needle[j]))
-			j++;
-		if (j == needle.size())
-			return true;
-	}
-	return false;
-}
-
-constexpr bool ci_equal(std::string_view a, std::string_view b) {
-	if (a.size() != b.size())
-		return false;
-	for (size_t i = 0; i < a.size(); i++)
-		if (ascii_lower(a[i]) != ascii_lower(b[i]))
-			return false;
-	return true;
-}
+constexpr size_t max_ini_bytes = 1024 * 1024;
 
 std::string path_join(std::string_view a, std::string_view b) {
 	while (!a.empty() && a.back() == '/')
@@ -51,46 +29,24 @@ std::string path_join(std::string_view a, std::string_view b) {
 	return s;
 }
 
-// Strips surrounding whitespace and quotes (settings.ini values).
-void strip_quotes(std::string &s) {
-	while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '
-			|| s.back() == '\t' || s.back() == '\'' || s.back() == '"'))
-		s.pop_back();
-	size_t off = 0;
-	while (off < s.size() && (s[off] == ' ' || s[off] == '\t' || s[off] == '\''
-			|| s[off] == '"'))
-		off++;
-	s.erase(0, off);
-}
-
 // ---- theme detection (gsettings, then GTK settings.ini) ----
 
+// The icon theme name of a GTK settings.ini, without the quotes and spaces some tools
+// write around it.
 std::optional<std::string> theme_from_ini(const std::string &path) {
-	Handle<FILE, fclose> f{fopen(path.c_str(), "r")};
-	if (!f)
+	const std::optional<std::string> contents = fs::read_text_file(path, max_ini_bytes);
+	if (!contents)
 		return std::nullopt;
-	constexpr std::string_view key = "gtk-icon-theme-name";
-	char line[512];
-	while (fgets(line, sizeof(line), f.get())) {
-		char *s = line;
-		while (*s == ' ' || *s == '\t')
-			s++;
-		if (strncmp(s, key.data(), key.size()) != 0)
-			continue;
-		s += key.size();
-		while (*s == ' ' || *s == '\t')
-			s++;
-		if (*s != '=')
-			continue;
-		s++;
-		while (*s == ' ' || *s == '\t')
-			s++;
-		std::string val = s;
-		strip_quotes(val);
-		if (!val.empty())
-			return val;
-	}
-	return std::nullopt;
+	const text::Ini ini = text::parse_ini(*contents);
+	const text::IniGroup *settings = ini.group("Settings");
+	const std::string *value = settings ? settings->get("gtk-icon-theme-name") : nullptr;
+	if (!value)
+		return std::nullopt;
+	constexpr std::string_view skipped = " \t'\"";
+	const size_t first = value->find_first_not_of(skipped);
+	if (first == std::string::npos)
+		return std::nullopt;
+	return value->substr(first, value->find_last_not_of(skipped) - first + 1);
 }
 
 std::optional<std::string> detect_theme() {
@@ -115,13 +71,9 @@ std::optional<std::string> detect_theme() {
 
 // ---- index.theme parsing ----
 
-int kf_int(GKeyFile *kf, const char *group, const char *key, int def) {
-	GError *raw = nullptr;
-	gint v = g_key_file_get_integer(kf, group, key, &raw);
-	Handle<GError, g_error_free> err{raw};
-	if (raw)
-		return def;
-	return static_cast<int>(v);
+std::optional<int> group_int(const text::IniGroup &group, std::string_view key) {
+	const std::string *value = group.get(key);
+	return value ? text::parse_int(*value) : std::nullopt;
 }
 
 // ---- loading ----
@@ -177,9 +129,9 @@ CairoSurfacePtr load_file_icon(std::string_view path, int size) {
 	size_t dot = path.rfind('.');
 	if (dot != std::string_view::npos) {
 		std::string_view suffix = path.substr(dot);
-		if (ci_equal(suffix, ".svg"))
+		if (text::ci_equal(suffix, ".svg"))
 			return load_svg(path, size);
-		if (ci_equal(suffix, ".png"))
+		if (text::ci_equal(suffix, ".png"))
 			return load_png(path, size);
 	}
 	if (CairoSurfacePtr s = load_png(path, size))
@@ -231,35 +183,32 @@ void Icons::ensure_base_dirs() {
 	}
 }
 
-void Icons::add_icon_dir(Theme &th, GKeyFile *kf, const char *dir) {
-	GError *raw = nullptr;
-	gint size = g_key_file_get_integer(kf, dir, "Size", &raw);
-	Handle<GError, g_error_free> err{raw};
-	if (raw)
+void Icons::add_icon_dir(Theme &th, const text::Ini &ini, const std::string &dir) {
+	const text::IniGroup *group = ini.group(dir);
+	if (!group)
+		return;
+	const std::optional<int> size = group_int(*group, "Size");
+	if (!size)
 		return; // Size is required by the spec
 
 	Dir d;
-	d.size = static_cast<int>(size);
-	d.scale = kf_int(kf, dir, "Scale", 1);
-	if (d.scale < 1)
-		d.scale = 1;
-	d.min_size = kf_int(kf, dir, "MinSize", d.size);
-	d.max_size = kf_int(kf, dir, "MaxSize", d.size);
-	d.threshold = kf_int(kf, dir, "Threshold", 2);
-	if (d.threshold < 0)
-		d.threshold = 0;
+	d.size = *size;
+	d.scale = std::max(group_int(*group, "Scale").value_or(1), 1);
+	d.min_size = group_int(*group, "MinSize").value_or(d.size);
+	d.max_size = group_int(*group, "MaxSize").value_or(d.size);
+	d.threshold = std::max(group_int(*group, "Threshold").value_or(2), 0);
 
-	Handle<gchar, g_free> type{g_key_file_get_string(kf, dir, "Type", nullptr)};
-	if (type && ci_equal(type.get(), "Fixed"))
+	const std::string *type = group->get("Type");
+	if (type && text::ci_equal(*type, "Fixed"))
 		d.type = DirType::fixed;
-	else if (type && ci_equal(type.get(), "Scalable"))
+	else if (type && text::ci_equal(*type, "Scalable"))
 		d.type = DirType::scalable;
 	else
 		d.type = DirType::threshold;
 
-	Handle<gchar, g_free> ctx{g_key_file_get_string(kf, dir, "Context", nullptr)};
-	d.apps = (ctx && ci_equal(ctx.get(), "Applications"))
-		|| ci_contains(dir, "apps");
+	const std::string *ctx = group->get("Context");
+	d.apps = (ctx && text::ci_equal(*ctx, "Applications"))
+		|| text::ci_contains(dir, "apps");
 
 	d.name = dir;
 	th.dirs.push_back(std::move(d));
@@ -275,33 +224,25 @@ void Icons::load_theme_index(Theme &th) {
 	ensure_base_dirs();
 	for (const std::string &base : base_dirs_) {
 		std::string idx = path_join(path_join(base, th.name), "index.theme");
-		Handle<GKeyFile, g_key_file_free> kf{g_key_file_new()};
+		const std::optional<std::string> contents = fs::read_text_file(idx, max_ini_bytes);
+		if (!contents)
+			continue;
+		const text::Ini ini = text::parse_ini(*contents);
 		// index.theme lists (Inherits, Directories) are comma-separated.
-		g_key_file_set_list_separator(kf.get(), ',');
-		GError *raw = nullptr;
-		if (g_key_file_load_from_file(kf.get(), idx.c_str(), G_KEY_FILE_NONE, &raw)) {
-			Handle<GError, g_error_free> err{raw};
-			if (gchar **inh = g_key_file_get_string_list(kf.get(), "Icon Theme",
-					"Inherits", nullptr, nullptr)) {
-				for (gchar **i = inh; *i; i++)
-					add_inherit(th, *i);
-				g_strfreev(inh);
+		if (const text::IniGroup *group = ini.group("Icon Theme")) {
+			if (const std::string *inherits = group->get("Inherits")) {
+				for (const std::string &name : text::split_list(*inherits, ','))
+					add_inherit(th, name);
 			}
-			if (gchar **dirs = g_key_file_get_string_list(kf.get(), "Icon Theme",
-					"Directories", nullptr, nullptr)) {
-				for (gchar **i = dirs; *i; i++)
-					add_icon_dir(th, kf.get(), *i);
-				g_strfreev(dirs);
+			for (const char *key : {"Directories", "ScaledDirectories"}) {
+				const std::string *list = group->get(key);
+				if (!list)
+					continue;
+				for (const std::string &dir : text::split_list(*list, ','))
+					add_icon_dir(th, ini, dir);
 			}
-			if (gchar **sdirs = g_key_file_get_string_list(kf.get(), "Icon Theme",
-					"ScaledDirectories", nullptr, nullptr)) {
-				for (gchar **i = sdirs; *i; i++)
-					add_icon_dir(th, kf.get(), *i);
-				g_strfreev(sdirs);
-			}
-			return; // first index.theme found wins
 		}
-		Handle<GError, g_error_free> err{raw};
+		return; // first index.theme found wins
 	}
 }
 
@@ -415,8 +356,8 @@ CairoSurfacePtr Icons::load_icon(std::string_view icon, int size) {
 	size_t dot = icon.rfind('.');
 	if (dot != std::string_view::npos) {
 		std::string_view suffix = icon.substr(dot);
-		if (ci_equal(suffix, ".png") || ci_equal(suffix, ".svg")
-				|| ci_equal(suffix, ".xpm")) {
+		if (text::ci_equal(suffix, ".png") || text::ci_equal(suffix, ".svg")
+				|| text::ci_equal(suffix, ".xpm")) {
 			size_t n = std::min(dot, size_t{511});
 			name_buf = icon.substr(0, n);
 			if (name_buf.empty())

@@ -27,6 +27,9 @@
 #include <unistd.h>
 #include <vector>
 
+#include "core/fs.h"
+#include "core/json.h"
+
 namespace {
 
 using namespace agent_usage;
@@ -39,18 +42,6 @@ constexpr const char *codex_auth_help =
 // flick; a fresh answer is reused for this long.
 constexpr int probe_reuse_seconds = 15;
 
-// A JsonParser held by unique_ptr: json-glib parsers are GObjects.
-struct ParserDelete {
-	void operator()(JsonParser *parser) const {
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-	}
-};
-
-using ParserPtr = std::unique_ptr<JsonParser, ParserDelete>;
-
-
 std::string home_path(const char *variable, const char *relative) {
 	const char *value = variable != nullptr ? std::getenv(variable) : nullptr;
 	if (value != nullptr && *value != '\0') {
@@ -61,21 +52,6 @@ std::string home_path(const char *variable, const char *relative) {
 		return relative + 1; // no HOME: a relative best-effort path
 	}
 	return std::string{home} + "/" + relative;
-}
-
-std::string read_text_file(const std::string &path) {
-	std::FILE *f = std::fopen(path.c_str(), "r");
-	if (f == nullptr) {
-		return {};
-	}
-	std::string out;
-	char buf[4096];
-	std::size_t n = 0;
-	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
-		out.append(buf, n);
-	}
-	std::fclose(f);
-	return out;
 }
 
 // A forked child: its stdout comes back on one pipe, its stdin is fed
@@ -174,20 +150,13 @@ struct Credentials {
 // of it, and only the plan label reaches the printed record.
 Credentials claude_credentials(const std::string &claude_dir) {
 	Credentials out;
-	ParserPtr parser(json_parser_new());
-	std::string raw = read_text_file(claude_dir + "/.credentials.json");
-	if (raw.empty() || !json_parser_load_from_data(parser.get(), raw.c_str(),
-		    static_cast<gssize>(raw.size()), nullptr)) {
+	JsonParserPtr parser = fs::read_json_file(claude_dir + "/.credentials.json");
+	JsonObject *root = root_object(parser);
+	if (root == nullptr) {
 		return out;
 	}
-	JsonNode *root = json_parser_get_root(parser.get());
-	if (json_node_get_node_type(root) != JSON_NODE_OBJECT) {
-		return out;
-	}
-	JsonObject *login = json_object_has_member(json_node_get_object(root),
-		"claudeAiOauth")
-		? json_object_get_object_member(json_node_get_object(root),
-			"claudeAiOauth")
+	JsonObject *login = json_object_has_member(root, "claudeAiOauth")
+		? json_object_get_object_member(root, "claudeAiOauth")
 		: nullptr;
 	if (login == nullptr) {
 		return out;
@@ -334,17 +303,9 @@ std::string rpc_line(int fd, int id, int timeout_s) {
 // A response line that carries an error member: the app-server's refusal,
 // which for these reads is the not-signed-in answer.
 bool rpc_is_error(const std::string &line) {
-	if (line.empty()) {
-		return false;
-	}
-	ParserPtr parser(json_parser_new());
-	if (!json_parser_load_from_data(parser.get(), line.c_str(),
-		    static_cast<gssize>(line.size()), nullptr)) {
-		return false;
-	}
-	JsonNode *root = json_parser_get_root(parser.get());
-	return json_node_get_node_type(root) == JSON_NODE_OBJECT
-		&& json_object_has_member(json_node_get_object(root), "error");
+	JsonParserPtr parser = parse_json(line);
+	JsonObject *root = root_object(parser);
+	return root != nullptr && json_object_has_member(root, "error");
 }
 
 ProviderLimits codex_limits() {

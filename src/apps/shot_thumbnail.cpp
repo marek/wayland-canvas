@@ -6,22 +6,10 @@
 
 #include "core/config.h"
 #include "core/server.h"
+#include "core/text.h"
 #include "core/theme.h"
 #include "platform/output.h"
 #include "render/draw.h"
-
-namespace {
-
-// Single-quotes `text` for /bin/sh.
-std::string shell_quote(const std::string &text) {
-	std::string out = "'";
-	for (const char ch : text) {
-		out += ch == '\'' ? "'\\''" : std::string(1, ch);
-	}
-	return out + "'";
-}
-
-} // namespace
 
 ShotThumbnail::ShotThumbnail(Server &server) : server_(server) {
 }
@@ -125,7 +113,7 @@ bool ShotThumbnail::pointer_button(Output &output, double ox, double oy, uint32_
 	}
 	pressed_ = false;
 	if (inside) {
-		spawn((std::string{"xdg-open "} + shell_quote(path_)).c_str());
+		spawn((std::string{"xdg-open "} + text::shell_quote(path_)).c_str());
 	}
 	return true;
 }
