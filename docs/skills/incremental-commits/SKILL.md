@@ -36,8 +36,9 @@ edited.
 2. **Intent** — the `docs/intents/` change that states the target
    end-state, committed before or with the code it governs, never as an
    afterthought.
-3. **Code and tests** — one commit for the phase once `tools/check.sh`
-   passes, plus the venue the change calls for (a nested or TTY run for
+3. **Code and tests** — one commit for the phase once the tests that
+   cover it pass (the `verification` skill; `tools/check.sh` runs once
+   per batch of work), plus the venue the change calls for (a nested or TTY run for
    anything drawn or felt). The habit in this repo is big single
    commits; do not slice a phase into a trail of small ones, and do not
    commit a phase that has not been run. A mechanical change that is

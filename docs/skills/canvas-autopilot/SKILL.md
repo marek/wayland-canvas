@@ -46,7 +46,8 @@ on, not a standing state.
 3. Do the work, in the role that fits (`docs/roles/`). wlroots'
    `tinywl` and `wlr_scene` are the reference for protocol handling;
    Windows 11 for the title bars and the launcher.
-4. Verify (the `verification` skill): `tools/check.sh`, plus a nested
+4. Verify (the `verification` skill): the tests that cover the change,
+   `tools/check.sh` at the end of each batch, plus a nested
    or TTY run as the change calls for. Nothing temporary left in the
    tree; no compositor or client process left running.
 5. Commit (the `incremental-commits` skill): source, tests and docs as

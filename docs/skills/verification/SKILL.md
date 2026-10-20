@@ -45,12 +45,17 @@ What each kind of change needs:
 
 | Change | Minimum |
 |---|---|
-| Any code | `tools/check.sh`, and `tools/package.sh` before the work is called warning-free |
+| Any code | The build, plus the unit tests and the scenarios that cover the files changed (`meson test -C build <name>`); `tools/check.sh` once per batch of work, before a push, a pause or a merge; `tools/package.sh` before the work is called warning-free |
 | Input, gestures, canvas, overview, window management, launcher | + the scenarios that cover it |
 | Protocols, anything a client depends on | + a scenario with a real client (foot, grim) |
 | Rendering, title bars, the overview UI | + an on-screen run and a look |
-| A restructuring | `tools/check.sh`; behaviour must not change |
+| A restructuring | The suites that cover the moved code; behaviour must not change |
+| Ownership, lifetimes, buffers | + `tools/check.sh --sanitize` |
 | Dependencies, build options, `meson.build`, `packaging/` | + `tools/package.sh` |
+
+A run is repeated only when something it covers changed since it last
+passed: a full suite run after a commit that touched one area proves
+nothing the area's own tests did not.
 
 Every run is read whole: its log stays in `tmp/` until it has been read,
 and an exit code or a `grep -c warning:` is not a reading — a configure

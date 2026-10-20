@@ -77,8 +77,12 @@ Each split adds its new subsystems to cpp-standards.md's
   it by the names given.
 - Commits:
   - Each source phase lands in one or more commits. Each commit is made
-    once `tools/check.sh` passes and ticks the boxes it finishes (the
-    `incremental-commits` skill).
+    once the unit tests and scenarios that cover what it changed pass,
+    plus `tools/check.sh --sanitize` when it changes ownership, lifetimes
+    or buffers, and it ticks the boxes it finishes (the
+    `incremental-commits` and `verification` skills).
+  - `tools/check.sh` runs once per batch: on main, after a batch of
+    branches has merged and before a pause or a push.
   - A split is its own commit.
   - A box whose on-screen check is still owed stays open, marked
     "(on screen owed)".

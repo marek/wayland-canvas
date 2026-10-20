@@ -34,7 +34,7 @@ and code agreeing with each other.
 - Checks `tinywl` and the `wlr_scene` code in the subproject before
   writing protocol handling, and reads the wlroots headers to verify
   every API called.
-- Runs the venues the change needs (`tools/check.sh`, plus a nested or
+- Runs the venues the change needs (the tests that cover it, `tools/check.sh` once per batch, plus a nested or
   TTY run for anything drawn) and looks at the result.
 - Commits once the phase is proven; ticks the plan box.
 
