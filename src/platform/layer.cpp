@@ -344,8 +344,7 @@ void Output::arrange_layers() {
 	}
 
 	this->usable = usable;
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 }
 
 // A surface a plugin put on the plane, under an output-local point, the

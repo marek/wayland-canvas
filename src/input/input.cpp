@@ -37,15 +37,27 @@ uint32_t seat_modifiers(Server &server) {
 	return wlr_keyboard_get_modifiers(keyboard) & binding_mods;
 }
 
+// The bit `button` holds in the buttons pressed and forwarded to a client.
+uint32_t button_bit(uint32_t button) {
+	return 1u << (button & 31);
+}
+
+// How many surface-local px one output px is on a surface: one on the plane
+// is measured in canvas px, at the output's zoom; any other is at 1.
+double surface_scale(const Output &output, const View *view,
+		const LayerSurface *layer) {
+	bool on_plane = view != nullptr
+		|| (layer != nullptr && layer->canvas_box.has_value());
+	return on_plane ? 1.0 / output.camera.drawn().zoom : 1.0;
+}
+
 // Hover bookkeeping without extra server state: clear every view's hover
 // except the one under the pointer. Returns true when anything changed.
 bool set_view_hover(Server &server, View *hover, DecoPart part) {
 	bool changed = false;
 	for (View *view : server.views) {
 		DecoPart want = view == hover ? part : DecoPart::none;
-		if (view->deco.hover != want) {
-			view->deco.hover = want;
-			view->damage();
+		if (view->deco.set_hover(want)) {
 			changed = true;
 		}
 	}
@@ -763,6 +775,18 @@ std::optional<CanvasPos> Input::cursor_canvas_pos() const {
 	return CanvasPos{.output = output, .cx = p.x, .cy = p.y};
 }
 
+Desktop *Input::desktop_under_cursor(const Output &output) const {
+	std::optional<CanvasPos> pos = cursor_canvas_pos();
+	if (!pos.has_value() || pos->output != &output) {
+		return nullptr;
+	}
+	return server_.canvas.desktops.at(pos->cx, pos->cy);
+}
+
+bool Input::super_held() const {
+	return (seat_modifiers(server_) & WLR_MODIFIER_LOGO) != 0;
+}
+
 void Input::forget(const View &view) {
 	if (last_title_view == &view) {
 		last_title_view = nullptr;
@@ -913,7 +937,7 @@ void Input::forward_press(uint32_t time, uint32_t button, wlr_surface *surface,
 		held_destroy_.disconnect();
 		held_destroy_.connect<&Input::handle_held_destroy>(surface->events.destroy, this);
 	}
-	pressed_buttons_ |= 1u << (button & 31);
+	pressed_buttons_ |= button_bit(button);
 	// The press goes where it landed, though no motion entered it there.
 	wlr_seat_pointer_notify_enter(server_.seat, surface, sx, sy);
 	wlr_seat_pointer_notify_button(server_.seat, time, button,
@@ -953,7 +977,7 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	other_input();
 	if (server.lock.locked()) {
 		if (server.seat->pointer_state.focused_surface != nullptr) {
-			pressed_buttons_ |= 1u << (button & 31);
+			pressed_buttons_ |= button_bit(button);
 			wlr_seat_pointer_notify_button(server.seat, time, button,
 				WL_POINTER_BUTTON_STATE_PRESSED);
 		}
@@ -964,7 +988,7 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	}
 	if (pressed_buttons_ != 0 && held_.surface != nullptr) {
 		// Every button goes where the first held one went, until all are up.
-		pressed_buttons_ |= 1u << (button & 31);
+		pressed_buttons_ |= button_bit(button);
 		wlr_seat_pointer_notify_button(server.seat, time, button,
 			WL_POINTER_BUTTON_STATE_PRESSED);
 		return;
@@ -982,17 +1006,15 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 	if (!output->interactive()) {
 		if (std::optional<LayerHit> shell = shell_surface_at(server, *output)) {
 			focus_layer_on_click(server, *shell->layer, shell->surface);
-			// A surface on the plane is measured in canvas px, at the zoom.
-			double scale = shell->layer->canvas_box.has_value()
-				? 1.0 / output->camera.drawn().zoom : 1.0;
-			forward_press(time, button, shell->surface, shell->sx, shell->sy, scale);
+			forward_press(time, button, shell->surface, shell->sx, shell->sy,
+				surface_scale(*output, nullptr, shell->layer));
 			return;
 		}
 		overview_press(*output, time, button);
 		return;
 	}
 
-	bool super = seat_modifiers(server) & WLR_MODIFIER_LOGO;
+	bool super = super_held();
 	PointerHit hit = pointer_hit_test(server, *output);
 
 
@@ -1015,10 +1037,8 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 		} else if (hit.layer != nullptr) {
 			focus_layer_on_click(server, *hit.layer, hit.surface);
 		}
-		bool on_plane = hit.view != nullptr
-			|| (hit.layer != nullptr && hit.layer->canvas_box.has_value());
 		forward_press(time, button, hit.surface, hit.sx, hit.sy,
-			on_plane ? 1.0 / output->camera.drawn().zoom : 1.0);
+			surface_scale(*output, hit.view, hit.layer));
 		return;
 	}
 
@@ -1068,7 +1088,7 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 
 void Input::cursor_button_release(uint32_t time, uint32_t button) {
 	if (server_.lock.locked()) {
-		uint32_t bit = 1u << (button & 31);
+		uint32_t bit = button_bit(button);
 		if (pressed_buttons_ & bit) {
 			pressed_buttons_ &= ~bit;
 			wlr_seat_pointer_notify_button(server_.seat, time, button,
@@ -1078,7 +1098,7 @@ void Input::cursor_button_release(uint32_t time, uint32_t button) {
 	}
 	// A release whose press reached a client reaches it too, also when the
 	// client handed the drag that followed to the compositor.
-	uint32_t bit = 1u << (button & 31);
+	uint32_t bit = button_bit(button);
 	bool forwarded = (pressed_buttons_ & bit) != 0;
 	if (forwarded) {
 		pressed_buttons_ &= ~bit;
@@ -1130,7 +1150,6 @@ std::optional<Input::ContactHit> Input::client_at(double lx, double ly) {
 	if (layer_at(*output, ox, oy) != nullptr) {
 		return std::nullopt;
 	}
-	double zoom = output->camera.drawn().zoom;
 	if (!output->interactive()) {
 		// The overview and a transition: shell surfaces only.
 		std::optional<LayerHit> shell = shell_surface_at(server, *output, ox, oy);
@@ -1138,17 +1157,16 @@ std::optional<Input::ContactHit> Input::client_at(double lx, double ly) {
 			return std::nullopt;
 		}
 		return ContactHit{.surface = shell->surface, .sx = shell->sx, .sy = shell->sy,
-			.scale = shell->layer->canvas_box.has_value() ? 1.0 / zoom : 1.0,
+			.scale = surface_scale(*output, nullptr, shell->layer),
 			.layer = shell->layer};
 	}
 	PointerHit hit = pointer_hit_test(server, *output, ox, oy);
 	if (hit.surface == nullptr) {
 		return std::nullopt;
 	}
-	bool on_plane = hit.view != nullptr
-		|| (hit.layer != nullptr && hit.layer->canvas_box.has_value());
 	return ContactHit{.surface = hit.surface, .sx = hit.sx, .sy = hit.sy,
-		.scale = on_plane ? 1.0 / zoom : 1.0, .view = hit.view, .layer = hit.layer};
+		.scale = surface_scale(*output, hit.view, hit.layer), .view = hit.view,
+		.layer = hit.layer};
 }
 
 bool Input::canvas_at(double lx, double ly) {
@@ -1404,7 +1422,7 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	// wherever the pointer is, and no client sees the scroll. The screen
 	// moves by the scrolled distance whatever the zoom, the way the pan
 	// switch says.
-	if (!output->overview.active() && (seat_modifiers(server) & WLR_MODIFIER_LOGO) != 0) {
+	if (!output->overview.active() && super_held()) {
 		if (event->delta != 0) {
 			double delta = pan_delta(server, *event);
 			bool vertical = event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL;

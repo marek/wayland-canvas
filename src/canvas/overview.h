@@ -55,6 +55,10 @@ public:
 	void pin_target(); // the target spot becomes a desktop
 
 private:
+	// The target the overview opens on and goes back to: the desktop the
+	// output shows, else the screen-sized spot `home_` looks at.
+	void reset_target();
+
 	Output &output_;
 	bool active_ = false;
 	Camera home_;

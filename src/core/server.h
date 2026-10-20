@@ -61,6 +61,12 @@ public:
 	// does; `normal_view` leaves out the outputs showing the overview.
 	enum class Showing { viewport, normal_view };
 	Output *output_showing(double cx, double cy, Showing which = Showing::viewport);
+	// Which outputs show which window may have changed; the next
+	// update_visibility() works them out again. View::visibility_changed and
+	// Output::visibility_changed pair this with the repaint.
+	void visibility_changed() { visibility_dirty_ = true; }
+	// Works every window's outputs out again when visibility_changed() said
+	// they may differ.
 	void update_visibility();
 
 	// server.cpp: switches the palette, repaints, tells the subscribers.
@@ -151,7 +157,6 @@ public:
 	View *focused_view = nullptr;
 	LayerSurface *focused_layer = nullptr; // keyboard-interactive layer surface
 	uint64_t minimize_counter = 0;
-	bool visibility_dirty = false;
 	// A window list subscribers have not been told about yet: opened, closed,
 	// moved, retitled, minimized or focused. Flushed once per frame, and only
 	// when the list really reads differently (docs/intents/shell/app-bar.md).
@@ -208,6 +213,7 @@ private:
 	void handle_new_output(wlr_output *wlr);
 	void handle_layout_change();
 	Listener new_output_, layout_change_;
+	bool visibility_dirty_ = false; // see visibility_changed()
 
 	// view.cpp
 	void finish_views();

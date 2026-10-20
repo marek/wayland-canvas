@@ -520,6 +520,17 @@ constexpr std::array vt_keys = {
 	VtBind{settings::mod_ctrl | settings::mod_alt, XKB_KEY_F12, 12},
 };
 
+// Runs the VT switch that sym with mods names. True when there was one.
+bool run_vt(Server &server, Output *output, xkb_keysym_t sym, uint32_t mods) {
+	for (const VtBind &vt : vt_keys) {
+		if (vt.keysym == sym && vt.mods == mods) {
+			act_vt(server, output, vt.vt);
+			return true;
+		}
+	}
+	return false;
+}
+
 } // namespace
 
 Bindings::Bindings(Server &server)
@@ -630,29 +641,18 @@ bool Bindings::handle(xkb_keysym_t sym, uint32_t mods, Output *output) {
 	if (handle_everywhere(sym, mods, output)) {
 		return true;
 	}
-	sym = xkb_keysym_to_lower(sym);
 	// The fixed VT switching: no chord can take it.
-	for (const VtBind &vt : vt_keys) {
-		if (vt.keysym == sym && vt.mods == mods) {
-			act_vt(server_, output, vt.vt);
-			return true;
-		}
+	if (run_vt(server_, output, sym, mods)) {
+		return true;
 	}
 	return run_found(global_, sym, mods, output)
 		|| run_found(commands_, sym, mods, output);
 }
 
 bool Bindings::handle_locked(xkb_keysym_t sym, uint32_t mods, Output *output) {
-	sym = xkb_keysym_to_lower(sym);
 	// Only the way out of a stuck session; every other chord belongs to the
 	// locker while the session is locked.
-	for (const VtBind &vt : vt_keys) {
-		if (vt.keysym == sym && vt.mods == mods) {
-			act_vt(server_, output, vt.vt);
-			return true;
-		}
-	}
-	return false;
+	return run_vt(server_, output, sym, mods);
 }
 
 bool Bindings::handle_everywhere(xkb_keysym_t sym, uint32_t mods, Output *output) {

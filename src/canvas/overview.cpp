@@ -69,6 +69,17 @@ Camera Overview::camera_for(const Camera &home) const {
 	};
 }
 
+void Overview::reset_target() {
+	if (Desktop *desktop = output_.desktop_showing()) {
+		target_ = OverviewTarget{.box = desktop->frame(), .desktop = desktop->id()};
+		return;
+	}
+	target_ = OverviewTarget{
+		.box = box_rounded(home_.viewport(output_.width, output_.height)),
+		.desktop = std::nullopt,
+	};
+}
+
 Camera Overview::prepare() {
 	output_.camera.stop();
 	Camera home = output_.camera.current();
@@ -76,14 +87,7 @@ Camera Overview::prepare() {
 	// scale, or 1 in a free view.
 	home.zoom = output_.resting_zoom();
 	home_ = home;
-	if (Desktop *desktop = output_.desktop_showing()) {
-		target_ = OverviewTarget{.box = desktop->frame(), .desktop = desktop->id()};
-	} else {
-		target_ = OverviewTarget{
-			.box = box_rounded(home.viewport(output_.width, output_.height)),
-			.desktop = std::nullopt,
-		};
-	}
+	reset_target();
 	Camera far = camera_for(home);
 	zoom_ = far.zoom;
 	return far;
@@ -145,14 +149,7 @@ void Overview::cancel() {
 	if (!active_) {
 		return;
 	}
-	if (Desktop *desktop = output_.desktop_showing()) {
-		target_ = OverviewTarget{.box = desktop->frame(), .desktop = desktop->id()};
-	} else {
-		target_ = OverviewTarget{
-			.box = box_rounded(home_.viewport(output_.width, output_.height)),
-			.desktop = std::nullopt,
-		};
-	}
+	reset_target();
 	finish_exit(home_, output_.camera.current(), 1);
 }
 

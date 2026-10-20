@@ -4,27 +4,14 @@
 
 #include "core/config.h"
 #include "canvas/desktop.h"
-#include "platform/output.h"
 #include "core/server.h"
+#include "core/util.h"
+#include "platform/output.h"
 
 namespace {
 
 // Travel (touchpad units) before a pending gesture is classified.
 constexpr double decide_threshold = 12.0;
-
-template <typename... Ts>
-struct overloaded : Ts... {
-	using Ts::operator()...;
-};
-template <typename... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
-
-// Super held right now (the same query seat_modifiers makes for buttons).
-bool super_held(Server &server) {
-	wlr_keyboard *keyboard = wlr_seat_get_keyboard(server.seat);
-	return keyboard != nullptr
-		&& (wlr_keyboard_get_modifiers(keyboard) & WLR_MODIFIER_LOGO) != 0;
-}
 
 // The finger counts a preset binds: `hop` hops in either mode, `overview`
 // opens the overview and steers it. The `off` preset binds none.
@@ -74,16 +61,11 @@ const GestureOptions &Gestures::options() const {
 	return options_;
 }
 
-std::optional<DesktopId> Gestures::desktop_under(Output &out) {
-	if (std::optional<CanvasPos> pos = server_.input.cursor_canvas_pos()) {
-		if (Desktop *desktop = server_.canvas.desktops.at(pos->cx, pos->cy)) {
-			return desktop->id();
-		}
+Desktop *Gestures::desktop_under(Output &out) {
+	if (Desktop *desktop = server_.input.desktop_under_cursor(out)) {
+		return desktop;
 	}
-	if (Desktop *target = server_.canvas.desktops.find(out.overview.target().desktop)) {
-		return target->id();
-	}
-	return std::nullopt;
+	return server_.canvas.desktops.find(out.overview.target().desktop);
 }
 
 const Gestures::State &Gestures::state() const {
@@ -170,12 +152,12 @@ void Gestures::decide(Pending &pending) {
 		state_ = ZoomFurther{o, o->camera.current().zoom, oy, 0};
 		return;
 	}
-	std::optional<DesktopId> d = desktop_under(*o);
-	if (!d.has_value()) {
+	Desktop *desktop = desktop_under(*o);
+	if (desktop == nullptr) {
 		state_ = Ignored{};
 		return;
 	}
-	state_ = Abandon{o, *d, 0};
+	state_ = Abandon{o, desktop->id(), 0};
 }
 
 void Gestures::swipe_begin(uint32_t time, uint32_t fingers) {
@@ -355,7 +337,7 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 }
 
 void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
-	pinch_begin(time, fingers, super_held(server_));
+	pinch_begin(time, fingers, server_.input.super_held());
 }
 
 void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
@@ -375,20 +357,10 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
 		bool overview = out->overview.active();
 		Desktop *desktop = nullptr;
 		if (overview) {
-			// The desktop under the cursor, else the target.
-			if (std::optional<CanvasPos> pos = server_.input.cursor_canvas_pos();
-					pos.has_value() && pos->output == out) {
-				desktop = server_.canvas.desktops.at(pos->cx, pos->cy);
-			}
+			desktop = desktop_under(*out);
 			if (desktop == nullptr) {
-				if (Desktop *target =
-						server_.canvas.desktops.find(out->overview.target().desktop);
-						target != nullptr) {
-					desktop = target;
-				} else {
-					out->overview.pin_target();
-					desktop = server_.canvas.desktops.find(out->overview.target().desktop);
-				}
+				out->overview.pin_target();
+				desktop = server_.canvas.desktops.find(out->overview.target().desktop);
 			}
 		} else {
 			desktop = out->desktop_showing();
@@ -420,7 +392,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
 		}
 		if (fingers == counts.hop) {
 			// A null target is allowed: tile then acts on the target box.
-			state_ = Pinch{out, desktop_under(*out), std::nullopt, 1, {}};
+			state_ = Pinch{out, id_of(desktop_under(*out)), std::nullopt, 1, {}};
 			return;
 		}
 		if (fingers == counts.overview

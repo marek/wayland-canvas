@@ -17,13 +17,6 @@
 
 namespace {
 
-template <typename... Ts>
-struct overloaded : Ts... {
-	using Ts::operator()...;
-};
-template <typename... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
-
 // The view an overview press landed on, when it landed on one.
 View *press_view(const PressTarget &target) {
 	if (const auto *on_view = std::get_if<PressOnView>(&target)) {
@@ -61,6 +54,11 @@ void overview_target_view(Server &server, Output &output, View &view) {
 	}
 }
 
+// The cursor where it is now, measured against `cam`.
+GrabAnchor cursor_anchor(Server &server, const Camera &cam) {
+	return GrabAnchor{cam, server.cursor->x, server.cursor->y};
+}
+
 } // namespace
 
 PointerGrab::PointerGrab(Server &server)
@@ -81,9 +79,7 @@ void PointerGrab::begin_move(View &view, Output &output) {
 	Move move{
 		.view = &view,
 		.output = &output,
-		.cam = output.camera.drawn(),
-		.lx = server_.cursor->x,
-		.ly = server_.cursor->y,
+		.anchor = cursor_anchor(server_, output.camera.drawn()),
 		.start = view.content_box(),
 		.moved = false,
 	};
@@ -107,9 +103,7 @@ void PointerGrab::begin_resize(View &view, Output &output, uint32_t edges) {
 	state_ = Resize{
 		.view = &view,
 		.output = &output,
-		.cam = output.camera.drawn(),
-		.lx = server_.cursor->x,
-		.ly = server_.cursor->y,
+		.anchor = cursor_anchor(server_, output.camera.drawn()),
 		.start = start,
 		.edges = edges,
 	};
@@ -121,25 +115,20 @@ void PointerGrab::begin_resize(View &view, Output &output, uint32_t edges) {
 void PointerGrab::begin_pan(Output &output) {
 	state_ = Pan{
 		.output = &output,
-		.cam = output.camera.drawn(),
-		.lx = server_.cursor->x,
-		.ly = server_.cursor->y,
+		.anchor = cursor_anchor(server_, output.camera.drawn()),
 	};
 }
 
 void PointerGrab::begin_title_button(View &view, Output &output,
 		DecoPart part) {
 	state_ = TitleButton{.view = &view, .output = &output, .part = part};
-	view.deco.pressed = part;
-	view.damage();
+	view.deco.set_pressed(part);
 }
 
 void PointerGrab::begin_overview_press(Output &output, PressTarget target) {
 	state_ = OverviewPress{
 		.output = &output,
-		.cam = output.camera.drawn(),
-		.lx = server_.cursor->x,
-		.ly = server_.cursor->y,
+		.anchor = cursor_anchor(server_, output.camera.drawn()),
 		.target = target,
 	};
 }
@@ -149,9 +138,7 @@ void PointerGrab::begin_surface_drag(LayerSurface &layer, Output &output,
 	SurfaceDrag drag{
 		.layer = &layer,
 		.output = &output,
-		.cam = output.camera.drawn(),
-		.lx = lx,
-		.ly = ly,
+		.anchor = GrabAnchor{output.camera.drawn(), lx, ly},
 		.start = layer.canvas_box.value_or(wlr_box{}),
 		.edges = edges,
 		.min_w = std::max(min_w, 1),
@@ -183,8 +170,7 @@ void PointerGrab::motion() {
 void PointerGrab::move_motion(Move &move) {
 	View *view = move.view;
 	Output *output = move.output;
-	double dist = std::hypot(server_.cursor->x - move.lx,
-		server_.cursor->y - move.ly);
+	double dist = move.anchor.distance(server_.cursor->x, server_.cursor->y);
 	if (view->maximized) {
 		if (dist < config::drag_threshold) {
 			return;
@@ -208,24 +194,21 @@ void PointerGrab::move_motion(Move &move) {
 		move.start.y = view->y;
 		move.start.width = restored.width;
 		move.start.height = restored.height;
-		move.lx = server_.cursor->x;
-		move.ly = server_.cursor->y;
+		move.anchor = cursor_anchor(server_, move.anchor.cam);
 		move.moved = true;
 		return;
 	}
 	if (dist >= config::drag_threshold) {
 		move.moved = true;
 	}
-	double dx = (server_.cursor->x - move.lx) / move.cam.zoom;
-	double dy = (server_.cursor->y - move.ly) / move.cam.zoom;
+	auto [dx, dy] = move.anchor.travel(server_.cursor->x, server_.cursor->y);
 	view->move(static_cast<int>(std::round(move.start.x + dx)),
 		static_cast<int>(std::round(move.start.y + dy)));
 }
 
 void PointerGrab::resize_motion(Resize &resize) {
 	View *view = resize.view;
-	double dx = (server_.cursor->x - resize.lx) / resize.cam.zoom;
-	double dy = (server_.cursor->y - resize.ly) / resize.cam.zoom;
+	auto [dx, dy] = resize.anchor.travel(server_.cursor->x, server_.cursor->y);
 	double x1 = resize.start.x;
 	double y1 = resize.start.y;
 	double x2 = x1 + resize.start.width;
@@ -264,9 +247,10 @@ void PointerGrab::resize_motion(Resize &resize) {
 
 void PointerGrab::pan_motion(Pan &pan) {
 	// Content follows the cursor.
-	Camera cam = pan.cam;
-	cam.cx -= (server_.cursor->x - pan.lx) / cam.zoom;
-	cam.cy -= (server_.cursor->y - pan.ly) / cam.zoom;
+	Camera cam = pan.anchor.cam;
+	Point travel = pan.anchor.travel(server_.cursor->x, server_.cursor->y);
+	cam.cx -= travel.x;
+	cam.cy -= travel.y;
 	if (pan.output->overview.active()) {
 		pan.output->camera.jump(cam);
 		return;
@@ -283,29 +267,23 @@ void PointerGrab::title_button_motion(TitleButton &button) {
 	DecoHit hit = view->deco.hit(pos->cx, pos->cy,
 		pos->output->camera.drawn().zoom);
 	DecoPart pressed = hit.part == button.part ? button.part : DecoPart::none;
-	if (view->deco.pressed != pressed) {
-		view->deco.pressed = pressed;
-		view->damage();
-	}
+	view->deco.set_pressed(pressed);
 }
 
 void PointerGrab::overview_press_motion(OverviewPress &press) {
-	double dist = std::hypot(server_.cursor->x - press.lx,
-		server_.cursor->y - press.ly);
+	double dist = press.anchor.distance(server_.cursor->x, server_.cursor->y);
 	if (dist < config::drag_threshold) {
 		return;
 	}
 	Output *output = press.output;
-	Camera cam = press.cam;
+	Camera cam = press.anchor.cam;
 	std::visit(overloaded{
 		[&](PressOnDesktop &on) {
 			if (Desktop *desktop = server_.canvas.desktops.find(on.desktop)) {
 				state_ = DesktopDrag{
 					.output = output,
 					.desktop = desktop->id(),
-					.cam = cam,
-					.lx = server_.cursor->x,
-					.ly = server_.cursor->y,
+					.anchor = cursor_anchor(server_, cam),
 					.start = desktop->frame(),
 					.drop = std::nullopt,
 				};
@@ -330,8 +308,7 @@ void PointerGrab::desktop_drag_motion(DesktopDrag &drag) {
 		// Its desktop was removed mid-drag; nothing follows the cursor.
 		return;
 	}
-	double dx = (server_.cursor->x - drag.lx) / drag.cam.zoom;
-	double dy = (server_.cursor->y - drag.ly) / drag.cam.zoom;
+	auto [dx, dy] = drag.anchor.travel(server_.cursor->x, server_.cursor->y);
 	server_.canvas.desktops.move(desktop->id(),
 		static_cast<int>(std::round(drag.start.x + dx)),
 		static_cast<int>(std::round(drag.start.y + dy)));
@@ -356,8 +333,7 @@ void PointerGrab::desktop_drag_motion(DesktopDrag &drag) {
 }
 
 void PointerGrab::surface_drag_motion(SurfaceDrag &drag) {
-	double dx = (server_.cursor->x - drag.lx) / drag.cam.zoom;
-	double dy = (server_.cursor->y - drag.ly) / drag.cam.zoom;
+	auto [dx, dy] = drag.anchor.travel(server_.cursor->x, server_.cursor->y);
 	double x1 = drag.start.x, y1 = drag.start.y;
 	double x2 = x1 + drag.start.width, y2 = y1 + drag.start.height;
 	if (drag.edges == 0) {
@@ -428,10 +404,7 @@ void PointerGrab::release_title_button(TitleButton &button) {
 			}
 		}
 	}
-	if (view->deco.pressed != DecoPart::none) {
-		view->deco.pressed = DecoPart::none;
-		view->damage();
-	}
+	view->deco.set_pressed(DecoPart::none);
 }
 
 void PointerGrab::overview_click(OverviewPress &press) {
@@ -510,8 +483,7 @@ void PointerGrab::cancel() {
 }
 
 void PointerGrab::end_view_grab(View &view) {
-	view.deco.pressed = DecoPart::none;
-	view.damage();
+	view.deco.set_pressed(DecoPart::none);
 }
 
 bool PointerGrab::panning(const Output &output) const {

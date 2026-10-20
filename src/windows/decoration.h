@@ -83,18 +83,28 @@ public:
 	void refresh_mode();
 
 	bool ssd = false; // client accepted server-side decorations
-	DecoPart hover = DecoPart::none, pressed = DecoPart::none; // pointer state
+
+	// The title bar part the pointer is over and the one it holds down. They
+	// change only through these, which repaint the window; true when the part
+	// differed.
+	DecoPart hover() const { return hover_; }
+	DecoPart pressed() const { return pressed_; }
+	bool set_hover(DecoPart part);
+	bool set_pressed(DecoPart part);
 
 private:
 	// Takes the toplevel's new xdg-decoration object and starts negotiating with it.
 	void attach(wlr_xdg_toplevel_decoration_v1 *decoration);
 	void handle_request_mode();
 	void handle_deco_destroy();
+	// Sets `field` to `part`, repainting the window when that changes it.
+	bool change_part(DecoPart &field, DecoPart part);
 	// Draws the picture of `wanted_` at `scale`.
 	TexturePtr draw_bar(float scale) const;
 
 	View &view_;
 	wlr_xdg_toplevel_decoration_v1 *xdg_decoration_ = nullptr;
+	DecoPart hover_ = DecoPart::none, pressed_ = DecoPart::none;
 	Listener deco_request_mode_, deco_destroy_;
 	CachedTexture<BarState> bar_;
 	BarState wanted_; // what the bar shows now, reused for each lookup

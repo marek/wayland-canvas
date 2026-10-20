@@ -83,3 +83,11 @@ using TexturePtr = Handle<wlr_texture, wlr_texture_destroy>;
 using CairoSurfacePtr = Handle<cairo_surface_t, cairo_surface_destroy>;
 using CairoPtr = Handle<cairo_t, cairo_destroy>;
 using EventSourcePtr = Handle<wl_event_source, wl_event_source_remove>;
+
+// The visitor std::visit takes: one callable built from several lambdas.
+template <typename... Ts>
+struct overloaded : Ts... {
+	using Ts::operator()...;
+};
+template <typename... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;

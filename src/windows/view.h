@@ -49,6 +49,9 @@ public:
 	void move(int x, int y);
 	void activate();
 	void damage();
+	// What the view shows, or where, changed: repaints it and has every
+	// window's outputs worked out again before the next frame.
+	void visibility_changed();
 	// Foreign toplevel handle: the view entered or left `output`'s viewport.
 	void foreign_output_enter(Output &output);
 	void foreign_output_leave(Output &output);

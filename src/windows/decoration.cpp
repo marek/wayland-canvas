@@ -57,8 +57,8 @@ void draw_button(cairo_t *cr, const View &view, DecoPart part, const wlr_box &bo
 	double bw = box.width;
 	double bh = box.height;
 
-	bool hover = view.deco.hover == part;
-	bool pressed = view.deco.pressed == part;
+	bool hover = view.deco.hover() == part;
+	bool pressed = view.deco.pressed() == part;
 
 	const config::Palette &pal = view.server.theme.colors();
 	uint32_t base = active ? pal.title_active : pal.title_inactive;
@@ -112,6 +112,23 @@ int Decoration::border() const {
 	return ssd && !view_.fullscreen && !view_.maximized ? config::border_width : 0;
 }
 
+bool Decoration::set_hover(DecoPart part) {
+	return change_part(hover_, part);
+}
+
+bool Decoration::set_pressed(DecoPart part) {
+	return change_part(pressed_, part);
+}
+
+bool Decoration::change_part(DecoPart &field, DecoPart part) {
+	if (field == part) {
+		return false;
+	}
+	field = part;
+	view_.damage();
+	return true;
+}
+
 wlr_texture *Decoration::title_bar(float scale) {
 	if (titlebar() == 0) {
 		bar_.drop();
@@ -122,8 +139,8 @@ wlr_texture *Decoration::title_bar(float scale) {
 	wanted_.width = std::max(content.width + 2 * border(), 1);
 	wanted_.active = view_.server.focused_view == &view_;
 	wanted_.maximized = view_.maximized;
-	wanted_.hover = hover;
-	wanted_.pressed = pressed;
+	wanted_.hover = hover_;
+	wanted_.pressed = pressed_;
 	if (wanted_.title != (title != nullptr ? title : "")) {
 		wanted_.title.assign(title != nullptr ? title : "");
 	}
@@ -265,8 +282,7 @@ void Decoration::refresh_mode() {
 	}
 	ssd = negotiated;
 	if (view_.mapped) {
-		view_.damage();
-		view_.server.visibility_dirty = true;
+		view_.visibility_changed();
 	}
 }
 
@@ -309,8 +325,7 @@ void Decoration::handle_deco_destroy() {
 	if (ssd) {
 		ssd = false;
 		if (view_.mapped) {
-			view_.damage();
-			view_.server.visibility_dirty = true;
+			view_.visibility_changed();
 		}
 	}
 }

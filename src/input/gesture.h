@@ -93,9 +93,9 @@ private:
 	// Classifies a pending gesture now that enough travel has accumulated;
 	// replaces the state, so the pending struct must not be read afterwards.
 	void decide(Pending &pending);
-	// The desktop under the cursor (canvas coords), or the overview target
-	// desktop; nullopt once it is gone.
-	std::optional<DesktopId> desktop_under(Output &output);
+	// The desktop under the cursor when it is on `output`, else that
+	// output's overview target desktop; null once there is neither.
+	Desktop *desktop_under(Output &output);
 	// Shows `outcome` as the hint when it differs from what the pinch shows;
 	// otherwise only keeps the hint showing.
 	void preview_pinch(Pinch &pinch, const PinchOutcome &outcome);

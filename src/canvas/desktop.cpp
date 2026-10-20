@@ -271,7 +271,7 @@ void Desktops::move(DesktopId id, int x, int y) {
 	desktop->centre_.x += dx;
 	desktop->centre_.y += dy;
 	// A moved frame takes windows in with it: their desktop may change.
-	server_.visibility_dirty = true;
+	server_.visibility_changed();
 	server_.damage_all();
 }
 

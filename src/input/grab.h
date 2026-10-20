@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -24,20 +25,34 @@ struct PressOnShelf { View *view; };
 using PressTarget = std::variant<PressOnEmpty, PressOnView, PressOnDesktop,
 	PressOnTile, PressOnAbandon, PressOnShelf>;
 
+// Where a grab began: the output's camera and the cursor's layout position
+// then. What the cursor has travelled since is measured against both.
+struct GrabAnchor {
+	Camera cam;
+	double lx, ly;
+
+	// The cursor's travel to layout (x, y), in canvas units at the camera's zoom.
+	Point travel(double x, double y) const {
+		return {(x - lx) / cam.zoom, (y - ly) / cam.zoom};
+	}
+	// The straight distance to layout (x, y), in layout px.
+	double distance(double x, double y) const { return std::hypot(x - lx, y - ly); }
+};
+
 // The compositor-owned pointer interaction in progress, one state per kind
 // of grab.
 class PointerGrab {
 public:
 	struct None {};
-	struct Move { View *view; Output *output; Camera cam; double lx, ly; wlr_box start; bool moved; double rel_x, titlebar_offset; };
-	struct Resize { View *view; Output *output; Camera cam; double lx, ly; wlr_box start; uint32_t edges; };
-	struct Pan { Output *output; Camera cam; double lx, ly; };
+	struct Move { View *view; Output *output; GrabAnchor anchor; wlr_box start; bool moved; double rel_x, titlebar_offset; };
+	struct Resize { View *view; Output *output; GrabAnchor anchor; wlr_box start; uint32_t edges; };
+	struct Pan { Output *output; GrabAnchor anchor; };
 	struct TitleButton { View *view; Output *output; DecoPart part; };
-	struct OverviewPress { Output *output; Camera cam; double lx, ly; PressTarget target; };
-	struct DesktopDrag { Output *output; DesktopId desktop; Camera cam; double lx, ly; wlr_box start; std::optional<DesktopId> drop; };
+	struct OverviewPress { Output *output; GrabAnchor anchor; PressTarget target; };
+	struct DesktopDrag { Output *output; DesktopId desktop; GrabAnchor anchor; wlr_box start; std::optional<DesktopId> drop; };
 	// A plugin's surface on the plane, moved (no edges) or sized by its
 	// edges for the client that asked (docs/intents/platform/ipc.md).
-	struct SurfaceDrag { LayerSurface *layer; Output *output; Camera cam; double lx, ly; wlr_box start; uint32_t edges; int min_w, min_h; };
+	struct SurfaceDrag { LayerSurface *layer; Output *output; GrabAnchor anchor; wlr_box start; uint32_t edges; int min_w, min_h; };
 	using State = std::variant<None, Move, Resize, Pan, TitleButton, OverviewPress,
 		DesktopDrag, SurfaceDrag>;
 

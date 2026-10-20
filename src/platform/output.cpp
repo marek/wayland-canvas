@@ -126,6 +126,11 @@ void Output::damage() {
 	wlr_output_schedule_frame(wlr);
 }
 
+void Output::visibility_changed() {
+	damage();
+	server.visibility_changed();
+}
+
 Rect Output::viewport() const {
 	return camera.drawn().viewport(width, height);
 }
@@ -380,7 +385,10 @@ Output *Server::output_showing(double cx, double cy, Showing which) {
 }
 
 void Server::update_visibility() {
-	visibility_dirty = false;
+	if (!visibility_dirty_) {
+		return;
+	}
+	visibility_dirty_ = false;
 	for (View *view : views) {
 		uint32_t mask = 0;
 		if (view->mapped && !view->minimized) {
@@ -401,9 +409,7 @@ void Output::handle_frame() {
 	// A window that left fullscreen, by any path, comes back from its own
 	// desktop before this frame shows where it is.
 	server.canvas.fullscreen_desktops.reconcile();
-	if (server.visibility_dirty) {
-		server.update_visibility();
-	}
+	server.update_visibility();
 	if (server.windows_dirty) {
 		server.windows_dirty = false;
 		server.ipc.emit_windows();
@@ -474,7 +480,7 @@ void Output::handle_destroy() {
 		layer->attached_ = false;
 		wlr_layer_surface_v1_destroy(layer->wlr);
 	}
-	server.visibility_dirty = true;
+	server.visibility_changed();
 	destroy_owned(server.outputs, this);
 	server.ipc.emit_outputs(); // the state no longer lists this output
 	server.input.outputs_changed(); // a touchscreen or a pen loses its output
@@ -529,15 +535,14 @@ void Server::handle_new_output(wlr_output *wlr) {
 	}
 	wlr_log(WLR_INFO, "output %s: %dx%d logical at scale %.2f", wlr->name,
 		output.width, output.height, wlr->scale);
-	visibility_dirty = true;
-	output.damage();
+	output.visibility_changed();
 }
 
 void Server::handle_layout_change() {
 	for (const std::unique_ptr<Output> &output : outputs) {
 		update_output_geometry(*output);
 	}
-	visibility_dirty = true;
+	visibility_changed();
 	ipc.emit_outputs(); // a moved or resized output changes the state
 }
 

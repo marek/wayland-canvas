@@ -302,8 +302,7 @@ void X11View::handle_x11_set_geometry() {
 	}
 	damage();
 	x11_place_override_redirect();
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 }
 
 void X11View::handle_x11_request_resize(wlr_xwayland_resize_event *event) {

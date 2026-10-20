@@ -494,7 +494,7 @@ int run_step() {
 		wlr_box f = b->frame_box();
 		Point mini = button_centre(f, DecoPart::minimize);
 		move_to(mini.x, mini.y);
-		check(b->deco.hover == DecoPart::minimize, "hovering the minimize button highlights it");
+		check(b->deco.hover() == DecoPart::minimize, "hovering the minimize button highlights it");
 		shot("hover-minimize");
 		return 300;
 	}

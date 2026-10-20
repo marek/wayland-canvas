@@ -37,9 +37,8 @@ void CameraMotion::stop() {
 void CameraMotion::jump(const Camera &to) {
 	stop();
 	cam_ = to;
-	output_.server.visibility_dirty = true;
+	output_.visibility_changed();
 	output_.server.pointer_focus_stale = true;
-	output_.damage();
 }
 
 void CameraMotion::animate_to(const Camera &to) {
@@ -102,11 +101,9 @@ bool CameraMotion::tick(double now) {
 	cam_ = next;
 
 	if (cam_changed) {
-		output_.dirty = true;
-		output_.server.visibility_dirty = true;
+		output_.visibility_changed();
 		output_.server.pointer_focus_stale = true;
-	}
-	if (cam_changed || busy) {
+	} else if (busy) {
 		output_.damage();
 	}
 

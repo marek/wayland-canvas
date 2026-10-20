@@ -363,13 +363,7 @@ void draw_desktop_frames(const RenderCtx &ctx) {
 	Server &server = o.server;
 	const config::Palette &pal = server.theme.colors();
 
-	Desktop *hovered = nullptr;
-	if (ctx.overview) {
-		if (std::optional<CanvasPos> pos = server.input.cursor_canvas_pos();
-				pos && pos->output == &o) {
-			hovered = server.canvas.desktops.at(pos->cx, pos->cy);
-		}
-	}
+	Desktop *hovered = ctx.overview ? server.input.desktop_under_cursor(o) : nullptr;
 
 	for (const Desktop &d : std::views::reverse(server.canvas.desktops.all())) {
 		const wlr_box &frame = d.frame();

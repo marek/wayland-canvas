@@ -81,6 +81,10 @@ public:
 	// The canvas moved under the pointer: refresh pointer focus and hover.
 	void rebase_cursor();
 	std::optional<CanvasPos> cursor_canvas_pos() const;
+	// The desktop under the cursor when the cursor is on `output`, else null.
+	Desktop *desktop_under_cursor(const Output &output) const;
+	// Super is held on the seat's keyboard.
+	bool super_held() const;
 	void set_cursor_image(const char *name);
 	// A view was unmapped or destroyed: drop what referred to it.
 	void forget(const View &view);

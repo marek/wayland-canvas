@@ -273,6 +273,11 @@ void View::damage() {
 	}
 }
 
+void View::visibility_changed() {
+	damage();
+	server.visibility_changed();
+}
+
 void View::move(int new_x, int new_y) {
 	if (x == new_x && y == new_y) {
 		return;
@@ -280,8 +285,7 @@ void View::move(int new_x, int new_y) {
 	damage();
 	x = new_x;
 	y = new_y;
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 	server.windows_dirty = true;
 }
 
@@ -314,8 +318,7 @@ void View::set_minimized(bool want) {
 	if (foreign_) {
 		wlr_foreign_toplevel_handle_v1_set_minimized(foreign_.get(), want);
 	}
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 	server.windows_dirty = true;
 	server.canvas.settle(*this);
 }
@@ -363,8 +366,7 @@ void View::set_maximized(bool want) {
 	if (foreign_) {
 		wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), want);
 	}
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 	if (want || !is_initialized(*this)) {
 		server.canvas.settle(*this);
 	} else {
@@ -424,8 +426,7 @@ void View::set_fullscreen(bool want) {
 	if (foreign_) {
 		wlr_foreign_toplevel_handle_v1_set_fullscreen(foreign_.get(), want);
 	}
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 	if (want || !is_initialized(*this)) {
 		server.canvas.settle(*this);
 	} else {
@@ -476,8 +477,7 @@ void View::set_frame(wlr_box frame) {
 	x = content.x;
 	y = content.y;
 	tiled = true;
-	damage();
-	server.visibility_dirty = true;
+	visibility_changed();
 }
 
 void View::set_tiled(bool want) {
@@ -628,8 +628,7 @@ void View::handle_map() {
 		// A menu or a tooltip belongs where its client put it, beside the
 		// window it hangs from; it joins no board and takes no focus
 		// unless it asks for one.
-		server.visibility_dirty = true;
-		damage();
+		visibility_changed();
 		return;
 	}
 	place(*this);
@@ -645,9 +644,8 @@ void View::handle_map() {
 		server.focus_view(this);
 	}
 	launched_for.reset();
-	server.visibility_dirty = true;
+	visibility_changed();
 	server.windows_dirty = true;
-	damage();
 }
 
 void Server::view_gone(View &view) {
@@ -675,11 +673,10 @@ void View::handle_unmap() {
 	settle_pending = false;
 	saved = wlr_box{0, 0, 0, 0};
 	drop_resize();
-	deco.hover = DecoPart::none;
-	deco.pressed = DecoPart::none;
-	server.visibility_dirty = true;
+	deco.set_hover(DecoPart::none);
+	deco.set_pressed(DecoPart::none);
+	visibility_changed();
 	server.windows_dirty = true;
-	damage();
 }
 
 // The client's first commit, whichever shell it speaks: the window learns
@@ -715,9 +712,8 @@ void View::handle_kind_change() {
 		place(*this);
 	}
 	server.canvas.settle(*this);
-	server.visibility_dirty = true;
 	server.windows_dirty = true;
-	damage();
+	visibility_changed();
 }
 
 void View::handle_commit() {

@@ -23,6 +23,9 @@ public:
 
 	// output.cpp
 	void damage();
+	// What this output shows, or where it looks, changed: repaints it and
+	// has every window's outputs worked out again before the next frame.
+	void visibility_changed();
 	Rect viewport() const;
 	Point local_to_canvas(double ox, double oy) const;
 	Point canvas_to_local(double cx, double cy) const;

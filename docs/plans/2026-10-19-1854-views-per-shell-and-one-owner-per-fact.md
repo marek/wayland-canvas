@@ -1392,7 +1392,7 @@ Tests:
   - Acceptance: a unit test checks that every registry action has a
     runner, and that renaming the group label changes only the label. The
     input and bar scenarios are green.
-- [ ] Small helpers written twice are written once
+- [x] Small helpers written twice are written once
   - Each of these gets one definition:
     - `overloaded` (gesture.cpp:15, grab.cpp:20) moves to core/util.h;
     - `super_held` (gesture.cpp:22-27) uses `seat_modifiers`
@@ -1415,6 +1415,13 @@ Tests:
     written once.
   - Acceptance: each is defined once (grep), and the unit and scenario
     suites are green.
+  - Done: the title-bar key was already `BarState` with a defaulted `==`
+    (the text cache phase); the grab's anchor is one `GrabAnchor` that
+    every grab state holds; the desktop under the cursor is
+    `Input::desktop_under_cursor`, which the render hover, the
+    overview-finger abandon swipe and the overview pinch now share.
+    Covered by the unit `bindings` test and the gestures, input, lock,
+    touch, viewgone, xwayland and bar scenarios.
 - [x] File, text and ownership helpers live in one wlroots-free place
   - `Handle` and `destroy_owned` move to a wlroots-free `core/handle.h`;
     util.h keeps `Listener` and includes it. agent_usage's hand-written
