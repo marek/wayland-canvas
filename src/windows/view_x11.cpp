@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ranges>
+#include <span>
+#include <string_view>
 #include <vector>
 #include "core/config.h"
 #include "core/server.h"
@@ -59,6 +61,8 @@ X11View::X11View(Server &server, wlr_xwayland_surface *wlr)
 		wlr->events.request_fullscreen, this);
 	set_title_.connect<&X11View::handle_set_title>(wlr->events.set_title, this);
 	set_app_id_.connect<&X11View::handle_set_app_id>(wlr->events.set_class, this);
+	set_parent_.connect<&X11View::handle_x11_set_parent>(wlr->events.set_parent, this);
+	map_request_.connect<&X11View::handle_x11_map_request>(wlr->events.map_request, this);
 }
 
 // ---- what the shared code asks ----
@@ -318,6 +322,24 @@ void X11View::handle_x11_request_fullscreen() {
 	set_fullscreen(wlr->fullscreen);
 }
 
+// The parent decides the kind, and the client may set it after the window
+// maps (or have it dropped with the parent's death): the window is laid out
+// again by the rules of the map. wlroots reports no change of the modal
+// state, so it is read when the parent arrives; the window type decides no
+// kind and needs no listener.
+void X11View::handle_x11_set_parent() {
+	handle_kind_change();
+}
+
+// wlroots rewrites _NET_WM_STATE when the window maps, from what it has read
+// of it, and reads it only at the association, which comes after that
+// rewrite. A client that sets the state and maps in one flush would lose
+// _NET_WM_STATE_MODAL before wlroots saw it; the map request comes first,
+// with the property as the client left it.
+void X11View::handle_x11_map_request() {
+	wlr->modal = wlr->modal || server.x11_modal_requested(wlr);
+}
+
 // ---- the Xwayland server ----
 
 void Server::init_xwayland() {
@@ -352,10 +374,47 @@ void Server::handle_xwayland_ready() {
 	// A new window manager connection: an ask on the one before is void.
 	x11_settle_ask_.reset();
 	x11_unasked_ = false;
+	// The atoms of the state hint wlroots rewrites before it reads it
+	// (x11_modal_requested); each X server numbers its own.
+	xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(xwayland);
+	static constexpr std::string_view state_name = "_NET_WM_STATE",
+		modal_name = "_NET_WM_STATE_MODAL";
+	xcb_intern_atom_cookie_t state = xcb_intern_atom(conn, 0,
+		static_cast<uint16_t>(state_name.size()), state_name.data());
+	xcb_intern_atom_cookie_t modal = xcb_intern_atom(conn, 0,
+		static_cast<uint16_t>(modal_name.size()), modal_name.data());
+	auto atom_of = [conn](xcb_intern_atom_cookie_t cookie) {
+		xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(conn, cookie, nullptr);
+		xcb_atom_t atom = reply != nullptr ? reply->atom : XCB_ATOM_NONE;
+		std::free(reply);
+		return atom;
+	};
+	x11_atom_state_ = atom_of(state);
+	x11_atom_modal_ = atom_of(modal);
 }
 
 void Server::handle_new_xwayland_surface(wlr_xwayland_surface *surface) {
 	toplevels.push_back(std::make_unique<X11View>(*this, surface));
+}
+
+bool Server::x11_modal_requested(wlr_xwayland_surface *surface) {
+	xcb_connection_t *conn = xwayland != nullptr ? wlr_xwayland_get_xwm_connection(xwayland)
+		: nullptr;
+	if (conn == nullptr || x11_atom_state_ == XCB_ATOM_NONE || x11_atom_modal_ == XCB_ATOM_NONE) {
+		return false;
+	}
+	xcb_get_property_reply_t *reply = xcb_get_property_reply(conn,
+		xcb_get_property(conn, 0, surface->window_id, x11_atom_state_, XCB_ATOM_ATOM, 0, 32),
+		nullptr);
+	if (reply == nullptr) {
+		return false;
+	}
+	std::span<const xcb_atom_t> states(
+		static_cast<const xcb_atom_t *>(xcb_get_property_value(reply)),
+		static_cast<size_t>(xcb_get_property_value_length(reply)) / sizeof(xcb_atom_t));
+	bool modal = std::ranges::contains(states, x11_atom_modal_);
+	std::free(reply);
+	return modal;
 }
 
 void Server::sync_x11() {

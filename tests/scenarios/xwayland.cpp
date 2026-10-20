@@ -441,6 +441,12 @@ wlr_box frame_on_screen(View &view) {
 		int(std::round(frame.height * cam.zoom))};
 }
 
+// Whether `over`'s frame is centred on `under`'s, within a pixel.
+bool centred_on(const View &over, const View &under) {
+	Rect a = under.frame_rect(), b = over.frame_rect();
+	return std::abs(a.cx() - b.cx()) <= 1 && std::abs(a.cy() - b.cy()) <= 1;
+}
+
 int run_step() {
 	switch (step) {
 	case 0: { // no X11 client yet: Xwayland has nothing to show
@@ -896,12 +902,8 @@ int run_step() {
 			"the window joined the tiled desktop's board");
 		check(dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
 			"its modal dialog floats, off the board");
-		bool centred = false;
-		if (main != nullptr && dialog != nullptr) {
-			Rect a = main->frame_rect(), b = dialog->frame_rect();
-			centred = std::abs(a.cx() - b.cx()) <= 1 && std::abs(a.cy() - b.cy()) <= 1;
-		}
-		check(centred, "centred over the window it blocks");
+		check(main != nullptr && dialog != nullptr && centred_on(*dialog, *main),
+			"centred over the window it blocks");
 		// Switching tiling off and on lays the desktop out again: the modal
 		// dialog still floats over its window.
 		super_key(KEY_T);
@@ -1330,6 +1332,82 @@ int run_step() {
 		View *view = titled("x11-ask");
 		check(view != nullptr && far_edges_held(resized_from, view->content_box()),
 			"and after the client's next commit");
+		reap_client(client);
+		return 300;
+	}
+	// ---- a modal dialog whose hints reach the window manager after it maps: the
+	// kind they decide is laid out when they arrive, as at the map.
+	case 94: {
+		output().camera.jump(home);
+		return 300;
+	}
+	case 95: {
+		Desktop *shown = output().desktop_showing();
+		check(shown != nullptr, "the screen shows a desktop");
+		if (shown != nullptr && !shown->tiling()) {
+			super_key(KEY_T);
+		}
+		check(start_client(client, {"--size=600x400", "--title=x11-late", "--dialog-late"}),
+			"an X11 window that opens its modal dialog bare started on a tiled desktop");
+		return 1500;
+	}
+	case 96: {
+		if (titled("x11-late") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		return 800; // tiled by now
+	}
+	case 97: { // its first key opens the dialog with no hints
+		key(KEY_D, true);
+		key(KEY_D, false);
+		return 600;
+	}
+	case 98: {
+		if (titled("x11-late-dialog") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		return 600;
+	}
+	case 99: { // mapped bare it is a window like any: the board holds it
+		View *main = titled("x11-late"), *dialog = titled("x11-late-dialog");
+		check(main != nullptr && main->tiled && main->board.has_value(),
+			"the window joined the tiled desktop's board");
+		check(dialog != nullptr && dialog->kind() == ViewKind::normal && dialog->tiled
+				&& dialog->board.has_value(),
+			"its dialog, mapped before its hints, joined the board as a plain window");
+		// The second key gives the dialog its hints, after the map.
+		key(KEY_D, true);
+		key(KEY_D, false);
+		return 600;
+	}
+	case 100: { // the hints are in wlroots, and so was the layout when they arrived
+		View *dialog = titled("x11-late-dialog");
+		const X11View *shell = dialog != nullptr ? dialog->as_x11() : nullptr;
+		bool arrived = shell != nullptr && shell->wlr->parent != nullptr
+			&& shell->wlr->modal;
+		if (!arrived && retries++ < 100) {
+			return -100;
+		}
+		check(arrived, "the dialog's hints, sent after its map, reached the window manager");
+		View *main = titled("x11-late");
+		check(dialog != nullptr && dialog->kind() == ViewKind::modal,
+			"the dialog is a modal one now");
+		check(dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+			"its modal dialog floats, off the board");
+		check(main != nullptr && dialog != nullptr && centred_on(*dialog, *main),
+			"centred over the window it blocks");
+		super_key(KEY_T);
+		return 600;
+	}
+	case 101: {
+		super_key(KEY_T);
+		return 600;
+	}
+	case 102: {
+		View *main = titled("x11-late"), *dialog = titled("x11-late-dialog");
+		check(main != nullptr && main->tiled && main->board.has_value()
+				&& dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+			"switched off and on, tiling leaves the late modal dialog floating");
 		reap_client(client);
 		return 300;
 	}

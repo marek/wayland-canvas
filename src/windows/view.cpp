@@ -621,6 +621,7 @@ View::~View() = default;
 
 void View::handle_map() {
 	mapped = true;
+	laid_out_kind_ = kind();
 	server.views.insert(server.views.begin(), this);
 	deco.refresh_mode();
 	if (placed_by_client(kind())) {
@@ -697,6 +698,26 @@ void View::handle_first_commit() {
 	} else {
 		configure_size(0, 0);
 	}
+}
+
+void View::handle_kind_change() {
+	ViewKind before = laid_out_kind_, now = kind();
+	if (!mapped || now == before) {
+		return;
+	}
+	laid_out_kind_ = now;
+	damage();
+	if (!tiles(now)) {
+		server.canvas.leave_board(*this);
+	}
+	// A window that stops being a dialog stays where it is.
+	if (opens_over_parent(now) && !opens_over_parent(before)) {
+		place(*this);
+	}
+	server.canvas.settle(*this);
+	server.visibility_dirty = true;
+	server.windows_dirty = true;
+	damage();
 }
 
 void View::handle_commit() {

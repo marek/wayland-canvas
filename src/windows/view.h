@@ -162,6 +162,11 @@ protected:
 	void handle_map();
 	void handle_unmap();
 	void handle_first_commit(); // the client's very first commit
+	// What decides kind() can arrive after the map (an X11 client sets its
+	// parent and modal state when it likes): the window joins or leaves a
+	// board, and goes over its parent when it has become a dialog, as at the
+	// map.
+	void handle_kind_change();
 	void handle_commit();
 	void handle_destroy();
 	void handle_request_move();
@@ -187,6 +192,8 @@ private:
 	// its title and app id kept current (view.cpp).
 	Handle<wlr_ext_foreign_toplevel_handle_v1,
 		wlr_ext_foreign_toplevel_handle_v1_destroy> ext_foreign_{};
+	// The kind the window was last laid out as: the map's, then each change.
+	ViewKind laid_out_kind_ = ViewKind::normal;
 
 	friend class Server;
 };

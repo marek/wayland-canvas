@@ -101,6 +101,12 @@ public:
 	// X did not answer within config::x11_input_wait_ms: input goes on
 	// without the answer, and the ask is dropped.
 	void x11_give_up();
+#if CANVAS_HAVE_XWAYLAND
+	// Whether the window's _NET_WM_STATE, as the client set it, holds
+	// _NET_WM_STATE_MODAL; read from X, one round trip, at the map request
+	// (X11View::handle_x11_map_request).
+	bool x11_modal_requested(wlr_xwayland_surface *surface);
+#endif
 	// Whether `surface` belongs to an X11 window: input to one waits for X.
 	static bool on_x11_window(wlr_surface *surface);
 
@@ -230,6 +236,8 @@ private:
 	void x11_ask_settled();
 	std::optional<unsigned int> x11_settle_ask_;
 	bool x11_unasked_ = false;
+	// The atoms of _NET_WM_STATE and _NET_WM_STATE_MODAL on the running X server.
+	uint32_t x11_atom_state_ = 0, x11_atom_modal_ = 0;
 #endif
 
 	// layer.cpp

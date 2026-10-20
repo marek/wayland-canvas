@@ -87,6 +87,7 @@ their values.
 | [bugs/zoom-collapsed-the-grid.md](bugs/zoom-collapsed-the-grid.md) | Zooming a tiled desktop in and out left windows as bars at the screen's edge: a settled scale re-flowed the grid and its shrinking frame dropped them |
 | [bugs/notes-that-never-followed.md](bugs/notes-that-never-followed.md) | Sticky notes inert on screen while their files changed: plain JS objects that told QML nothing, drags the plugin ran against its own coordinates, and checks that read only the storage |
 | [bugs/x11-click-lost-after-a-jump.md](bugs/x11-click-lost-after-a-jump.md) | An X11 click after a pointer jump went nowhere: a timed retell raced the window moves on another connection |
+| [bugs/x11-modal-state-lost-at-map.md](bugs/x11-modal-state-lost-at-map.md) | An X11 modal dialog laid out as a plain tiled window now and then: wlroots rewrote `_NET_WM_STATE` at the map before reading the client's modal state |
 
 ## Reading paths
 

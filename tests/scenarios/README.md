@@ -200,9 +200,12 @@ own the machine's Wayland display namespace and GPU.
   one takes none, windows past X's screen or larger than it at 25 % take
   clicks at their own points, a click straight after a jump lands where
   it was aimed and so does a press in the same instant as the jump, held
-  until X has taken in the moves; on a tiled desktop a modal dialog
-  floating centred over
-  its window, still floating after Super+T switches tiling off and on;
+  until X has taken in the moves; on a tiled desktop a modal dialog whose
+  hints go to X in the one flush that maps it, as toolkits send them,
+  floating centred over its window and still floating after Super+T
+  switches tiling off and on; a dialog that maps bare and joins the board,
+  its parent and modal state arriving afterwards, leaving the board to
+  float centred over its window;
   the keyboard following Super+1 and Super+2 to the window last used on
   each desktop; and last fullscreen: Super+F on a window beside another
   taking it to a new desktop of its own, overlapping none, the screen and

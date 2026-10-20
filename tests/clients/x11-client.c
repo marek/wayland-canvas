@@ -1,7 +1,9 @@
 // An X11 client for the scenarios: maps one window of a known size, colour
 // and title through xcb (and with --dialog, on its first key, a modal dialog
-// transient for it; with --moveresize, on its first button, a
-// _NET_WM_MOVERESIZE request to size from the top left corner), and says on
+// transient for it, its hints sent in the one flush that maps it, as toolkits
+// send them; with --dialog-late, the same dialog mapped bare on the first key
+// and given its hints on the second; with --moveresize, on its first button,
+// a _NET_WM_MOVERESIZE request to size from the top left corner), and says on
 // stdout what reaches it —
 //
 //   MAPPED <w>x<h>         the window is up
@@ -11,6 +13,7 @@
 //   CONFIGURED <w>x<h>     the window manager resized it
 //   POPUP <x>,<y>          an override-redirect window was mapped there
 //   DIALOG <w>x<h>         the modal dialog is up, titled <title>-dialog
+//   HINTED                 the late dialog now names its window and is modal
 //   OFFERED                the client owns the X11 clipboard
 //   PASTED <text>          what the X11 clipboard holds, read back
 //   CLOSING                WM_DELETE_WINDOW arrived; the client exits
@@ -35,6 +38,44 @@ static xcb_atom_t intern(xcb_connection_t *connection, const char *name) {
 	return atom;
 }
 
+// The atoms of a modal dialog's hints, interned before its window exists so
+// that making and mapping it takes no round trip.
+struct dialog_atoms {
+	xcb_atom_t type, type_dialog, state, state_modal;
+};
+
+// The hints toolkits give a modal dialog: the dialog type, the window it
+// belongs to, _NET_WM_STATE_MODAL. Before the map they are properties; on a
+// mapped window the state is the client message EWMH asks of a client, which
+// goes first because wlroots reports no change of it: the hint that names the
+// window after it is what tells the compositor the window changed.
+static void hint_dialog(xcb_connection_t *connection, xcb_window_t root,
+		xcb_window_t dialog, xcb_window_t parent, const struct dialog_atoms *atoms,
+		int mapped) {
+	if (mapped) {
+		xcb_client_message_event_t request = {
+			.response_type = XCB_CLIENT_MESSAGE,
+			.format = 32,
+			.window = dialog,
+			.type = atoms->state,
+		};
+		request.data.data32[0] = 1; // _NET_WM_STATE_ADD
+		request.data.data32[1] = atoms->state_modal;
+		request.data.data32[3] = 1; // source: an application
+		xcb_send_event(connection, 0, root,
+			XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
+			(const char *)&request);
+	}
+	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, dialog,
+		XCB_ATOM_WM_TRANSIENT_FOR, XCB_ATOM_WINDOW, 32, 1, &parent);
+	xcb_change_property(connection, XCB_PROP_MODE_REPLACE, dialog, atoms->type,
+		XCB_ATOM_ATOM, 32, 1, &atoms->type_dialog);
+	if (!mapped) {
+		xcb_change_property(connection, XCB_PROP_MODE_REPLACE, dialog, atoms->state,
+			XCB_ATOM_ATOM, 32, 1, &atoms->state_modal);
+	}
+}
+
 int main(int argc, char **argv) {
 	int width = 400, height = 300;
 	// Where the menu goes, in the same space the window manager places
@@ -52,7 +93,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	const char *offer = NULL;
-	int popup = 0, paste = 0, paste_tries = 0, dialog = 0, moveresize = 0;
+	int popup = 0, paste = 0, paste_tries = 0, dialog = 0, late = 0, moveresize = 0;
 	for (int i = 1; i < argc; i++) {
 		if (strncmp(argv[i], "--offer=", 8) == 0) {
 			offer = argv[i] + 8;
@@ -62,6 +103,9 @@ int main(int argc, char **argv) {
 			paste = 1;
 		} else if (strcmp(argv[i], "--dialog") == 0) {
 			dialog = 1;
+		} else if (strcmp(argv[i], "--dialog-late") == 0) {
+			dialog = 1;
+			late = 1;
 		} else if (strcmp(argv[i], "--moveresize") == 0) {
 			moveresize = 1;
 		}
@@ -78,6 +122,16 @@ int main(int argc, char **argv) {
 		xcb_screen_next(&screens);
 	}
 	xcb_screen_t *screen = screens.data;
+	// A dialog's hints name atoms: interned now, before any window exists, so
+	// that sending them with the dialog's map is one flush.
+	struct dialog_atoms atoms = {0};
+	xcb_window_t modal = XCB_NONE;
+	if (dialog != 0) {
+		atoms.type = intern(connection, "_NET_WM_WINDOW_TYPE");
+		atoms.type_dialog = intern(connection, "_NET_WM_WINDOW_TYPE_DIALOG");
+		atoms.state = intern(connection, "_NET_WM_STATE");
+		atoms.state_modal = intern(connection, "_NET_WM_STATE_MODAL");
+	}
 
 	xcb_window_t window = xcb_generate_id(connection);
 	uint32_t values[2] = {colour,
@@ -179,10 +233,11 @@ int main(int argc, char **argv) {
 		case XCB_KEY_PRESS:
 			// With --dialog, the first key opens a modal dialog of our own:
 			// transient for the window, of the dialog type and
-			// _NET_WM_STATE_MODAL, as toolkits make them.
+			// _NET_WM_STATE_MODAL, as toolkits make them. With --dialog-late
+			// it opens bare, and the second key gives it those hints.
 			if (dialog == 1) {
-				dialog = 2;
-				xcb_window_t modal = xcb_generate_id(connection);
+				dialog = late ? 2 : 3;
+				modal = xcb_generate_id(connection);
 				xcb_create_window(connection, XCB_COPY_FROM_PARENT, modal, screen->root,
 					0, 0, 300, 200, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
 					XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, values);
@@ -191,19 +246,17 @@ int main(int argc, char **argv) {
 				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal,
 					XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, (uint32_t)strlen(dialog_title),
 					dialog_title);
-				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal,
-					XCB_ATOM_WM_TRANSIENT_FOR, XCB_ATOM_WINDOW, 32, 1, &window);
-				xcb_atom_t type = intern(connection, "_NET_WM_WINDOW_TYPE");
-				xcb_atom_t type_dialog = intern(connection, "_NET_WM_WINDOW_TYPE_DIALOG");
-				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal, type,
-					XCB_ATOM_ATOM, 32, 1, &type_dialog);
-				xcb_atom_t state = intern(connection, "_NET_WM_STATE");
-				xcb_atom_t state_modal = intern(connection, "_NET_WM_STATE_MODAL");
-				xcb_change_property(connection, XCB_PROP_MODE_REPLACE, modal, state,
-					XCB_ATOM_ATOM, 32, 1, &state_modal);
+				if (!late) {
+					hint_dialog(connection, screen->root, modal, window, &atoms, 0);
+				}
 				xcb_map_window(connection, modal);
 				xcb_flush(connection);
 				say("DIALOG 300x200\n");
+			} else if (dialog == 2) {
+				dialog = 3;
+				hint_dialog(connection, screen->root, modal, window, &atoms, 1);
+				xcb_flush(connection);
+				say("HINTED\n");
 			}
 			say("KEY %u %u\n", ((xcb_key_press_event_t *)event)->detail,
 				((xcb_key_press_event_t *)event)->state);

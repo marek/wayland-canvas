@@ -72,6 +72,8 @@ private:
 	void handle_x11_request_maximize();
 	void handle_x11_request_minimize();
 	void handle_x11_request_fullscreen();
+	void handle_x11_set_parent();
+	void handle_x11_map_request();
 
 	// The surface comes and goes with the pairing; map, unmap and commit are
 	// connected while it is there.
@@ -79,5 +81,5 @@ private:
 	Listener map_, unmap_, commit_, destroy_;
 	Listener request_move_, request_resize_, request_maximize_, request_minimize_,
 		request_fullscreen_;
-	Listener set_title_, set_app_id_;
+	Listener set_title_, set_app_id_, set_parent_, map_request_;
 };

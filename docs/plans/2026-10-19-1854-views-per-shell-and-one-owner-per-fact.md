@@ -643,7 +643,7 @@ The compositor:
     does, instead of un-tiling the windows whose centre lies in it. The
     gestures scenario's last step tiles a desktop with two windows and
     abandons it; the old code fails that check and the new passes.
-- [ ] An X11 modal dialog is laid out as a dialog every time
+- [x] An X11 modal dialog is laid out as a dialog every time
   - The problem:
     - The xwayland scenario's modal-dialog checks fail now and then:
       "its modal dialog floats, off the board", "centred over the window
@@ -669,6 +669,40 @@ The compositor:
     - That step fails before the fix and passes after.
     - The modal-dialog checks pass 20 runs in a row under a loaded
       machine.
+  - Done: the parent and the window type were never late: wlroots reads
+    every property at the association, before the surface maps. The modal
+    state was lost. At the map notify wlroots rewrites `_NET_WM_STATE`
+    from fields it has not read yet, and the association comes after it,
+    so a client that sets the hints and maps in one flush loses
+    `_NET_WM_STATE_MODAL`; a client that waits on round trips between its
+    hints gives wlroots time to select property changes first, which is why
+    only a loaded machine failed. `X11View::handle_x11_map_request` reads
+    the property at the map request, before the rewrite
+    (`Server::x11_modal_requested`). A parent that arrives after the map
+    lays the window out again (`set_parent` into `View::handle_kind_change`):
+    a window that has become a modal dialog leaves the board and floats
+    centred over its parent. wlroots emits nothing for the modal state alone,
+    and the window type decides no kind, so neither has a listener; a modal
+    state sent alone after the map waits for the next hint (the case study
+    is `docs/intents/bugs/x11-modal-state-lost-at-map.md`).
+  - Done: `x11-client --dialog` now sends the hints in the one flush that
+    maps the dialog, and `--dialog-late` maps it bare and hints it on the
+    second key; the xwayland scenario checks both. Without the fix the
+    first failed 3 checks in each of the 4 runs made and the second 2
+    checks; with it the scenario passed 20 runs in a row, other suites
+    running on the machine.
+- [ ] The modal state read at map does not wait on X (found, not started)
+  - The problem: the modal-dialog fix reads `_NET_WM_STATE` at each X11
+    map request with one blocking round trip on the window manager's
+    connection (`Server::x11_modal_requested`). While Xwayland is slow or
+    stalled, the compositor's loop stops: no input, no frames.
+  - The fix: send the request when the map request arrives and take the
+    reply when it comes, laying the window out again then (the same
+    late-kind path that a late parent uses), or bound the wait by
+    `config::x11_input_wait_ms`, as input to X already is.
+  - Acceptance: a scenario that stalls the X server (SIGSTOP on
+    Xwayland) while a dialog maps shows the compositor still answering
+    IPC `state` within 100 ms. The modal-dialog checks stay green.
 
 The shell and its plugins:
 
