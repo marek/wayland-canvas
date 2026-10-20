@@ -47,7 +47,7 @@ sits on the object it acts on.
 | A C object with a destroy function (texture, cairo surface and context, pango layout, `GKeyFile`, event source) | `Handle<T, destroy>`, a `std::unique_ptr` with that function as its deleter; `TexturePtr` and friends in `src/core/util.h` |
 | A compositor object (output, view, popup, layer surface, keyboard, desktop) | Owned by exactly one `std::vector<std::unique_ptr<T>>` of its owner. Its wlroots destroy handler ends with `destroy_owned(owner, this)` |
 | A reference that does not own | A raw pointer or reference for the length of a call. Kept longer: a name resolved when it is used (`DesktopId` through `Desktops::find`, `nullptr` once the desktop is gone). Outputs and views have no names: the one subsystem holding such a pointer is told when they go (`forget`, `output_gone`); no other code writes its fields |
-| A state, kind or mode | `enum class`, enumerators `snake_case`. Plain integers only for masks and values shared with a C API (`wlr_edges`, layer indices) |
+| A state, kind or mode | `enum class`, enumerators `snake_case`. Plain integers only for masks and values shared with a C API (`wlr_edges`, layer indices). A kind that brings its own behaviour and its own wlroots object is a subclass instead (Classes, below) |
 | A state machine whose states carry different data | A `std::variant` of one struct per state (`Gestures`, `PointerGrab`), each holding only what that state needs; `std::visit` or `std::get_if`. No shared fields plus a kind enum |
 | A result that may be absent | `std::optional`; out-parameters are not used |
 | Several results | A small struct returned by value (`ViewHit`, `TabLayout`) |
@@ -67,6 +67,7 @@ sits on the object it acts on.
 | Fallible setup | `bool init()` after construction; a constructor never fails |
 | Teardown order | `~Server` releases wlroots resources explicitly, in reverse order of creation; each subsystem's `finish()` releases its own before the display goes |
 | Inheritance | Only where something is polymorphic; not for sharing code |
+| A kind fixed at creation whose behaviour differs (a window's shell) | An abstract base with one `final` subclass per kind: `View`, and `XdgView` and `X11View`. The kind's wlroots object is private to its subclass, so code holding the base cannot reach one kind's object on the other kind. RTTI is off and there is no `dynamic_cast`; the one subsystem that exists for a single kind (the X window manager) reaches its windows through a virtual on the base (`View::as_x11()`) |
 
 A class is one concept of the compositor: the canvas and its desktops, a
 screen's camera and its overview, gestures, pointer grabs, bindings. Other

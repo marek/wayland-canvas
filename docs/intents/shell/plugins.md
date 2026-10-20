@@ -166,6 +166,10 @@ switches, tabs, choice rows, key chips, text and fields, all coloured from
 
 - An invalid manifest, a too-new `apiVersion` or a QML error while loading:
   that plugin is skipped, with a log line naming it and the reason.
+- A config that is not valid JSON: the shell runs on the defaults and logs
+  the reason, and nothing writes the file while it fails to parse; a
+  change the host would have written (a setting, the mode) holds for the
+  running shell only.
 - A widget or button naming a panel or action that does not exist: the
   click does nothing, logged once.
 - A plugin disabled or removed while its panel is open: the panel closes.
