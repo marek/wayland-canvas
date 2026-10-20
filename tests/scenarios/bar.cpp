@@ -4232,18 +4232,17 @@ wlr_box toolbar_strip_box(const wlr_box &geo) {
 	return {geo.x, geo.y < 0 ? geo.y + pocket : geo.y, geo.width, toolbar_button};
 }
 
-// The strip's box as the compositor placed it for this edge, read from
-// the mapped toolbar surface: a 44 px column or row of whole buttons,
-// on the edge's margin (the top row below the bar). The wait loops on
-// it, so the reload has landed when it holds — the old surface stays
-// mapped at the old edge until the reload, so the geo, not the mapping,
-// is what moves.
-bool toolbar_on_edge(const char *edge) {
-	LayerSurface *toolbar = toolbar_layer();
-	if (toolbar == nullptr) {
+// A strip's box as the compositor placed it for this edge, read from
+// its mapped surface: a 44 px column or row of whole squares, on the
+// edge's margin (the top row below the bar). The wait loops on it, so
+// the reload has landed when it holds — the old surface stays mapped at
+// the old edge until the reload, so the geo, not the mapping, is what
+// moves.
+bool strip_on_edge(LayerSurface *layer, const char *edge) {
+	if (layer == nullptr) {
 		return false;
 	}
-	wlr_box geo = toolbar_strip_box(toolbar->geo);
+	wlr_box geo = toolbar_strip_box(layer->geo);
 	bool column = std::strcmp(edge, "left") == 0 || std::strcmp(edge, "right") == 0;
 	if (column && (geo.width != toolbar_button || geo.height % toolbar_button != 0)) {
 		return false;
@@ -4263,11 +4262,19 @@ bool toolbar_on_edge(const char *edge) {
 	return geo.y + geo.height == screen_h - toolbar_margin;
 }
 
+bool toolbar_on_edge(const char *edge) {
+	return strip_on_edge(toolbar_layer(), edge);
+}
+
 // The app bar surface, shown with the overview on the edge its config
 // names (the left by default): one entry per open app
 // (docs/intents/shell/app-bar.md).
 LayerSurface *app_bar_layer() {
 	return named_layer(app_bar_namespace);
+}
+
+bool app_bar_on_edge(const char *edge) {
+	return strip_on_edge(app_bar_layer(), edge);
 }
 
 // The app bar's own strip, from its placed surface: like the toolbar's, the
@@ -4376,7 +4383,10 @@ int shared_apps_length(const wlr_box &toolbar) {
 	}
 	wlr_box strip = app_bar_strip_box(apps->geo);
 	bool column = toolbar.width == toolbar_button;
-	if (column != (strip.width == toolbar_button)) {
+	// A row of one app is a square as a strip: only its surface, a column's
+	// being the strip plus the pocket across, tells which it is.
+	bool apps_column = apps->geo.width == toolbar_button + toolbar_margin + toolbar_button;
+	if (column != apps_column) {
 		return 0; // one is a column, the other a row: different edges
 	}
 	if (column ? strip.x != toolbar.x : strip.y != toolbar.y) {
@@ -4508,6 +4518,16 @@ void edge_checks(const char *edge, const char *shot_name) {
 			toolbar != nullptr ? strip.width : 0, toolbar != nullptr ? strip.height : 0));
 	check(toolbar != nullptr && toolbar_centred(strip),
 		"the strip is centred along its edge");
+	// The app bar on this edge too: the two are one strip, the buttons
+	// first, the apps a separator's gap after them.
+	LayerSurface *apps = app_bar_layer();
+	wlr_box app_strip = apps != nullptr ? app_bar_strip_box(apps->geo) : wlr_box{};
+	bool column = strip.width == toolbar_button;
+	int gap = column ? app_strip.y - (strip.y + strip.height)
+		: app_strip.x - (strip.x + strip.width);
+	check(apps != nullptr && app_bar_on_edge(edge) && gap == strip_separator,
+		std::format("the app bar shares the {} edge, a separator's gap after the"
+			" buttons (gap {})", edge, gap));
 	shot(shot_name);
 }
 
@@ -6489,14 +6509,25 @@ int run_step() {
 		left_button(false);
 		return 600;
 	}
-	case 138: { // a second note, for the formatting: it takes the keyboard
+	case 138: { // a second note, for the formatting: out of the overview first
 		if (out()->overview.active()) {
 			chord(KEY_TAB, SUPER[0]);
 		}
+		step = 241; // on to 242
+		return 400;
+	}
+	case 242: { // the note goes centred on the cursor's canvas point, which the
+		// compositor answers through the camera as drawn: the camera has
+		// stopped first, or the note lands where the overview showed the cursor
+		if (!overview_settled(false) && note_retries++ < 100) {
+			return -100;
+		}
+		note_retries = 0;
 		run_msg("action.run",
 			R"({"name":"canvas.notes/create","args":{"color":")" + std::string{note_yellow}
 				+ R"("}})",
 			"note-create-2");
+		step = 138; // on to 139
 		return 1200;
 	}
 	case 139: {
@@ -10034,8 +10065,12 @@ int run_step() {
 			"the toolbar mapped 8 px from the right edge, its default");
 		check(toolbar != nullptr && toolbar_centred(strip),
 			"the strip is centred along its edge");
-		check(toolbar != nullptr && strip.height / toolbar_button >= 4,
-			std::format("the strip holds its buttons ({} squares)",
+		// The notes and settings buttons and the scratch plugin's three
+		// valid ones: the scratch manifest's two invalid buttons (one
+		// naming an action and a panel, one naming nothing) were dropped
+		// by the host, and the toolbar draws what it is given.
+		check(toolbar != nullptr && strip.height / toolbar_button == 5,
+			std::format("the strip holds exactly its five valid buttons ({} squares)",
 				toolbar != nullptr ? strip.height / toolbar_button : 0));
 		// The app bar: its default left edge, opposite the toolbar's, one
 		// entry per open app (docs/intents/shell/app-bar.md).
@@ -10092,12 +10127,12 @@ int run_step() {
 				|| !flyout_folded_checks("edges-left-folded")) {
 			return -100;
 		}
-		check(set_toolbar_position("top"),
-			"toolbar.position: top written to the scratch shell.json");
+		check(set_toolbar_position("top") && set_app_bar_position("top"),
+			"toolbar.position and appbar.position: top written to the scratch shell.json");
 		return 800;
 	}
 	case 307: { // the top edge: a row below the bar
-		if (!toolbar_on_edge("top") && retries++ < 150) {
+		if (!(toolbar_on_edge("top") && app_bar_on_edge("top")) && retries++ < 150) {
 			return -400;
 		}
 		retries = 0;
@@ -10124,12 +10159,12 @@ int run_step() {
 				|| !flyout_folded_checks("edges-top-folded")) {
 			return -100;
 		}
-		check(set_toolbar_position("bottom"),
-			"toolbar.position: bottom written to the scratch shell.json");
+		check(set_toolbar_position("bottom") && set_app_bar_position("bottom"),
+			"toolbar.position and appbar.position: bottom written to the scratch shell.json");
 		return 800;
 	}
 	case 311: { // the bottom edge: the shelf above the toolbar
-		if (!toolbar_on_edge("bottom") && retries++ < 150) {
+		if (!(toolbar_on_edge("bottom") && app_bar_on_edge("bottom")) && retries++ < 150) {
 			return -400;
 		}
 		retries = 0;
@@ -10168,12 +10203,12 @@ int run_step() {
 				|| !flyout_folded_checks("edges-bottom-folded")) {
 			return -100;
 		}
-		check(set_toolbar_position("right"),
-			"toolbar.position: right written to the scratch shell.json");
+		check(set_toolbar_position("right") && set_app_bar_position("right"),
+			"toolbar.position and appbar.position: right written to the scratch shell.json");
 		return 800;
 	}
 	case 315: { // the right edge again, as the run leaves it
-		if (!toolbar_on_edge("right") && retries++ < 150) {
+		if (!(toolbar_on_edge("right") && app_bar_on_edge("right")) && retries++ < 150) {
 			return -400;
 		}
 		retries = 0;
@@ -10214,8 +10249,19 @@ int run_step() {
 		check(panel_layers() == 0, "no panel outlived the toolbar's edges");
 		check(toolbar_position_in_config() == "right",
 			"the scratch shell.json ends with toolbar.position: right");
+		watch_remember_bar();
+		check(set_app_bar_position("left"), "the app bar put back on its default edge");
+		step = 243; // on to the reload that edit makes
+		return -800; // without the advance: every other step moves on alone
+	}
+	case 243: { // the shell has reloaded: the next walk starts on the shell it keeps
+		if (!shell_reloaded() && retries++ < 100) {
+			return -200;
+		}
+		retries = 0;
+		check(shell_reloaded(), "the shell reloaded when the app bar went back to its edge");
 		step = 320; // on to the host's writes
-		return -100; // without the advance: every other step moves on alone
+		return -100;
 	}
 	// The host's own writes with the clock's panel open: the scratch
 	// plugin's `write` action moves the toolbar to the left edge and back
@@ -10585,7 +10631,9 @@ int main() {
 	// one action button, one panel button and one menu button, whose
 	// action appends its args to the plugin's storage — the read-back is
 	// the proof a click ran what it should. The menu's second row names a
-	// colour, the first a glyph, so the flyout draws both kinds.
+	// colour, the first a glyph, so the flyout draws both kinds. Two more
+	// buttons are invalid on purpose - one names an action and a panel,
+	// one names nothing - and the host drops them.
 	std::string scratch_plugin = plugins_dir + "/canvas.scratch";
 	mkdir_p(scratch_plugin);
 	write_file(scratch_plugin + "/plugin.json",
@@ -10608,7 +10656,12 @@ int main() {
 		"\t\t\t\t\t{\n\t\t\t\t\t\t\"label\": \"Yellow\",\n\t\t\t\t\t\t\"color\": \"#e0af68\",\n"
 		"\t\t\t\t\t\t\"action\": \"mark\",\n"
 		"\t\t\t\t\t\t\"args\": {\"kind\": \"menu-yellow\"}\n\t\t\t\t\t}\n"
-		"\t\t\t\t],\n\t\t\t\t\"order\": 2\n\t\t\t}\n"
+		"\t\t\t\t],\n\t\t\t\t\"order\": 2\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"both\",\n\t\t\t\t\"icon\": \"B\",\n"
+		"\t\t\t\t\"label\": \"Both\",\n\t\t\t\t\"action\": \"mark\",\n"
+		"\t\t\t\t\"panel\": \"scratch\",\n\t\t\t\t\"order\": 3\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"none\",\n\t\t\t\t\"icon\": \"N\",\n"
+		"\t\t\t\t\"label\": \"None\",\n\t\t\t\t\"order\": 4\n\t\t\t}\n"
 		"\t\t],\n"
 		"\t\t\"panels\": [\n\t\t\t{\n\t\t\t\t\"id\": \"scratch\",\n"
 		"\t\t\t\t\"entry\": \"ScratchPanel.qml\"\n\t\t\t}\n\t\t],\n"

@@ -1,5 +1,4 @@
 import Quickshell
-import Quickshell.Wayland
 import QtQuick
 import WaylandCanvas.Ui
 import "."
@@ -11,37 +10,25 @@ import "."
 // app's window, which the compositor focuses and moves the view to
 // (window.focus, docs/intents/platform/ipc.md).
 //
-// On the toolbar's own edge the two read as one strip: the toolbar's buttons
-// first, the separator in the gap, the apps last. Neither surface knows the
-// other — both place themselves from WaylandCanvas.Ui's StripLayout with the
-// two lengths, which each reads off the shell config, the toolbar registry
-// and the compositor's window list.
-Item {
+// The strip, its slide, its edge and its chrome are the UI kit's EdgeStrip.
+// On the toolbar's own edge the two read as one strip, the toolbar's buttons
+// first, the separator in the gap, the apps last: each publishes its length
+// and StripLayout places them, so neither surface knows the other.
+EdgeStrip {
 	id: root
 
-	property var api: null
-	property var registry: null
-	property var modelData: null // the output this app bar is on
-
-	readonly property int entrySize: 44
-	readonly property int slideMs: 200
-	readonly property int edgeMargin: UiTheme.edgeMargin
-
-	// appbar.enabled: off leaves no surface on any screen.
-	readonly property bool switchedOn: api != null && api.shell != null
-		? api.shell.appBarEnabled : true
-
-	// The edge appbar.position names, the left when it names none or
-	// something else: a hand edit can hold anything.
-	readonly property string edge: api != null && api.shell != null
-		? api.shell.appBarPosition : "left"
-	readonly property bool vertical: edge === "left" || edge === "right"
-
-	// The toolbar's edge, and whether it is this one: the strips then share
-	// it, the apps after the toolbar's buttons.
-	readonly property string toolbarEdge: api != null && api.shell != null
-		? api.shell.toolbarPosition : "right"
-	readonly property bool shared: toolbarEdge === edge
+	edge: api.shell.appBarPosition
+	namespace: "wayland-canvas-app-bar"
+	switchedOn: api.shell.appBarEnabled
+	count: apps.length
+	order: 1
+	hoverIndex: indexOfKey(hoveredKey)
+	label: {
+		var app = appFor(hoveredKey)
+		return app != null ? app.name : ""
+	}
+	catching: flyoutKey !== ""
+	onDismissed: foldFlyout()
 
 	// ---- the apps ----
 
@@ -52,7 +39,7 @@ Item {
 	readonly property var apps: groupWindows()
 
 	function groupWindows() {
-		var windows = api != null && api.compositor != null
+		var windows = api.compositor != null
 			? (api.compositor.state.windows || []) : []
 		var byApp = ({})
 		var out = []
@@ -112,12 +99,8 @@ Item {
 	// The entry with `key`, as the list reads now: the list is rebuilt on
 	// every state change, so nothing may hold on to an entry object.
 	function appFor(key) {
-		for (var i = 0; i < apps.length; i++) {
-			if (apps[i].key === key) {
-				return apps[i]
-			}
-		}
-		return null
+		var index = indexOfKey(key)
+		return index >= 0 ? apps[index] : null
 	}
 
 	function indexOfKey(key) {
@@ -129,306 +112,63 @@ Item {
 		return -1
 	}
 
-	// Whether this screen shows the overview, from the compositor's state.
-	readonly property bool overview: {
-		var outputs = api != null && api.compositor != null
-			? api.compositor.state.outputs : []
-		for (var i = 0; i < outputs.length; i++) {
-			if (outputs[i].name === modelData.name) {
-				return outputs[i].overview === true
-			}
-		}
-		return false
-	}
+	Repeater {
+		model: root.apps
 
-	// ---- the strip's place ----
+		AppEntry {
+			required property var modelData
 
-	readonly property int stripLength: apps.length * entrySize
-	// The toolbar's own length on this edge, for the shared strip: the
-	// buttons it would draw, from the same registry the toolbar reads.
-	readonly property int toolbarLength: {
-		if (!shared || registry == null) {
-			return 0
-		}
-		var all = registry.toolbarButtons || []
-		var count = 0
-		for (var i = 0; i < all.length; i++) {
-			var button = all[i]
-			var kinds = (button.action !== "" ? 1 : 0)
-				+ (button.panel !== "" ? 1 : 0)
-				+ (button.menu.length > 0 ? 1 : 0)
-			if (kinds === 1) {
-				count++
-			}
-		}
-		return count * entrySize
-	}
-
-	readonly property int nearEdge: edge === "top"
-		? UiTheme.barHeight + edgeMargin : edgeMargin
-	readonly property int pocket: nearEdge + entrySize
-	property real slide: overview ? 0 : -pocket
-	Behavior on slide {
-		NumberAnimation {
-			id: slideAnim
-			duration: root.slideMs
-			easing.type: Easing.OutCubic
+			app: modelData
+			surface: root
 		}
 	}
 
-	// Along its edge: after the toolbar's part when they share the edge,
-	// else the strip centred on its own.
-	readonly property int along: StripLayout.appsStart(
-		vertical ? modelData.height : modelData.width, toolbarLength, stripLength)
+	// ---- the window flyout ----
 
-	// ---- the strip ----
+	// An app's windows, listed beside its entry: one row per window, the
+	// focused one marked. A click goes to that window.
+	flyouts: Rectangle {
+		readonly property var app: root.appFor(root.flyoutKey)
+		readonly property var box: root.squareBox(root.indexOfKey(root.flyoutKey))
+		readonly property var spot: box != null
+			? root.placeBeside(box, width, height, false, UiTheme.edgeMargin)
+			: Qt.point(0, 0)
 
-	PanelWindow {
-		id: strip
+		visible: app != null && box != null
+		width: 240
+		height: rows.implicitHeight + 2 * UiTheme.panelPadding
+		color: UiTheme.panel
+		border.width: 1
+		border.color: UiTheme.border
+		radius: 4
+		x: spot.x
+		y: spot.y
 
-		screen: root.modelData
-		color: "transparent"
-		exclusionMode: ExclusionMode.Ignore // an overlay, not a reservation
-		visible: root.switchedOn && root.apps.length > 0
-			&& (root.overview || slideAnim.running)
-		WlrLayershell.namespace: "wayland-canvas-app-bar"
-		WlrLayershell.layer: WlrLayer.Top // above the canvas, below the panels
-		WlrLayershell.keyboardFocus: WlrKeyboardFocus.None // never the keyboard
-
-		// Anchored to its edge and to the leading one along it, so the
-		// margin along the edge places the strip where StripLayout says;
-		// the margin on the edge itself overhangs by an entry square, the
-		// pocket the strip slides into (as the toolbar's).
-		// Its edge, and the leading edge along it: the margin along the edge
-		// is where StripLayout puts the strip, so a shared edge lines the two
-		// strips up; the margin on the edge itself overhangs by an entry
-		// square, the pocket the strip slides into.
-		anchors.left: root.edge === "left" || !root.vertical
-		anchors.right: root.edge === "right"
-		anchors.top: root.edge === "top" || root.vertical
-		anchors.bottom: root.edge === "bottom"
-		WlrLayershell.margins.left: root.edge === "left" ? -root.entrySize
-			: root.vertical ? 0 : root.along
-		WlrLayershell.margins.right: root.edge === "right" ? -root.entrySize : 0
-		WlrLayershell.margins.top: root.edge === "top"
-			? root.nearEdge - root.pocket
-			: root.vertical ? root.along : 0
-		WlrLayershell.margins.bottom: root.edge === "bottom" ? -root.entrySize : 0
-
-		implicitWidth: root.vertical
-			? root.entrySize + root.pocket : root.stripLength
-		implicitHeight: root.vertical
-			? root.stripLength : root.entrySize + root.pocket
-
-		// Input is the strip's alone, wherever the slide has it.
-		mask: Region {
-			x: content.x
-			y: content.y
-			width: root.vertical ? root.entrySize : root.stripLength
-			height: root.vertical ? root.stripLength : root.entrySize
-		}
-
-		Item {
-			id: content
-			x: root.edge === "right" ? -root.slide
-				: root.edge === "left" ? root.pocket + root.slide : 0
-			y: root.edge === "bottom" ? -root.slide
-				: root.edge === "top" ? root.pocket + root.slide : 0
-			width: root.vertical ? root.entrySize : root.stripLength
-			height: root.vertical ? root.stripLength : root.entrySize
-
-			Rectangle {
-				anchors.fill: parent
-				color: UiTheme.panel
-				border.width: 1
-				border.color: UiTheme.border
-			}
-
-			// The separator between the toolbar's part and this one: a
-			// hairline across the strip in the gap the two leave, drawn on
-			// this side of it.
-			Rectangle {
-				visible: root.shared && root.toolbarLength > 0
-				color: UiTheme.border
-				width: root.vertical ? parent.width - 16 : 1
-				height: root.vertical ? 1 : parent.height - 16
-				x: root.vertical ? 8 : -Math.round(StripLayout.separator / 2)
-				y: root.vertical ? -Math.round(StripLayout.separator / 2) : 8
-			}
-
-			Repeater {
-				model: root.apps
-
-				AppEntry {
-					required property var modelData
-					required property int index
-
-					app: modelData
-					surface: root
-					x: root.vertical ? 0 : index * root.entrySize
-					y: root.vertical ? index * root.entrySize : 0
-					width: root.entrySize
-					height: root.entrySize
-				}
-			}
-		}
-	}
-
-	// ---- the chrome: the hovered app's name and the window flyout ----
-
-	// The hovered entry's square in output coordinates, from the same
-	// anchors and margins the strip commits.
-	function entryBox(index) {
-		if (index < 0) {
-			return null
-		}
-		var x = edge === "right"
-			? modelData.width - edgeMargin - entrySize
-			: edge === "left" ? edgeMargin
-			: along + index * entrySize
-		var y = edge === "bottom"
-			? modelData.height - edgeMargin - entrySize
-			: edge === "top" ? nearEdge
-			: along + index * entrySize
-		return {x: x, y: y, width: entrySize, height: entrySize}
-	}
-
-	PanelWindow {
-		id: chrome
-
-		screen: root.modelData
-		color: "transparent"
-		exclusionMode: ExclusionMode.Ignore
-		visible: root.switchedOn && root.overview
-			&& (root.hoveredKey !== "" || root.flyoutKey !== "")
-		WlrLayershell.namespace: "wayland-canvas-app-bar-chrome"
-		WlrLayershell.layer: WlrLayer.Overlay
-		WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-		anchors {
-			top: true
-			bottom: true
-			left: true
-			right: true
-		}
-
-		// Input is the open flyout's alone: without one the pointer reaches
-		// the overview and the strip below, and a click anywhere else folds
-		// the flyout.
-		mask: Region {
-			width: root.flyoutKey !== "" ? root.modelData.width : 0
-			height: root.flyoutKey !== "" ? root.modelData.height : 0
-		}
-
+		// Swallow the card's own padding: only a click truly outside folds.
 		MouseArea {
 			anchors.fill: parent
-			enabled: root.flyoutKey !== ""
-			onClicked: root.foldFlyout()
 		}
 
-		// The hovered app's name, on a chip beside its entry toward the
-		// screen's centre.
-		Rectangle {
-			readonly property int gap: 8
-			readonly property int pad: 6
-			readonly property var box: root.entryBox(root.indexOfKey(root.hoveredKey))
+		Column {
+			id: rows
+			anchors.fill: parent
+			anchors.margins: UiTheme.panelPadding
+			spacing: 2
 
-			visible: box != null && root.flyoutKey === ""
-			x: {
-				if (box == null) {
-					return 0
-				}
-				var want = root.edge === "right" ? box.x - gap - width
-					: root.edge === "left" ? box.x + box.width + gap
-					: box.x + box.width / 2 - width / 2
-				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
-					root.modelData.width - width - UiTheme.edgeMargin)))
-			}
-			y: {
-				if (box == null) {
-					return 0
-				}
-				var want = root.edge === "top" ? box.y + box.height + gap
-					: root.edge === "bottom" ? box.y - gap - height
-					: box.y + box.height / 2 - height / 2
-				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
-					root.modelData.height - height - UiTheme.edgeMargin)))
-			}
-			// The chip never grows past the screen: its text is elided to
-			// what is left beside the strip.
-			width: Math.min(labelText.implicitWidth + 2 * pad,
-				root.modelData.width - root.entrySize - 2 * UiTheme.edgeMargin - gap)
-			height: labelText.implicitHeight + 2 * pad
-			radius: 4
-			color: UiTheme.background
+			Repeater {
+				model: parent.parent.app != null ? parent.parent.app.windows : []
 
-			PanelText {
-				id: labelText
-				anchors.centerIn: parent
-				width: parent.width - 2 * parent.pad
-				elide: Text.ElideRight
-				horizontalAlignment: Text.AlignHCenter
-				text: {
-					var app = root.appFor(root.hoveredKey)
-					return app != null ? app.name : ""
-				}
-			}
-		}
+				PanelRow {
+					required property var modelData
 
-		// An app's windows, listed beside its entry: one row per window,
-		// the focused one marked. A click goes to that window.
-		Rectangle {
-			readonly property var app: root.appFor(root.flyoutKey)
-			readonly property var box: root.entryBox(root.indexOfKey(root.flyoutKey))
-
-			visible: app != null && box != null
-			width: 240
-			height: rows.implicitHeight + 2 * UiTheme.panelPadding
-			color: UiTheme.panel
-			border.width: 1
-			border.color: UiTheme.border
-			radius: 4
-			x: {
-				if (box == null) {
-					return 0
-				}
-				var want = root.edge === "right" ? box.x - UiTheme.edgeMargin - width
-					: root.edge === "left" ? box.x + box.width + UiTheme.edgeMargin
-					: box.x
-				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
-					root.modelData.width - width - UiTheme.edgeMargin)))
-			}
-			y: {
-				if (box == null) {
-					return 0
-				}
-				var want = root.edge === "top" ? box.y + box.height + UiTheme.edgeMargin
-					: root.edge === "bottom" ? box.y - UiTheme.edgeMargin - height
-					: box.y
-				return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
-					root.modelData.height - height - UiTheme.edgeMargin)))
-			}
-
-			Column {
-				id: rows
-				anchors.fill: parent
-				anchors.margins: UiTheme.panelPadding
-				spacing: 2
-
-				Repeater {
-					model: parent.parent.app != null ? parent.parent.app.windows : []
-
-					PanelRow {
-						required property var modelData
-
-						// Nothing is parked on the right of these rows: the
-						// title may use the card's full width, elided in it.
-						reserve: 8
-						label: modelData.title !== "" ? modelData.title
-							: (modelData.appId !== "" ? modelData.appId : "A window")
-						marked: modelData.focused === true
-						detail: modelData.minimized === true ? "Minimized" : ""
-						onClicked: root.goToWindow(modelData.id)
-					}
+					// Nothing is parked on the right of these rows: the
+					// title may use the card's full width, elided in it.
+					reserve: 8
+					label: modelData.title !== "" ? modelData.title
+						: (modelData.appId !== "" ? modelData.appId : "A window")
+					marked: modelData.focused === true
+					detail: modelData.minimized === true ? "Minimized" : ""
+					onClicked: root.goToWindow(modelData.id)
 				}
 			}
 		}

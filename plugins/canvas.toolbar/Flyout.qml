@@ -22,43 +22,14 @@ Rectangle {
 	width: surface != null ? surface.flyoutWidth : 0
 	height: column.implicitHeight + 2 * UiTheme.panelPadding
 
-	// The button's square, from the toolbar's layout of the strip.
-	readonly property var box: button != null && button.index >= 0
-		&& surface != null ? surface.buttonBox(button.index) : null
-
-	// Beside the strip on its inner side, one margin away from it; level
-	// with the button along the strip — the card's near edge sits at the
-	// button's near one, hanging along the edge — kept inside the output.
-	x: {
-		if (box == null || surface == null) {
-			return 0
-		}
-		var want = 0
-		if (surface.edge === "right") {
-			want = box.x - UiTheme.edgeMargin - width
-		} else if (surface.edge === "left") {
-			want = box.x + box.width + UiTheme.edgeMargin
-		} else {
-			want = box.x
-		}
-		return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
-			surface.modelData.width - width - UiTheme.edgeMargin)))
-	}
-	y: {
-		if (box == null || surface == null) {
-			return 0
-		}
-		var want = 0
-		if (surface.edge === "top") {
-			want = box.y + box.height + UiTheme.edgeMargin
-		} else if (surface.edge === "bottom") {
-			want = box.y - UiTheme.edgeMargin - height
-		} else {
-			want = box.y
-		}
-		return Math.round(Math.max(UiTheme.edgeMargin, Math.min(want,
-			surface.modelData.height - height - UiTheme.edgeMargin)))
-	}
+	// Beside the strip, one margin away from it, the card's near edge at
+	// the button's near one and hanging along the strip.
+	readonly property var spot: button != null && surface != null
+		? surface.placeBeside(surface.squareBox(button.index), width, height,
+			false, UiTheme.edgeMargin)
+		: Qt.point(0, 0)
+	x: spot.x
+	y: spot.y
 
 	// Swallow the card's own padding: only a click truly outside folds.
 	MouseArea {

@@ -1488,7 +1488,7 @@ Tests:
     - Delete Toolbar.qml's fallback for a host without `api.shell`.
   - Acceptance: `git grep -nE 'api\.plugin\.host|api\.shell\.plugins' -- plugins`
     prints nothing, and the bar scenario is green.
-- [ ] The two overview strips are one kit component
+- [x] The two overview strips are one kit component
   - Toolbar.qml and AppBar.qml each write their own copy of:
     - the strip window (AppBar 211-282, Toolbar 216-298);
     - the slide (192-202, 109-133);
@@ -1512,6 +1512,17 @@ Tests:
   - Acceptance: the bar scenario's toolbar and app-bar steps are green on
     every edge. In a nested run, check both strips on each edge
     (on screen).
+  - Done: `EdgeStrip` holds the strip window, the slide, the overview
+    flag, the chrome and label chip (clamped for both strips), the 44 px
+    square and `placeBeside()`, which PanelCard's clamps and the flyout
+    use. Toolbar.qml and AppBar.qml keep only their squares. The edge
+    comes from `api.shell`, the host drops invalid toolbar buttons, and
+    StripLayout reads each strip's published `length`. The host-writes
+    walk waits for the reload that putting the app bar back on its edge
+    makes before it starts.
+    A nested run with three windows open showed both strips on nine edge
+    pairs (each edge shared, and right/left, left/right, top/bottom,
+    bottom/top, right/top) and none after Escape.
 - [ ] Each manifest fact is stated once
   - The host passes each panel its name when creating it. Today 11
     panels restate it as `panelName` (e.g. AgentsPanel.qml:15-16), while

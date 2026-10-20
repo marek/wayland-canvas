@@ -522,9 +522,8 @@ Item {
 			["actions", contributes.actions],
 		]
 		// Toolbar buttons are manifest data, not components: they name no
-		// file, so there is nothing to compile — the toolbar that hosts
-		// them skips a button that names none or more than one of action,
-		// panel and menu.
+		// file, so there is nothing to compile — a button that names none
+		// or more than one of action, panel and menu is dropped below.
 		var toolbarEntries = contributes.toolbarButtons || []
 		// Compile everything the manifest names first: one file that does
 		// not compile skips the whole plugin, before anything registers.
@@ -603,17 +602,10 @@ Item {
 		}
 	// The toolbar buttons, straight from the manifest data.
 	for (var t = 0; t < toolbarEntries.length; t++) {
-		var b = toolbarEntries[t]
-		pluginButtons.push({
-			name: plugin.id + "/" + (b.id || "?"),
-			icon: b.icon || "",
-			label: b.label || "",
-			action: b.action ? plugin.id + "/" + b.action : "",
-			panel: b.panel ? plugin.id + "/" + b.panel : "",
-			menu: buttonMenu(plugin, b.menu),
-			args: b.args,
-			order: b.order || 0,
-		})
+		var button = toolbarButton(plugin, toolbarEntries[t])
+		if (button !== null) {
+			pluginButtons.push(button)
+		}
 	}
 	if (problem !== "") {
 		skip(plugin.dir, problem)
@@ -651,6 +643,32 @@ Item {
 				action: entry.action ? plugin.id + "/" + entry.action : ""
 			})
 		})
+	}
+
+	// A toolbar button from its manifest entry, with the names made global.
+	// One naming none or more than one of action, panel and menu is dropped
+	// here, with a line saying why, so the toolbar only ever sees valid ones.
+	function toolbarButton(plugin, entry) {
+		var button = {
+			name: plugin.id + "/" + (entry.id || "?"),
+			icon: entry.icon || "",
+			label: entry.label || "",
+			action: entry.action ? plugin.id + "/" + entry.action : "",
+			panel: entry.panel ? plugin.id + "/" + entry.panel : "",
+			menu: buttonMenu(plugin, entry.menu),
+			args: entry.args,
+			order: entry.order || 0,
+		}
+		var kinds = (button.action !== "" ? 1 : 0) + (button.panel !== "" ? 1 : 0)
+			+ (button.menu.length > 0 ? 1 : 0)
+		if (kinds !== 1) {
+			console.warn("[plugins] skipping toolbar button " + button.name
+				+ ": it names " + (kinds === 0
+					? "no action, panel or menu"
+					: "more than one of action, panel and menu"))
+			return null
+		}
+		return button
 	}
 
 	// Every contribution that loaded, before the config orders and filters

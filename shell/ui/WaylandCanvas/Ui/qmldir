@@ -3,6 +3,7 @@ singleton UiTheme UiTheme.qml
 singleton StripLayout StripLayout.qml
 BarButton BarButton.qml
 ChoiceRow ChoiceRow.qml
+EdgeStrip EdgeStrip.qml
 KeyChip KeyChip.qml
 NightLightControl NightLightControl.qml
 PanelCard PanelCard.qml

@@ -147,7 +147,11 @@ follows `api.shell.barWidgets`, so a widget hidden or shown applies at once.
 Plugins draw with the shell's UI kit, a QML module they import as
 `WaylandCanvas.Ui`: the bar button, the panel card and its rows, sliders,
 switches, tabs, choice rows, key chips, text and fields, all coloured from
-`api.theme`.
+`api.theme`, and the edge strip of the overview - its window, slide,
+label chip and the placement of a card beside it - which the toolbar and
+the app bar are both written on. The host passes a surface only valid
+toolbar buttons: one naming none or more than one of `action`, `panel` and
+`menu` is dropped when the plugins load.
 
 ### Built-in plugins
 

@@ -13,6 +13,10 @@ Item {
 	property var app: null // the grouped entry: key, appId, name, icon, windows
 	property var surface: null // the app bar surface, which acts on clicks
 
+	// The strip lays the entry out; the square is its.
+	width: surface != null ? surface.squareSize : 0
+	height: width
+
 	readonly property string mark: app != null && app.name !== ""
 		? app.name.substring(0, 1).toUpperCase() : "?"
 	readonly property bool dim: app != null && app.minimized
