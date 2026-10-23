@@ -487,6 +487,27 @@ test(
 	suite: 'unit',
 )
 
+# The notes' file format on a real TextEdit, under Qt 6's qmltestrunner (the
+# plain `qmltestrunner` is often Qt 5's). Registered only where it is installed.
+qml_test_runner = find_program(
+	'qmltestrunner6',
+	'qmltestrunner-qt6',
+	'/usr/lib/qt6/bin/qmltestrunner',
+	'/usr/lib64/qt6/bin/qmltestrunner',
+	required: false,
+)
+if qml_test_runner.found()
+	qml_test_env = environment()
+	qml_test_env.set('QT_QPA_PLATFORM', 'offscreen')
+	test(
+		'note-file',
+		qml_test_runner,
+		args: ['-input', meson.project_source_root() / 'tests/test_note_file.qml'],
+		env: qml_test_env,
+		suite: 'unit',
+	)
+endif
+
 # End-to-end scenarios: the real compositor on the headless backend, real
 # foot clients, fake input devices, grim screenshots. Registered only when
 # foot and grim are on PATH; the bar scenario additionally needs qs (the

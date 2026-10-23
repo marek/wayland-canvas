@@ -1,2 +1,3 @@
 singleton Notes NotesState.qml
 NoteSurface 1.0 NoteSurface.qml
+NoteEditor 1.0 NoteEditor.qml

@@ -1978,7 +1978,7 @@ Tests:
     `set(params, faultKey)`.
   - Each tab is a file, listed in phase 7's tab table.
   - Acceptance: the bar scenario's settings steps are green.
-- [ ] Notes: editing, the file format and placement each in their own
+- [x] Notes: editing, the file format and placement each in their own
   file
   - The text-formatting code (NoteSurface.qml:146-300, 605-627) moves to
     `NoteEditor.qml`.
