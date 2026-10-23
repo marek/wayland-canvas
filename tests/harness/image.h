@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include "core/wlr.h"
 
 namespace harness {
 
@@ -25,6 +27,16 @@ constexpr uint32_t argb_of(uint32_t rgba) {
 	return (rgba >> 8) | (rgba << 24);
 }
 
+// What counts when two images are compared.
+struct ImageCompare {
+	// Only these pixels count; all of them when empty.
+	std::optional<wlr_box> within;
+	// These do not count.
+	std::span<const wlr_box> skip;
+	// A pixel differs when a colour channel is further off than this.
+	int tolerance = 0;
+};
+
 // A PNG read into memory.
 class Image {
 public:
@@ -39,6 +51,13 @@ public:
 	double share_of(uint32_t argb) const;
 	// The mean red, green and blue, 0 to 1 each.
 	std::array<double, 3> average_rgb() const;
+
+	// How many pixels of `box`, clipped to the image, are not black: ink of
+	// any kind drawn there.
+	long ink_in(wlr_box box) const;
+
+	// How many pixels of this image and `other` differ, -1 when their sizes do.
+	long differing(const Image &other, const ImageCompare &how = {}) const;
 
 private:
 	using Surface = std::unique_ptr<cairo_surface_t, void (*)(cairo_surface_t *)>;

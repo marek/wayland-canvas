@@ -1,5 +1,7 @@
 #include "harness/image.h"
 
+#include <algorithm>
+#include <cstdlib>
 #include <format>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -94,6 +96,45 @@ std::array<double, 3> Image::average_rgb() const {
 		return {0, 0, 0};
 	}
 	return {sums[0] / pixels / 255.0, sums[1] / pixels / 255.0, sums[2] / pixels / 255.0};
+}
+
+long Image::ink_in(wlr_box box) const {
+	long ink = 0;
+	for (int y = std::max(box.y, 0); y < std::min(box.y + box.height, height()); y++) {
+		for (int x = std::max(box.x, 0); x < std::min(box.x + box.width, width()); x++) {
+			if ((pixel(x, y) & 0x00ffffffu) != 0) {
+				ink++;
+			}
+		}
+	}
+	return ink;
+}
+
+long Image::differing(const Image &other, const ImageCompare &how) const {
+	if (width() != other.width() || height() != other.height()) {
+		return -1;
+	}
+	wlr_box area = how.within.value_or(wlr_box{0, 0, width(), height()});
+	long count = 0;
+	for (int y = std::max(area.y, 0); y < std::min(area.y + area.height, height()); y++) {
+		for (int x = std::max(area.x, 0); x < std::min(area.x + area.width, width()); x++) {
+			bool skipped = std::ranges::any_of(how.skip, [&](const wlr_box &s) {
+				return x >= s.x && y >= s.y && x < s.x + s.width && y < s.y + s.height;
+			});
+			if (skipped) {
+				continue;
+			}
+			uint32_t a = pixel(x, y), b = other.pixel(x, y);
+			for (int shift : {0, 8, 16}) {
+				if (std::abs(static_cast<int>((a >> shift) & 0xff)
+						- static_cast<int>((b >> shift) & 0xff)) > how.tolerance) {
+					count++;
+					break;
+				}
+			}
+		}
+	}
+	return count;
 }
 
 std::optional<Image> read_shot(std::string_view name) {

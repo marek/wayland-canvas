@@ -43,6 +43,7 @@ int on_tick() {
 } // namespace
 
 bool begin(std::string_view scenario, std::initializer_list<const char *> required_env) {
+	wlr_log_init(WLR_ERROR, nullptr);
 	for (const char *name : required_env) {
 		const char *value = std::getenv(name);
 		if (value == nullptr || *value == '\0') {

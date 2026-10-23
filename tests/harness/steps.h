@@ -93,6 +93,9 @@ public:
 	std::string_view current() const;
 	// True once a step finished the run or it ran past the last step.
 	bool finished() const { return finished_; }
+	// A step that ends the run another way - the compositor's own quit - says
+	// so first: the display stopping is then the run's end, not a stop before it.
+	void end_is_coming() { finished_ = true; }
 	// What stopped the run when a go_to named no step; empty otherwise.
 	const std::string &error() const { return error_; }
 

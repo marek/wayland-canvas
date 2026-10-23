@@ -13,116 +13,79 @@
 // Writes only under $CANVAS_TMP: the XDG pictures and videos dirs point
 // into it, and xdg-open is a stub.
 #include <algorithm>
-#include <cairo.h>
-#include <cerrno>
 #include <chrono>
-#include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <dirent.h>
-#include <fcntl.h>
-#include <filesystem>
-#include <json-glib/json-glib.h>
+#include <format>
 #include <linux/input-event-codes.h>
 #include <optional>
-#include <print>
 #include <ranges>
 #include <signal.h>
-#include <source_location>
 #include <span>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <xkbcommon/xkbcommon-keysyms.h>
+#include <vector>
 #include "apps/capture_toolbar_layout.h"
 #include "core/config.h"
 #include "core/server.h"
-#include "core/wlr.h"
+#include "harness/check.h"
+#include "harness/child.h"
+#include "harness/control.h"
+#include "harness/devices.h"
+#include "harness/files.h"
+#include "harness/image.h"
+#include "harness/run.h"
 #include "platform/output.h"
 #include "windows/view.h"
 
+using namespace harness;
+
 namespace {
 
-std::optional<Server> server;
-wl_event_source *timer = nullptr;
-int step = 0, failures = 0, retries = 0;
-bool acted = false; // a step's interaction has happened (see handle_timer)
+Child events; // the events subscriber, running for the whole run
 std::string term_geometry; // the window crop the key-leak check compares
-bool finished = false; // the run reached its end; see main()
-uint32_t t = 90000;
-pid_t grim_pid = -1;
-pid_t sub_pid = -1; // the events subscriber
-pid_t held_pid = -1; // the command a recording runs beside
 std::string stall_bin; // the dir holding the stand-in encoder as `ffmpeg`
-std::chrono::steady_clock::time_point state_asked; // when the stalled state was asked
-std::string shot_dir;
 std::string pictures_dir; // the scratch XDG pictures dir
 std::string videos_dir; // the scratch XDG videos dir
-std::string events_path;
-wlr_pointer ptr{};
-const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
-wlr_keyboard kbd{};
-const wlr_keyboard_impl kbd_impl = {.name = "fake-keyboard"};
+std::chrono::steady_clock::time_point state_asked; // when the stalled state was asked
 
-// Prints PASS/FAIL with the note; a failure counts and names its source line.
-void check(bool cond, std::string_view note,
-	std::source_location where = std::source_location::current()) {
-	std::println("{}: {}", cond ? "PASS" : "FAIL", note);
-	std::fflush(stdout);
-	if (!cond) {
-		failures++;
-		std::println(stderr, "  at {}:{} in {}", where.file_name(), where.line(),
-			where.function_name());
+// grim and the compositor round differently: pixels differ by up to this
+// much in a channel and still count as the same.
+constexpr int shot_tolerance = 2;
+
+// The command a recording runs beside. The compositor's own spawn starts it
+// and double forks, so it is nobody's child; it dies with the scenario
+// whatever step the run ends at.
+class HeldCommand {
+public:
+	~HeldCommand() {
+		stop();
 	}
-}
 
-void mkdir_p(const std::string &path) {
-	for (std::size_t i = 1; i < path.size(); i++) {
-		if (path[i] == '/') {
-			mkdir(path.substr(0, i).c_str(), 0755);
+	void start() {
+		pid_ = spawn("sleep 60");
+	}
+
+	pid_t pid() const {
+		return pid_;
+	}
+
+	void stop() {
+		if (pid_ > 0) {
+			kill(pid_, SIGKILL);
+			pid_ = -1;
 		}
 	}
-	if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) {
-		std::fprintf(stderr, "mkdir %s: %s\n", path.c_str(), std::strerror(errno));
-	}
-}
 
-void write_file(const std::string &path, std::string_view text) {
-	FILE *f = std::fopen(path.c_str(), "w");
-	if (f == nullptr) {
-		std::fprintf(stderr, "cannot write %s\n", path.c_str());
-		return;
-	}
-	std::fwrite(text.data(), 1, text.size(), f);
-	std::fclose(f);
-}
-
-std::string read_file(const std::string &path) {
-	FILE *f = std::fopen(path.c_str(), "r");
-	if (f == nullptr) {
-		return "";
-	}
-	std::string out;
-	char buf[256];
-	std::size_t n;
-	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
-		out.append(buf, n);
-	}
-	std::fclose(f);
-	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
-		out.pop_back();
-	}
-	return out;
-}
-
-bool file_exists(const std::string &path) {
-	struct stat st{};
-	return stat(path.c_str(), &st) == 0;
-}
+private:
+	pid_t pid_ = -1;
+};
+HeldCommand held;
 
 // The shot files that carry `prefix` in `dir`, newest first.
 std::vector<std::string> files_with(const std::string &dir, std::string_view prefix) {
@@ -166,227 +129,12 @@ std::vector<std::string> proc_fds(pid_t pid) {
 	return out;
 }
 
-// Kills the command a recording ran beside; the double fork in spawn
-// reparented it, so there is nothing to wait on.
-void kill_held() {
-	if (held_pid > 0) {
-		kill(held_pid, SIGKILL);
-		held_pid = -1;
-	}
-}
-
-// ------------------------------------------------------------- pictures
-
-void shot(const char *name) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	grim_pid = fork();
-	if (grim_pid == 0) {
-		execlp("grim", "grim", path.c_str(), static_cast<char *>(nullptr));
-		_exit(127);
-	}
-}
-
-// A grim crop of a region, in grim's own "x,y WxH" geometry format.
-void shot_region(const char *name, const std::string &geometry) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	grim_pid = fork();
-	if (grim_pid == 0) {
-		execlp("grim", "grim", "-g", geometry.c_str(), path.c_str(),
-			static_cast<char *>(nullptr));
-		_exit(127);
-	}
-}
-
-bool grim_running() {
-	if (grim_pid <= 0) {
-		return false;
-	}
-	if (waitpid(grim_pid, nullptr, WNOHANG) == 0) {
-		return true;
-	}
-	grim_pid = -1;
-	return false;
-}
-
-using CairoSurfacePtr = std::unique_ptr<cairo_surface_t,
-	void (*)(cairo_surface_t *)>;
-
-// Loads a PNG as ARGB32 (grim and the shots may write other formats).
-cairo_surface_t *load_png(const char *name) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	cairo_surface_t *raw = cairo_image_surface_create_from_png(path.c_str());
-	if (cairo_surface_status(raw) != CAIRO_STATUS_SUCCESS) {
-		std::fprintf(stderr, "cannot read %s\n", path.c_str());
-		cairo_surface_destroy(raw);
-		return nullptr;
-	}
-	if (cairo_image_surface_get_format(raw) == CAIRO_FORMAT_ARGB32) {
-		return raw;
-	}
-	cairo_surface_t *argb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-		cairo_image_surface_get_width(raw), cairo_image_surface_get_height(raw));
-	cairo_t *cr = cairo_create(argb);
-	cairo_set_source_surface(cr, raw, 0, 0);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	cairo_surface_destroy(raw);
-	return argb;
-}
-
-// Loads the newest shot file under the pictures dir; null when there is
-// none (or it is unreadable).
-cairo_surface_t *load_newest_shot(std::string *path_out = nullptr) {
-	std::vector<std::string> files = files_with(pictures_dir + "/Screenshots",
-		"Screenshot");
-	if (files.empty()) {
-		return nullptr;
-	}
-	std::string path = files.front();
-	std::string name = "newest-shot";
-	std::string dest = std::format("{}/{}.png", shot_dir, name);
-	FILE *from = std::fopen(path.c_str(), "r");
-	FILE *to = std::fopen(dest.c_str(), "w");
-	if (from == nullptr || to == nullptr) {
-		if (from != nullptr) {
-			std::fclose(from);
-		}
-		if (to != nullptr) {
-			std::fclose(to);
-		}
-		return nullptr;
-	}
-	char buf[4096];
-	std::size_t n;
-	while ((n = std::fread(buf, 1, sizeof buf, from)) > 0) {
-		std::fwrite(buf, 1, n, to);
-	}
-	std::fclose(from);
-	std::fclose(to);
-	if (path_out != nullptr) {
-		*path_out = path;
-	}
-	return load_png(name.c_str());
-}
-
-// How many pixels of two same-sized ARGB32 images differ by more than `tol`
-// in any RGB channel, not counting pixels inside `skip` (the cursor's box).
-long pixels_differing(cairo_surface_t *a, cairo_surface_t *b,
-		const std::vector<wlr_box> &skip = {}, int tol = 2) {
-	if (a == nullptr || b == nullptr) {
-		return -1;
-	}
-	int w = cairo_image_surface_get_width(a), h = cairo_image_surface_get_height(a);
-	if (w != cairo_image_surface_get_width(b) || h != cairo_image_surface_get_height(b)) {
-		return -1;
-	}
-	cairo_surface_flush(a);
-	cairo_surface_flush(b);
-	const unsigned char *da = cairo_image_surface_get_data(a);
-	const unsigned char *db = cairo_image_surface_get_data(b);
-	int sa = cairo_image_surface_get_stride(a), sb = cairo_image_surface_get_stride(b);
-	long bad = 0;
-	for (int y = 0; y < h; y++) {
-		for (int x = 0; x < w; x++) {
-			bool skipped = false;
-			for (const wlr_box &s : skip) {
-				if (x >= s.x && y >= s.y && x < s.x + s.width && y < s.y + s.height) {
-					skipped = true;
-					break;
-				}
-			}
-			if (skipped) {
-				continue;
-			}
-			// Both layouts little-endian: B, G, R at bytes 0..2.
-			const unsigned char *pa = da + y * sa + static_cast<std::size_t>(x) * 4;
-			const unsigned char *pb = db + y * sb + static_cast<std::size_t>(x) * 4;
-			if (std::abs(pa[0] - pb[0]) > tol || std::abs(pa[1] - pb[1]) > tol
-					|| std::abs(pa[2] - pb[2]) > tol) {
-				bad++;
-			}
-		}
-	}
-	return bad;
-}
-
-// The box around the pointer's on-screen position, translated into the
-// reference image's coordinates (a crop's origin for grim -g shots).
-wlr_box cursor_box(double px, double py, int ref_x = 0, int ref_y = 0) {
-	return {static_cast<int>(px) - ref_x - 24, static_cast<int>(py) - ref_y - 24,
-		64, 64};
-}
-
-// A shot (an offscreen capture, cursorless) against a grim reference: they
-// match, at the usual 0.1 % budget, outside `skip` (the cursor's box in the
-// reference, none when the pointer was parked outside it). `pw`/`ph` are
-// the sizes the shot must have.
-bool shot_matches(cairo_surface_t *shot_surf, const char *ref,
-		const std::vector<wlr_box> &skip, int pw, int ph) {
-	if (shot_surf == nullptr) {
-		return false;
-	}
-	if (cairo_image_surface_get_width(shot_surf) != pw
-			|| cairo_image_surface_get_height(shot_surf) != ph) {
-		return false;
-	}
-	cairo_surface_t *reference = load_png(ref);
-	if (reference == nullptr) {
-		return false;
-	}
-	long bad = pixels_differing(shot_surf, reference, skip);
-	long total = static_cast<long>(pw) * ph;
-	cairo_surface_destroy(reference);
-	return bad >= 0 && bad * 1000 <= total;
-}
-
-// ------------------------------------------------------------- clients
-
-// Runs `cmd` through the compositor's own spawn (never blocking this
-// process) with stdout, stderr and the exit code captured under `name`.
-void run_shell(const std::string &cmd, const char *name) {
-	std::string full = std::format("{} > {}/{}.out 2> {}/{}.err; echo $? > {}/{}.code",
-		cmd, shot_dir, name, shot_dir, name, shot_dir, name);
-	spawn(full.c_str());
-}
-
-// The real `wayland-canvas msg` client. Params, when given, are
-// single-quoted for the shell.
-void run_client(std::string_view method, std::string_view params, const char *name) {
-	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
-	std::string cmd = std::format("\"{}\" msg {}", bin, method);
-	if (!params.empty()) {
-		cmd += std::format(" '{}'", params);
-	}
-	run_shell(cmd, name);
-}
-
-// The chooser bridge: `msg capture.pick` fed a chooser list on stdin.
-void run_bridge(const char *list, const char *name) {
-	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
-	run_shell(std::format("\"{}\" msg capture.pick < {}/{}", bin, shot_dir, list), name);
-}
-
-bool client_done(const char *name) {
-	return file_exists(std::format("{}/{}.code", shot_dir, name));
-}
-
-std::string client_out(const char *name) {
-	return read_file(std::format("{}/{}.out", shot_dir, name));
-}
-
-std::string client_err(const char *name) {
-	return read_file(std::format("{}/{}.err", shot_dir, name));
-}
-
-int client_code(const char *name) {
-	return std::atoi(read_file(std::format("{}/{}.code", shot_dir, name)).c_str());
-}
-
-// Runs a command that needs no compositor interaction to completion.
+// Runs a command that needs no compositor interaction to completion, its
+// stdout in <scratch>/<out>; its exit status.
 int run_sync(const std::string &cmd, const char *out) {
 	pid_t pid = fork();
 	if (pid == 0) {
-		FILE *f = std::fopen((shot_dir + "/" + out).c_str(), "w");
+		FILE *f = std::fopen((scratch() + "/" + out).c_str(), "w");
 		if (f == nullptr || dup2(fileno(f), 1) < 0) {
 			_exit(126);
 		}
@@ -398,157 +146,121 @@ int run_sync(const std::string &cmd, const char *out) {
 	return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-// ------------------------------------------------------ json members
+// ------------------------------------------------------------- pictures
 
-std::optional<long long> member_int(JsonObject *object, const char *name) {
-	if (object == nullptr || !json_object_has_member(object, name)) {
-		return std::nullopt;
-	}
-	JsonNode *node = json_object_get_member(object, name);
-	return json_node_get_node_type(node) == JSON_NODE_VALUE
-			&& json_node_get_value_type(node) == G_TYPE_INT64
-		? std::optional{json_node_get_int(node)} : std::nullopt;
+std::string newest_shot_path() {
+	std::vector<std::string> files = files_with(pictures_dir + "/Screenshots", "Screenshot");
+	return files.empty() ? std::string{} : files.front();
 }
 
-std::string member_string(JsonObject *object, const char *name) {
-	if (object == nullptr || !json_object_has_member(object, name)) {
-		return {};
-	}
-	JsonNode *node = json_object_get_member(object, name);
-	return json_node_get_node_type(node) == JSON_NODE_VALUE
-			&& json_node_get_value_type(node) == G_TYPE_STRING
-		? std::string{json_node_get_string(node)} : std::string{};
+// The newest shot file under the pictures dir; empty when there is none (or
+// it is unreadable).
+std::optional<Image> read_newest_shot() {
+	std::string path = newest_shot_path();
+	return path.empty() ? std::nullopt : Image::read(path);
 }
 
-// A parsed result object of one client's answer: fills `*parser` (to unref
-// when done) and `*result`. False when the answer is not an object.
-bool client_result(const char *name, JsonParser **parser, JsonObject **result) {
-	*parser = nullptr;
-	*result = nullptr;
-	std::string text = client_out(name);
-	if (text.empty()) {
+int shots_saved() {
+	return static_cast<int>(files_with(pictures_dir + "/Screenshots", "Screenshot").size());
+}
+
+// The box around the pointer's on-screen position, translated into the
+// reference image's coordinates (a crop's origin for grim -g shots).
+wlr_box cursor_box(double px, double py, int ref_x = 0, int ref_y = 0) {
+	return {static_cast<int>(px) - ref_x - 24, static_cast<int>(py) - ref_y - 24, 64, 64};
+}
+
+// How many pixels of `got` differ from the shot named `reference`, outside
+// `skip` (the cursor's box in the reference, none when the pointer was parked
+// outside it); -1 when either is missing or their sizes differ.
+long pixels_off(const std::optional<Image> &got, std::string_view reference,
+		std::optional<wlr_box> skip = std::nullopt) {
+	std::optional<Image> ref = read_shot(reference);
+	if (!got.has_value() || !ref.has_value()) {
+		return -1;
+	}
+	std::span<const wlr_box> skipped;
+	if (skip.has_value()) {
+		skipped = std::span<const wlr_box>{&*skip, 1};
+	}
+	return got->differing(*ref, {.skip = skipped, .tolerance = shot_tolerance});
+}
+
+// A thousandth of the picture may differ.
+bool within_budget(long off, long total) {
+	return off >= 0 && off * 1000 <= total;
+}
+
+// A shot (an offscreen capture, cursorless) against a grim reference: they
+// match, at the usual 0.1 % budget, outside `skip`. `pw`/`ph` are the sizes
+// the shot must have.
+bool shot_matches(const std::optional<Image> &got, std::string_view reference,
+		std::optional<wlr_box> skip, int pw, int ph) {
+	if (!got.has_value() || got->width() != pw || got->height() != ph) {
 		return false;
 	}
-	JsonParser *p = json_parser_new();
-	if (!json_parser_load_from_data(p, text.c_str(),
-			static_cast<gssize>(text.size()), nullptr)) {
-		g_object_unref(p);
+	return within_budget(pixels_off(got, reference, skip), static_cast<long>(pw) * ph);
+}
+
+// Pixels of two grims that differ inside `box`; -1 when one cannot be read.
+long grim_differs_inside(std::string_view a, std::string_view b, const wlr_box &box) {
+	std::optional<Image> first = read_shot(a), second = read_shot(b);
+	if (!first.has_value() || !second.has_value()) {
+		return -1;
+	}
+	return first->differing(*second, {.within = box, .tolerance = shot_tolerance});
+}
+
+// ffprobe's csv rows ("W,H" and the duration) joined by the tr in
+// run_sync: the size matches and the recording runs at least `min_s`.
+bool probe_matches(const std::string &probe, int want_w, int want_h, double min_s) {
+	int w = 0, h = 0;
+	double dur = 0;
+	if (std::sscanf(probe.c_str(), "%d,%d %lf", &w, &h, &dur) != 3) {
 		return false;
 	}
-	JsonNode *root = json_parser_get_root(p);
-	*result = root != nullptr && json_node_get_node_type(root) == JSON_NODE_OBJECT
-		? json_node_get_object(root) : nullptr;
-	if (*result == nullptr) {
-		g_object_unref(p);
-		return false;
-	}
-	*parser = p;
-	return true;
+	return w == want_w && h == want_h && dur >= min_s;
+}
+
+// ffprobe of `file`, as run_sync leaves it in <scratch>/<out>; its status.
+int probe_recording(const std::string &file, const char *out) {
+	return run_sync(std::format(
+		"ffprobe -v error -select_streams v:0 "
+			"-show_entries stream=width,height -show_entries format=duration "
+			"-of csv=p=0 \"{}\" | tr '\\n' ' '", file), out);
 }
 
 // The `recording` member of a `msg state` answer: "" when absent, "none"
 // when null, else the recording's path.
-std::string state_recording(const char *name) {
-	std::string text = client_out(name);
-	JsonParser *parser = json_parser_new();
-	std::string out;
-	if (json_parser_load_from_data(parser, text.c_str(),
-			static_cast<gssize>(text.size()), nullptr)) {
-		JsonNode *root = json_parser_get_root(parser);
-		JsonObject *object = root != nullptr
-				&& json_node_get_node_type(root) == JSON_NODE_OBJECT
-			? json_node_get_object(root) : nullptr;
-		if (object != nullptr && json_object_has_member(object, "recording")) {
-			JsonNode *node = json_object_get_member(object, "recording");
-			if (json_node_get_node_type(node) == JSON_NODE_NULL) {
-				out = "none";
-			} else if (json_node_get_node_type(node) == JSON_NODE_OBJECT) {
-				out = member_string(json_node_get_object(node), "path");
-			}
-		}
+std::string state_recording(std::string_view name) {
+	JsonAnswer answer(command_out(name));
+	JsonObject *object = answer.object();
+	if (object == nullptr || !json_object_has_member(object, "recording")) {
+		return "";
 	}
-	g_object_unref(parser);
-	return out;
-}
-
-// ------------------------------------------------------ input fakes
-
-// Pointer at output-local logical (x, y) on the single 1280x720 output.
-void move_to(double x, double y) {
-	t += 8;
-	wlr_pointer_motion_absolute_event ev = {
-		.pointer = &ptr, .time_msec = t, .x = x / 1280.0, .y = y / 720.0};
-	wl_signal_emit_mutable(&ptr.events.motion_absolute, &ev);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-}
-
-void button(uint32_t code, bool pressed) {
-	t += 8;
-	wlr_pointer_button_event ev = {.pointer = &ptr, .time_msec = t, .button = code,
-		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
-			: WL_POINTER_BUTTON_STATE_RELEASED};
-	wl_signal_emit_mutable(&ptr.events.button, &ev);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-}
-
-void click(double x, double y) {
-	move_to(x, y);
-	button(BTN_LEFT, true);
-	button(BTN_LEFT, false);
-}
-
-void drag(double x0, double y0, double x1, double y1) {
-	move_to(x0, y0);
-	button(BTN_LEFT, true);
-	for (int i = 1; i <= 10; i++) {
-		move_to(x0 + (x1 - x0) * i / 10, y0 + (y1 - y0) * i / 10);
+	JsonNode *node = json_object_get_member(object, "recording");
+	if (json_node_get_node_type(node) == JSON_NODE_NULL) {
+		return "none";
 	}
-	button(BTN_LEFT, false);
-}
-
-void key(uint32_t code, bool pressed) {
-	t += 8;
-	wlr_keyboard_key_event ev = {.time_msec = t, .keycode = code, .update_state = true,
-		.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
-			: WL_KEYBOARD_KEY_STATE_RELEASED};
-	wlr_keyboard_notify_key(&kbd, &ev);
-}
-
-// Press mods..., tap k, release mods.
-void chord(uint32_t k, std::span<const uint32_t> mods) {
-	for (uint32_t m : mods) {
-		key(m, true);
+	if (json_node_get_node_type(node) == JSON_NODE_OBJECT) {
+		return member_string(json_node_get_object(node), "path");
 	}
-	key(k, true);
-	key(k, false);
-	for (uint32_t m : std::views::reverse(mods)) {
-		key(m, false);
-	}
+	return "";
 }
 
-constexpr uint32_t SHIFT[] = {KEY_LEFTSHIFT};
-constexpr uint32_t SUPER_SHIFT[] = {KEY_LEFTMETA, KEY_LEFTSHIFT};
-constexpr uint32_t SUPER_CTRL_SHIFT[] = {KEY_LEFTMETA, KEY_LEFTCTRL,
-	KEY_LEFTSHIFT};
-constexpr uint32_t ALT[] = {KEY_LEFTALT};
+// The chooser bridge: `msg capture.pick` fed a chooser list on stdin.
+void run_bridge(const char *list, std::string_view name) {
+	run_command(std::format("\"{}\" msg capture.pick < {}/{}", std::getenv("WAYLAND_CANVAS_BIN"),
+		scratch(), list), name);
+}
 
 // ------------------------------------------------------ window helpers
 
-View *cap_window() {
-	for (View *v : server->views) {
-		if (v->mapped) {
-			return v;
-		}
-	}
-	return nullptr;
-}
-
 // The view's frame where the output shows it, output-local logical px.
 wlr_box view_on_screen(View &view) {
-	Output *output = server->outputs.front().get();
-	Camera cam = output->camera.drawn();
+	Camera cam = output().camera.drawn();
 	wlr_box frame = view.frame_box();
-	Point tl = output->canvas_to_local(frame.x, frame.y);
+	Point tl = output().canvas_to_local(frame.x, frame.y);
 	return wlr_box{
 		.x = static_cast<int>(std::lround(tl.x)),
 		.y = static_cast<int>(std::lround(tl.y)),
@@ -557,15 +269,19 @@ wlr_box view_on_screen(View &view) {
 	};
 }
 
-bool output_settled() {
-	Output *output = server->outputs.front().get();
-	return output != nullptr && !output->camera.panning() && !output->camera.zooming();
+// The scenario's one window's frame on screen; empty when it is gone.
+wlr_box window_frame() {
+	View *view = first_mapped_view();
+	return view != nullptr ? view_on_screen(*view) : wlr_box{};
+}
+
+void click_title_bar(const wlr_box &frame) {
+	click(frame.x + 60.0, frame.y + 14.0);
 }
 
 // The toolbar as the compositor lays it out on the first output.
 ToolbarLayout toolbar_on_screen() {
-	Output *output = server->outputs.front().get();
-	return toolbar_layout(output->width, output->height);
+	return toolbar_layout(output().width, output().height);
 }
 
 void click_mode(ToolbarMode mode) {
@@ -581,1075 +297,928 @@ void click_option(ToolbarOption option) {
 // The thumbnail's on-screen box (the newest shot is 1280x720, fit into the
 // 240x140 slot), for the appear/dismiss pixel checks.
 wlr_box thumb_box() {
-	Output *output = server->outputs.front().get();
-	double ar = 1280.0 / 720.0;
-	double w = std::fmin(config::capture_thumbnail_max_w,
-		config::capture_thumbnail_max_h * ar);
+	double ar = static_cast<double>(screen_w) / screen_h;
+	double w = std::fmin(config::capture_thumbnail_max_w, config::capture_thumbnail_max_h * ar);
 	double h = w / ar;
-	return {static_cast<int>(std::lround(output->width
-			- config::capture_thumbnail_margin - w)),
-		static_cast<int>(std::lround(output->height
-			- config::capture_thumbnail_margin - h)),
+	return {static_cast<int>(std::lround(output().width - config::capture_thumbnail_margin - w)),
+		static_cast<int>(std::lround(output().height - config::capture_thumbnail_margin - h)),
 		static_cast<int>(std::lround(w)), static_cast<int>(std::lround(h))};
 }
 
-// Pixels of two grims that differ inside `box`.
-long grim_differs_inside(const char *a, const char *b, const wlr_box &box) {
-	cairo_surface_t *sa = load_png(a);
-	cairo_surface_t *sb = load_png(b);
-	if (sa == nullptr || sb == nullptr) {
-		if (sa != nullptr) {
-			cairo_surface_destroy(sa);
-		}
-		if (sb != nullptr) {
-			cairo_surface_destroy(sb);
-		}
-		return -1;
-	}
-	// Count only the box: everything outside it is skipped through four
-	// rectangles.
-	wlr_box wide = {0, 0, cairo_image_surface_get_width(sa),
-		cairo_image_surface_get_height(sa)};
-	wlr_box left = wide, right = wide, top = wide, bottom = wide;
-	left.width = box.x;
-	right.x = box.x + box.width;
-	right.width = wide.width - right.x;
-	top.height = box.y;
-	bottom.y = box.y + box.height;
-	bottom.height = wide.height - bottom.y;
-	long inside = pixels_differing(sa, sb, {left, right, top, bottom});
-	cairo_surface_destroy(sa);
-	cairo_surface_destroy(sb);
-	return inside >= 0 ? inside : -1;
+// A swipe (a drag) across the thumbnail dismisses it.
+void swipe_thumbnail_away() {
+	wlr_box box = thumb_box();
+	drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
+		box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
 }
 
-// ffprobe's csv rows ("W,H" and the duration) joined by the tr in
-// run_sync: the size matches and the recording runs at least `min_s`.
-bool probe_matches(const std::string &probe, int want_w, int want_h, double min_s) {
-	int w = 0, h = 0;
-	double dur = 0;
-	if (std::sscanf(probe.c_str(), "%d,%d %lf", &w, &h, &dur) != 3) {
-		return false;
-	}
-	return w == want_w && h == want_h && dur >= min_s;
+// ---------------------------------------------------------------- steps
+
+// The fake input devices, and one foot window to frame; the events
+// subscriber runs for the whole run.
+Result window_and_subscriber() {
+	attach_keyboard();
+	attach_pointer();
+	spawn("foot -T cap sh -c 'echo capture scenario; exec sleep 600'");
+	check(events.start({std::getenv("WAYLAND_CANVAS_BIN"), "msg", "subscribe"}),
+		"the events subscriber started");
+	return after(500);
 }
 
-
-// --------------------------------------------------------------- steps
-
-int shots_saved() {
-	return static_cast<int>(files_with(pictures_dir + "/Screenshots",
-		"Screenshot").size());
+// The window mapped and the camera settled.
+Result window_mapped() {
+	if (auto wait = wait_for(first_mapped_view() != nullptr && settled())) {
+		return *wait;
+	}
+	View *view = first_mapped_view();
+	check(view != nullptr, "one foot window mapped");
+	if (view != nullptr) {
+		server->focus_view(view);
+	}
+	return after(2500); // any startup hint clears before the reference shot
 }
 
-int run_step() {
-	switch (step) {
-	case 0: { // the fake input devices, and one foot window to frame
-		wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
-		wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
-		wlr_keyboard_init(&kbd, &kbd_impl, "fake-keyboard");
-		wl_signal_emit_mutable(&server->backend->events.new_input, &kbd.base);
-		spawn("foot -T cap sh -c 'echo capture scenario; exec sleep 600'");
-		// The events subscriber, running for the whole run.
-		events_path = shot_dir + "/events.out";
-		sub_pid = fork();
-		if (sub_pid == 0) {
-			sigset_t empty;
-			sigemptyset(&empty);
-			sigprocmask(SIG_SETMASK, &empty, nullptr);
-			FILE *f = std::fopen(events_path.c_str(), "w");
-			if (f == nullptr || dup2(fileno(f), 1) < 0) {
-				_exit(126);
-			}
-			execlp(std::getenv("WAYLAND_CANVAS_BIN"), "wayland-canvas", "msg",
-				"subscribe", static_cast<char *>(nullptr));
-			_exit(127);
-		}
-		return 500;
-	}
-	case 1: { // the window mapped and the camera settled
-		View *view = cap_window();
-		if ((view == nullptr || !output_settled()) && retries++ < 100) {
-			return -100;
-		}
-		check(view != nullptr, "one foot window mapped");
-		if (view != nullptr) {
-			server->focus_view(view);
-		}
-		return 2500; // any startup hint clears before the reference shot
-	}
-	case 2: { // the reference: the whole output, cursor parked top-left
-		move_to(40, 40);
-		shot("ref-full");
-		return 400;
-	}
-	case 3: { // Super+Shift+3: the whole screen, saved and thumbnailed
-		if (grim_running()) {
-			return -100;
-		}
-		chord(KEY_3, SUPER_SHIFT);
-		int saved = shots_saved();
-		check(saved == 1, std::format("Super+Shift+3 saved one shot ({})", saved));
-		cairo_surface_t *shot_surf = load_newest_shot();
-		check(shot_matches(shot_surf, "ref-full", {cursor_box(40, 40)}, 1280, 720),
-			"the saved shot matches grim of the whole screen");
-		if (shot_surf != nullptr) {
-			cairo_surface_destroy(shot_surf);
-		}
-		return 2300; // the save hint clears; the thumbnail (5 s) is still up
-	}
-	case 4: { // the thumbnail is on screen, bottom-right
-		shot("with-thumb");
-		return 400;
-	}
-	case 5: {
-		if (grim_running()) {
-			return -100;
-		}
-		wlr_box box = thumb_box();
-		long changed = grim_differs_inside("with-thumb", "ref-full", box);
-		check(changed > 500,
-			std::format("the shot shows as a bottom-right thumbnail "
-				"({} of {} px changed)", changed,
-				static_cast<long>(box.width) * box.height));
-		return 200;
-	}
-	case 6: { // a swipe (a drag) on the thumbnail dismisses it
-		wlr_box box = thumb_box();
-		drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
-			box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
-		return 400;
-	}
-	case 7: {
-		shot("thumb-gone");
-		return 400;
-	}
-	case 8: {
-		if (grim_running()) {
-			return -100;
-		}
-		wlr_box box = thumb_box();
-		long changed = grim_differs_inside("thumb-gone", "with-thumb", box);
-		check(changed > 500,
-			std::format("a swipe dismissed the thumbnail ({} of {} px changed)",
-				changed, static_cast<long>(box.width) * box.height));
-		return 300;
-	}
-	case 9: { // Ctrl+Super+Shift+3: the clipboard instead of a file
-		chord(KEY_3, SUPER_CTRL_SHIFT);
-		check(shots_saved() == 1, "the Ctrl chord saved no file");
-		run_shell(std::format("wl-paste --no-newline | tee {}/pasted-1.png",
-			shot_dir), "paste-1");
-		return 400;
-	}
-	case 10: {
-		if (!client_done("paste-1") && retries++ < 50) {
-			return -100;
-		}
-		check(client_code("paste-1") == 0, "wl-paste read the clipboard");
-		// pasted-1.png lands in shot_dir; compare as pictures.
-		cairo_surface_t *pasted = load_png("pasted-1");
-		bool matches = false;
-		if (pasted != nullptr) {
-			cairo_surface_t *ref = load_png("ref-full");
-			matches = pixels_differing(pasted, ref, {cursor_box(40, 40)}) >= 0
-				&& pixels_differing(pasted, ref, {cursor_box(40, 40)}) * 1000
-					<= 1280 * 720;
-			cairo_surface_destroy(ref);
-			cairo_surface_destroy(pasted);
-		}
-		check(matches, "the clipboard holds the shot as PNG, matching grim");
-		return 1200; // a later shot keeps its own second
-	}
-	case 11: { // Super+Shift+4: drag a region
-		move_to(40, 40); // the cursor parks outside the crop
-		shot_region("ref-region", "300,200 400x300");
-		return 400;
-	}
-	case 12: {
-		if (grim_running()) {
-			return -100;
-		}
-		chord(KEY_4, SUPER_SHIFT);
-		check(server->capture_ui.picking(), "Super+Shift+4 opened the picker");
-		shot("picker-region");
-		return 400;
-	}
-	case 13: {
-		if (grim_running()) {
-			return -100;
-		}
-		drag(300, 200, 700, 500);
-		check(shots_saved() == 2, "the drag saved a second shot");
-		cairo_surface_t *shot_surf = load_newest_shot();
-		check(shot_matches(shot_surf, "ref-region", {}, 400, 300),
-			"the region shot matches grim's crop of the same area");
-		if (shot_surf != nullptr) {
-			cairo_surface_destroy(shot_surf);
-		}
-		return 2300; // let the hint clear while the thumbnail is still up
-	}
-	case 14: { // dismiss that thumbnail, then reference the window alone
-		wlr_box box = thumb_box();
-		drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
-			box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
-		return 400;
-	}
-	case 15: {
-		if (grim_running()) {
-			return -100;
-		}
-		View *view = cap_window();
-		if (view == nullptr) {
-			check(false, "the window is still mapped");
-			return 200;
-		}
-		wlr_box f = view_on_screen(*view);
-		move_to(f.x + 60.0, f.y + 14.0); // the pointer parks on the title bar
-		shot_region("ref-window",
-			std::format("{},{} {}x{}", f.x, f.y, f.width, f.height));
-		return 400;
-	}
-	case 16: { // a click on the window captures the window alone
-		if (grim_running()) {
-			return -100;
-		}
-		View *view = cap_window();
-		wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-		chord(KEY_4, SUPER_SHIFT);
-		check(server->capture_ui.picking(), "the picker opened again");
-		click(f.x + 60.0, f.y + 14.0);
-		check(shots_saved() == 3, "the click saved a window shot");
-		cairo_surface_t *shot_surf = load_newest_shot();
-		check(shot_surf != nullptr && view != nullptr
-				&& shot_matches(shot_surf, "ref-window",
-					{cursor_box(f.x + 60, f.y + 14, f.x, f.y)}, f.width, f.height),
-			"the window shot matches grim's crop of its frame, alone");
-		if (shot_surf != nullptr) {
-			cairo_surface_destroy(shot_surf);
-		}
-		return 2300;
-	}
-	case 17: { // dismiss, then Space: window picking on purpose
-		wlr_box box = thumb_box();
-		drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
-			box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
-		return 400;
-	}
-	case 18: {
-		if (grim_running()) {
-			return -100;
-		}
-		View *view = cap_window();
-		wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-		chord(KEY_4, SUPER_SHIFT);
-		chord(KEY_SPACE, {});
-		click(80, 650); // empty canvas: nothing is picked
-		check(server->capture_ui.picking(),
-			"Space switched to window picking; empty canvas picks nothing");
-		check(shots_saved() == 3, "no shot from a click on the empty canvas");
-		click(f.x + 60.0, f.y + 14.0);
-		check(shots_saved() == 4, "clicking the window in Space mode shot it");
-		return 2300;
-	}
-	case 19: { // Esc cancels
-		wlr_box box = thumb_box();
-		drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
-			box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
-		return 400;
-	}
-	case 20: {
-		if (grim_running()) {
-			return -100;
-		}
-		chord(KEY_4, SUPER_SHIFT);
-		check(server->capture_ui.picking(), "the picker is up for Esc");
-		chord(KEY_ESC, {});
-		check(!server->capture_ui.picking(), "Esc cancelled the picker");
-		check(shots_saved() == 4, "no shot from a cancelled pick");
-		return 300;
-	}
-	case 21: { // Print opens the same picker; Shift+Print takes the screen
-		chord(KEY_SYSRQ, {});
-		check(server->capture_ui.picking(), "Print opened the picker");
-		chord(KEY_ESC, {});
-		check(!server->capture_ui.picking(), "Esc closed it again");
-		return 1200;
-	}
-	case 22: {
-		move_to(40, 40);
-		chord(KEY_SYSRQ, SHIFT);
-		check(shots_saved() == 5, "Shift+Print saved a whole-screen shot");
-		cairo_surface_t *shot_surf = load_newest_shot();
-		check(shot_matches(shot_surf, "ref-full", {cursor_box(40, 40)}, 1280, 720),
-			"the Shift+Print shot matches grim of the whole screen");
-		if (shot_surf != nullptr) {
-			cairo_surface_destroy(shot_surf);
-		}
-		return 2300;
-	}
-	case 23: { // a click opens the shot: the xdg-open stub logs its path
-		wlr_box box = thumb_box();
-		click(box.x + box.width / 2.0, box.y + box.height / 2.0);
-		return 600;
-	}
-	case 24: {
-		std::string path;
-		if (cairo_surface_t *newest = load_newest_shot(&path); newest != nullptr) {
-			cairo_surface_destroy(newest);
-		}
-		std::string opened = read_file(shot_dir + "/xdg-open.args");
-		check(opened == path,
-			std::format("a click on the thumbnail opened the shot ({})", opened));
-		// clean up: dismiss this thumbnail too
-		wlr_box box = thumb_box();
-		drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
-			box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
-		return 400;
-	}
-	case 25: { // the toolbar: Super+Shift+5
-		if (grim_running()) {
-			return -100;
-		}
-		chord(KEY_5, SUPER_SHIFT);
-		check(server->capture_ui.owns_keyboard(), "the toolbar owns the keyboard");
-		shot("toolbar");
-		return 400;
-	}
-	case 26: { // destination to the clipboard, then a screen shot from it
-		if (grim_running()) {
-			return -100;
-		}
-		click_option(ToolbarOption::destination); // clipboard on
-		click_mode({ToolbarTarget::screen, false}); // shot the screen
-		check(shots_saved() == 5, "the toolbar's clipboard option saved no file");
-		run_shell(std::format("wl-paste --no-newline | tee {}/pasted-2.png",
-			shot_dir), "paste-2");
-		return 400;
-	}
-	case 27: {
-		if (!client_done("paste-2") && retries++ < 50) {
-			return -100;
-		}
-		cairo_surface_t *pasted = load_png("pasted-2");
-		long bad = -1;
-		if (pasted != nullptr) {
-			cairo_surface_t *ref = load_png("ref-full");
-			bad = pixels_differing(pasted, ref, {cursor_box(40, 40)});
-			cairo_surface_destroy(ref);
-			cairo_surface_destroy(pasted);
-		}
-		check(bad >= 0 && bad * 1000 <= 1280 * 720,
-			"the toolbar's clipboard shot matches grim");
-		return 200;
-	}
-	case 28: { // the timer: 5 s, then a screen shot that waits for it
-		chord(KEY_5, SUPER_SHIFT);
-		click_option(ToolbarOption::destination); // clipboard off
-		click_option(ToolbarOption::timer); // timer 5 s
-		click_mode({ToolbarTarget::screen, false}); // shot the screen
-		check(server->capture_ui.owns_keyboard(), "the countdown owns the keyboard");
-		shot("countdown");
-		return 2000; // inside the countdown: no file yet
-	}
-	case 29: {
-		if (grim_running()) {
-			return -100;
-		}
-		check(shots_saved() == 5, "the countdown had not saved anything yet");
-		return 4200; // past the 5 s
-	}
-	case 30: {
-		check(shots_saved() == 6, "the shot landed after the countdown");
-		return 600; // its thumbnail will be dismissed with the next picker
-	}
-	case 31: { // capture.pick, region: the answer is deferred until the drag
-		wlr_box box = thumb_box();
-		drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
-			box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
-		run_client("capture.pick", R"({"what":"region"})", "pick-region");
-		return 400;
-	}
-	case 32: {
-		if (!acted) { // the picker wait and the drag happen once, not per retry
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100; // the request has not arrived yet
-			}
-			check(server->capture_ui.picking(), "capture.pick opened the picker");
-			drag(400, 150, 600, 350);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("pick-region") && retries++ < 30) {
-			return -100;
-		}
-		JsonParser *parser = nullptr;
-		JsonObject *result = nullptr;
-		client_result("pick-region", &parser, &result);
-		bool ok = result != nullptr && member_string(result, "output") != ""
-			&& member_int(result, "x") == 400 && member_int(result, "y") == 150
-			&& member_int(result, "w") == 200 && member_int(result, "h") == 200;
-		check(ok, std::format("capture.pick answered the dragged region ({})",
-			client_out("pick-region")));
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-		return 300;
-	}
-	case 33: { // capture.pick, window: the window's id and identifier
-		run_client("capture.pick", R"({"what":"window"})", "pick-window");
-		return 400;
-	}
-	case 34: {
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			View *first = cap_window();
-			wlr_box f = first != nullptr ? view_on_screen(*first) : wlr_box{};
-			click(f.x + 60.0, f.y + 14.0);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		View *view = cap_window();
-		if (!client_done("pick-window") && retries++ < 30) {
-			return -100;
-		}
-		JsonParser *parser = nullptr;
-		JsonObject *result = nullptr;
-		client_result("pick-window", &parser, &result);
-		bool ok = result != nullptr && view != nullptr
-			&& member_int(result, "window") == static_cast<long long>(view->session_id)
-			&& !member_string(result, "identifier").empty();
-		check(ok, std::format("capture.pick answered the picked window by id "
-			"and identifier ({})", client_out("pick-window")));
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-		return 300;
-	}
-	case 35: { // capture.pick, output and any
-		run_client("capture.pick", R"({"what":"output"})", "pick-output");
-		return 400;
-	}
-	case 36: {
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			click(80, 650);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("pick-output") && retries++ < 30) {
-			return -100;
-		}
-		std::string out = client_out("pick-output");
-		check(out.find("\"output\"") != std::string::npos,
-			std::format("capture.pick answered the output ({})", out));
-		run_client("capture.pick", R"({"what":"any"})", "pick-any");
-		return 400;
-	}
-	case 37: { // any: the empty canvas picks the output, a window the window
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			click(80, 650);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("pick-any") && retries++ < 30) {
-			return -100;
-		}
-		std::string out = client_out("pick-any");
-		check(out.find("\"output\"") != std::string::npos,
-			std::format("capture.pick in any mode picked the output on the empty "
-				"canvas ({})", out));
-		run_client("capture.pick", R"({"what":"any"})", "pick-any2");
-		return 400;
-	}
-	case 38: {
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			View *view = cap_window();
-			wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-			click(f.x + 60.0, f.y + 14.0);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("pick-any2") && retries++ < 30) {
-			return -100;
-		}
-		std::string out = client_out("pick-any2");
-		check(out.find("\"window\"") != std::string::npos,
-			std::format("capture.pick in any mode picked the window ({})", out));
-		return 300;
-	}
-	case 39: { // only one pick at a time
-		chord(KEY_4, SUPER_SHIFT);
-		run_client("capture.pick", R"({"what":"region"})", "pick-busy");
-		return 400;
-	}
-	case 40: {
-		if (!client_done("pick-busy") && retries++ < 30) {
-			return -100;
-		}
-		check(client_code("pick-busy") == 1
-				&& client_err("pick-busy").find("already running") != std::string::npos,
-			"a second pick is answered with an error");
-		chord(KEY_ESC, {}); // close the key-opened picker
-		check(!server->capture_ui.picking(), "Esc closed the key-opened picker");
-		return 300;
-	}
-	case 41: { // a cancel is an error answer
-		run_client("capture.pick", R"({"what":"region"})", "pick-cancel");
-		return 400;
-	}
-	case 42: {
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			chord(KEY_ESC, {});
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("pick-cancel") && retries++ < 30) {
-			return -100;
-		}
-		check(client_code("pick-cancel") == 1
-				&& client_err("pick-cancel").find("cancelled") != std::string::npos,
-			"cancelling the pick answers with an error");
-		return 300;
-	}
-	case 43: { // params are checked
-		run_client("capture.pick", R"({"what":"nope"})", "pick-bad");
-		return 400;
-	}
-	case 44: {
-		if (!client_done("pick-bad") && retries++ < 30) {
-			return -100;
-		}
-		check(client_code("pick-bad") == 1,
-			"a bad `what` is answered with the usage error");
-		return 300;
-	}
-	case 45: { // the chooser bridge: both monitors and windows on stdin
-		std::string name = server->outputs.front()->wlr->name;
-		JsonParser *parser = nullptr;
-		JsonObject *result = nullptr;
-		client_result("pick-window", &parser, &result);
-		std::string identifier = result != nullptr
-			? member_string(result, "identifier") : "";
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-		if (identifier.empty()) {
-			check(false, "the window pick had an identifier for the bridge list");
-			return 200;
-		}
-		write_file(shot_dir + "/chooser.txt", std::format(
-			"Monitor: {} the headless output\nWindow: cap ({})\n", name, identifier));
-		run_bridge("chooser.txt", "bridge-output");
-		return 400;
-	}
-	case 46: { // the bridge asks `any`; a click on the canvas picks the monitor
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			click(80, 650);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("bridge-output") && retries++ < 30) {
-			return -100;
-		}
-		std::string name = server->outputs.front()->wlr->name;
-		check(client_out("bridge-output")
-				== std::format("Monitor: {} the headless output", name)
-			&& client_code("bridge-output") == 0,
-			"the bridge printed the chosen monitor's line, byte-exactly");
-		run_bridge("chooser.txt", "bridge-window");
-		return 400;
-	}
-	case 47: { // the same list, a window chosen
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			View *view = cap_window();
-			wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-			click(f.x + 60.0, f.y + 14.0);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("bridge-window") && retries++ < 30) {
-			return -100;
-		}
-		JsonParser *parser = nullptr;
-		JsonObject *result = nullptr;
-		client_result("pick-window", &parser, &result);
-		std::string identifier = result != nullptr
-			? member_string(result, "identifier") : "";
-		if (parser != nullptr) {
-			g_object_unref(parser);
-		}
-		check(client_out("bridge-window")
-				== std::format("Window: cap ({})", identifier)
-			&& client_code("bridge-window") == 0,
-			"the bridge printed the chosen window's line, byte-exactly");
-		run_bridge("chooser.txt", "bridge-cancel");
-		return 400;
-	}
-	case 48: { // a cancelled bridge prints nothing and exits 0
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			chord(KEY_ESC, {});
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!client_done("bridge-cancel") && retries++ < 30) {
-			return -100;
-		}
-		check(client_out("bridge-cancel").empty() && client_code("bridge-cancel") == 0,
-			"a cancelled chooser bridge prints nothing, exiting 0");
-		return 300;
-	}
-	case 49: { // a recording from the toolbar, whole screen
-		chord(KEY_5, SUPER_SHIFT);
-		// the timer option still reads 5 s from the countdown test: cycle
-		// it back to none (5 -> 10 -> none)
-		click_option(ToolbarOption::timer);
-		click_option(ToolbarOption::timer);
-		click_mode({ToolbarTarget::screen, true}); // record the screen
-		return 600;
-	}
-	case 50: {
-		if (!server->capture_ui.recording() && retries++ < 30) {
-			return -100;
-		}
-		if (acted) {
-			return -100; // the state client is on its way
-		}
-		std::string path = server->capture_ui.recording_path();
-		check(server->capture_ui.recording()
-				&& path.starts_with(videos_dir)
-				&& path.find("Screen Recording") != std::string::npos,
-			std::format("the recording started into the videos dir ({})", path));
-		check(read_file(events_path).find("capture.recording") != std::string::npos,
-			"the capture.recording event told the bar");
-		run_client("state", "", "state-recording");
-		acted = true;
-		return 400;
-	}
-	case 51: {
-		if (!client_done("state-recording") && retries++ < 30) {
-			return -100;
-		}
-		std::string rec = state_recording("state-recording");
-		check(!rec.empty() && rec != "none",
-			std::format("the state reports the recording ({})", rec));
-		shot("recording-hint");
-		// the spawn path a shortcut takes, running beside the recording
-		held_pid = spawn("sleep 60");
-		return 2500; // some footage
-	}
-	case 52: { // the started command holds nothing of the compositor's
-		if (grim_running()) {
-			return -100;
-		}
-		std::vector<std::string> fds = proc_fds(held_pid);
-		std::string held;
-		for (const std::string &fd : fds) {
-			held += held.empty() ? fd : ", " + fd;
-		}
-		check(fds == std::vector<std::string>{"0", "1", "2"},
-			std::format("the command started beside the recording holds only "
-				"fds 0, 1, 2 ({})", held));
-		chord(KEY_SYSRQ, ALT);
-		return 400;
-	}
-	case 53: {
-		// ffmpeg finalises the file after the pipe's end: a wide budget
-		if (server->capture_ui.recording() && retries++ < 100) {
-			return -100;
-		}
-		if (acted) {
-			return -100; // the state client is on its way
-		}
-		check(!server->capture_ui.recording(), "Alt+Print stopped the recording");
-		run_client("state", "", "state-stopped");
-		acted = true;
-		return 400;
-	}
-	case 54: {
-		if (!client_done("state-stopped") && retries++ < 30) {
-			return -100;
-		}
-		check(state_recording("state-stopped") == "none",
-			"the state reports no recording any more");
-		std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
-		check(files.size() == 1 && !files.empty(),
-			"one recording file was left behind");
-		if (!files.empty()) {
-			int code = run_sync(std::format(
-				"ffprobe -v error -select_streams v:0 "
-					"-show_entries stream=width,height -show_entries format=duration "
-					"-of csv=p=0 \"{}\" | tr '\\n' ' '",
-				files.front()), "ffprobe-screen.txt");
-			std::string probe = read_file(shot_dir + "/ffprobe-screen.txt");
-			check(code == 0 && probe_matches(probe, 1280, 720, 0.5),
-				std::format("ffprobe reads the recording as a 1280x720 video ({})",
-					probe));
-		}
-		kill_held();
-		return 300;
-	}
-	case 55: { // capture.stop on nothing is an error
-		run_client("capture.stop", "", "stop-idle");
-		return 400;
-	}
-	case 56: {
-		if (!client_done("stop-idle") && retries++ < 30) {
-			return -100;
-		}
-		check(client_code("stop-idle") == 1
-				&& client_err("stop-idle").find("not recording") != std::string::npos,
-			"capture.stop with nothing running is an error");
-		return 200;
-	}
-	case 57: { // a region recording, stopped through the IPC
-		chord(KEY_5, SUPER_SHIFT);
-		click_mode({ToolbarTarget::region, true}); // record a region
-		return 600;
-	}
-	case 58: {
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			drag(150, 100, 550, 400);
-			acted = true;
-			retries = 0; // a fresh budget for the answer's wait
-		}
-		if (!server->capture_ui.recording() && retries++ < 30) {
-			return -100;
-		}
-		check(server->capture_ui.recording(), "the region recording started");
-		return 2200; // some footage
-	}
-	case 59: {
-		run_client("capture.stop", "", "stop-region");
-		return 400;
-	}
-	case 60: {
-		if ((!client_done("stop-region") || server->capture_ui.recording())
-				&& retries++ < 30) {
-			return -100;
-		}
-		check(client_code("stop-region") == 0, "capture.stop answered true");
-		check(!server->capture_ui.recording(), "the region recording stopped");
-		std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
-		check(files.size() == 2, "two recordings, one per run");
-		if (files.size() == 2) {
-			run_sync(std::format(
-				"ffprobe -v error -select_streams v:0 "
-					"-show_entries stream=width,height -show_entries format=duration "
-					"-of csv=p=0 \"{}\" | tr '\\n' ' '",
-				files.front()), "ffprobe-region.txt");
-			std::string probe = read_file(shot_dir + "/ffprobe-region.txt");
-			check(probe_matches(probe, 400, 300, 0.5),
-				std::format("ffprobe reads the region recording as 400x300 ({})",
-					probe));
-		}
-		return 300;
-	}
-	case 61: { // keys pressed while the picker is up never reach a client
-		move_to(40, 40); // the cursor stays out of the compared crop
-		View *view = cap_window();
-		wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-		check(f.width > 0, "the window is still there to type at");
-		term_geometry = std::format("{},{} {}x{}", f.x, f.y, f.width, f.height);
-		shot_region("term-before", term_geometry);
-		return 400;
-	}
-	case 62: {
-		if (grim_running()) {
-			return -100;
-		}
-		// Everything the picker consumes: open, Space, letters, Esc, twice.
-		chord(KEY_4, SUPER_SHIFT);
-		chord(KEY_SPACE, {});
-		chord(KEY_A, {});
-		chord(KEY_ESC, {});
-		chord(KEY_PRINT, {});
-		chord(KEY_ESC, {});
-		shot_region("term-after", term_geometry);
-		return 400;
-	}
-	case 63: {
-		if (grim_running()) {
-			return -100;
-		}
-		cairo_surface_t *before = load_png("term-before");
-		cairo_surface_t *after = load_png("term-after");
-		long changed = pixels_differing(before, after);
-		long total = before != nullptr && after != nullptr
-			? static_cast<long>(cairo_image_surface_get_width(before))
-				* cairo_image_surface_get_height(before)
-			: 0;
-		// The caret may blink; nothing else may change: no key reached foot.
-		check(changed >= 0 && total > 0 && changed * 1000 <= total,
-			std::format("no key the picker saw reached the window ({}/{} px)",
-				changed, total));
-		if (before != nullptr) {
-			cairo_surface_destroy(before);
-		}
-		if (after != nullptr) {
-			cairo_surface_destroy(after);
-		}
-		return 300;
-	}
-	case 64: { // a window recording, the rect frozen at pick time
-		chord(KEY_5, SUPER_SHIFT);
-		click_mode({ToolbarTarget::window, true}); // record a window
-		return 600;
-	}
-	case 65: {
-		if (!acted) {
-			if (!server->capture_ui.picking() && retries++ < 30) {
-				return -100;
-			}
-			View *view = cap_window();
-			wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-			click(f.x + 60.0, f.y + 14.0);
-			acted = true;
-			retries = 0; // a fresh budget for the recorder's wait
-		}
-		if (!server->capture_ui.recording() && retries++ < 30) {
-			return -100;
-		}
-		check(server->capture_ui.recording(), "the window recording started");
-		return 2200; // some footage
-	}
-	case 66: {
-		run_client("capture.stop", "", "stop-window");
-		return 400;
-	}
-	case 67: {
-		if ((!client_done("stop-window") || server->capture_ui.recording())
-				&& retries++ < 30) {
-			return -100;
-		}
-		check(client_code("stop-window") == 0, "capture.stop closed the window recording");
-		std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
-		check(files.size() == 3, "three recordings, one per run");
-		if (files.size() == 3) {
-			run_sync(std::format(
-				"ffprobe -v error -select_streams v:0 "
-					"-show_entries stream=width,height -show_entries format=duration "
-					"-of csv=p=0 \"{}\" | tr '\\n' ' '",
-				files.front()), "ffprobe-window.txt");
-			std::string probe = read_file(shot_dir + "/ffprobe-window.txt");
-			View *view = cap_window();
-			wlr_box f = view != nullptr ? view_on_screen(*view) : wlr_box{};
-			// the encoder crops odd edges to whole yuv420p macroblocks
-			check(view != nullptr && probe_matches(probe, f.width - f.width % 2,
-					f.height - f.height % 2, 0.5),
-				std::format("ffprobe reads the window recording as its frame ({})",
-					probe));
-		}
-		return 300;
-	}
-	case 68: { // an encoder that never reads: the compositor must not wait for it
-		std::string path = std::getenv("PATH");
-		setenv("PATH", std::format("{}:{}", stall_bin, path).c_str(), 1);
-		chord(KEY_5, SUPER_SHIFT);
-		click_mode({ToolbarTarget::screen, true}); // record the screen
-		setenv("PATH", path.c_str(), 1); // the encoder is started by now
-		return 600;
-	}
-	case 69: {
-		if (!server->capture_ui.recording() && retries++ < 30) {
-			return -100;
-		}
-		check(server->capture_ui.recording(),
-			"the recording with an encoder that reads nothing started");
-		return 2500; // 150 frames come due; the pipe takes 64 KiB of the first
-	}
-	case 70: { // the compositor still answers
-		if (!acted) {
-			run_client("state", "", "state-stalled");
-			state_asked = std::chrono::steady_clock::now();
-			acted = true;
-		}
-		if (!client_done("state-stalled") && retries++ < 150) {
-			return -20;
-		}
-		long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now() - state_asked).count();
-		check(client_done("state-stalled") && ms <= 500, std::format(
-			"IPC state answered in {} ms while the encoder read nothing", ms));
-		std::string rec = state_recording("state-stalled");
-		check(rec.starts_with(videos_dir) && rec.ends_with(".mp4"),
-			std::format("the state reports the stalled recording ({})", rec));
-		std::size_t dropped = server->capture_ui.recording_dropped_frames();
-		check(dropped > 0, std::format("the frames that came due behind the "
-			"encoder were dropped and counted ({})", dropped));
-		shot("stalled");
-		return 400;
-	}
-	case 71: { // the screen is still drawn: grim gets its frame
-		if (grim_running()) {
-			return -100;
-		}
-		check(file_exists(std::format("{}/stalled.png", shot_dir)),
-			"grim captured the screen while the encoder stalled");
-		run_client("capture.stop", "", "stop-stalled");
-		return 400;
-	}
-	case 72: { // the stop ends it, the encoder not having read a byte
-		if ((!client_done("stop-stalled") || server->capture_ui.recording())
-				&& retries++ < 100) {
-			return -100;
-		}
-		check(client_code("stop-stalled") == 0, "capture.stop answered true");
-		check(!server->capture_ui.recording(),
-			"the stop ended the recording whose encoder never read");
-		std::string report = read_file(std::format("{}/recorder-report.txt", shot_dir));
-		check(report.find("started args=") != std::string::npos
-				&& report.find("-f rawvideo") != std::string::npos,
-			"the stand-in was the encoder, started as ffmpeg raw video");
-		int unread = 0, capacity = 0;
-		std::size_t at = report.find("unread=");
-		check(at != std::string::npos
-				&& std::sscanf(report.c_str() + at, "unread=%d capacity=%d",
-					&unread, &capacity) == 2 && unread > 0 && unread <= capacity,
-			std::format("the pipe was closed on the encoder with the written "
-				"frames unread ({} of {} bytes)", unread, capacity));
-		return 300;
-	}
-	case 73: { // the end: nothing recording, the event closed it
-		check(!server->capture_ui.recording(), "no recording is left running");
-		check(read_file(events_path).find("\"active\":false") != std::string::npos,
-			"the capture.recording event closed the recording");
-		finished = true;
-		run_client("quit", "", "quit");
-		return 300;
-	}
-	default:
-		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
-		return -1; // `msg quit` already terminated the display
-	}
+// The reference: the whole output, cursor parked top-left.
+Result reference_shot() {
+	move_to(40, 40);
+	shot("ref-full");
+	return after(400);
 }
 
-int handle_timer() {
-	if (grim_pid > 0) {
-		if (waitpid(grim_pid, nullptr, WNOHANG) == 0) {
-			wl_event_source_timer_update(timer, 30);
-			return 0;
-		}
-		grim_pid = -1;
+// Super+Shift+3: the whole screen, saved and thumbnailed.
+Result whole_screen_chord() {
+	chord(KEY_3, mods::super_shift);
+	int saved = shots_saved();
+	check(saved == 1, std::format("Super+Shift+3 saved one shot ({})", saved));
+	check(shot_matches(read_newest_shot(), "ref-full", cursor_box(40, 40), screen_w, screen_h),
+		"the saved shot matches grim of the whole screen");
+	return after(2300); // the save hint clears; the thumbnail (5 s) is still up
+}
+
+// The thumbnail is on screen, bottom-right.
+Result thumbnail_shot() {
+	shot("with-thumb");
+	return after(400);
+}
+
+Result thumbnail_shown() {
+	wlr_box box = thumb_box();
+	long changed = grim_differs_inside("with-thumb", "ref-full", box);
+	check(changed > 500,
+		std::format("the shot shows as a bottom-right thumbnail "
+			"({} of {} px changed)", changed, static_cast<long>(box.width) * box.height));
+	return after(200);
+}
+
+// A swipe on the thumbnail dismisses it.
+Result swipe_on_thumbnail() {
+	swipe_thumbnail_away();
+	return after(400);
+}
+
+Result thumbnail_gone_shot() {
+	shot("thumb-gone");
+	return after(400);
+}
+
+Result thumbnail_dismissed() {
+	wlr_box box = thumb_box();
+	long changed = grim_differs_inside("thumb-gone", "with-thumb", box);
+	check(changed > 500,
+		std::format("a swipe dismissed the thumbnail ({} of {} px changed)",
+			changed, static_cast<long>(box.width) * box.height));
+	return after(300);
+}
+
+// Ctrl+Super+Shift+3: the clipboard instead of a file.
+Result clipboard_chord() {
+	chord(KEY_3, mods::super_ctrl_shift);
+	check(shots_saved() == 1, "the Ctrl chord saved no file");
+	run_command(std::format("wl-paste --no-newline | tee {}/pasted-1.png", scratch()), "paste-1");
+	return after(400);
+}
+
+Result clipboard_pasted() {
+	if (auto wait = wait_for(command_done("paste-1"), {.budget_ms = 5000})) {
+		return *wait;
 	}
-	t += 1000;
-	int delay = run_step();
-	if (delay < -1) {
-		wl_event_source_timer_update(timer, -delay);
-		return 0;
+	check(command_code("paste-1") == 0, "wl-paste read the clipboard");
+	// pasted-1.png lands in the scratch dir; compare as pictures.
+	std::optional<Image> pasted = read_shot("pasted-1");
+	check(pasted.has_value()
+			&& within_budget(pixels_off(pasted, "ref-full", cursor_box(40, 40)),
+				static_cast<long>(screen_w) * screen_h),
+		"the clipboard holds the shot as PNG, matching grim");
+	return after(1200); // a later shot keeps its own second
+}
+
+// Super+Shift+4: drag a region.
+Result region_reference() {
+	move_to(40, 40); // the cursor parks outside the crop
+	shot("ref-region", "300,200 400x300");
+	return after(400);
+}
+
+Result region_picker() {
+	chord(KEY_4, mods::super_shift);
+	check(server->capture_ui.picking(), "Super+Shift+4 opened the picker");
+	shot("picker-region");
+	return after(400);
+}
+
+Result region_dragged() {
+	drag(300, 200, 700, 500);
+	check(shots_saved() == 2, "the drag saved a second shot");
+	check(shot_matches(read_newest_shot(), "ref-region", std::nullopt, 400, 300),
+		"the region shot matches grim's crop of the same area");
+	return after(2300); // let the hint clear while the thumbnail is still up
+}
+
+// Dismiss that thumbnail, then reference the window alone.
+Result dismiss_region_thumbnail() {
+	swipe_thumbnail_away();
+	return after(400);
+}
+
+Result window_reference() {
+	View *view = first_mapped_view();
+	if (view == nullptr) {
+		check(false, "the window is still mapped");
+		return after(200);
 	}
-	if (delay == -1) {
-		return 0;
+	wlr_box f = view_on_screen(*view);
+	move_to(f.x + 60.0, f.y + 14.0); // the pointer parks on the title bar
+	shot("ref-window", std::format("{},{} {}x{}", f.x, f.y, f.width, f.height));
+	return after(400);
+}
+
+// A click on the window captures the window alone.
+Result window_click() {
+	View *view = first_mapped_view();
+	wlr_box f = window_frame();
+	chord(KEY_4, mods::super_shift);
+	check(server->capture_ui.picking(), "the picker opened again");
+	click_title_bar(f);
+	check(shots_saved() == 3, "the click saved a window shot");
+	check(view != nullptr
+			&& shot_matches(read_newest_shot(), "ref-window",
+				cursor_box(f.x + 60, f.y + 14, f.x, f.y), f.width, f.height),
+		"the window shot matches grim's crop of its frame, alone");
+	return after(2300);
+}
+
+// Dismiss, then Space: window picking on purpose.
+Result dismiss_window_thumbnail() {
+	swipe_thumbnail_away();
+	return after(400);
+}
+
+Result space_picks_windows() {
+	wlr_box f = window_frame();
+	chord(KEY_4, mods::super_shift);
+	tap(KEY_SPACE);
+	click(80, 650); // empty canvas: nothing is picked
+	check(server->capture_ui.picking(),
+		"Space switched to window picking; empty canvas picks nothing");
+	check(shots_saved() == 3, "no shot from a click on the empty canvas");
+	click_title_bar(f);
+	check(shots_saved() == 4, "clicking the window in Space mode shot it");
+	return after(2300);
+}
+
+// Esc cancels.
+Result dismiss_space_thumbnail() {
+	swipe_thumbnail_away();
+	return after(400);
+}
+
+Result esc_cancels() {
+	chord(KEY_4, mods::super_shift);
+	check(server->capture_ui.picking(), "the picker is up for Esc");
+	tap(KEY_ESC);
+	check(!server->capture_ui.picking(), "Esc cancelled the picker");
+	check(shots_saved() == 4, "no shot from a cancelled pick");
+	return after(300);
+}
+
+// Print opens the same picker; Shift+Print takes the screen.
+Result print_opens_the_picker() {
+	tap(KEY_SYSRQ);
+	check(server->capture_ui.picking(), "Print opened the picker");
+	tap(KEY_ESC);
+	check(!server->capture_ui.picking(), "Esc closed it again");
+	return after(1200);
+}
+
+Result shift_print() {
+	move_to(40, 40);
+	chord(KEY_SYSRQ, mods::shift);
+	check(shots_saved() == 5, "Shift+Print saved a whole-screen shot");
+	check(shot_matches(read_newest_shot(), "ref-full", cursor_box(40, 40), screen_w, screen_h),
+		"the Shift+Print shot matches grim of the whole screen");
+	return after(2300);
+}
+
+// A click opens the shot: the xdg-open stub logs its path.
+Result click_opens_the_shot() {
+	wlr_box box = thumb_box();
+	click(box.x + box.width / 2.0, box.y + box.height / 2.0);
+	return after(600);
+}
+
+Result xdg_open_ran() {
+	std::string path = newest_shot_path();
+	std::string opened = read_text(scratch() + "/xdg-open.args");
+	while (!opened.empty() && opened.back() == '\n') {
+		opened.pop_back();
 	}
-	step++;
-	retries = 0;
-	acted = false; // the next step's interactions start fresh
-	wl_event_source_timer_update(timer, delay > 0 ? delay : 1);
-	return 0;
+	check(opened == path, std::format("a click on the thumbnail opened the shot ({})", opened));
+	// clean up: dismiss this thumbnail too
+	swipe_thumbnail_away();
+	return after(400);
+}
+
+// The toolbar: Super+Shift+5.
+Result toolbar_opens() {
+	chord(KEY_5, mods::super_shift);
+	check(server->capture_ui.owns_keyboard(), "the toolbar owns the keyboard");
+	shot("toolbar");
+	return after(400);
+}
+
+// Destination to the clipboard, then a screen shot from it.
+Result toolbar_clipboard() {
+	click_option(ToolbarOption::destination); // clipboard on
+	click_mode({ToolbarTarget::screen, false}); // shot the screen
+	check(shots_saved() == 5, "the toolbar's clipboard option saved no file");
+	run_command(std::format("wl-paste --no-newline | tee {}/pasted-2.png", scratch()), "paste-2");
+	return after(400);
+}
+
+Result toolbar_clipboard_pasted() {
+	if (auto wait = wait_for(command_done("paste-2"), {.budget_ms = 5000})) {
+		return *wait;
+	}
+	check(within_budget(pixels_off(read_shot("pasted-2"), "ref-full", cursor_box(40, 40)),
+			static_cast<long>(screen_w) * screen_h),
+		"the toolbar's clipboard shot matches grim");
+	return after(200);
+}
+
+// The timer: 5 s, then a screen shot that waits for it.
+Result countdown_starts() {
+	chord(KEY_5, mods::super_shift);
+	click_option(ToolbarOption::destination); // clipboard off
+	click_option(ToolbarOption::timer); // timer 5 s
+	click_mode({ToolbarTarget::screen, false}); // shot the screen
+	check(server->capture_ui.owns_keyboard(), "the countdown owns the keyboard");
+	shot("countdown");
+	return after(2000); // inside the countdown: no file yet
+}
+
+Result countdown_saved_nothing() {
+	check(shots_saved() == 5, "the countdown had not saved anything yet");
+	return after(4200); // past the 5 s
+}
+
+Result countdown_saved_it() {
+	check(shots_saved() == 6, "the shot landed after the countdown");
+	return after(600); // its thumbnail will be dismissed with the next picker
+}
+
+// capture.pick, region: the answer is deferred until the drag.
+Result pick_region_asked() {
+	swipe_thumbnail_away();
+	run_msg("capture.pick", R"({"what":"region"})", "pick-region");
+	return after(400);
+}
+
+Result pick_region_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] {
+				check(server->capture_ui.picking(), "capture.pick opened the picker");
+				drag(400, 150, 600, 350);
+			}, {.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("pick-region"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	JsonAnswer answer(command_out("pick-region"));
+	JsonObject *result = answer.object();
+	bool ok = result != nullptr && member_string(result, "output") != ""
+		&& member_int(result, "x") == 400 && member_int(result, "y") == 150
+		&& member_int(result, "w") == 200 && member_int(result, "h") == 200;
+	check(ok, std::format("capture.pick answered the dragged region ({})",
+		command_out("pick-region")));
+	return after(300);
+}
+
+// capture.pick, window: the window's id and identifier.
+Result pick_window_asked() {
+	run_msg("capture.pick", R"({"what":"window"})", "pick-window");
+	return after(400);
+}
+
+Result pick_window_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(),
+			[] { click_title_bar(window_frame()); }, {.budget_ms = 3000})) {
+		return *wait;
+	}
+	View *view = first_mapped_view();
+	if (auto wait = wait_for(command_done("pick-window"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	JsonAnswer answer(command_out("pick-window"));
+	JsonObject *result = answer.object();
+	bool ok = result != nullptr && view != nullptr
+		&& member_int(result, "window") == static_cast<long long>(view->session_id)
+		&& !member_string(result, "identifier").empty();
+	check(ok, std::format("capture.pick answered the picked window by id "
+		"and identifier ({})", command_out("pick-window")));
+	return after(300);
+}
+
+// capture.pick, output and any.
+Result pick_output_asked() {
+	run_msg("capture.pick", R"({"what":"output"})", "pick-output");
+	return after(400);
+}
+
+Result pick_output_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] { click(80, 650); },
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("pick-output"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	std::string out = command_out("pick-output");
+	check(out.find("\"output\"") != std::string::npos,
+		std::format("capture.pick answered the output ({})", out));
+	run_msg("capture.pick", R"({"what":"any"})", "pick-any");
+	return after(400);
+}
+
+// Any: the empty canvas picks the output, a window the window.
+Result pick_any_empty_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] { click(80, 650); },
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("pick-any"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	std::string out = command_out("pick-any");
+	check(out.find("\"output\"") != std::string::npos,
+		std::format("capture.pick in any mode picked the output on the empty "
+			"canvas ({})", out));
+	run_msg("capture.pick", R"({"what":"any"})", "pick-any2");
+	return after(400);
+}
+
+Result pick_any_window_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(),
+			[] { click_title_bar(window_frame()); }, {.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("pick-any2"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	std::string out = command_out("pick-any2");
+	check(out.find("\"window\"") != std::string::npos,
+		std::format("capture.pick in any mode picked the window ({})", out));
+	return after(300);
+}
+
+// Only one pick at a time.
+Result second_pick_asked() {
+	chord(KEY_4, mods::super_shift);
+	run_msg("capture.pick", R"({"what":"region"})", "pick-busy");
+	return after(400);
+}
+
+Result second_pick_refused() {
+	if (auto wait = wait_for(command_done("pick-busy"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_code("pick-busy") == 1
+			&& command_err("pick-busy").find("already running") != std::string::npos,
+		"a second pick is answered with an error");
+	tap(KEY_ESC); // close the key-opened picker
+	check(!server->capture_ui.picking(), "Esc closed the key-opened picker");
+	return after(300);
+}
+
+// A cancel is an error answer.
+Result pick_cancel_asked() {
+	run_msg("capture.pick", R"({"what":"region"})", "pick-cancel");
+	return after(400);
+}
+
+Result pick_cancel_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] { tap(KEY_ESC); },
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("pick-cancel"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_code("pick-cancel") == 1
+			&& command_err("pick-cancel").find("cancelled") != std::string::npos,
+		"cancelling the pick answers with an error");
+	return after(300);
+}
+
+// Params are checked.
+Result bad_pick_asked() {
+	run_msg("capture.pick", R"({"what":"nope"})", "pick-bad");
+	return after(400);
+}
+
+Result bad_pick_refused() {
+	if (auto wait = wait_for(command_done("pick-bad"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_code("pick-bad") == 1, "a bad `what` is answered with the usage error");
+	return after(300);
+}
+
+// The identifier the window pick answered with, for the chooser list.
+std::string picked_window_identifier() {
+	JsonAnswer answer(command_out("pick-window"));
+	return member_string(answer.object(), "identifier");
+}
+
+// The chooser bridge: both monitors and windows on stdin.
+Result bridge_output_asked() {
+	std::string name = output().wlr->name;
+	std::string identifier = picked_window_identifier();
+	if (identifier.empty()) {
+		check(false, "the window pick had an identifier for the bridge list");
+		return after(200);
+	}
+	write_file(scratch() + "/chooser.txt", std::format(
+		"Monitor: {} the headless output\nWindow: cap ({})\n", name, identifier));
+	run_bridge("chooser.txt", "bridge-output");
+	return after(400);
+}
+
+// The bridge asks `any`; a click on the canvas picks the monitor.
+Result bridge_output_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] { click(80, 650); },
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("bridge-output"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	std::string name = output().wlr->name;
+	check(command_out("bridge-output") == std::format("Monitor: {} the headless output", name)
+			&& command_code("bridge-output") == 0,
+		"the bridge printed the chosen monitor's line, byte-exactly");
+	run_bridge("chooser.txt", "bridge-window");
+	return after(400);
+}
+
+// The same list, a window chosen.
+Result bridge_window_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(),
+			[] { click_title_bar(window_frame()); }, {.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("bridge-window"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_out("bridge-window")
+			== std::format("Window: cap ({})", picked_window_identifier())
+			&& command_code("bridge-window") == 0,
+		"the bridge printed the chosen window's line, byte-exactly");
+	run_bridge("chooser.txt", "bridge-cancel");
+	return after(400);
+}
+
+// A cancelled bridge prints nothing and exits 0.
+Result bridge_cancel_answered() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] { tap(KEY_ESC); },
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(command_done("bridge-cancel"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_out("bridge-cancel").empty() && command_code("bridge-cancel") == 0,
+		"a cancelled chooser bridge prints nothing, exiting 0");
+	return after(300);
+}
+
+// A recording from the toolbar, whole screen.
+Result recording_starts() {
+	chord(KEY_5, mods::super_shift);
+	// the timer option still reads 5 s from the countdown test: cycle
+	// it back to none (5 -> 10 -> none)
+	click_option(ToolbarOption::timer);
+	click_option(ToolbarOption::timer);
+	click_mode({ToolbarTarget::screen, true}); // record the screen
+	return after(600);
+}
+
+Result recording_started() {
+	if (auto wait = wait_for(server->capture_ui.recording(), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	std::string path = server->capture_ui.recording_path();
+	check(server->capture_ui.recording()
+			&& path.starts_with(videos_dir)
+			&& path.find("Screen Recording") != std::string::npos,
+		std::format("the recording started into the videos dir ({})", path));
+	check(events.said().find("capture.recording") != std::string_view::npos,
+		"the capture.recording event told the bar");
+	run_msg("state", "", "state-recording");
+	return after(400);
+}
+
+Result state_reports_recording() {
+	if (auto wait = wait_for(command_done("state-recording"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	std::string rec = state_recording("state-recording");
+	check(!rec.empty() && rec != "none",
+		std::format("the state reports the recording ({})", rec));
+	shot("recording-hint");
+	// the spawn path a shortcut takes, running beside the recording
+	held.start();
+	return after(2500); // some footage
+}
+
+// The started command holds nothing of the compositor's.
+Result spawned_command_holds_nothing() {
+	std::vector<std::string> fds = proc_fds(held.pid());
+	std::string listed;
+	for (const std::string &fd : fds) {
+		listed += listed.empty() ? fd : ", " + fd;
+	}
+	check(fds == std::vector<std::string>{"0", "1", "2"},
+		std::format("the command started beside the recording holds only "
+			"fds 0, 1, 2 ({})", listed));
+	chord(KEY_SYSRQ, mods::alt);
+	return after(400);
+}
+
+Result alt_print_stopped_it() {
+	// ffmpeg finalises the file after the pipe's end: a wide budget
+	if (auto wait = wait_for(!server->capture_ui.recording(), {.budget_ms = 10'000})) {
+		return *wait;
+	}
+	check(!server->capture_ui.recording(), "Alt+Print stopped the recording");
+	run_msg("state", "", "state-stopped");
+	return after(400);
+}
+
+Result state_reports_stopped() {
+	if (auto wait = wait_for(command_done("state-stopped"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(state_recording("state-stopped") == "none",
+		"the state reports no recording any more");
+	std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
+	check(files.size() == 1 && !files.empty(), "one recording file was left behind");
+	if (!files.empty()) {
+		int code = probe_recording(files.front(), "ffprobe-screen.txt");
+		std::string probe = read_text(scratch() + "/ffprobe-screen.txt");
+		check(code == 0 && probe_matches(probe, screen_w, screen_h, 0.5),
+			std::format("ffprobe reads the recording as a 1280x720 video ({})", probe));
+	}
+	held.stop();
+	return after(300);
+}
+
+// capture.stop on nothing is an error.
+Result stop_idle_asked() {
+	run_msg("capture.stop", "", "stop-idle");
+	return after(400);
+}
+
+Result stop_idle_refused() {
+	if (auto wait = wait_for(command_done("stop-idle"), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_code("stop-idle") == 1
+			&& command_err("stop-idle").find("not recording") != std::string::npos,
+		"capture.stop with nothing running is an error");
+	return after(200);
+}
+
+// A region recording, stopped through the IPC.
+Result region_recording_starts() {
+	chord(KEY_5, mods::super_shift);
+	click_mode({ToolbarTarget::region, true}); // record a region
+	return after(600);
+}
+
+Result region_recording_started() {
+	if (auto wait = act_when(server->capture_ui.picking(), [] { drag(150, 100, 550, 400); },
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(server->capture_ui.recording(), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(server->capture_ui.recording(), "the region recording started");
+	return after(2200); // some footage
+}
+
+Result region_stop_asked() {
+	run_msg("capture.stop", "", "stop-region");
+	return after(400);
+}
+
+Result region_recording_stopped() {
+	if (auto wait = wait_for(command_done("stop-region") && !server->capture_ui.recording(),
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_code("stop-region") == 0, "capture.stop answered true");
+	check(!server->capture_ui.recording(), "the region recording stopped");
+	std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
+	check(files.size() == 2, "two recordings, one per run");
+	if (files.size() == 2) {
+		probe_recording(files.front(), "ffprobe-region.txt");
+		std::string probe = read_text(scratch() + "/ffprobe-region.txt");
+		check(probe_matches(probe, 400, 300, 0.5),
+			std::format("ffprobe reads the region recording as 400x300 ({})", probe));
+	}
+	return after(300);
+}
+
+// Keys pressed while the picker is up never reach a client.
+Result keys_before() {
+	move_to(40, 40); // the cursor stays out of the compared crop
+	wlr_box f = window_frame();
+	check(f.width > 0, "the window is still there to type at");
+	term_geometry = std::format("{},{} {}x{}", f.x, f.y, f.width, f.height);
+	shot("term-before", term_geometry);
+	return after(400);
+}
+
+Result keys_while_the_picker_is_up() {
+	// Everything the picker consumes: open, Space, letters, Esc, twice.
+	chord(KEY_4, mods::super_shift);
+	tap(KEY_SPACE);
+	tap(KEY_A);
+	tap(KEY_ESC);
+	tap(KEY_PRINT);
+	tap(KEY_ESC);
+	shot("term-after", term_geometry);
+	return after(400);
+}
+
+Result keys_did_not_reach_the_window() {
+	std::optional<Image> before = read_shot("term-before");
+	std::optional<Image> after_keys = read_shot("term-after");
+	long changed = before.has_value() && after_keys.has_value()
+		? before->differing(*after_keys, {.tolerance = shot_tolerance}) : -1;
+	long total = before.has_value() && after_keys.has_value()
+		? static_cast<long>(before->width()) * before->height() : 0;
+	// The caret may blink; nothing else may change: no key reached foot.
+	check(changed >= 0 && total > 0 && changed * 1000 <= total,
+		std::format("no key the picker saw reached the window ({}/{} px)", changed, total));
+	return after(300);
+}
+
+// A window recording, the rect frozen at pick time.
+Result window_recording_starts() {
+	chord(KEY_5, mods::super_shift);
+	click_mode({ToolbarTarget::window, true}); // record a window
+	return after(600);
+}
+
+Result window_recording_started() {
+	if (auto wait = act_when(server->capture_ui.picking(),
+			[] { click_title_bar(window_frame()); }, {.budget_ms = 3000})) {
+		return *wait;
+	}
+	if (auto wait = wait_for(server->capture_ui.recording(), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(server->capture_ui.recording(), "the window recording started");
+	return after(2200); // some footage
+}
+
+Result window_stop_asked() {
+	run_msg("capture.stop", "", "stop-window");
+	return after(400);
+}
+
+Result window_recording_stopped() {
+	if (auto wait = wait_for(command_done("stop-window") && !server->capture_ui.recording(),
+			{.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(command_code("stop-window") == 0, "capture.stop closed the window recording");
+	std::vector<std::string> files = files_with(videos_dir, "Screen Recording");
+	check(files.size() == 3, "three recordings, one per run");
+	if (files.size() == 3) {
+		probe_recording(files.front(), "ffprobe-window.txt");
+		std::string probe = read_text(scratch() + "/ffprobe-window.txt");
+		View *view = first_mapped_view();
+		wlr_box f = window_frame();
+		// the encoder crops odd edges to whole yuv420p macroblocks
+		check(view != nullptr && probe_matches(probe, f.width - f.width % 2,
+				f.height - f.height % 2, 0.5),
+			std::format("ffprobe reads the window recording as its frame ({})", probe));
+	}
+	return after(300);
+}
+
+// An encoder that never reads: the compositor must not wait for it.
+Result stalled_recording_starts() {
+	std::string path = std::getenv("PATH");
+	put_first_on_path(stall_bin);
+	chord(KEY_5, mods::super_shift);
+	click_mode({ToolbarTarget::screen, true}); // record the screen
+	setenv("PATH", path.c_str(), 1); // the encoder is started by now
+	return after(600);
+}
+
+Result stalled_recording_started() {
+	if (auto wait = wait_for(server->capture_ui.recording(), {.budget_ms = 3000})) {
+		return *wait;
+	}
+	check(server->capture_ui.recording(),
+		"the recording with an encoder that reads nothing started");
+	return after(2500); // 150 frames come due; the pipe takes 64 KiB of the first
+}
+
+// The compositor still answers.
+Result state_answers_while_stalled() {
+	act_when(true, [] {
+		run_msg("state", "", "state-stalled");
+		state_asked = std::chrono::steady_clock::now();
+	});
+	if (auto wait = wait_for(command_done("state-stalled"), {.poll_ms = 20, .budget_ms = 3000})) {
+		return *wait;
+	}
+	long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - state_asked).count();
+	check(command_done("state-stalled") && ms <= 500, std::format(
+		"IPC state answered in {} ms while the encoder read nothing", ms));
+	std::string rec = state_recording("state-stalled");
+	check(rec.starts_with(videos_dir) && rec.ends_with(".mp4"),
+		std::format("the state reports the stalled recording ({})", rec));
+	std::size_t dropped = server->capture_ui.recording_dropped_frames();
+	check(dropped > 0, std::format("the frames that came due behind the "
+		"encoder were dropped and counted ({})", dropped));
+	shot("stalled");
+	return after(400);
+}
+
+// The screen is still drawn: grim gets its frame.
+Result grim_gets_its_frame() {
+	check(file_exists(shot_path("stalled")),
+		"grim captured the screen while the encoder stalled");
+	run_msg("capture.stop", "", "stop-stalled");
+	return after(400);
+}
+
+// The stop ends it, the encoder not having read a byte.
+Result stop_ends_the_stalled_recording() {
+	if (auto wait = wait_for(command_done("stop-stalled") && !server->capture_ui.recording(),
+			{.budget_ms = 10'000})) {
+		return *wait;
+	}
+	check(command_code("stop-stalled") == 0, "capture.stop answered true");
+	check(!server->capture_ui.recording(),
+		"the stop ended the recording whose encoder never read");
+	std::string report = read_text(scratch() + "/recorder-report.txt");
+	check(report.find("started args=") != std::string::npos
+			&& report.find("-f rawvideo") != std::string::npos,
+		"the stand-in was the encoder, started as ffmpeg raw video");
+	int unread = 0, capacity = 0;
+	std::size_t at = report.find("unread=");
+	check(at != std::string::npos
+			&& std::sscanf(report.c_str() + at, "unread=%d capacity=%d",
+				&unread, &capacity) == 2 && unread > 0 && unread <= capacity,
+		std::format("the pipe was closed on the encoder with the written "
+			"frames unread ({} of {} bytes)", unread, capacity));
+	return after(300);
+}
+
+// The end: nothing recording, the event closed it.
+Result the_end() {
+	check(!server->capture_ui.recording(), "no recording is left running");
+	check(events.said().find("\"active\":false") != std::string_view::npos,
+		"the capture.recording event closed the recording");
+	return after(0);
+}
+
+Result quit() {
+	return quit_by_msg();
 }
 
 } // namespace
 
 int main() {
-	if (std::getenv("WAYLAND_CANVAS_BIN") == nullptr) {
-		std::fprintf(stderr, "capture: $WAYLAND_CANVAS_BIN is not set (meson passes it)\n");
+	if (!begin("capture", {"WAYLAND_CANVAS_BIN", "CANVAS_RECORDER_STANDIN"})) {
 		return 2;
 	}
-	const char *env = std::getenv("CANVAS_TMP");
-	std::string root = env && *env ? env : "tmp";
-	shot_dir = std::format("{}/scenarios/capture", root);
-	// A fresh world every run: the shots and recordings of a previous run
-	// must never count as this run's.
-	std::error_code ec;
-	std::filesystem::remove_all(shot_dir, ec);
-	mkdir_p(shot_dir);
 	// Nothing touches the real Pictures, Videos or clipboard: both user
 	// dirs point into the scratch tree, and xdg-open is a stub that logs
 	// what it was asked to open. glib caches the user dirs, so this has to
 	// happen before the server exists.
-	std::string conf = std::format("{}/config", shot_dir);
-	std::string bin = std::format("{}/bin", shot_dir);
-	pictures_dir = std::format("{}/pictures", shot_dir);
-	videos_dir = std::format("{}/videos", shot_dir);
-	mkdir_p(conf);
-	mkdir_p(bin);
-	mkdir_p(pictures_dir);
-	mkdir_p(videos_dir);
-	write_file(std::format("{}/user-dirs.dirs", conf), std::format(
+	pictures_dir = scratch_dir("pictures");
+	videos_dir = scratch_dir("videos");
+	write_file(scratch_dir("xdg-config") + "/user-dirs.dirs", std::format(
 		"XDG_PICTURES_DIR=\"{}\"\nXDG_VIDEOS_DIR=\"{}\"\n", pictures_dir, videos_dir));
-	write_file(std::format("{}/xdg-open", bin), std::format(
-		"#!/bin/sh\nprintf '%s\\n' \"$1\" > {}/xdg-open.args\n", shot_dir));
-	chmod((bin + "/xdg-open").c_str(), 0755);
-	setenv("XDG_CONFIG_HOME", conf.c_str(), 1);
-	std::string path = std::format("{}:{}", bin, std::getenv("PATH") != nullptr
-		? std::getenv("PATH") : "");
-	setenv("PATH", path.c_str(), 1);
+	std::string bin = scratch_dir("bin");
+	write_script(bin + "/xdg-open", std::format(
+		"#!/bin/sh\nprintf '%s\\n' \"$1\" > {}/xdg-open.args\n", scratch()));
+	put_first_on_path(bin);
 	// The stand-in encoder the stalled recording runs: an ffmpeg that never
 	// reads its stdin (tests/scenarios/recorder-standins/ffmpeg), first on
 	// PATH only while that recording starts, and a report it writes.
-	const char *standin = std::getenv("CANVAS_RECORDER_STANDIN");
-	if (standin == nullptr || *standin == '\0') {
-		std::fprintf(stderr, "capture: $CANVAS_RECORDER_STANDIN is not set "
-			"(meson passes it)\n");
-		return 2;
-	}
-	stall_bin = std::format("{}/stall-bin", shot_dir);
-	mkdir_p(stall_bin);
-	if (symlink(standin, (stall_bin + "/ffmpeg").c_str()) != 0) {
+	stall_bin = scratch_dir("stall-bin");
+	if (symlink(std::getenv("CANVAS_RECORDER_STANDIN"), (stall_bin + "/ffmpeg").c_str()) != 0) {
 		std::fprintf(stderr, "capture: cannot link the stand-in encoder\n");
 		return 2;
 	}
-	setenv("CANVAS_RECORDER_REPORT",
-		std::format("{}/recorder-report.txt", shot_dir).c_str(), 1);
-
-	setenv("WLR_BACKENDS", "headless", 1);
-	setenv("WLR_RENDERER", "gles2", 1);
-	server.emplace();
+	setenv("CANVAS_RECORDER_REPORT", (scratch() + "/recorder-report.txt").c_str(), 1);
 	Options options;
-	options.start_bar = false; // the suites never spawn the bar
-	if (!server->init(options) || !server->start()) {
-		server.reset();
-		return 2;
-	}
-	timer = wl_event_loop_add_timer(server->loop, [](void *data) { return handle_timer(); },
-		nullptr);
-	wl_event_source_timer_update(timer, 200);
-	wl_display_run(server->display); // `msg quit` ends it
-	kill_held(); // an early end leaves no command behind either
-	if (!finished) {
-		check(false, std::format("the run ended at step {}, before its last step", step));
-	}
-	wl_event_source_remove(timer);
-	if (sub_pid > 0) {
-		kill(sub_pid, SIGINT);
-		waitpid(sub_pid, nullptr, 0);
-	}
-	wlr_pointer_finish(&ptr);
-	server.reset(); // releases the control socket and the clients
-	return failures != 0;
+	options.start_bar = false; // the suites never spawn the shell
+	return run(options, {
+		{"window and subscriber", window_and_subscriber},
+		{"window mapped", window_mapped},
+		{"reference shot", reference_shot},
+		{"whole screen chord", whole_screen_chord},
+		{"thumbnail shot", thumbnail_shot},
+		{"thumbnail shown", thumbnail_shown},
+		{"swipe on the thumbnail", swipe_on_thumbnail},
+		{"thumbnail gone shot", thumbnail_gone_shot},
+		{"thumbnail dismissed", thumbnail_dismissed},
+		{"clipboard chord", clipboard_chord},
+		{"clipboard pasted", clipboard_pasted},
+		{"region reference", region_reference},
+		{"region picker", region_picker},
+		{"region dragged", region_dragged},
+		{"dismiss the region thumbnail", dismiss_region_thumbnail},
+		{"window reference", window_reference},
+		{"window click", window_click},
+		{"dismiss the window thumbnail", dismiss_window_thumbnail},
+		{"space picks windows", space_picks_windows},
+		{"dismiss the space thumbnail", dismiss_space_thumbnail},
+		{"esc cancels", esc_cancels},
+		{"print opens the picker", print_opens_the_picker},
+		{"shift print", shift_print},
+		{"click opens the shot", click_opens_the_shot},
+		{"xdg-open ran", xdg_open_ran},
+		{"toolbar opens", toolbar_opens},
+		{"toolbar clipboard", toolbar_clipboard},
+		{"toolbar clipboard pasted", toolbar_clipboard_pasted},
+		{"countdown starts", countdown_starts},
+		{"countdown saved nothing", countdown_saved_nothing},
+		{"countdown saved it", countdown_saved_it},
+		{"pick region asked", pick_region_asked},
+		{"pick region answered", pick_region_answered},
+		{"pick window asked", pick_window_asked},
+		{"pick window answered", pick_window_answered},
+		{"pick output asked", pick_output_asked},
+		{"pick output answered", pick_output_answered},
+		{"pick any, empty canvas", pick_any_empty_answered},
+		{"pick any, window", pick_any_window_answered},
+		{"second pick asked", second_pick_asked},
+		{"second pick refused", second_pick_refused},
+		{"pick cancel asked", pick_cancel_asked},
+		{"pick cancel answered", pick_cancel_answered},
+		{"bad pick asked", bad_pick_asked},
+		{"bad pick refused", bad_pick_refused},
+		{"bridge output asked", bridge_output_asked},
+		{"bridge output answered", bridge_output_answered},
+		{"bridge window answered", bridge_window_answered},
+		{"bridge cancel answered", bridge_cancel_answered},
+		{"recording starts", recording_starts},
+		{"recording started", recording_started},
+		{"state reports recording", state_reports_recording},
+		{"spawned command holds nothing", spawned_command_holds_nothing},
+		{"alt print stopped it", alt_print_stopped_it},
+		{"state reports stopped", state_reports_stopped},
+		{"stop idle asked", stop_idle_asked},
+		{"stop idle refused", stop_idle_refused},
+		{"region recording starts", region_recording_starts},
+		{"region recording started", region_recording_started},
+		{"region stop asked", region_stop_asked},
+		{"region recording stopped", region_recording_stopped},
+		{"keys before", keys_before},
+		{"keys while the picker is up", keys_while_the_picker_is_up},
+		{"keys did not reach the window", keys_did_not_reach_the_window},
+		{"window recording starts", window_recording_starts},
+		{"window recording started", window_recording_started},
+		{"window stop asked", window_stop_asked},
+		{"window recording stopped", window_recording_stopped},
+		{"stalled recording starts", stalled_recording_starts},
+		{"stalled recording started", stalled_recording_started},
+		{"state answers while stalled", state_answers_while_stalled},
+		{"grim gets its frame", grim_gets_its_frame},
+		{"stop ends the stalled recording", stop_ends_the_stalled_recording},
+		{"the end", the_end},
+		{"quit", quit},
+	});
 }

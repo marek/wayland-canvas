@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <ranges>
+#include <utility>
 #include "harness/run.h"
 #include "platform/output.h"
 

@@ -25,6 +25,19 @@ Point title_point(const View &view, double from_left) {
 	return output().canvas_to_local(frame.x + from_left, frame.y + config::titlebar_height / 2.0);
 }
 
+View *titled(std::string_view title) {
+	for (View *view : server->views) {
+		if (view->mapped && view->shell_title() != nullptr && view->shell_title() == title) {
+			return view;
+		}
+	}
+	return nullptr;
+}
+
+Point on_screen(const View &view, double sx, double sy) {
+	return output().canvas_to_local(view.x + sx, view.y + sy);
+}
+
 LayerSurface *layer_named(const char *ns) {
 	for (const std::unique_ptr<Output> &each : server->outputs) {
 		for (const auto &layer : each->layers) {

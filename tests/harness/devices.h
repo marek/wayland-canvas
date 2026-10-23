@@ -53,6 +53,10 @@ inline constexpr uint32_t shift[] = {KEY_LEFTSHIFT};
 inline constexpr uint32_t super[] = {KEY_LEFTMETA};
 inline constexpr uint32_t super_shift[] = {KEY_LEFTMETA, KEY_LEFTSHIFT};
 inline constexpr uint32_t super_ctrl[] = {KEY_LEFTMETA, KEY_LEFTCTRL};
+inline constexpr uint32_t ctrl[] = {KEY_LEFTCTRL};
+inline constexpr uint32_t ctrl_shift[] = {KEY_LEFTCTRL, KEY_LEFTSHIFT};
+inline constexpr uint32_t super_ctrl_shift[] = {KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFTSHIFT};
+inline constexpr uint32_t alt[] = {KEY_LEFTALT};
 } // namespace mods
 
 // ------------------------------------------------------------- pointer

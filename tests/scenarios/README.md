@@ -24,7 +24,7 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
 | `files.h` | scratch directories under `$CANVAS_TMP`, small file helpers |
 | `image.h` | `shot` (grim) and PNG reading |
 | `devices.h` | the fake keyboard, pointer, touchscreen and tablet |
-| `control.h` | a raw client of the control socket, run in a forked child |
+| `control.h` | the control socket's raw clients and the real `msg` client, run in forked children or through the compositor's spawn |
 | `child.h` | child processes: pipe for stdout, SIGTERM first, killed with the run |
 | `bus.h` | the private system and session D-Bus |
 | `layout.h` | `deco_point`, `bar_mid_y` and the other asks of the layout |
