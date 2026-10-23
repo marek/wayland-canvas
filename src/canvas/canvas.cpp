@@ -352,6 +352,54 @@ void Canvas::settle(View &view) {
 	view.set_tiled(false);
 }
 
+void Canvas::remove_desktop(DesktopId id) {
+	Desktop *desktop = desktops.find(id);
+	if (desktop != nullptr && desktop->tiling()) {
+		// Abandoning a tiled desktop leaves its windows where they are,
+		// off its board.
+		for (View *view : server_.views) {
+			if (view->seated_on(id)) {
+				leave_board(*view);
+			}
+		}
+	}
+	desktops.remove(id);
+}
+
+void Canvas::move_desktop(DesktopId id, int x, int y) {
+	Desktop *desktop = desktops.find(id);
+	if (desktop == nullptr) {
+		return;
+	}
+	if (desktop->tiling()) {
+		// The one case a frame carries its windows: a tiled desktop keeps
+		// its board wherever the frame goes.
+		int dx = x - desktop->frame().x;
+		int dy = y - desktop->frame().y;
+		for (View *view : server_.views) {
+			if (view->mapped && !view->minimized && desktop_of(*view) == desktop) {
+				view->move(view->x + dx, view->y + dy);
+			}
+		}
+	}
+	desktops.move(id, x, y);
+	// A moved frame takes windows in with it: their desktop may change.
+	server_.visibility_changed();
+}
+
+void Canvas::abandon(std::optional<DesktopId> desktop) {
+	Desktop *found = desktops.find(desktop);
+	if (found == nullptr) {
+		server_.hint.set("Nothing to abandon here");
+		return;
+	}
+	int number = found->number();
+	// An overview aimed at it keeps its box, now a free spot.
+	remove_desktop(found->id());
+	server_.hint.set(
+		std::format("Abandoned Desktop {} — its windows stay on the canvas", number));
+}
+
 void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
 	if (into == from) {
 		return;
@@ -372,7 +420,7 @@ void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
 	std::sort(incoming.begin(), incoming.end(), standing_before);
 	int from_number = from_desktop->number(), into_number = into_desktop->number();
 	bool from_tiled = from_desktop->tiling();
-	desktops.remove(from);
+	remove_desktop(from);
 	if (into_desktop->tiling()) {
 		// The incoming windows join the board like new ones.
 		for (View *view : incoming) {
@@ -389,6 +437,20 @@ void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
 	}
 	server_.hint.set(std::format("Combined Desktop {} into Desktop {}",
 		from_number, into_number));
+}
+
+void Canvas::combine_nearest(std::optional<DesktopId> into) {
+	Desktop *into_desktop = desktops.find(into);
+	if (into_desktop == nullptr) {
+		server_.hint.set("Nothing to combine here");
+		return;
+	}
+	Desktop *from = desktops.nearest(into_desktop->id());
+	if (from == nullptr) {
+		server_.hint.set("No other desktop to combine");
+		return;
+	}
+	combine(into_desktop->id(), from->id(), from->frame());
 }
 
 wlr_box Canvas::spot_at(double cx, double cy, const Output &output) {

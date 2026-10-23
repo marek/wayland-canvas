@@ -1931,7 +1931,7 @@ Tests:
     lives in one place.
   - Acceptance: the scenarios are green, including a second output
     unplugged mid-gesture.
-- [ ] `Canvas` owns the board rules
+- [x] `Canvas` owns the board rules
   - The problem:
     - `desktops` is a public member that other code changes directly
       (canvas.h:52-53).

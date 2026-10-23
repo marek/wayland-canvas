@@ -2,14 +2,12 @@
 #include <cmath>
 #include <optional>
 
-#include "canvas/canvas.h"
 #include "canvas/desktop.h"
 #include "core/box.h"
 #include "core/config.h"
 #include "core/geometry.h"
 #include "core/server.h"
 #include "platform/output.h"
-#include "windows/view.h"
 
 namespace {
 
@@ -223,17 +221,7 @@ Desktop &Desktops::insert(int number, wlr_box frame, double scale) {
 }
 
 void Desktops::remove(DesktopId id) {
-	Desktop *desktop = find(id);
-	if (desktop != nullptr && desktop->tiling()) {
-		// Abandoning a tiled desktop leaves its windows where they are,
-		// off its board.
-		for (View *view : server_.views) {
-			if (view->seated_on(id)) {
-				server_.canvas.leave_board(*view);
-			}
-		}
-	}
-	destroy_owned(stack_, desktop);
+	destroy_owned(stack_, find(id));
 	server_.damage_all();
 	server_.changed(Change::desktops);
 }
@@ -256,22 +244,10 @@ void Desktops::move(DesktopId id, int x, int y) {
 	}
 	int dx = x - desktop->frame_.x;
 	int dy = y - desktop->frame_.y;
-	if (desktop->tiling()) {
-		// The one case a frame carries its windows: a tiled desktop keeps
-		// its board wherever the frame goes.
-		for (View *view : server_.views) {
-			if (view->mapped && !view->minimized
-					&& server_.canvas.desktop_of(*view) == desktop) {
-				view->move(view->x + dx, view->y + dy);
-			}
-		}
-	}
 	desktop->frame_.x = x;
 	desktop->frame_.y = y;
 	desktop->centre_.x += dx;
 	desktop->centre_.y += dy;
-	// A moved frame takes windows in with it: their desktop may change.
-	server_.visibility_changed();
 	server_.damage_all();
 }
 

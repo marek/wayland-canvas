@@ -42,8 +42,21 @@ public:
 	// window under the drop or takes the largest free slice under it; outside
 	// the desktop it leaves the board.
 	void drop(View &view);
+	// Takes a desktop away; its windows stay where they stand. A tiled
+	// desktop's are told they are no longer tiled and drop their slices.
+	void remove_desktop(DesktopId id);
+	// Moves a desktop's frame. A tiled desktop carries its windows with it; the
+	// windows of any other stay on the canvas and may belong to another
+	// desktop after.
+	void move_desktop(DesktopId id, int x, int y);
+	// Abandons the desktop (remove_desktop), or says there is none; a hint
+	// names it.
+	void abandon(std::optional<DesktopId> desktop);
 	// The views in `from_area` move into `into`, keeping their offsets; `from` is removed.
 	void combine(DesktopId into, DesktopId from, wlr_box from_area);
+	// Combines the desktop nearest `into` into it (combine), or says why
+	// nothing is combined.
+	void combine_nearest(std::optional<DesktopId> into);
 	// Settles a desktop's scale: the frame resizes around its centre, an
 	// overview targeting it follows the frame, and a hint names the scale.
 	// Nothing else follows: no window is resized or re-flowed, and no
@@ -52,6 +65,8 @@ public:
 	// The desktop frame at the point, or an output-sized box centred on it.
 	wlr_box spot_at(double cx, double cy, const Output &output);
 
+	// The frames: asked freely, and created, raised and scaled in place. A
+	// change that reaches a window is one of the verbs above.
 	Desktops desktops;
 	FullscreenDesktops fullscreen_desktops;
 

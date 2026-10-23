@@ -310,7 +310,7 @@ void PointerGrab::desktop_drag_motion(DesktopDrag &drag) {
 		return;
 	}
 	auto [dx, dy] = drag.anchor.travel(server_.cursor->x, server_.cursor->y);
-	server_.canvas.desktops.move(desktop->id(),
+	server_.canvas.move_desktop(desktop->id(),
 		static_cast<int>(std::round(drag.start.x + dx)),
 		static_cast<int>(std::round(drag.start.y + dy)));
 
@@ -427,7 +427,7 @@ void PointerGrab::overview_click(OverviewPress &press) {
 		},
 		[&](PressOnAbandon &on) {
 			if (Desktop *desktop = server_.canvas.desktops.find(on.desktop)) {
-				output->overview.abandon(desktop->id());
+				server_.canvas.abandon(desktop->id());
 			}
 		},
 		[&](PressOnDesktop &on) {

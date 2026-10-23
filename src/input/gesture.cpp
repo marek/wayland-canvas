@@ -311,7 +311,7 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 			if (Desktop *swiped = server_.canvas.desktops.find(a.desktop);
 					swiped != nullptr) {
 				if (std::fabs(a.offset) > config::abandon_distance && !cancelled) {
-					o.overview.abandon(swiped->id());
+					server_.canvas.abandon(swiped->id());
 				} else {
 					a.offset = 0;
 					o.damage();
@@ -536,7 +536,7 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 				o->overview.tile(pinch->desktop);
 			} else if (!cancelled
 					&& server_.canvas.desktops.find(pinch->merge_from) != nullptr) {
-				o->overview.combine(pinch->desktop);
+				server_.canvas.combine_nearest(pinch->desktop);
 			}
 			o->damage();
 		}

@@ -131,7 +131,7 @@ void FullscreenDesktops::come_back(const Away &away) {
 			looking.push_back(output.get());
 		}
 	}
-	server_.canvas.desktops.remove(away.own);
+	server_.canvas.remove_desktop(away.own);
 	Desktop *home = server_.canvas.desktops.find(away.home);
 	for (Output *output : looking) {
 		if (home != nullptr) {

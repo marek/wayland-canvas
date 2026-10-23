@@ -203,7 +203,7 @@ void act_pin(Server &, Output *output, KeyArg) {
 	}
 }
 
-void act_abandon_current(Server &, Output *output, KeyArg) {
+void act_abandon_current(Server &server, Output *output, KeyArg) {
 	if (output == nullptr) {
 		return;
 	}
@@ -211,7 +211,7 @@ void act_abandon_current(Server &, Output *output, KeyArg) {
 	if (Desktop *showing = output->desktop_showing()) {
 		desktop = showing->id();
 	}
-	output->overview.abandon(desktop);
+	server.canvas.abandon(desktop);
 }
 
 // Super+T: switch tiling for the desktop shown; a free view is pinned as a
@@ -341,7 +341,7 @@ void act_ov_abandon(Server &server, Output *output, KeyArg) {
 	}
 	if (Desktop *desktop =
 			server.canvas.desktops.find(output->overview.target().desktop)) {
-		output->overview.abandon(desktop->id());
+		server.canvas.abandon(desktop->id());
 	}
 }
 
@@ -351,9 +351,9 @@ void act_ov_tiling(Server &, Output *output, KeyArg) {
 	}
 }
 
-void act_ov_combine(Server &, Output *output, KeyArg) {
+void act_ov_combine(Server &server, Output *output, KeyArg) {
 	if (output != nullptr) {
-		output->overview.combine(output->overview.target().desktop);
+		server.canvas.combine_nearest(output->overview.target().desktop);
 	}
 }
 

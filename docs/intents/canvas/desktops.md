@@ -34,6 +34,12 @@ dialog aside: it floats over the window it blocks
   ([../bugs/zoom-collapsed-the-grid.md](../bugs/zoom-collapsed-the-grid.md)).
 - **Combine keeps relative layout**, translating by the offset between
   the two desktops, so a working arrangement survives the merge.
+- **One owner for what a frame does to windows.** Removing a desktop,
+  moving it, abandoning it and combining into it are the canvas's
+  actions, whether a tab, a key, a gesture or a drag asks. They alone
+  decide what happens to windows (a moved tiled desktop carries its
+  windows; a removed one drops them from its board), so no way in
+  differs from another.
 - **Ids are the smallest unused number**, matching Windows' virtual
   desktop numbering that `Super+1..9` addresses
   ([../input/keyboard-and-pointer.md](../input/keyboard-and-pointer.md)).

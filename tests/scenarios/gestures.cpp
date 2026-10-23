@@ -835,7 +835,7 @@ int run_step() {
 		}
 		check(std::holds_alternative<Gestures::Abandon>(server->gestures.state()),
 			"4-finger sideways swipe is sliding a desktop away");
-		o->overview.abandon(o->overview.target().desktop);
+		server->canvas.abandon(o->overview.target().desktop);
 		for (int i = 0; i < 6; i++) {
 			server->gestures.swipe_update(t_ms += 8, 20, 0);
 		}
@@ -2276,7 +2276,7 @@ int run_step() {
 			}
 		}
 		for (DesktopId id : others) {
-			o->overview.abandon(id);
+			server->canvas.abandon(id);
 		}
 		// Super+1 goes to desktop 1, making it at its own place when even
 		// that is gone.
@@ -2362,8 +2362,8 @@ int run_step() {
 		if (two_desk == nullptr || three_desk == nullptr) {
 			return 0;
 		}
-		o->overview.abandon(two_desk->id());
-		server->canvas.desktops.move(three_desk->id(), up.x, up.y);
+		server->canvas.abandon(two_desk->id());
+		server->canvas.move_desktop(three_desk->id(), up.x, up.y);
 		check(server->canvas.desktops.by_number(2) == nullptr
 				&& three_desk->frame().x == up.x && three_desk->frame().y == up.y,
 			"desktop 2 abandoned, desktop 3 moved onto the up slot");
@@ -2509,7 +2509,14 @@ int run_step() {
 		check(desk(boarded)->tiling() && one->seated_on(boarded) && two->seated_on(boarded)
 				&& one->tiled && two->tiled,
 			"tiling the desktop put both windows on its board");
-		o->overview.abandon(boarded);
+		wlr_box frame = desk(boarded)->frame();
+		int one_x = one->x, one_y = one->y, two_x = two->x, two_y = two->y;
+		server->canvas.move_desktop(boarded, frame.x + 300, frame.y + 40);
+		check(desk(boarded)->frame().x == frame.x + 300
+				&& one->x == one_x + 300 && one->y == one_y + 40
+				&& two->x == two_x + 300 && two->y == two_y + 40,
+			"moving a tiled desktop carried both windows with its frame");
+		server->canvas.abandon(boarded);
 		check(server->canvas.desktops.find(boarded) == nullptr,
 			"the tiled desktop is abandoned");
 		check(!one->board_seat.has_value() && !two->board_seat.has_value()

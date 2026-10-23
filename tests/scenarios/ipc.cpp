@@ -989,7 +989,7 @@ int run_step() {
 			life_b = desktops.create(wlr_box{5120, 0, 1280, 720}).id();
 			return -100;
 		case 2:
-			desktops.move(*life_b, 5120, 720);
+			server->canvas.move_desktop(*life_b, 5120, 720);
 			return -100;
 		case 3: {
 			// combine() removes `a`; nothing may touch it afterwards.
@@ -998,7 +998,7 @@ int run_step() {
 			return -100;
 		}
 		default:
-			desktops.remove(*life_b);
+			server->canvas.remove_desktop(*life_b);
 			return 300;
 		}
 	}

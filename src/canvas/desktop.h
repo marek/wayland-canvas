@@ -52,7 +52,11 @@ inline std::optional<DesktopId> id_of(const Desktop *desktop) {
 	return desktop != nullptr ? std::optional<DesktopId>{desktop->id()} : std::nullopt;
 }
 
-// Every desktop on the canvas, topmost first; the only owner of Desktop objects.
+// Every desktop's frame on the canvas, topmost first; the only owner of
+// Desktop objects. A container of frames: it knows no window. Removing a
+// frame and moving it have effects on windows, so those two are Canvas's
+// alone (Canvas::remove_desktop, Canvas::move_desktop), as is the tiling
+// switch with the board that follows it.
 class Desktops {
 public:
 	explicit Desktops(Server &server);
@@ -70,12 +74,8 @@ public:
 	// slot beside `anchor`, by the same order and rings as create_beside;
 	// the frame fills `output`'s screen.
 	Desktop &create_next_to(wlr_box anchor, const Output &output);
-	void remove(DesktopId id); // damages
 	void raise(DesktopId id);
-	void move(DesktopId id, int x, int y); // the frame; a tiled desktop carries its windows
 	void set_scale(DesktopId id, double scale); // resizes the frame around its centre; damages
-	// Flips the switch only; the board that follows is Canvas::toggle_tiling's.
-	void set_tiling(DesktopId id, bool on);
 
 	// A removed desktop resolves to nullptr.
 	Desktop *find(DesktopId id);
@@ -101,6 +101,14 @@ public:
 	}
 
 private:
+	friend class Canvas;
+	// Takes the frame out; damages. Its windows are Canvas::remove_desktop's.
+	void remove(DesktopId id);
+	// Moves the frame alone, and damages. The windows it carries or takes in
+	// are Canvas::move_desktop's.
+	void move(DesktopId id, int x, int y);
+	// Flips the switch only; the board that follows is Canvas::toggle_tiling's.
+	void set_tiling(DesktopId id, bool on);
 	// Where desktop 1 sits — its frame — or, with it abandoned, the first
 	// output's initial view, the box desktop 1 is made at on start-up.
 	wlr_box anchor_frame() const;

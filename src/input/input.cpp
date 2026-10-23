@@ -280,7 +280,7 @@ std::optional<DesktopId> pressed_desktop(const PressTarget &target) {
 // shelf it does nothing.
 void overview_right_click(Output &output, const PressTarget &target, Point p) {
 	if (std::optional<DesktopId> desktop = pressed_desktop(target)) {
-		output.overview.abandon(desktop);
+		output.server.canvas.abandon(desktop);
 		return;
 	}
 	if (std::holds_alternative<PressOnEmpty>(target)) {

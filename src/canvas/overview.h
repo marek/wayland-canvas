@@ -49,9 +49,7 @@ public:
 	void target_point(double cx, double cy);
 	void zoom_by(double factor, double ox, double oy);
 	void keep_zoom(); // the camera's current zoom becomes the overview zoom
-	void abandon(std::optional<DesktopId> desktop);
 	void tile(std::optional<DesktopId> desktop);
-	void combine(std::optional<DesktopId> into);
 	void new_desktop(double cx, double cy);
 	void pin_target(); // the target spot becomes a desktop
 	// Whether the overview was entered or left since the last call: the Ipc

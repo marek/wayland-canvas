@@ -207,19 +207,6 @@ void Overview::keep_zoom() {
 	zoom_ = output_.camera.current().zoom;
 }
 
-void Overview::abandon(std::optional<DesktopId> desktop) {
-	Desktop *found = output_.server.canvas.desktops.find(desktop);
-	if (found == nullptr) {
-		output_.server.hint.set("Nothing to abandon here");
-		return;
-	}
-	int number = found->number();
-	// The target box stays put and becomes a free spot.
-	output_.server.canvas.desktops.remove(found->id());
-	output_.server.hint.set(
-		std::format("Abandoned Desktop {} — its windows stay on the canvas", number));
-}
-
 void Overview::tile(std::optional<DesktopId> desktop) {
 	Server &server = output_.server;
 	if (Desktop *found = server.canvas.desktops.find(desktop)) {
@@ -228,20 +215,6 @@ void Overview::tile(std::optional<DesktopId> desktop) {
 	}
 	// A free spot holds no switch: its windows are tiled once, where they stand.
 	server.canvas.tile(target_.box, output_);
-}
-
-void Overview::combine(std::optional<DesktopId> into) {
-	Desktop *into_desktop = output_.server.canvas.desktops.find(into);
-	if (into_desktop == nullptr) {
-		output_.server.hint.set("Nothing to combine here");
-		return;
-	}
-	Desktop *from = output_.server.canvas.desktops.nearest(into_desktop->id());
-	if (from == nullptr) {
-		output_.server.hint.set("No other desktop to combine");
-		return;
-	}
-	output_.server.canvas.combine(into_desktop->id(), from->id(), from->frame());
 }
 
 void Overview::new_desktop(double cx, double cy) {
