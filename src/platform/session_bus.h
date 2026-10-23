@@ -43,8 +43,8 @@ struct HandOver {
 Handed handed_in(std::string_view show_environment);
 
 // On exit a login gives the portal back: the values to restore, given the
-// environment holds `now`; nullopt when it no longer holds the login's own
-// (another session has taken the portal since, and keeps it).
+// environment holds `now`; nullopt when it holds something other than the
+// login's own (another session has taken the portal since, and keeps it).
 std::optional<Handed> hand_back(const HandOver &hand_over, const Handed &now);
 
 }

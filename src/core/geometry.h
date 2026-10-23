@@ -117,11 +117,10 @@ std::optional<Slice> largest_free_slice(std::span<const Slice> occupied,
 
 inline constexpr std::size_t no_slice = static_cast<std::size_t>(-1);
 
-// Where a new window goes: the largest free slice, or, with none free, half of
-// the largest slice other than `exclude` (the one a key moved; when nothing
-// else is held, that one, so a push that would cover the last window halves
-// the moved slice back instead). `halved` names the occupied entry that was
-// halved, no_slice when a free slice was taken.
+// Where a new window goes: the largest free slice or, with none free, half of
+// the largest slice other than `exclude` (the one a key moved; when it is the
+// only one, it is halved back rather than covered). `halved` names the
+// occupied entry that was halved, no_slice when a free slice was taken.
 struct SlicePlacement {
 	Slice slice;
 	std::size_t halved = no_slice;

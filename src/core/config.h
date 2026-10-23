@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-// Compile-time configuration (dwl-style): edit and rebuild. Keybindings live in input.cpp
-// next to the actions they call.
+// Compile-time constants (dwl-style): edit and rebuild. Keybindings and the
+// other user settings are canvas.conf's (core/settings.h).
 namespace config {
 
 // Server-side window decorations, logical pixels (Windows 11 metrics).
@@ -121,8 +121,10 @@ inline constexpr Palette palette_light{
 // Panning.
 inline constexpr double scroll_pan_speed = 1.5; // 2-finger scroll over empty canvas
 
-// Hops: a 3-finger swipe, in the normal view and the overview alike.
-// Touchpad units are libinput's (roughly pointer pixels).
+// Hops: a swipe, in the normal view and the overview alike. The finger counts
+// of the gestures below are the default `swipes` preset; four-finger-hops swaps
+// 3 and 4 (docs/intents/input/gestures.md). Touchpad units are libinput's
+// (roughly pointer pixels).
 inline constexpr double hop_threshold = 36.0; // 3-finger travel that triggers a jump to the next desktop
 inline constexpr double hop_cone_deg = 60.0; // how far off the swipe direction a desktop may lie
 
@@ -150,24 +152,24 @@ inline constexpr int overview_margin = 80; // logical px kept around the content
 
 // The overview's desktop tabs, logical px: a tab sits above its desktop's frame,
 // and holds the label, the Tile switch and the Abandon button in a row.
-inline constexpr int tab_height = 28;
+inline constexpr int tab_height = 28; // the row of label and buttons
 inline constexpr int tab_lift = 4; // the gap between a tab and its frame
 inline constexpr int tab_pad = 12; // before the label
 inline constexpr int tab_gap = 8; // between the label and the buttons
 inline constexpr int tab_button = 24; // the buttons are squares this wide
-inline constexpr int tab_button_gap = 6;
+inline constexpr int tab_button_gap = 6; // between the two buttons
 inline constexpr int tab_button_inset = 2; // from the tab's top to its buttons
 inline constexpr int tab_label_guess = 9; // px a character before the label is drawn once
 
 // The overview's bottom stack, logical px, from the bottom edge up: the help
 // line, the row a hint takes, the shelf.
-inline constexpr int overview_help_margin = 12;
-inline constexpr int overview_hint_gap = 8;
-inline constexpr int overview_shelf_gap = 16;
+inline constexpr int overview_help_margin = 12; // kept clear around the help line: above it, and at each side
+inline constexpr int overview_hint_gap = 8; // between the help line and the hint's row
+inline constexpr int overview_shelf_gap = 16; // between the hint's row and the shelf
 inline constexpr int overview_help_guess_h = 28; // before the help line is drawn once
-inline constexpr int shelf_thumb_w = 160;
-inline constexpr int shelf_thumb_h = 100;
-inline constexpr int shelf_gap = 12;
+inline constexpr int shelf_thumb_w = 160; // a shelf thumbnail's width
+inline constexpr int shelf_thumb_h = 100; // and its height
+inline constexpr int shelf_gap = 12; // between thumbnails
 inline constexpr int shelf_backing = 10; // the panel behind the shelf, beyond its thumbnails
 inline constexpr int shelf_title_strip = 16; // under a thumbnail, for the title
 inline constexpr int hint_bottom_margin = 48; // the hint's gap above the bottom edge outside the overview
@@ -228,7 +230,7 @@ inline constexpr const char *launcher_font = "Sans 11";
 inline constexpr const char *launcher_search_font = "Sans 13";
 inline constexpr int launcher_pad = 12; // around the search field and the rows
 inline constexpr int launcher_gap = 8; // between the search field, the rows and the footer
-inline constexpr int launcher_footer_height = 28;
+inline constexpr int launcher_footer_height = 28; // the line under the rows
 inline constexpr int launcher_margin_x = 16; // kept clear on each side of the panel
 inline constexpr int launcher_margin_y = 32; // and above and below it
 
@@ -240,11 +242,11 @@ inline constexpr const char *bar_program = "qs";
 inline constexpr const char *bar_shell_build_dir = "../shell";
 inline constexpr const char *bar_shell_install_dir = "../share/wayland-canvas/shell";
 
-// Control socket for shell clients and `wayland-canvas msg`, created in
-// $XDG_RUNTIME_DIR as <prefix>-<wayland display>.sock and exported to
-// spawned clients as $WAYLAND_CANVAS_SOCKET. Lines over `ipc_max_line`
-// bytes and subscribers with over `ipc_max_queued` bytes of unread events
-// are answered then dropped, so a client can never stall the compositor.
+// Control socket for shell clients and `wayland-canvas msg`: <prefix>-<wayland
+// display>.sock in $XDG_RUNTIME_DIR, exported to spawned clients as
+// $WAYLAND_CANVAS_SOCKET. A line over `ipc_max_line` bytes, or a subscriber
+// with over `ipc_max_queued` unread bytes, is answered then dropped: a client
+// can never stall the compositor.
 inline constexpr const char *ipc_socket_prefix = "wayland-canvas";
 inline constexpr std::size_t ipc_max_line = 64 * 1024;
 inline constexpr std::size_t ipc_max_queued = 1024 * 1024;

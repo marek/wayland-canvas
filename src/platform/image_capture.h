@@ -9,12 +9,11 @@ class Server;
 class View;
 struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request;
 
-// ext-image-copy-capture-v1: the copy manager, the output capture sources
-// (wlroots' own, fed by the output's committed frames — the renderer already
-// answers wlroots' needs_frame) and one capture source per window, backed by
-// the offscreen window renderer (render/capture.h). Also owns
-// ext-foreign-toplevel-list-v1, whose handles the views carry (foreign_toplevel.h) so
-// capture clients can name a window to capture.
+// ext-image-copy-capture-v1: the copy manager, wlroots' own output capture
+// sources and one source per window, backed by the offscreen window renderer
+// (render/capture.h). Also owns ext-foreign-toplevel-list-v1, whose handles the
+// views carry (windows/foreign_toplevel.h) so clients can name a window to
+// capture.
 class ImageCapture {
 public:
 	struct ToplevelSource; // the per-window capture source (image_capture.cpp)

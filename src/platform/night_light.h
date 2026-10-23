@@ -8,13 +8,10 @@
 class Output;
 class Server;
 
-// The night light: the screen warmed by a colour temperature, and the wlr
-// gamma-control protocol a client (wlsunset, gammastep) uses instead. An
-// output with a gamma ramp holds one colour transform of its own, the
-// client's table or the built-in filter's ramp, committed with the output's
-// state so a screenshot stays in true colours; an output with no ramp
-// (nested, headless) shows no night light
-// (docs/intents/render/night-light.md).
+// The night light: the screen warmed by a colour temperature, or by the table
+// a gamma-control client (wlsunset, gammastep) sets instead. It is one colour
+// transform per output with a gamma ramp, committed with the output's state so
+// a screenshot stays in true colours (docs/intents/render/night-light.md).
 class NightLight {
 public:
 	explicit NightLight(Server &server);

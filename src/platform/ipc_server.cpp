@@ -497,7 +497,6 @@ int IpcServer::handle_client(int, uint32_t mask, void *data) {
 	}
 	ipc.flush(*client);
 	if (ipc.quit_) {
-		// The response is out; `quit` ends the session.
 		wl_display_terminate(ipc.display_);
 		return 0;
 	}

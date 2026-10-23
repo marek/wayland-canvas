@@ -9,9 +9,8 @@ double now_ms();
 // Returns the shell's pid (the command's own when the shell execs it), or -1.
 pid_t spawn(const char *cmd);
 
-// The compositor ignores SIGPIPE for itself, so a write to a peer that has
-// gone fails with EPIPE. What spawn() starts gets the disposition the
-// compositor found back, since an ignored signal stays ignored across exec; a
-// second Server in the same process would find the first one's ignore
-// instead, so only the first call records it.
+// The compositor ignores SIGPIPE, so a write to a peer that has gone fails
+// with EPIPE. What spawn() starts gets the disposition the compositor found,
+// since an ignored signal stays ignored across exec; only the first call
+// records it, as a second Server in the process would find the first's ignore.
 void ignore_sigpipe();

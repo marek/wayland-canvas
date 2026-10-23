@@ -15,10 +15,7 @@
 namespace {
 
 // The output-local rectangle the chrome leaves of the screen: the bars'
-// exclusive zones (Output::usable), less the overview's strips while the
-// overview shows. A strip's window is its settled square plus the pocket
-// that overhangs the edge it hugs — the strip lies against the window's
-// inner side — so the free box ends at the window's far edge.
+// exclusive zones (Output::usable), less the overview's strips while it shows.
 wlr_box free_screen_box(const Output &output) {
 	wlr_box free = output.usable;
 	if (!output.overview.active()) {
@@ -30,18 +27,21 @@ wlr_box free_screen_box(const Output &output) {
 				continue;
 			}
 			const wlr_box &geo = layer->geo;
-			if (geo.x < 0) { // hugs the left edge, pocket past it
+			// A strip's surface overhangs the edge it hugs (a negative origin on
+			// the left and top, past the output's size on the right and bottom):
+			// the free box is cut at the strip's inner side.
+			if (geo.x < 0) {
 				int inner = std::max(free.x, geo.x + geo.width);
 				free.width = std::max(0, free.x + free.width - inner);
 				free.x = inner;
-			} else if (geo.y < 0) { // the top edge
+			} else if (geo.y < 0) {
 				int inner = std::max(free.y, geo.y + geo.height);
 				free.height = std::max(0, free.y + free.height - inner);
 				free.y = inner;
-			} else if (geo.x + geo.width > output.width) { // the right edge
+			} else if (geo.x + geo.width > output.width) {
 				free.width = std::max(0,
 					std::min(free.x + free.width, geo.x) - free.x);
-			} else if (geo.y + geo.height > output.height) { // the bottom edge
+			} else if (geo.y + geo.height > output.height) {
 				free.height = std::max(0,
 					std::min(free.y + free.height, geo.y) - free.y);
 			}

@@ -33,11 +33,10 @@ private:
 	Listener map_, commit_, destroy_;
 };
 
-// ext-session-lock-v1. While the session is locked only the locker's
-// surfaces are drawn, only the locker receives input, and a capture of an
-// output shows what the screen shows: the locker, or an opaque fill where
-// it has no surface yet. A locker that dies leaves the session locked; the
-// next locker takes it over.
+// ext-session-lock-v1. While the session is locked only the locker's surfaces
+// are drawn and receive input, and a capture shows what the screen shows: the
+// locker, or an opaque fill where it has no surface yet. A locker that dies
+// leaves the session locked; the next locker takes it over.
 class SessionLock final : public InputGate {
 public:
 	explicit SessionLock(Server &server);
@@ -61,10 +60,9 @@ public:
 	// that resized a new configure.
 	void output_changed(Output &output);
 
-	// A lock trigger: the `lock` action, a logind Lock, the idle timeout.
-	// The shell's locker draws the lock; the session is locked once it
-	// takes the protocol. Returns false when no locker answered because
-	// nothing in the session speaks the protocol.
+	// A lock trigger: the `lock` action, a logind Lock, the idle timeout. The
+	// shell's locker draws the lock; the session is locked once it takes the
+	// protocol, and `requested()` holds until then.
 	void request(const char *reason);
 	// Whether a lock was asked for and no locker has taken it yet.
 	bool requested() const { return requested_; }

@@ -22,12 +22,10 @@ std::string ipc_socket_path(const char *runtime_dir, const char *display);
 bool fill_socket_address(sockaddr_un &addr, const std::string &path);
 
 // The control socket's transport: JSON lines as docs/intents/platform/ipc.md
-// defines them — a request names a method and carries an id, the response
-// echoes the id with a result or an error, and a connection that subscribed
-// also receives events. It knows no method but `subscribe` and `quit`: each
-// area of the protocol registers its own (platform/ipc_methods.h). The path
-// is exported to spawned clients as $WAYLAND_CANVAS_SOCKET; `wayland-canvas
-// msg` (platform/ipc_client.cpp) is the command-line client.
+// defines them. It knows no method but `subscribe` and `quit`: each area of
+// the protocol registers its own (platform/ipc_methods.h). The path is
+// exported to spawned clients as $WAYLAND_CANVAS_SOCKET; `wayland-canvas msg`
+// (platform/ipc_client.cpp) is the command-line client.
 class IpcServer {
 public:
 	// What answers a request: a result's JSON text or an error message.

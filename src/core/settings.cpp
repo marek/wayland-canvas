@@ -21,10 +21,8 @@
 
 namespace settings {
 
-// The registry (the settings contract §3): [shortcuts] scope global first,
-// then [overview] with group "In the overview". Defaults are written as
-// chord text and parsed once; a default that fails to parse is dropped (and
-// the template test catches that).
+// The registry: defaults are written as chord text and parsed once; a default
+// that fails to parse is dropped (the template test catches that).
 const std::vector<ActionDef> &registry() {
 	static const std::vector<ActionDef> table = [] {
 		std::vector<ActionDef> defs;
@@ -362,8 +360,6 @@ void parse_setting_line(Parsed &out, int line, std::string_view section,
 
 } // namespace
 
-// ------------------------------------------------------------- parsing
-
 Parsed parse(std::string_view text) {
 	Parsed out;
 	enum class Section { none, shortcuts, overview, commands, setting, unknown };
@@ -445,8 +441,6 @@ Parsed parse(std::string_view text) {
 	return out;
 }
 
-// ---------------------------------------------------------- resolution
-
 Resolved resolve(const Parsed &parsed) {
 	Resolved out;
 	const std::vector<ActionDef> &reg = registry();
@@ -512,8 +506,6 @@ Resolved resolve(const Parsed &parsed) {
 	}
 	return out;
 }
-
-// ------------------------------------------------------------ template
 
 std::string template_text() {
 	std::string out =

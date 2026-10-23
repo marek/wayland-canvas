@@ -145,8 +145,6 @@ long long usage_token(JsonObject *usage, const char *first, const char *second) 
 	return value != 0 ? value : int_member(usage, second);
 }
 
-// ------------------------------------------------------------- local days
-
 // Days since 1970-01-01 of a civil date, and the inverse (Howard Hinnant's
 // algorithms): the calendar math the day buckets and labels need, without
 // walking a time-zone database by hand.
@@ -343,8 +341,6 @@ std::optional<time_t> epoch_of_iso(const std::string &raw) {
 	return static_cast<time_t>(days_from_civil(y, m, d) * 86400 + hour * 3600
 		+ minute * 60 + second - offset);
 }
-
-// --------------------------------------------------------------- scanning
 
 // One counted message, as the cache keeps it and the merge walks it.
 struct Counted {
@@ -704,8 +700,6 @@ std::vector<std::string> jsonl_files(const std::string &root) {
 	return files;
 }
 
-// ---------------------------------------------------------------- sources
-
 std::vector<std::string> claude_files(const std::string &claude_dir) {
 	return jsonl_files(claude_dir + "/projects");
 }
@@ -765,8 +759,6 @@ constexpr SourceKind source_kinds[] = {
 	{{"opencode", "XDG_DATA_HOME", ".local/share", "/opencode/opencode.db"},
 		opencode_files, scan_opencode_db},
 };
-
-// ---------------------------------------------------------------- caching
 
 constexpr int cache_version = 1;
 
@@ -919,8 +911,6 @@ bool same_cache(const std::map<std::string, FileEntry> &a,
 }
 
 } // namespace
-
-// ---------------------------------------------------------- display names
 
 std::string format_tokens(long long tokens) {
 	if (tokens >= 1'000'000'000) {
@@ -1148,8 +1138,6 @@ std::string plan_label(std::string_view tier, std::string_view subscription) {
 	return capitalised(subscription);
 }
 
-// ----------------------------------------------------------------- limits
-
 std::vector<Limit> parse_anthropic_limits(const std::string &payload) {
 	std::vector<Limit> limits;
 	JsonParserPtr parser = parse_json(payload);
@@ -1234,8 +1222,6 @@ CodexLimits parse_codex_limits(const std::string &account_result,
 	}
 	return out;
 }
-
-// ------------------------------------------------------------- collection
 
 std::vector<SourceRoot> source_roots() {
 	std::vector<SourceRoot> roots;
@@ -1508,8 +1494,6 @@ std::string record_json(const Record &record) {
 	json_builder_end_object(builder);
 	return builder_text(builder);
 }
-
-// ------------------------------------------------------------ probe cache
 
 namespace {
 

@@ -1,12 +1,10 @@
 #pragma once
 
-// The AI usage collector behind the agents panel (docs/intents/shell/
-// bar.md). Pure logic over the tools' own records — Claude Code
-// transcripts, Codex session files, pi/omp session logs, the opencode
-// database — plus the payloads the two limits endpoints answer with. No
-// compositor types and no network of its own, so the unit suite covers
-// every rule on fixtures and the wayland-canvas-agent-usage helper only
-// adds the environment, the probes and the printing.
+// The AI usage collector behind the agents panel (docs/intents/shell/bar.md):
+// pure logic over the tools' own records (Claude Code, Codex, pi/omp, opencode)
+// and the limits endpoints' payloads. No compositor types and no network, so
+// the unit suite covers every rule; the wayland-canvas-agent-usage helper adds
+// the environment, the probes and the printing.
 #include <map>
 #include <optional>
 #include <string>
@@ -31,8 +29,6 @@ struct Usage {
 inline constexpr std::string_view family_claude = "claude";
 inline constexpr std::string_view family_gpt = "gpt";
 
-// ---------------------------------------------------------- display names
-
 // `246.1M`, `811.5K`, `1.0K`, `0` — one decimal above a thousand, plain
 // below. The one place a token count is formatted: the record carries every
 // figure as text.
@@ -43,12 +39,11 @@ inline constexpr std::string_view family_gpt = "gpt";
 // version, the words title-cased.
 [[nodiscard]] std::string model_display_name(std::string_view model_id);
 
-// The family a usage entry belongs to, from the provider label (the api
-// label when the provider is silent) and, only when neither names a
-// service, the model id. Exactly `anthropic` is the Claude subscription;
-// every other label roots its own family by its first segment — a custom
-// Anthropic gateway is its own usage, not the subscription's, so the
-// Claude figures stay exactly Claude Code's own records.
+// The family a usage entry belongs to, from the provider label (the api label
+// when the provider is silent) and, only when neither names a service, the
+// model id. Exactly `anthropic` is the Claude subscription; every other label
+// roots its own family by its first segment, so a custom Anthropic gateway is
+// its own usage and the Claude figures stay Claude Code's own records.
 [[nodiscard]] std::string family_of(std::string_view provider,
 	std::string_view api, std::string_view model_id);
 
@@ -59,8 +54,6 @@ inline constexpr std::string_view family_gpt = "gpt";
 // `max_20x` → `Max 20x`, `pro` → `Pro`.
 [[nodiscard]] std::string plan_label(std::string_view tier,
 	std::string_view subscription);
-
-// ----------------------------------------------------------------- limits
 
 struct Limit {
 	std::string title;   // "Session", "Weekly"
@@ -83,8 +76,6 @@ struct CodexLimits {
 };
 [[nodiscard]] CodexLimits parse_codex_limits(const std::string &account_result,
 	const std::string &rate_limits_result);
-
-// ------------------------------------------------------------- collection
 
 // Where one tool keeps its records. The base is the `env` variable when it
 // is set and `home` under $HOME when it is not (`env` is nullptr when no

@@ -3,9 +3,9 @@
 #include <bitset>
 #include <cstddef>
 
-// A fact the control socket's subscribers hear of when it changes. The
-// owner of the fact flags it with Server::changed(); the Ipc reads the flags
-// once per frame and says nothing for one that was not set.
+// A fact the control socket's subscribers hear of when it changes. The owner
+// of the fact flags it with Server::changed(); IpcEvents reads the flags once
+// per frame and says nothing for one that was not set.
 enum class Change : std::size_t {
 	windows,
 	desktops,

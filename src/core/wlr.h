@@ -1,11 +1,11 @@
 #pragma once
 
-// The one place wlroots enters C++. Its headers use three things C++ rejects: `[static N]`
-// array parameters (render/color.h), a member named `namespace` (the layer-shell
-// protocol header and wlr_layer_shell_v1.h) and one named `class` (xwayland.h). Every C
-// header they depend on is included first, so the macros below only ever touch wlroots'
-// own declarations: xcb.h reaches pthread.h, whose C++ cleanup class a build with
-// -fexceptions (makepkg's flags) compiles, and `class` would break it.
+// The one place wlroots enters C++. Its headers use three things C++ rejects:
+// `[static N]` array parameters (render/color.h), a member named `namespace`
+// (layer-shell headers) and one named `class` (xwayland.h). Every C header they
+// depend on is included first, so the macros below touch only wlroots' own
+// declarations: xcb.h reaches pthread.h, whose C++ cleanup class (compiled under
+// -fexceptions, makepkg's flags) the `class` macro would break.
 #include <errno.h>
 #include <libinput.h>
 #include <pixman.h>

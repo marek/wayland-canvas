@@ -4,9 +4,8 @@ class IpcServer;
 class Server;
 
 // The methods of the control socket (docs/intents/platform/ipc.md), one
-// function per area, in that area's file `ipc_methods_<area>.cpp`: each
-// registers the methods it owns, so a new method is one `register_method`
-// call there. A new area adds its function here and one line to
+// function per area in that area's `ipc_methods_<area>.cpp`, each registering
+// the methods it owns. A new area adds its function here and one line to
 // register_ipc_methods.
 void register_state_methods(IpcServer &ipc, Server &server); // state, theme.set
 // window.focus, overview.toggle and launcher.toggle

@@ -53,13 +53,9 @@ public:
 	// Switches the palette, repaints, tells the subscribers.
 	void set_theme(ThemeMode mode);
 	// Settles what the events since the last frame left pending, before a
-	// frame draws: a window that left fullscreen goes back to its desktop,
-	// every window's outputs are worked out again, the control socket's
-	// subscribers are told what changed, the pointer's focus is rebased on
-	// a canvas that moved under it, and X is told the canvas's places. An
-	// output's frame runs it first; every step consumes what is pending or
-	// compares with what it last sent, so the frame of a second output in
-	// the same refresh finds nothing left to do.
+	// frame draws: fullscreen exits, every window's outputs, the control
+	// socket's events, the pointer's focus and X's view of the canvas. Each
+	// step is idempotent: a second output's frame in one refresh finds nothing.
 	void flush_pending();
 
 	// A window was unmapped or destroyed: every holder of a pointer to it
@@ -98,9 +94,7 @@ public:
 	std::vector<View *> views; // mapped views in stacking order, front is topmost
 	std::vector<std::unique_ptr<Popup>> popups;
 
-	// What the control socket's subscribers have not been told yet: the
-	// owner of a fact calls changed(), and IpcEvents reads the flags once per
-	// frame (docs/intents/shell/app-bar.md for the window list).
+	// Flags a fact for the control socket's subscribers (core/changes.h).
 	void changed(Change what);
 	Changes changes;
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame

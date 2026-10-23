@@ -22,19 +22,16 @@ public:
 	wlr_layer_surface_v1 *const wlr;
 	wlr_box geo{}; // output-local logical
 	bool mapped = false;
-	// A surface a plugin asked to be put on the plane
-	// (docs/intents/platform/ipc.md): its rectangle in canvas pixels. It
-	// is then drawn, moved and hit-tested with the canvas instead of with
-	// the screen. Unset for an ordinary layer surface.
+	// Set for a surface a plugin put on the plane (docs/intents/platform/ipc.md):
+	// its rectangle in canvas pixels, drawn, moved and hit-tested with the
+	// canvas rather than the screen.
 	std::optional<wlr_box> canvas_box;
 	// The name the plugin placed it by: its layer-shell namespace.
 	std::string name() const;
-	// A surface whose name says it belongs on the plane. It is never
-	// given a place on a screen: until the plugin says where on the
-	// canvas it goes, it is not drawn at all — a surface meant for the
-	// plane must never end up centred on the screen instead. Decided once,
-	// when the surface is made: the namespace never changes, and pointer
-	// motion asks for it.
+	// A surface whose name says it belongs on the plane: it has no place on a
+	// screen, and is not drawn until the plugin says where on the canvas it
+	// goes, so it never ends up centred on the screen. Decided once when the
+	// surface is made, since pointer motion asks for it.
 	bool belongs_on_canvas() const;
 	// A shell strip the overview works around: the toolbar or the app bar.
 	// Overlays that reserve no exclusive zone, so the free box and the

@@ -1,10 +1,8 @@
 // wayland-canvas-agent-usage: the helper the agents panel's widget runs
-// (docs/intents/shell/bar.md). The library owns every counting rule; this
-// file only resolves the environment, probes the two limits services and
-// prints the one JSON record the panel reads. The Anthropic probe goes
-// through curl with the CLI's own saved credentials — nothing else ever
-// reads them — and the Codex probe speaks the app-server's JSON-RPC the
-// way the codex CLI itself does.
+// (docs/intents/shell/bar.md). The library owns every counting rule; this file
+// resolves the environment, probes the two limits services (Anthropic through
+// curl with the CLI's own saved credentials, Codex over the app-server's
+// JSON-RPC) and prints the one JSON record the panel reads.
 #include "shell/agent_usage.h"
 
 #include <json-glib/json-glib.h>
@@ -137,8 +135,6 @@ void reap(Spawned &child) {
 	}
 }
 
-// ---------------------------------------------------------- Claude limits
-
 struct Credentials {
 	std::string token;
 	long long expires_at_ms = 0;
@@ -252,8 +248,6 @@ ProviderLimits claude_limits(const std::string &claude_dir,
 		"Local stats are still shown.";
 	return out;
 }
-
-// ------------------------------------------------------------- Codex RPC
 
 bool write_all(int fd, std::string_view text) {
 	std::size_t sent = 0;

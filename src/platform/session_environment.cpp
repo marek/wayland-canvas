@@ -41,11 +41,10 @@ session_bus::Owner bus_owner(bool login) {
 	return session_bus::owner(address ? address : "", runtime ? runtime : "", login);
 }
 
-// Puts this compositor's WAYLAND_DISPLAY and desktop name into the
-// activation environment of the services the session bus starts — the
-// screen-sharing portal and its wlroots backend first among them — when
-// the bus is this run's to take. A login returns the values it replaced,
-// for the hand-back on exit.
+// Puts this compositor's WAYLAND_DISPLAY and desktop name into the activation
+// environment of the services the session bus starts (the screen-sharing
+// portal first among them), when the bus is this run's to take. A login
+// returns the values it replaced, for the hand-back on exit.
 std::optional<session_bus::Handed> hand_over_session_bus(session_bus::Owner owner) {
 	switch (owner) {
 	case session_bus::Owner::none:

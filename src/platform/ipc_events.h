@@ -32,13 +32,11 @@ private:
 
 	Server &server_;
 	IpcServer &ipc_;
-	// The window list as it was last pushed, and the rows each flush reads
-	// the list into: an identical list is no event. Both keep their rows'
-	// strings between frames, so comparing allocates nothing. Unset while no
-	// subscriber has heard a list, which is also what a list nobody listened
-	// for leaves behind.
+	// The window list as last pushed, and the rows each flush reads the list
+	// into: an identical list is no event. Both keep their rows' strings
+	// between frames, so comparing allocates nothing.
 	std::vector<WindowRow> told_rows_, window_rows_;
-	bool windows_told_ = false;
+	bool windows_told_ = false; // false while no subscriber has heard a list
 	// The file the recording last told writes: a stop names it too.
 	std::string recording_path_;
 };

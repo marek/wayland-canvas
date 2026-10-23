@@ -8,10 +8,9 @@
 
 class Server;
 
-// canvas.conf (core/settings.h): the file, its text as last read, the
-// settings in force and the lines it ignored. `load` applies them to the
-// bindings, the gestures and the subsystems that read them; `write` writes a
-// new text atomically and applies it at once
+// canvas.conf (core/settings.h): the file's text as last read, the settings in
+// force and the lines it ignored. `load` applies them to the subsystems that
+// read them; `write` replaces the file atomically and applies it at once
 // (docs/intents/input/config-file.md).
 class ConfStore {
 public:
@@ -34,11 +33,11 @@ public:
 	// The settings in force.
 	settings::Resolved resolved;
 
-	// Reads the file and applies it to the running session: the bindings'
-	// tables, the gesture options, and — when the file has lines it ignored —
-	// the hint that names the first on every screen. The first load never
-	// emits the settings event; later ones only when something changed, so
-	// the watch's own echo of a write is silent.
+	// Reads the file and applies it to the running session: the bindings, the
+	// gesture options and, when the file has lines it ignored, the hint that
+	// names the first on every screen. The first load never emits the settings
+	// event; later ones only when something changed, so the watch's own echo of
+	// a write is silent.
 	void load(bool first);
 	// Writes `new_text` as canvas.conf — beside the old file, then renamed
 	// over it, so neither an editor nor a crash sees half a file — and

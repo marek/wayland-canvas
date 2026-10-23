@@ -80,7 +80,7 @@ void IpcEvents::flush_overview() {
 		if (!output->overview.take_changed()) {
 			continue;
 		}
-		std::string name = output->wlr->name; // NUL-terminated for the C API
+		std::string name = output->wlr->name;
 		bool active = output->overview.active();
 		ipc_.push_event("overview", object_text([&](JsonBuilder *builder) {
 			json_builder_set_member_name(builder, "output");

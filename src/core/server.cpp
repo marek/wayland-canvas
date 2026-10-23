@@ -150,7 +150,6 @@ struct Server::SurfaceTracker {
 	Listener commit_, destroy_;
 };
 
-// One idle inhibitor client resource.
 struct Server::Inhibitor {
 	Inhibitor(Server &server, wlr_idle_inhibitor_v1 *wlr)
 		: server_(server) {
@@ -181,11 +180,9 @@ Server::Server()
 }
 
 Server::~Server() {
-	// The reverse of init() and start(): what was made last is released
-	// first, and each subsystem lets go of what it made before what it
-	// hangs on goes. The signals are the one exception: nothing reads the
-	// loop from here on, so one that arrives now must take the process
-	// down, not wait in a source nobody dispatches.
+	// The reverse of init() and start(). The signal sources go first: nothing
+	// reads the loop from here on, so a signal now must take the process down,
+	// not wait in a source nobody dispatches.
 	sigint_source_.reset();
 	sigterm_source_.reset();
 	// The session ends: its services go with it, and the portal goes back.
@@ -243,9 +240,9 @@ bool Server::init(const Options &options) {
 
 	display = wl_display_create();
 	loop = wl_display_get_event_loop(display);
-	// IPC writes to clients that exit mid-line must fail with EPIPE, not
-	// take the compositor down: Ipc::flush already keeps such writes queued
-	// until the connection's EOF is dispatched.
+	// IPC writes to clients that exit mid-line must fail with EPIPE, not take
+	// the compositor down: IpcServer::flush keeps such writes queued until the
+	// connection's EOF is dispatched.
 	ignore_sigpipe();
 	sigint_source_.reset(wl_event_loop_add_signal(loop, SIGINT, handle_terminate_signal, this));
 	sigterm_source_.reset(wl_event_loop_add_signal(loop, SIGTERM, handle_terminate_signal, this));
@@ -302,10 +299,9 @@ bool Server::init(const Options &options) {
 	wlr_xdg_output_manager_v1_create(d, output_layout);
 
 	seat = wlr_seat_create(d, "seat0");
-	// The seat always offers a pointer and a keyboard, so clients bind both
-	// at start: a keyboard that connects later (wtype, an on-screen keyboard)
-	// types into the focus from its first key, instead of racing the
-	// client's get_keyboard after a late capability change.
+	// The seat always offers a pointer and a keyboard, so a keyboard that
+	// connects later (wtype, an on-screen keyboard) types into the focus from
+	// its first key instead of racing the client's get_keyboard.
 	wlr_seat_set_capabilities(seat, WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD);
 	cursor = wlr_cursor_create();
 	wlr_cursor_attach_output_layout(cursor, output_layout);
@@ -349,8 +345,6 @@ bool Server::start() {
 	unsetenv("NIRI_SOCKET");
 	// Before any client is spawned, so they inherit the socket path.
 	ipc.init(display, loop);
-	// canvas.conf: written with every default when missing, then watched
-	// (docs/intents/input/config-file.md).
 	conf.init();
 	// A login watches its logind session: lock-session and sleep lock it.
 	logind.init(session != nullptr);
@@ -393,12 +387,10 @@ void Server::start_bar() {
 
 void Server::set_theme(ThemeMode mode) {
 	// The applications' preference follows every call, a changed palette or
-	// not: the shell's start push makes it match the mode the compositor
-	// already has. Only the real session writes it (a seat session opened
-	// from a TTY): nested and headless runs never do.
+	// not: the shell's start push makes it match the mode the compositor has.
 	theme_prefs::apply(mode, session != nullptr);
 	if (theme.mode() == mode) {
-		return; // no change: no event, no repaint
+		return;
 	}
 	theme.set_mode(mode);
 	// Every cached texture was drawn with the old palette.

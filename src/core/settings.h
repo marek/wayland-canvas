@@ -23,19 +23,17 @@ std::optional<Scope> parse_scope(std::string_view name);
 // The file section that holds `scope`'s actions: `shortcuts` or `overview`.
 std::string_view section_name(Scope scope);
 
-// Where an action's chords are tried, apart from its scope's own table: the
-// global table serves every view but the overview, the overview table the
-// overview. `overview` is a global action whose chords the overview takes
-// too (the launcher, the terminal); `everywhere` is one whose chords are
-// tried before all else, so they also work in the overview and while a
-// capture UI holds the keyboard (the capture actions).
+// Where an action's chords are tried besides its scope's own table (the global
+// one serves every view but the overview). `overview`: a global action the
+// overview takes too (the launcher, the terminal); `everywhere`: tried before
+// all else, so also in the overview and while a capture UI holds the keyboard.
 enum class Reach { scope, overview, everywhere };
 
 // What the `swipes` setting chose. GestureOptions (input/gesture.h) carries it
 // into the gesture code. The order is the order of that setting's names.
 enum class SwipePreset { three_finger_hops, four_finger_hops, off };
 
-// One action of the registry (docs/plans' settings contract §3), in registry
+// One action of the registry (docs/intents/input/config-file.md), in registry
 // order. `group` and `label` are only how the settings window names it:
 // where its chords apply is `reach`.
 struct ActionDef {
@@ -107,22 +105,18 @@ enum class Kind {
 	integer, // a whole number from `min` to `max`
 };
 
-// One setting of [gestures] or [session]. The table below is the one place
-// a setting's key, its settings.get/settings.set name, its allowed values,
-// its default and the Resolved member that holds it are written: parse,
-// resolve, template_text, File::set, settings.get, settings.set and --help
-// all read it.
-//
-// A setting's value is an int: a choice's is the index of its name, a
-// toggle's is 0 (off) or 1 (on), an integer's is itself. The member is a
-// SwipePreset, a bool (0 or 1) or an int.
+// One setting of [gestures] or [session]. `fields` is the one place its key,
+// its settings.get/settings.set name, its allowed values, its default and the
+// Resolved member that holds it are written; everything that parses, resolves,
+// writes or lists settings reads it. Its value is an int: a choice's is the
+// index of its name, a toggle's 0 or 1, an integer's itself.
 struct Field {
 	std::string_view section; // "gestures" or "session"
 	std::string_view key;     // in the file
 	std::string_view param;   // in settings.get and settings.set
 	std::string_view help;    // what it does, in one line
 	Kind kind;
-	std::array<std::string_view, 3> names{}; // a choice's values, the first its way
+	std::array<std::string_view, 3> names{}; // a choice's values, in index order
 	std::string_view unit{};  // an integer: what it counts
 	int min = 0, max = 0;     // an integer: the lowest and highest number the file writes
 	bool off = false;         // an integer: `off` is 0, and the only way the file writes it
@@ -241,10 +235,10 @@ struct Parsed {
 
 Parsed parse(std::string_view text);
 
-// Resolution per scope: an action's keys are its line's when the file has
-// one, else its defaults; a chord the file gives to an action or command is
-// taken from any action that has it only by default; a repeated chord on a
-// later line of one scope was dropped at parse time. A setting is its first
+// Resolution per scope: an action's keys are its line's when the file has one,
+// else its defaults, but a chord the file gives to another action or command
+// is taken from any action that holds it only by default; a repeated chord on
+// a later line of one scope is dropped by `parse`. A setting is its first
 // line's, else its default.
 Resolved resolve(const Parsed &parsed);
 

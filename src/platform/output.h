@@ -21,7 +21,6 @@ public:
 	Output(const Output &) = delete;
 	Output &operator=(const Output &) = delete;
 
-	// output.cpp
 	void damage();
 	// What this output shows, or where it looks, changed: repaints it and
 	// has every window's outputs worked out again before the next frame.
@@ -57,7 +56,7 @@ public:
 	void forget_look_away();
 	void pin_desktop();
 
-	// layer.cpp
+	// defined in layer.cpp
 	void arrange_layers();
 	// Releases what this output holds before it is destroyed: its layer
 	// surfaces are destroyed, and the ones on the plane go to another
@@ -77,7 +76,7 @@ public:
 	Overview overview;
 	double frames_alpha = 0; // desktop outlines faded in while panning
 
-	// By zwlr_layer_shell_v1_layer; each in the order the C wl_list kept.
+	// Indexed by zwlr_layer_shell_v1_layer; the front of each is the topmost.
 	std::array<std::vector<std::unique_ptr<LayerSurface>>, 4> layers;
 	wlr_box usable{}; // output-local area not covered by exclusive zones
 

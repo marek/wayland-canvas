@@ -124,7 +124,7 @@ bool ConfStore::write(const std::string &new_text) {
 			path_.c_str());
 		return false;
 	}
-	load(false); // the settings event leaves with it; the watch echoes
+	load(false); // emits the settings event now; the watch's echo then finds no change
 	return true;
 }
 

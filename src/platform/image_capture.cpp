@@ -95,8 +95,7 @@ static void source_stop(wlr_ext_image_capture_source_v1 *source) {
 }
 
 static void source_request_frame(wlr_ext_image_capture_source_v1 *source, bool schedule_frame) {
-	// Answered now, not on some next commit: a frame request is always
-	// answered.
+	// Answered now, not on some next commit.
 	auto *s = source_of(source);
 	source_emit_frame(s);
 }
@@ -144,9 +143,8 @@ void ImageCapture::init() {
 	wl_display *display = server_.display;
 	list = wlr_ext_foreign_toplevel_list_v1_create(display, 1);
 	copy_mgr_ = wlr_ext_image_copy_capture_manager_v1_create(display, 1);
-	// The output sources are wlroots' own: fed by the outputs' committed
-	// frames, which the renderer already sends (a damaged commit makes
-	// wlroots' output source ask for a frame).
+	// The output sources are wlroots' own, fed by the outputs' committed
+	// frames: a damaged commit makes one ask for a frame.
 	output_mgr_ = wlr_ext_output_image_capture_source_manager_v1_create(display, 1);
 	toplevel_mgr_ = wlr_ext_foreign_toplevel_image_capture_source_manager_v1_create(display, 1);
 	new_request_.connect<&ImageCapture::handle_new_request>(
