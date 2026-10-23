@@ -41,6 +41,12 @@ order and the final tree byte for byte; a merge that rebases branch
 commits onto `main` squashes in the same step. Box-level commits never
 reach `main`, and are never pushed.
 
+Squash against the branch's own base, `git reset --soft $(git
+merge-base main HEAD)`, never against `main` itself: once `main` has
+moved past that base, a soft reset onto it commits the branch's tree,
+which silently reverts whatever landed on `main` in between. Against
+the merge base, a moved `main` shows up as a fast-forward that fails.
+
 ## The phases
 
 1. **Plan** — the dated file in `docs/plans/` (see
