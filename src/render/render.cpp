@@ -24,8 +24,6 @@ void draw_dashed_desktop(const RenderCtx &ctx, const Desktop &desktop, double sc
 		thickness, color);
 }
 
-// ------------------------------------------------------------- layers
-
 // A surface a plugin put on the plane: drawn in canvas space, so it pans,
 // zooms and scales with everything else there, by every output whose view
 // it is in (docs/intents/platform/ipc.md). Each surface of its tree is drawn
@@ -93,8 +91,6 @@ bool fullscreen_covers(const RenderCtx &ctx) {
 	return false;
 }
 
-// --------------------------------------------------------------- grid
-
 void draw_grid(const RenderCtx &ctx) {
 	double spacing = 64.0;
 	while (spacing * ctx.cam.zoom < 48.0) {
@@ -113,8 +109,6 @@ void draw_grid(const RenderCtx &ctx) {
 	}
 }
 
-// -------------------------------------------------------------- views
-
 // One window at the camera of `ctx`. Minimized or not is the caller's to
 // decide: the scene skips minimized windows, a capture of one window draws it.
 void draw_view(const RenderCtx &ctx, View &view) {
@@ -132,7 +126,7 @@ void draw_view(const RenderCtx &ctx, View &view) {
 	if (frame.intersects(ctx.viewport)) {
 		int tb = view.deco.titlebar();
 		int bw = view.deco.border();
-		// Layout as hit-tested by deco_hit(): the title bar spans the
+		// Layout as hit-tested by Decoration::hit(): the title bar spans the
 		// full frame width from the frame's top edge; the border runs
 		// below it and around the content.
 		if (tb > 0) {
@@ -168,8 +162,6 @@ void draw_view(const RenderCtx &ctx, View &view) {
 			cw * ctx.cam.zoom, ch * ctx.cam.zoom, 1.0f, frame_done);
 	});
 }
-
-// ------------------------------------------------------ desktop frames
 
 void draw_desktop_frames(const RenderCtx &ctx) {
 	Output &o = *ctx.output;
@@ -275,8 +267,6 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 	}
 }
 
-// ------------------------------------------------------------ drag icon
-
 void draw_drag_icon(const RenderCtx &ctx) {
 	Server &server = ctx.output->server;
 	std::optional<DragAndDrop::Icon> icon = server.input.dnd.icon();
@@ -290,8 +280,6 @@ void draw_drag_icon(const RenderCtx &ctx) {
 	};
 	wlr_surface_for_each_surface(icon->surface, screen_surface_iter, &it);
 }
-
-// ------------------------------------------------- frame done/enter/present
 
 void send_surface_feedback(const RenderCtx &ctx) {
 	timespec now;
@@ -325,8 +313,6 @@ void send_surface_feedback(const RenderCtx &ctx) {
 }
 
 } // namespace
-
-// ------------------------------------------------------------- public
 
 Painter::Painter(Server &server) : server_(server) {}
 
@@ -376,11 +362,9 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 	}
 	ctx.drawn->clear(); // no-op for a capture's scratch buffer
 
-	// clear
 	draw_logical_rect(ctx, 0, 0, output.width, output.height,
 		color_rgba(server_.theme.colors().canvas));
 
-	// background + bottom layers, screen space
 	draw_layers(ctx, ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
 		ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM);
 
@@ -398,14 +382,12 @@ void Painter::draw_scene(const RenderCtx &ctx) {
 		draw_grid(ctx);
 	}
 
-	// views bottom -> top
 	for (View *view : std::views::reverse(server_.views)) {
 		if (!view->minimized) {
 			draw_view(ctx, *view);
 		}
 	}
 
-	// desktop frames
 	if (ctx.overview || zoomed) {
 		draw_desktop_frames(ctx);
 	} else if (output.frames_alpha > 0) {
@@ -470,7 +452,6 @@ bool Painter::render_area(Output &output, wlr_box local_area, wlr_buffer *target
 	if (target == nullptr) {
 		return false;
 	}
-	// Clip the area to the output; an empty one is nothing to draw.
 	wlr_box bounds{0, 0, output.width, output.height};
 	wlr_box clipped{};
 	wlr_box_intersection(&clipped, &local_area, &bounds);
@@ -483,7 +464,6 @@ bool Painter::render_area(Output &output, wlr_box local_area, wlr_buffer *target
 		return false;
 	}
 	RenderCtx ctx = make_capture_ctx(output, pass, target);
-	// The capture target is the clipped area at the output's scale.
 	ctx.origin_x = clipped.x;
 	ctx.origin_y = clipped.y;
 	ctx.vw = clipped.width;
@@ -527,10 +507,7 @@ bool Painter::render_view(View &view, float scale, wlr_buffer *target) {
 	return wlr_render_pass_submit(pass);
 }
 
-// The capture target is untransformed — an upright image whatever the
-// output's own transform. Cursors stay out: an on-screen frame owns them, and
-// paint-cursor capture sessions get them through that frame. A capture never
-// shows the capture UI that asked for it and sends no surface feedback.
+// Cursors stay out of a capture: an on-screen frame owns them, and paint-cursor sessions get them there.
 RenderCtx Painter::make_capture_ctx(Output &output, wlr_render_pass *pass,
 		wlr_buffer *target) {
 	RenderCtx ctx = make_ctx(output, pass);

@@ -23,8 +23,6 @@ namespace {
 
 constexpr std::size_t query_max = 255;
 
-// ---- cairo/pango helpers ----
-
 uint32_t name_hash(const char *s) {
 	uint32_t h = 5381;
 	for (; s != nullptr && *s != '\0'; s++) {
@@ -97,8 +95,6 @@ std::size_t utf8_encode(uint32_t cp, char buf[4]) {
 	return 0;
 }
 
-// ---- drawing ----
-
 void draw_icon(cairo_t *cr, Icons &icons, const App &app, double x, double y,
 	float scale, uint32_t text_color) {
 	int idev = static_cast<int>(config::launcher_icon * scale + 0.5f);
@@ -146,8 +142,6 @@ Launcher::~Launcher() {
 	finish();
 }
 
-// ---- query editing ----
-
 bool Launcher::query_pop_char() {
 	if (query_.empty()) {
 		return false;
@@ -184,8 +178,6 @@ void Launcher::query_changed() {
 	scroll_ = 0;
 	panel_.invalidate(*output_);
 }
-
-// ---- selection ----
 
 void Launcher::scroll_to_selection(int rows) {
 	if (selected_ < scroll_) {
@@ -369,7 +361,6 @@ TexturePtr Launcher::draw_panel(const Output &output, const PanelLayout &layout)
 		}
 	}
 
-	// Footer.
 	const wlr_box &footer = layout.footer;
 	double fcy = footer.y + footer.height / 2.0;
 	int inset = config::launcher_pad + config::launcher_gap;
@@ -384,8 +375,6 @@ TexturePtr Launcher::draw_panel(const Output &output, const PanelLayout &layout)
 
 	return texture_from_cairo(server_.renderer, surf.get());
 }
-
-// ---- lifecycle ----
 
 void Launcher::open(Output &output) {
 	if (open_) {
@@ -458,8 +447,6 @@ void Launcher::finish() {
 	close();
 	icons_.clear();
 }
-
-// ---- keyboard ----
 
 namespace {
 
@@ -596,8 +583,6 @@ void Launcher::key_sym(xkb_keysym_t sym, uint32_t utf32, uint32_t mods) {
 	}
 }
 
-// ---- pointer ----
-
 bool Launcher::pointer_motion(Output &output, double ox, double oy) {
 	if (!open_ || output_ != &output) {
 		return false;
@@ -669,8 +654,6 @@ bool Launcher::pointer_axis(Output &output, double ox, double oy,
 	}
 	return true;
 }
-
-// ---- rendering ----
 
 std::optional<Launcher::Panel> Launcher::panel(Output &output) {
 	if (!open_ || output_ != &output) {

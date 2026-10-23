@@ -19,7 +19,6 @@ enum class PickWhat { region, window, output, any };
 // the caller's.
 class CapturePicker {
 public:
-	// A finished pick.
 	struct Pick {
 		enum class Kind { region, window, output };
 		Kind kind = Kind::region;

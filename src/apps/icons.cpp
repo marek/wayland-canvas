@@ -9,9 +9,6 @@
 #include "core/text.h"
 #include "core/theme_prefs.h"
 
-// Only these directory kinds matter here; per-theme data and the loaded
-// surfaces are cached for the process lifetime and dropped by clear().
-
 namespace {
 
 constexpr size_t max_ini_bytes = 1024 * 1024;
@@ -28,8 +25,6 @@ std::string path_join(std::string_view a, std::string_view b) {
 	s += b;
 	return s;
 }
-
-// ---- theme detection (gsettings, then GTK settings.ini) ----
 
 // The icon theme name of a GTK settings.ini, without the quotes and spaces some tools
 // write around it.
@@ -69,14 +64,10 @@ std::optional<std::string> detect_theme() {
 	return theme;
 }
 
-// ---- index.theme parsing ----
-
 std::optional<int> group_int(const text::IniGroup &group, std::string_view key) {
 	const std::string *value = group.get(key);
 	return value ? text::parse_int(*value) : std::nullopt;
 }
-
-// ---- loading ----
 
 // The image scaled to fit `size` x `size` (aspect kept, centred).
 CairoSurfacePtr scale_to_fit(cairo_surface_t *img, int size) {
@@ -143,8 +134,6 @@ CairoSurfacePtr load_file_icon(std::string_view path, int size) {
 
 Icons::Icons() = default;
 Icons::~Icons() = default;
-
-// ---- base dirs ----
 
 void Icons::add_base_dir(std::string_view path) {
 	if (path.empty())
@@ -256,8 +245,6 @@ Icons::Theme &Icons::theme_get(std::string_view name) {
 	return themes_.back();
 }
 
-// ---- theme chain ----
-
 void Icons::chain_push(std::vector<std::string> &chain, std::string_view name) {
 	for (const std::string &c : chain)
 		if (std::string_view(c) == name)
@@ -280,8 +267,6 @@ void Icons::build_chain() {
 	}
 	chain_push(chain_, "hicolor");
 }
-
-// ---- lookup ----
 
 // 0 when the directory covers `want` (exactly, Scalable range or within the
 // threshold); otherwise the distance to the nearest edge.

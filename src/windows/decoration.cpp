@@ -12,8 +12,6 @@ void fill_rect(cairo_t *cr, double x, double y, double w, double h, uint32_t rgb
 	cairo_fill(cr);
 }
 
-// ---- title bar drawing (Windows 11 dark look) ----
-
 // 10x10 logical glyph, centred in the button; 1px lines. Straight lines sit on
 // half-logical-pixel coordinates so they land on device pixel rows/columns at
 // every integer scale.
@@ -94,15 +92,11 @@ void draw_button(cairo_t *cr, const View &view, DecoPart part, const wlr_box &bo
 
 } // namespace
 
-// ---- Decoration ----
-
 Decoration::Decoration(View &view)
 	: view_(view), bar_(view.server.text_cache) {
 }
 
 Decoration::~Decoration() = default;
-
-// ---- metrics ----
 
 int Decoration::titlebar() const {
 	return ssd && view_.mode != WindowMode::fullscreen ? config::titlebar_height : 0;
@@ -175,8 +169,6 @@ TexturePtr Decoration::draw_bar(float scale) const {
 	return texture_from_cairo(server.renderer, surf.get());
 }
 
-// ---- hit testing (canvas coordinates vs the frame) ----
-
 namespace {
 
 // Where a coordinate falls on one axis of a window frame.
@@ -226,6 +218,8 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 
 	// Title bar: buttons right-aligned, resize strip along its top.
 	if (tb > 0 && cx >= fx && cx < fx + fw && cy >= fy && cy < fy + tb) {
+		// The strip is part of the drawn bar, so it zooms with it; the margin and the
+		// corner are bands with nothing drawn, kept a grabbable size on screen.
 		if (can_resize && cy < fy + 4) {
 			uint32_t edges = WLR_EDGE_TOP;
 			if (cx < fx + corner) {
@@ -270,8 +264,6 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 
 	return {};
 }
-
-// ---- mode negotiation ----
 
 // Clients that negotiate neither protocol (GTK4/libadwaita) draw their
 // own header bar; adding ours would double the title bar.
@@ -340,8 +332,6 @@ void Decoration::handle_deco_destroy() {
 		}
 	}
 }
-
-// ---- Decorations ----
 
 // One KDE server-decoration object; refresh_mode() looks the negotiated mode
 // up by surface.

@@ -102,8 +102,6 @@ void ClipboardImage::copy(std::vector<std::uint8_t> png) {
 	auto *source = new Source{};
 	source->loop = server_.loop;
 	source->bytes = std::move(png);
-	// wlroots has no public constructor for compositor-owned data
-	// sources; the internal initializer takes our own vtable.
 	static const wlr_data_source_impl impl = {
 		.send = &Source::send,
 		.accept = nullptr,

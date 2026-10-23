@@ -8,12 +8,10 @@
 
 class Output;
 
-// A texture the compositor draws for itself that is not one run of text -
-// the launcher's panel, the capture toolbar, a window's title bar - kept
-// while what it shows is unchanged. `Key` is everything the picture depends
-// on besides the scale (a box, the state of a button), compared with ==. A
-// few pictures are kept side by side, so outputs at different scales each
-// find theirs. The TextCache that owns it drops it with the rest when the
+// A picture the compositor draws for itself that is not one run of text (the launcher's
+// panel, a title bar), kept while what it shows is unchanged. `Key` is everything it
+// depends on besides the scale, compared with ==; a few are kept side by side so outputs at
+// different scales each find theirs. The TextCache it registers with drops it when the
 // palette changes.
 template <typename Key>
 class CachedTexture final : public Droppable {

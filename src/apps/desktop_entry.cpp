@@ -32,11 +32,7 @@ bool bool_key(const text::IniGroup &entry, std::string_view key) {
 	return v && text::ci_equal(*v, "true");
 }
 
-/*
- * Locale keys in spec order for `lang` (e.g. "de_DE.UTF-8@euro"):
- * de_DE@euro, de_DE, de@euro, de. ""/"C"/"POSIX" localize nothing.
- * The lang string is truncated to 63 bytes first.
- */
+// Locale keys for `lang` in spec order (de_DE@euro, de_DE, de@euro, de); none for "", "C" and "POSIX".
 std::vector<std::string> locale_variants(std::string_view lang) {
 	if (lang.empty() || lang == "C" || lang == "POSIX")
 		return {};

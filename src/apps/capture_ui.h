@@ -21,15 +21,10 @@ class Output;
 class Server;
 class View;
 
-// The shots-and-recordings UI the compositor draws itself: the picker
-// overlay (a region dragged, a window or an output clicked), the capture
-// toolbar, the after-shot thumbnail, and the recorder's life cycle. Each is
-// a component of its own; this class routes the keys and the pointer to
-// them, takes their reports and runs the countdown. Shots are taken through
-// the shared offscreen captures (src/render/capture.h); a recording is those
-// same offscreen captures piped as raw frames into ffmpeg, the one encoder,
-// so it works nested and from a TTY alike. While the picker, the toolbar or
-// a countdown is up, the capture UI owns the keyboard.
+// The shots-and-recordings UI the compositor draws itself. It routes the keys and the
+// pointer to the picker, the toolbar, the thumbnail and the recorder, takes their reports
+// and runs the countdown; shots and recordings come from the shared offscreen captures
+// (src/render/capture.h). While the picker, the toolbar or a countdown is up it owns the keyboard.
 class CaptureUi final : public UiLayer {
 public:
 	explicit CaptureUi(Server &server);

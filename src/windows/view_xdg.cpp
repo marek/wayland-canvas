@@ -25,8 +25,6 @@ XdgView::XdgView(Server &server, wlr_xdg_toplevel *wlr)
 	set_app_id_.connect<&XdgView::handle_set_names>(wlr->events.set_app_id, this);
 }
 
-// ---- what the shared code asks ----
-
 wlr_surface *XdgView::surface() const {
 	return wlr->base->surface;
 }
@@ -149,8 +147,6 @@ XdgView *XdgView::from_surface(wlr_surface *surface) {
 	return static_cast<XdgView *>(static_cast<View *>(toplevel->base->data));
 }
 
-// ---- an interactive resize ----
-
 void XdgView::begin_interactive_resize(uint32_t edges) {
 	resize_anchor_ = ResizeAnchor{.edges = edges, .start = content_box()};
 	wlr_xdg_toplevel_set_resizing(wlr, true);
@@ -190,8 +186,6 @@ void XdgView::anchor_resize() {
 		resize_anchor_.reset();
 	}
 }
-
-// ---- the xdg shell's own events ----
 
 void XdgView::handle_xdg_commit() {
 	if (wlr->base->initial_commit) {

@@ -34,8 +34,6 @@ std::string path_join(std::string_view a, std::string_view b) {
 	return s;
 }
 
-// ---- scanning state (load only) ----
-
 struct Scan {
 	std::vector<App> items;
 	std::vector<std::string> seen; // desktop ids already handled, listed or not
@@ -203,8 +201,6 @@ void Apps::clear() {
 	items_.clear();
 }
 
-// ---- search ----
-
 std::vector<std::size_t> Apps::search(std::string_view query) const {
 	if (query.empty()) {
 		std::vector<std::size_t> out(items_.size());
@@ -244,8 +240,6 @@ std::vector<std::size_t> Apps::search(std::string_view query) const {
 	}
 	return out;
 }
-
-// ---- launching ----
 
 pid_t launch(const App &app) {
 	if (app.exec.empty()) {

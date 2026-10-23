@@ -40,7 +40,7 @@ public:
 	// `view` was just minimized: it is numbered as the latest, and the focus
 	// moves on when it held it.
 	void view_minimized(View &view);
-	// `view` or `layer` is going: it holds nothing any more.
+	// `view` or `layer` is going: the focus or the keyboard holder is cleared if it is that one.
 	void forget(View &view);
 	void forget(LayerSurface &layer);
 

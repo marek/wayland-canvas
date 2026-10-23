@@ -22,8 +22,7 @@
 
 namespace {
 
-// One hollow rectangle of the capture overlay: four thin fills. The
-// horizontal edges carry the corners.
+// The horizontal edges carry the corners.
 void draw_outline(const RenderCtx &ctx, const CaptureOutline &outline) {
 	wlr_render_color color = color_rgba(outline.rgba);
 	double t = outline.thickness;

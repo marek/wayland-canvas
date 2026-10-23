@@ -55,12 +55,10 @@ protected:
 	TextCache &cache_;
 };
 
-// Every text texture the compositor draws for its own UI, one per distinct
-// request, and the one place the textures drawn for the palette are dropped
-// when it changes. The scale is part of the request, so outputs at different
-// scales each find theirs and a frame that shows what the last one showed
-// builds nothing. The least recently asked for go when more than
-// config::text_cache_entries are held.
+// Every text texture the compositor draws for its own UI, one per distinct request (the
+// scale is part of it, so outputs at different scales each find theirs), and the one place
+// the textures drawn for the palette are dropped when it changes. The least recently asked
+// for go when more than config::text_cache_entries are held.
 class TextCache {
 public:
 	explicit TextCache(Server &server);

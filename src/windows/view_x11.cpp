@@ -44,8 +44,6 @@ X11View::~X11View() {
 	drop_state_ask();
 }
 
-// ---- what the shared code asks ----
-
 wlr_surface *X11View::surface() const {
 	return wlr->surface;
 }
@@ -175,8 +173,6 @@ X11View *X11View::from_surface(wlr_surface *surface) {
 	return xwl != nullptr ? static_cast<X11View *>(static_cast<View *>(xwl->data)) : nullptr;
 }
 
-// ---- an interactive resize ----
-
 void X11View::begin_interactive_resize(uint32_t) {
 	// Nothing is held: the new place and size go to X in one configure.
 }
@@ -192,8 +188,6 @@ void X11View::end_interactive_resize() {
 }
 
 void X11View::drop_resize() {}
-
-// ---- the X11 window's own events ----
 
 void X11View::handle_x11_associate() {
 	// A menu or a tooltip is placed by its own client, beside the window

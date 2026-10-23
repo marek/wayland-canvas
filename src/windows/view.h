@@ -82,8 +82,8 @@ public:
 	// they entered or left and at what scale, and the foreign toplevel handle
 	// follows.
 	void update_outputs(uint32_t mask);
-	// `output` is going: it is no longer one the view is visible on. Its
-	// surfaces and its foreign toplevel handle drop it with the wl_output.
+	// `output` is going: the view is not visible on it. Its surfaces and its
+	// foreign toplevel handle drop it with the wl_output.
 	void output_gone(const Output &output);
 	// The ext-foreign-toplevel-list handle's identifier, or null before the
 	// window maps (or without the capture protocols). Window capture clients

@@ -53,7 +53,7 @@ private:
 
 	Server &server_;
 
-	Output *output_ = nullptr; // the output it is open on
+	Output *output_ = nullptr;
 	bool record_focus_ = false;
 	CaptureOptions options_{}; // the visible options
 	std::optional<ToolbarButton> hover_;

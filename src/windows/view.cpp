@@ -19,8 +19,6 @@ bool is_initialized(const View &view) {
 	return view.initialized();
 }
 
-// ---- interactive move/resize requests ----
-
 // Only honour requests stemming from a real button press on the focused
 // window; anything else is a client trying its luck.
 bool grab_allowed(const Server &server, const View &view) {
@@ -30,8 +28,6 @@ bool grab_allowed(const Server &server, const View &view) {
 }
 
 } // namespace
-
-// ---- geometry ----
 
 wlr_box View::content_box() const {
 	wlr_box geo = shell_geometry();
@@ -61,8 +57,6 @@ Point View::surface_origin() const {
 	}
 	return Point{static_cast<double>(x - geo.x), static_cast<double>(y - geo.y)};
 }
-
-// ---- state helpers ----
 
 void View::damage() {
 	Rect frame = frame_rect();
@@ -233,6 +227,7 @@ void View::set_mode(WindowMode want) {
 			server.views.insert(server.views.begin(), this);
 		}
 	}
+	// fullscreen_area again: a window that moved to a desktop of its own gets that desktop's frame
 	if (std::optional<wlr_box> area = area_for(*this, want)) {
 		int tb = deco.titlebar();
 		x = area->x;
@@ -278,7 +273,6 @@ void View::announce_mode(WindowMode of, bool on) {
 	}
 }
 
-// Grid placement: sized to the cell and told it is tiled.
 void View::set_frame(wlr_box frame) {
 	int tb = deco.titlebar();
 	drop_resize();
@@ -318,8 +312,6 @@ void View::set_tiled(bool want) {
 	}
 }
 
-// ---- lookup ----
-
 View *View::from_surface(wlr_surface *surface) {
 	if (surface == nullptr) {
 		return nullptr;
@@ -333,8 +325,6 @@ View *View::from_surface(wlr_surface *surface) {
 const char *View::ext_toplevel_identifier() const {
 	return foreign_.identifier();
 }
-
-// ---- toplevel events ----
 
 View::View(Server &server)
 	: server(server), deco(*this), foreign_(*this) {
@@ -361,7 +351,7 @@ void View::handle_map() {
 	server.canvas.settle(*this);
 	foreign_.open();
 	if (launched_for.has_value() && !shown_anywhere(*this)) {
-		// Launched for a spot no output shows any more (the overview closed
+		// Launched for a spot no output shows (the overview closed
 		// or moved on before it appeared): it opens there without taking the
 		// keyboard from the window in front of the user, and a hint says where.
 		server.hint.set(opened_where(*this));
@@ -451,8 +441,6 @@ void View::handle_destroy() {
 	server.changed(Change::windows);
 	destroy_owned(server.toplevels, this);
 }
-
-// ---- interactive move/resize requests ----
 
 void View::handle_request_move() {
 	if (!grab_allowed(server, *this)) {

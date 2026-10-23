@@ -19,7 +19,7 @@ struct DrawnSurface {
 struct RenderCtx {
 	Output *output;
 	wlr_render_pass *pass;
-	Camera cam; // output->camera(): quantized, same as hit testing
+	Camera cam; // output.camera.drawn(), quantized as hit testing is; a window shot sets its own
 	Rect viewport; // visible canvas rectangle
 	double left, top; // canvas coords shown at output-local (0, 0)
 	float scale;
