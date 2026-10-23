@@ -1867,11 +1867,14 @@ Tests:
   - `Hint` moves to `render/hint.{h,cpp}`, with its cache private.
   - Acceptance: `src/input` includes nothing from `src/render` except the
     drawing types, and the scenarios are green.
-- [ ] `settings.cpp` is one file per job
+- [x] `settings.cpp` is one file per job
   - `core/chord.{h,cpp}`: chords (63-373).
   - `core/settings.{h,cpp}`: the registry, phase 6's table, parse,
     resolve and the template.
   - `core/settings_file.{h,cpp}`: `File` and its edits.
+  - Done: `Scope`, `trim` and `split` are in chord.h, which a chord parses
+    by; `Edit` and `Moved` are in settings_file.h with `File`. Neither
+    settings.h nor chord.h includes settings_file.h.
   - Acceptance: the unit suite is green.
 - [x] The usage collector: one table of sources and one of families
   - Sources:

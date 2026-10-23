@@ -19,6 +19,7 @@
 #include <json-glib/json-glib.h>
 
 #include "canvas/desktop.h"
+#include "core/chord.h"
 #include "core/config.h"
 #include "core/json.h"
 #include "core/text.h"
@@ -27,6 +28,7 @@
 #include "platform/ipc.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/settings_file.h"
 
 namespace {
 

@@ -1,133 +1,25 @@
-// settings.cpp: canvas.conf — the action registry, chord parse, format and
-// validate, file parse with an error per bad line, resolution by the
-// precedence rules, the first-run template and the in-place edits
-// settings.set makes. Pure: no wlroots, no Server; xkbcommon names the keys.
+// settings.cpp: canvas.conf — the action registry, the settings table's
+// lookups, the file parse with an error per bad line, resolution by the
+// precedence rules and the first-run template. Pure: no wlroots, no Server.
 
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <cstdio>
-#include <cstring>
 #include <format>
-#include <map>
-#include <ranges>
+#include <initializer_list>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
-#include <xkbcommon/xkbcommon-keysyms.h>
 
+#include "core/chord.h"
 #include "core/settings.h"
 
 namespace settings {
-
-std::string_view trim(std::string_view text) {
-	while (!text.empty() && (text.front() == ' ' || text.front() == '\t'
-			|| text.front() == '\r')) {
-		text.remove_prefix(1);
-	}
-	while (!text.empty() && (text.back() == ' ' || text.back() == '\t'
-			|| text.back() == '\r')) {
-		text.remove_suffix(1);
-	}
-	return text;
-}
-
-namespace {
-
-char lower(char c) {
-	return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-char upper(char c) {
-	return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
-}
-
-bool iequals(std::string_view a, std::string_view b) {
-	return a.size() == b.size()
-		&& std::equal(a.begin(), a.end(), b.begin(),
-			[](char x, char y) { return lower(x) == lower(y); });
-}
-
-std::vector<std::string_view> split(std::string_view text, char sep) {
-	std::vector<std::string_view> parts;
-	std::size_t start = 0;
-	for (std::size_t sep_at = text.find(sep); sep_at != std::string_view::npos;
-			sep_at = text.find(sep, start)) {
-		parts.push_back(trim(text.substr(start, sep_at - start)));
-		start = sep_at + 1;
-	}
-	parts.push_back(trim(text.substr(start)));
-	return parts;
-}
-
-// The keysym's name as the file writes it: the uppercase letter for a letter,
-// the digit for a digit, otherwise the keysym name with its first letter
-// upper-cased (`Space`, `BackSpace`, `KP_Enter`, `F4`).
-std::string key_text(xkb_keysym_t key) {
-	char name[64];
-	if (xkb_keysym_get_name(key, name, sizeof name) <= 0) {
-		return std::format("0x{:x}", static_cast<unsigned>(key));
-	}
-	std::string_view text = name;
-	if (text.size() == 1 && lower(text[0]) >= 'a' && lower(text[0]) <= 'z') {
-		return std::string(1, upper(text[0]));
-	}
-	std::string out{text};
-	if (!out.empty() && out[0] >= 'a' && out[0] <= 'z') {
-		out[0] = upper(out[0]);
-	}
-	return out;
-}
-
-std::optional<uint32_t> modifier_bit(std::string_view token) {
-	if (iequals(token, "super")) {
-		return mod_logo;
-	}
-	if (iequals(token, "ctrl")) {
-		return mod_ctrl;
-	}
-	if (iequals(token, "alt")) {
-		return mod_alt;
-	}
-	if (iequals(token, "shift")) {
-		return mod_shift;
-	}
-	return std::nullopt;
-}
-
-std::string_view modifier_name(uint32_t bit) {
-	switch (bit) {
-	case mod_logo: return "Super";
-	case mod_ctrl: return "Ctrl";
-	case mod_alt: return "Alt";
-	default: return "Shift";
-	}
-}
-
-// A key that types no character, so a chord on it needs no Super, Ctrl or Alt.
-bool types_no_character(xkb_keysym_t key) {
-	if (key >= XKB_KEY_F1 && key <= XKB_KEY_F24) {
-		return true;
-	}
-	switch (key) {
-	case XKB_KEY_Print:
-	case XKB_KEY_Pause:
-	case XKB_KEY_Scroll_Lock:
-	case XKB_KEY_Insert:
-		return true;
-	default:
-		break;
-	}
-	char name[64];
-	if (xkb_keysym_get_name(key, name, sizeof name) > 0
-			&& std::strncmp(name, "XF86", 4) == 0) {
-		return true;
-	}
-	return false;
-}
-
-} // namespace
 
 // The registry (the settings contract §3): [shortcuts] scope global first,
 // then [overview] with group "In the overview". Defaults are written as
@@ -252,84 +144,13 @@ const std::vector<ActionDef> &registry() {
 	return table;
 }
 
-// ------------------------------------------------------------ chords
-
-std::string chord_text(Chord chord) {
-	if (chord.tap()) {
-		return chord.twice ? "Super Super" : "Super";
-	}
-	std::string out;
-	auto add = [&](std::string_view part) {
-		if (!out.empty()) {
-			out += '+';
+const ActionDef *find_action(std::string_view name, Scope scope) {
+	for (const ActionDef &def : registry()) {
+		if (def.scope == scope && def.name == name) {
+			return &def;
 		}
-		out += part;
-	};
-	if (chord.mods & mod_logo) {
-		add("Super");
 	}
-	if (chord.mods & mod_ctrl) {
-		add("Ctrl");
-	}
-	if (chord.mods & mod_alt) {
-		add("Alt");
-	}
-	if (chord.mods & mod_shift) {
-		add("Shift");
-	}
-	add(key_text(chord.key));
-	return out;
-}
-
-std::expected<Chord, std::string> parse_chord(std::string_view text, Scope scope) {
-	// `Super Super`, two lone taps of Super: the double tap. A space is
-	// otherwise only ever padding around a `+`.
-	std::string_view whole = trim(text);
-	if (std::size_t gap = whole.find_first_of(" \t");
-			gap != std::string_view::npos && whole.find('+') == std::string_view::npos
-			&& iequals(whole.substr(0, gap), "super")
-			&& iequals(trim(whole.substr(gap)), "super")) {
-		return Chord{.mods = mod_logo, .twice = true};
-	}
-	std::vector<std::string_view> tokens = split(text, '+');
-	if (std::any_of(tokens.begin(), tokens.end(),
-			[](std::string_view token) { return token.empty(); })) {
-		return std::unexpected(std::string{"an empty chord"});
-	}
-	uint32_t mods = 0;
-	for (std::size_t i = 0; i + 1 < tokens.size(); i++) {
-		std::optional<uint32_t> bit = modifier_bit(tokens[i]);
-		if (!bit.has_value()) {
-			return std::unexpected(std::format("'{}' is not a modifier", tokens[i]));
-		}
-		if ((mods & *bit) != 0) {
-			return std::unexpected(std::format("{} given twice", modifier_name(*bit)));
-		}
-		mods |= *bit;
-	}
-
-	Chord chord;
-	if (std::optional<uint32_t> bit = modifier_bit(tokens.back())) {
-		if (tokens.size() != 1 || *bit != mod_logo) {
-			return std::unexpected(std::string{"only Super may stand alone"});
-		}
-		chord.mods = mod_logo; // key 0: the tap
-	} else {
-		std::string name{tokens.back()}; // xkbcommon wants it NUL-terminated
-		xkb_keysym_t key = xkb_keysym_from_name(name.c_str(),
-			XKB_KEYSYM_CASE_INSENSITIVE);
-		if (key == XKB_KEY_NoSymbol) {
-			return std::unexpected(std::format("unknown key '{}'", tokens.back()));
-		}
-		chord = {.mods = mods, .key = key};
-	}
-	if (scope == Scope::global && !chord.tap()
-			&& (chord.mods & (mod_logo | mod_ctrl | mod_alt)) == 0
-			&& !types_no_character(chord.key)) {
-		return std::unexpected(
-			std::format("{} needs Super, Ctrl or Alt", key_text(chord.key)));
-	}
-	return chord;
+	return nullptr;
 }
 
 int Field::read(const Resolved &resolved) const {
@@ -455,45 +276,11 @@ std::optional<Scope> parse_scope(std::string_view name) {
 	return std::nullopt;
 }
 
-namespace {
-
-const ActionDef *find_action(std::string_view name, Scope scope) {
-	for (const ActionDef &def : registry()) {
-		if (def.scope == scope && def.name == name) {
-			return &def;
-		}
-	}
-	return nullptr;
-}
-
 std::string_view section_name(Scope scope) {
 	return scope == Scope::global ? "shortcuts" : "overview";
 }
 
-// The chords as the file writes them: `Super+Q, Alt+F4`.
-std::string chords_text(const std::vector<Chord> &chords) {
-	std::string out;
-	for (Chord chord : chords) {
-		if (!out.empty()) {
-			out += ", ";
-		}
-		out += chord_text(chord);
-	}
-	return out;
-}
-
-// The error for the first chord `chords` holds twice.
-std::expected<void, std::string> reject_repeats(const std::vector<Chord> &chords) {
-	for (std::size_t i = 0; i < chords.size(); i++) {
-		for (std::size_t j = i + 1; j < chords.size(); j++) {
-			if (chords[i] == chords[j]) {
-				return std::unexpected(std::format("chord '{}' given twice",
-					chord_text(chords[i])));
-			}
-		}
-	}
-	return {};
-}
+namespace {
 
 // One `name = value` line of [shortcuts] or [overview]: the entry's chords,
 // or an error per bad chord (the rest of the line stands).
@@ -548,36 +335,6 @@ void dedupe(std::vector<Entry> &actions, const std::vector<Entry> &commands,
 		}
 		entry->chords = std::move(kept);
 	}
-}
-
-// ---------------------------------------------------------- the file
-//
-// The edit side sees the same lines the parser does: a section runs from
-// its header to the next line that starts with '['.
-
-bool is_header_line(std::string_view line) {
-	std::string_view text = trim(line);
-	return !text.empty() && text.front() == '[';
-}
-
-// The entry name before '=', or empty for comments, blanks and non-entries.
-std::string_view line_name(std::string_view line) {
-	std::string_view text = trim(line);
-	if (text.empty() || text.front() == '#' || text.front() == '[') {
-		return {};
-	}
-	std::size_t eq = text.find('=');
-	if (eq == std::string_view::npos) {
-		return {};
-	}
-	return trim(text.substr(0, eq));
-}
-
-// The value after '=' (the parser's kind of trim).
-std::string_view line_value(std::string_view line) {
-	std::string_view text = trim(line);
-	std::size_t eq = text.find('=');
-	return eq == std::string_view::npos ? std::string_view{} : trim(text.substr(eq + 1));
 }
 
 bool is_setting_section(std::string_view name) {
@@ -800,225 +557,6 @@ std::string template_text() {
 			allowed(field), field.key, value_text(field, field.fallback));
 	}
 	return out;
-}
-
-// -------------------------------------------------------------- edits
-
-File::File(std::string_view text)
-	: parsed_(parse(text)), resolved_(resolve(parsed_)), text_(text) {
-	std::size_t start = 0;
-	for (std::size_t nl = text.find('\n'); nl != std::string_view::npos;
-			nl = text.find('\n', start)) {
-		lines_.emplace_back(text.substr(start, nl - start));
-		start = nl + 1;
-	}
-	trailing_newline_ = !text.empty() && start == text.size();
-	if (start < text.size()) {
-		lines_.emplace_back(text.substr(start));
-	}
-}
-
-int File::section_header(std::string_view section) const {
-	for (std::size_t i = 0; i < lines_.size(); i++) {
-		if (trim(lines_[i]) == std::format("[{}]", section)) {
-			return static_cast<int>(i);
-		}
-	}
-	return -1;
-}
-
-std::vector<int> File::entry_lines(std::string_view section,
-		std::string_view name) const {
-	std::vector<int> out;
-	int header = section_header(section);
-	if (header < 0) {
-		return out;
-	}
-	for (std::size_t i = header + 1; i < lines_.size() && !is_header_line(lines_[i]);
-			i++) {
-		std::string_view n = line_name(lines_[i]);
-		if (!n.empty() && (name.empty() || n == name)) {
-			out.push_back(static_cast<int>(i));
-		}
-	}
-	return out;
-}
-
-int File::append_after(std::string_view section) const {
-	int header = section_header(section);
-	if (header < 0) {
-		return static_cast<int>(lines_.size()); // the section is missing
-	}
-	int last = header;
-	for (std::size_t i = header + 1; i < lines_.size() && !is_header_line(lines_[i]);
-			i++) {
-		if (!trim(lines_[i]).empty()) {
-			last = static_cast<int>(i);
-		}
-	}
-	return last;
-}
-
-void File::erase_lines(const std::vector<int> &lines) {
-	for (std::size_t k = lines.size(); k > 0; k--) {
-		lines_.erase(lines_.begin() + lines[k - 1]);
-	}
-}
-
-void File::ensure_section(std::string_view section) {
-	if (section_header(section) >= 0) {
-		return;
-	}
-	if (!lines_.empty() && !trim(lines_.back()).empty()) {
-		lines_.push_back("");
-	}
-	lines_.push_back(std::format("[{}]", section));
-}
-
-void File::append_entry(std::string_view section, std::string_view name,
-		std::string_view value) {
-	ensure_section(section);
-	lines_.insert(lines_.begin() + append_after(section) + 1,
-		std::format("{} = {}", name, value.empty() ? "none" : value));
-}
-
-void File::write_entry(std::string_view section, std::string_view name,
-		std::string_view value) {
-	std::vector<int> lines = entry_lines(section, name);
-	if (lines.empty()) {
-		append_entry(section, name, value);
-		return;
-	}
-	erase_lines(std::vector<int>(lines.begin() + 1, lines.end()));
-	lines_[static_cast<std::size_t>(lines.front())] =
-		std::format("{} = {}", name, value.empty() ? "none" : value);
-}
-
-void File::rejoin() {
-	text_.clear();
-	for (std::size_t i = 0; i < lines_.size(); i++) {
-		if (i > 0) {
-			text_ += '\n';
-		}
-		text_ += lines_[i];
-	}
-	if (trailing_newline_ && !lines_.empty()) {
-		text_ += '\n';
-	}
-}
-
-void File::take_from_actions(const std::vector<Chord> &chords, Scope scope,
-		std::string_view skip_action, std::vector<Moved> &moved) {
-	const std::vector<ActionDef> &reg = registry();
-	for (std::size_t i = 0; i < reg.size(); i++) {
-		const ActionDef &def = reg[i];
-		if (def.scope != scope || def.name == skip_action) {
-			continue;
-		}
-		std::vector<Chord> taken;
-		for (Chord chord : chords) {
-			if (std::find(resolved_.keys[i].begin(), resolved_.keys[i].end(), chord)
-					!= resolved_.keys[i].end()) {
-				taken.push_back(chord);
-			}
-		}
-		if (taken.empty()) {
-			continue;
-		}
-		moved.push_back({.scope = scope, .action = std::string{def.name},
-			.keys = taken});
-		std::vector<int> lines = entry_lines(section_name(scope), def.name);
-		if (lines.empty()) {
-			continue; // it held them only by default: nothing to rewrite
-		}
-		std::vector<Chord> keep;
-		for (std::string_view token : split(line_value(lines_[lines.front()]), ',')) {
-			auto chord = parse_chord(token, scope);
-			if (chord.has_value()
-					&& std::find(taken.begin(), taken.end(), *chord) == taken.end()) {
-				keep.push_back(*chord);
-			}
-		}
-		if (keep.empty()) {
-			erase_lines(lines);
-		} else {
-			write_entry(section_name(scope), def.name, chords_text(keep));
-		}
-	}
-}
-
-void File::take_from_commands(const std::vector<Chord> &chords,
-		std::vector<Moved> &moved) {
-	std::vector<int> doomed;
-	for (const Command &command : resolved_.commands) {
-		if (std::find(chords.begin(), chords.end(), command.chord) == chords.end()) {
-			continue;
-		}
-		moved.push_back({.scope = Scope::global, .action = {},
-			.keys = {command.chord}, .command = command.command});
-		for (int index : entry_lines("commands")) {
-			auto chord = parse_chord(line_name(lines_[static_cast<std::size_t>(index)]),
-				Scope::global);
-			if (chord.has_value() && *chord == command.chord) {
-				doomed.push_back(index);
-			}
-		}
-	}
-	std::ranges::sort(doomed);
-	erase_lines(doomed);
-}
-
-std::expected<Edit, std::string> File::set_action(Scope scope,
-		std::string_view action, const std::optional<std::vector<Chord>> &keys) {
-	const ActionDef *def = find_action(action, scope);
-	if (def == nullptr) {
-		return std::unexpected(std::format("unknown action '{}'", action));
-	}
-	// What the line gets: the given keys, or the action's defaults (`keys`
-	// null is the reset: its defaults written into its line).
-	const std::vector<Chord> &write = keys.has_value() ? *keys : def->defaults;
-	if (auto repeat = reject_repeats(write); !repeat.has_value()) {
-		return std::unexpected(repeat.error());
-	}
-	write_entry(section_name(scope), action, chords_text(write));
-	std::vector<Moved> moved;
-	take_from_actions(write, scope, action, moved);
-	take_from_commands(write, moved);
-	rejoin();
-	return Edit{text_, std::move(moved)};
-}
-
-std::expected<Edit, std::string> File::set_commands(
-		const std::vector<Command> &commands) {
-	std::vector<Chord> chords;
-	for (const Command &command : commands) {
-		chords.push_back(command.chord);
-	}
-	if (auto repeat = reject_repeats(chords); !repeat.has_value()) {
-		return std::unexpected(repeat.error());
-	}
-	std::vector<Moved> moved;
-	take_from_actions(chords, Scope::global, {}, moved);
-	// The section's entries are replaced; its comments stay.
-	erase_lines(entry_lines("commands"));
-	ensure_section("commands");
-	int at = append_after("commands");
-	for (const Command &command : commands) {
-		lines_.insert(lines_.begin() + at + 1,
-			std::format("{} = {}", chord_text(command.chord), command.command));
-		at++;
-	}
-	rejoin();
-	return Edit{text_, std::move(moved)};
-}
-
-std::expected<Edit, std::string> File::set(const Field &field, long long value) {
-	if (!allows(field, value)) {
-		return std::unexpected(std::format("{} must be {}", field.key, allowed(field)));
-	}
-	write_entry(field.section, field.key, value_text(field, static_cast<int>(value)));
-	rejoin();
-	return Edit{text_, {}};
 }
 
 } // namespace settings

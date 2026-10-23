@@ -74,7 +74,7 @@ bool is_logo_key(std::span<const xkb_keysym_t> syms) {
 }
 
 // The binding modifier a key changes, when it is one. The settings' own
-// bits match the wlr_keyboard ones (core/settings.h).
+// bits match the wlr_keyboard ones (core/chord.h).
 std::optional<uint32_t> modifier_bit(xkb_keysym_t sym) {
 	switch (sym) {
 	case XKB_KEY_Super_L:

@@ -12,7 +12,7 @@
 #include "input/grab.h"
 #include "input/tablet.h"
 #include "input/touch.h"
-#include "core/settings.h"
+#include "core/chord.h"
 #include "core/util.h"
 
 class LayerSurface;

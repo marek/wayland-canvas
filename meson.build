@@ -176,7 +176,9 @@ session_bus_lib = static_library(
 # first-run template and the in-place edits settings.set makes.
 settings_lib = static_library(
 	'canvas-settings',
+	'src/core/chord.cpp',
 	'src/core/settings.cpp',
+	'src/core/settings_file.cpp',
 	include_directories: src_inc,
 	dependencies: [xkbcommon],
 )

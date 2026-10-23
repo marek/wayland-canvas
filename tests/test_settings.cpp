@@ -1,6 +1,7 @@
-// Unit tests for src/core/settings.cpp: chord parse, format and validate;
-// canvas.conf parse with an error per bad line; resolution by the precedence
-// rules; the first-run template; the in-place edits settings.set makes.
+// Unit tests for src/core/chord.cpp, settings.cpp and settings_file.cpp: chord
+// parse, format and validate; canvas.conf parse with an error per bad line;
+// resolution by the precedence rules; the first-run template; the in-place
+// edits settings.set makes.
 // Run via `meson test` (test 'settings').
 
 #include <format>
@@ -9,7 +10,9 @@
 #include <vector>
 
 #include "check.h"
+#include "core/chord.h"
 #include "core/settings.h"
+#include "core/settings_file.h"
 
 namespace {
 

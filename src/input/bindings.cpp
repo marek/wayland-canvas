@@ -15,9 +15,11 @@
 #include <xkbcommon/xkbcommon-names.h>
 
 #include "input/bindings.h"
+#include "core/chord.h"
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/settings_file.h"
 
 namespace {
 
