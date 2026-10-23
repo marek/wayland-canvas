@@ -177,6 +177,37 @@ TexturePtr Decoration::draw_bar(float scale) const {
 
 // ---- hit testing (canvas coordinates vs the frame) ----
 
+namespace {
+
+// Where a coordinate falls on one axis of a window frame.
+struct EdgeBand {
+	bool start;       // in the strip along the low edge (left, top)
+	bool end;         // in the strip along the high edge (right, bottom)
+	bool alongside;   // within the frame's extent, margin included
+
+	// The edges the coordinate is on, given the edge each end stands for.
+	uint32_t edges(uint32_t start_edge, uint32_t end_edge) const {
+		return (start ? start_edge : 0) | (end ? end_edge : 0);
+	}
+};
+
+// The strips of one axis: `outside` the frame's edge and `inside` it, the low
+// edge's inner strip beginning `lead` in from the edge (below the title bar).
+// Every interval is half-open, [low, high).
+EdgeBand edge_band(double c, double frame_start, double frame_length,
+		double outside, double inside, double lead) {
+	auto within = [c](double low, double high) { return c >= low && c < high; };
+	double frame_end = frame_start + frame_length;
+	return {
+		.start = within(frame_start - outside, frame_start)
+			|| within(frame_start + lead, frame_start + lead + inside),
+		.end = within(frame_end - inside, frame_end + outside),
+		.alongside = within(frame_start - outside, frame_end + outside),
+	};
+}
+
+} // namespace
+
 DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 	if (!view_.mapped) {
 		return {};
@@ -215,42 +246,22 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 	}
 
 	if (can_resize) {
+		EdgeBand strip_x = edge_band(cx, fx, fw, margin, bw, 0);
+		EdgeBand strip_y = edge_band(cy, fy, fh, margin, bw, tb);
 		uint32_t e = 0;
-		// Left and right: the border strip inside the frame plus the
-		// margin outside it.
-		if (cy >= fy - margin && cy <= fy + fh + margin) {
-			if (cx >= fx - margin && cx < fx + bw) {
-				e |= WLR_EDGE_LEFT;
-			}
-			if (cx >= fx + fw - bw && cx < fx + fw + margin) {
-				e |= WLR_EDGE_RIGHT;
-			}
+		// A strip along one edge counts while the point is alongside the
+		// frame on the other axis. The title bar itself was handled above.
+		if (strip_y.alongside) {
+			e |= strip_x.edges(WLR_EDGE_LEFT, WLR_EDGE_RIGHT);
 		}
-		// Top: the margin above the frame (plus the border strip below the
-		// title bar); bottom likewise. The title bar itself was handled above.
-		bool top_zone = (cy >= fy - margin && cy < fy)
-			|| (tb > 0 ? (cy >= fy + tb && cy < fy + tb + bw)
-				: (cy >= fy && cy < fy + bw));
-		if (top_zone && cx >= fx - margin && cx <= fx + fw + margin) {
-			e |= WLR_EDGE_TOP;
-		}
-		if (cy >= fy + fh - bw && cy < fy + fh + margin
-				&& cx >= fx - margin && cx <= fx + fw + margin) {
-			e |= WLR_EDGE_BOTTOM;
+		if (strip_x.alongside) {
+			e |= strip_y.edges(WLR_EDGE_TOP, WLR_EDGE_BOTTOM);
 		}
 		// Outside corners get a wider diagonal grab area.
-		if (cx < fx && cy < fy && cx > fx - corner && cy > fy - corner) {
-			e |= WLR_EDGE_TOP | WLR_EDGE_LEFT;
-		}
-		if (cx >= fx + fw && cy < fy && cx < fx + fw + corner && cy > fy - corner) {
-			e |= WLR_EDGE_TOP | WLR_EDGE_RIGHT;
-		}
-		if (cx < fx && cy >= fy + fh && cx > fx - corner && cy < fy + fh + corner) {
-			e |= WLR_EDGE_BOTTOM | WLR_EDGE_LEFT;
-		}
-		if (cx >= fx + fw && cy >= fy + fh && cx < fx + fw + corner
-				&& cy < fy + fh + corner) {
-			e |= WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT;
+		uint32_t corner_h = edge_band(cx, fx, fw, corner, 0, 0).edges(WLR_EDGE_LEFT, WLR_EDGE_RIGHT);
+		uint32_t corner_v = edge_band(cy, fy, fh, corner, 0, 0).edges(WLR_EDGE_TOP, WLR_EDGE_BOTTOM);
+		if (corner_h != 0 && corner_v != 0) {
+			e |= corner_h | corner_v;
 		}
 		if (e != 0) {
 			return {DecoPart::resize, e};

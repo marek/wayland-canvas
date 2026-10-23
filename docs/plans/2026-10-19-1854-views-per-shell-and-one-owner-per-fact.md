@@ -1920,7 +1920,7 @@ Tests:
     - `Canvas::remove_desktop`, `move_desktop`, `abandon` and
       `combine_nearest` own every effect on windows.
   - Acceptance: the gestures scenario is green.
-- [ ] Hand-mirrored code becomes one function called twice
+- [x] Hand-mirrored code becomes one function called twice
   - `layer_configure` (layer.cpp:24-99) mirrors its x and y blocks
     (36-63) and also tracks exclusive zones (71-98). Split it into
     `place_on_axis()`, called twice, and `reserve_zone()`.

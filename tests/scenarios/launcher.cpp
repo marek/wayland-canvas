@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <initializer_list>
+#include <iterator>
 #include <linux/input-event-codes.h>
 #include <optional>
 #include <print>
@@ -18,6 +20,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -39,6 +42,10 @@ std::string shot_dir;
 std::string xdg_dir;
 std::string marker_path;
 std::string canvas_conf; // this run's scratch canvas.conf (written on start)
+std::string keys_log; // what the key entries append to when launched
+std::size_t key_case = 0, keys_seen = 0; // the key case running; launches logged so far
+bool key_launched = false; // the case running launched an entry
+bool ends_are_markers = false; // see step 14
 std::string gsettings_marker; // written by the gsettings stand-in when anything runs it
 bool harness_ignores_sigpipe = false; // as this process was started; see main()
 
@@ -168,6 +175,104 @@ void click(double x, double y) {
 		wl_signal_emit_mutable(&ptr.events.button, &b);
 		wl_signal_emit_mutable(&ptr.events.frame, &ptr);
 	}
+}
+
+void open_launcher() {
+	key(KEY_LEFTMETA, true);
+	tap(KEY_SPACE);
+	key(KEY_LEFTMETA, false);
+}
+
+// A key tapped with modifiers held.
+void tap_with(std::initializer_list<uint32_t> modifiers, uint32_t code) {
+	for (uint32_t modifier : modifiers) {
+		key(modifier, true);
+	}
+	tap(code);
+	for (uint32_t modifier : modifiers) {
+		key(modifier, false);
+	}
+}
+
+// What the launcher's keys do, one case per launch: the keys are pressed in
+// the freshly opened launcher, then `accept`; the entry it launched logs its
+// word, which must be `expect`. "quokka" lists four entries, alpha first.
+struct KeyCase {
+	std::string_view name;
+	void (*press)();
+	std::string_view expect;
+	uint32_t accept = KEY_ENTER;
+	bool whole_list = false; // acts on the unfiltered list: its first and last entries
+};
+
+const KeyCase key_cases[] = {
+	{"Down twice selects the third result",
+		[] { type("quokka"); tap(KEY_DOWN); tap(KEY_DOWN); }, "charlie"},
+	{"Up on the first result stays on it",
+		[] { type("quokka"); tap(KEY_UP); }, "alpha"},
+	{"Tab moves down and Shift+Tab up",
+		[] {
+			type("quokka");
+			tap(KEY_TAB);
+			tap(KEY_TAB);
+			tap(KEY_TAB);
+			tap_with({KEY_LEFTSHIFT}, KEY_TAB);
+		}, "charlie"},
+	{"Ctrl+N moves down and Ctrl+P up",
+		[] {
+			type("quokka");
+			tap_with({KEY_LEFTCTRL}, KEY_N);
+			tap_with({KEY_LEFTCTRL}, KEY_N);
+			tap_with({KEY_LEFTCTRL}, KEY_P);
+		}, "bravo"},
+	{"Ctrl+Shift+N, the capital, moves down too",
+		[] { type("quokka"); tap_with({KEY_LEFTCTRL, KEY_LEFTSHIFT}, KEY_N); }, "bravo"},
+	{"Page Down goes to the last result",
+		[] { type("quokka"); tap(KEY_PAGEDOWN); }, "delta"},
+	{"Page Up goes back to the first",
+		[] { type("quokka"); tap(KEY_PAGEDOWN); tap(KEY_PAGEUP); }, "alpha"},
+	{"Backspace removes the last character",
+		[] { type("quokkaz"); tap(KEY_BACKSPACE); }, "alpha"},
+	{"Ctrl+W removes the last word",
+		[] { type("quokka zzz"); tap_with({KEY_LEFTCTRL}, KEY_W); }, "alpha"},
+	{"Ctrl+Shift+W removes the last word too",
+		[] { type("quokka zzz"); tap_with({KEY_LEFTCTRL, KEY_LEFTSHIFT}, KEY_W); }, "alpha"},
+	{"Ctrl+Backspace removes the last word",
+		[] { type("quokka zzz"); tap_with({KEY_LEFTCTRL}, KEY_BACKSPACE); }, "alpha"},
+	{"Ctrl+U clears the query and the selection",
+		[] {
+			type("quokka");
+			tap(KEY_DOWN);
+			tap_with({KEY_LEFTCTRL}, KEY_U);
+			type("quokka");
+		}, "alpha"},
+	{"Ctrl+Shift+U clears the query too",
+		[] { type("quokka"); tap_with({KEY_LEFTCTRL, KEY_LEFTSHIFT}, KEY_U); type("quokka"); },
+		"alpha"},
+	{"Ctrl+X types nothing",
+		[] { type("quokka"); tap_with({KEY_LEFTCTRL}, KEY_X); }, "alpha"},
+	{"Home and End do nothing while a query filters",
+		[] { type("quokka"); tap(KEY_DOWN); tap(KEY_HOME); tap(KEY_END); }, "bravo"},
+	{"Home selects the whole list's first entry",
+		[] { tap(KEY_HOME); }, "home", KEY_ENTER, true},
+	{"End selects the whole list's last entry",
+		[] { tap(KEY_END); }, "end", KEY_ENTER, true},
+	{"The keypad Enter launches too",
+		[] { type("quokka"); }, "alpha", KEY_KPENTER},
+};
+
+// The words the key entries logged so far, one per launch.
+std::vector<std::string> keys_logged() {
+	std::vector<std::string> lines;
+	std::optional<std::string> text = read_file(keys_log);
+	if (!text.has_value()) {
+		return lines;
+	}
+	std::size_t from = 0;
+	for (std::size_t end = 0; (end = text->find('\n', from)) != std::string::npos; from = end + 1) {
+		lines.push_back(text->substr(from, end - from));
+	}
+	return lines;
 }
 
 int run_step() {
@@ -302,6 +407,43 @@ int run_step() {
 		if (mapped() <= views_before && retries++ < 200) return -100;
 		check(mapped() == views_before + 1, "the custom entry opened foot (window mapped)");
 		return 0;
+	case 14: { // keys of the open launcher: each case launches the entry its keys select
+		Apps apps;
+		apps.load();
+		ends_are_markers = !apps.items().empty()
+			&& apps.items().front().name == "!Home Marker"
+			&& apps.items().back().name == "~End Marker";
+		check(ends_are_markers, "the Home and End entries are the whole list's first and last");
+		return 100;
+	}
+	case 15: {
+		const KeyCase &c = key_cases[key_case];
+		if (server->launcher.is_open()) {
+			tap(KEY_ESC);
+		}
+		key_launched = !c.whole_list || ends_are_markers;
+		if (key_launched) {
+			open_launcher();
+			c.press();
+			tap(c.accept);
+		}
+		return 150;
+	}
+	case 16: {
+		const KeyCase &c = key_cases[key_case];
+		if (key_launched) {
+			std::vector<std::string> lines = keys_logged();
+			if (lines.size() <= keys_seen && retries++ < 100) return -100;
+			std::string got = lines.size() > keys_seen ? lines.back() : "nothing";
+			check(lines.size() == keys_seen + 1 && got == c.expect && !server->launcher.is_open(),
+				std::format("{}: launched {} (wanted {})", c.name, got, c.expect));
+			keys_seen = lines.size();
+		}
+		if (++key_case < std::size(key_cases)) {
+			step = 14; // the loop's head is step 15, after the increment
+		}
+		return 100;
+	}
 	default:
 		finished = true;
 		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
@@ -355,6 +497,39 @@ void install_custom_entry() {
 	std::fclose(f);
 }
 
+// Entries for the key checks, each logging its own word into keys_log when
+// run: four whose names sort together, one that sorts before every other
+// name and one that sorts after.
+void install_key_entries() {
+	std::string apps = xdg_dir + "/applications";
+	mkdir_p(apps);
+	unlink(keys_log.c_str());
+	struct Entry {
+		const char *file;
+		const char *name;
+		const char *word;
+	};
+	constexpr Entry entries[] = {
+		{"scenario-key-alpha", "Quokka Alpha", "alpha"},
+		{"scenario-key-bravo", "Quokka Bravo", "bravo"},
+		{"scenario-key-charlie", "Quokka Charlie", "charlie"},
+		{"scenario-key-delta", "Quokka Delta", "delta"},
+		{"scenario-key-home", "!Home Marker", "home"},
+		{"scenario-key-end", "~End Marker", "end"},
+	};
+	for (const Entry &entry : entries) {
+		std::string path = std::format("{}/{}.desktop", apps, entry.file);
+		FILE *f = std::fopen(path.c_str(), "w");
+		if (f == nullptr) {
+			std::fprintf(stderr, "fopen %s: %s\n", path.c_str(), std::strerror(errno));
+			std::exit(2);
+		}
+		std::fprintf(f, "[Desktop Entry]\nType=Application\nName=%s\n"
+			"Exec=sh -c \"echo %s >> %s\"\n", entry.name, entry.word, keys_log.c_str());
+		std::fclose(f);
+	}
+}
+
 // A `gsettings` first on PATH that records that it ran, and the keyfile
 // settings backend holding the icon theme the compositor reads instead.
 void install_gsettings_stand_in(const std::string &scratch, const std::string &config) {
@@ -401,6 +576,8 @@ int main() {
 		"/wayland-canvas/canvas.conf", root);
 	mkdir_p(shot_dir);
 	install_custom_entry();
+	keys_log = std::format("{}/scenarios/launcher/keys.log", root);
+	install_key_entries();
 	// Before the server starts: the launcher scans $XDG_DATA_HOME/applications first.
 	setenv("XDG_DATA_HOME", xdg_dir.c_str(), 1);
 	// A conf left by an earlier run would make this run's start no first

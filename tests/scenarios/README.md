@@ -186,6 +186,14 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   command's ignored signals and its `XDG_CURRENT_DESKTOP`: SIGPIPE must be as
   the scenario process itself was started (the compositor's own ignore never
   reaches what it launches), and the desktop name `wayland-canvas:wlroots`.
+  Last, the launcher's keys, one launch per case: four entries named Quokka
+  and two that sort before and after the whole list each log their own word
+  into a file when run, so the word says which result the keys selected.
+  Down, Up, Tab and Shift+Tab, Ctrl+N and Ctrl+P (and Ctrl+Shift+N, the
+  capital), Page Down and Page Up, Home and End (acting on the unfiltered
+  list, doing nothing under a query), Backspace, Ctrl+W and Ctrl+Backspace
+  deleting a word, Ctrl+U and Ctrl+Shift+U clearing the query, Ctrl+X typing
+  nothing, and the keypad Enter launching.
 
 - **`lock.cpp`** — the lock screen, driven by the scenarios' own locker
   (`tests/clients/lock-client.c`, an ext-session-lock-v1 client built with

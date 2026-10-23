@@ -20,84 +20,88 @@ constexpr zwlr_layer_shell_v1_layer layer_order[] = {
 	ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
 };
 
-// Position and size one layer surface; same math as
-// wlr_scene_layer_surface_v1_configure. Updates `usable` when the surface
-// reserves an exclusive zone.
+// One axis of a box: where it starts and how far it runs.
+struct Span {
+	int start;
+	int length;
+};
+
+// Where a layer surface goes along one axis of `bounds`: a desired length of
+// 0 fills between the margins, a surface anchored to both ends or to
+// neither is centred. Same math as wlr_scene_layer_surface_v1_configure.
+Span place_on_axis(Span bounds, int desired, int margin_start, int margin_end,
+		bool anchored_start, bool anchored_end) {
+	if (desired == 0) {
+		return {bounds.start + margin_start, bounds.length - (margin_start + margin_end)};
+	}
+	if (anchored_start == anchored_end) {
+		return {bounds.start + bounds.length / 2 - desired / 2, desired};
+	}
+	if (anchored_start) {
+		return {bounds.start + margin_start, desired};
+	}
+	return {bounds.start + bounds.length - desired - margin_end, desired};
+}
+
+// Takes a zone and the margin on its side off one axis of the usable box.
+void take_from_axis(Span &usable, int zone, int margin, bool from_start) {
+	int taken = zone + margin;
+	if (from_start) {
+		usable.start += taken;
+	}
+	usable.length = std::max(usable.length - taken, 0);
+}
+
+// Takes the surface's exclusive zone off the edge it reserves.
+void reserve_zone(wlr_layer_surface_v1 &ls, wlr_box &usable) {
+	const wlr_layer_surface_v1_state &state = ls.current;
+	if (!ls.surface->mapped || state.exclusive_zone <= 0) {
+		return;
+	}
+	Span x{usable.x, usable.width};
+	Span y{usable.y, usable.height};
+	switch (wlr_layer_surface_v1_get_exclusive_edge(&ls)) {
+	case WLR_EDGE_TOP:
+		take_from_axis(y, state.exclusive_zone, state.margin.top, true);
+		break;
+	case WLR_EDGE_BOTTOM:
+		take_from_axis(y, state.exclusive_zone, state.margin.bottom, false);
+		break;
+	case WLR_EDGE_LEFT:
+		take_from_axis(x, state.exclusive_zone, state.margin.left, true);
+		break;
+	case WLR_EDGE_RIGHT:
+		take_from_axis(x, state.exclusive_zone, state.margin.right, false);
+		break;
+	default:
+		return;
+	}
+	usable = {x.start, y.start, x.length, y.length};
+}
+
+// Positions and sizes one layer surface, and takes its exclusive zone off
+// `usable`.
 void layer_configure(LayerSurface &layer, const wlr_box &full, wlr_box &usable) {
 	wlr_layer_surface_v1 *ls = layer.wlr;
-	wlr_layer_surface_v1_state *state = &ls->current;
+	const wlr_layer_surface_v1_state &state = ls->current;
 
 	// Zone -1: cover the whole output, ignoring other exclusive zones.
-	wlr_box bounds = state->exclusive_zone == -1 ? full : usable;
+	const wlr_box &bounds = state.exclusive_zone == -1 ? full : usable;
+	auto anchored = [&state](uint32_t edge) { return (state.anchor & edge) != 0; };
 
-	wlr_box box = {
-		.width = static_cast<int>(state->desired_width),
-		.height = static_cast<int>(state->desired_height),
-	};
+	Span x = place_on_axis({bounds.x, bounds.width}, static_cast<int>(state.desired_width),
+		state.margin.left, state.margin.right,
+		anchored(ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT), anchored(ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT));
+	Span y = place_on_axis({bounds.y, bounds.height}, static_cast<int>(state.desired_height),
+		state.margin.top, state.margin.bottom,
+		anchored(ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP), anchored(ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM));
+	layer.geo = {x.start, y.start, x.length, y.length};
 
-	// Horizontal positioning.
-	if (box.width == 0) {
-		box.x = bounds.x + state->margin.left;
-		box.width = bounds.width - (state->margin.left + state->margin.right);
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT &&
-			state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) {
-		box.x = bounds.x + bounds.width / 2 - box.width / 2;
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) {
-		box.x = bounds.x + state->margin.left;
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) {
-		box.x = bounds.x + bounds.width - box.width - state->margin.right;
-	} else {
-		box.x = bounds.x + bounds.width / 2 - box.width / 2;
-	}
-
-	// Vertical positioning.
-	if (box.height == 0) {
-		box.y = bounds.y + state->margin.top;
-		box.height = bounds.height - (state->margin.top + state->margin.bottom);
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP &&
-			state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) {
-		box.y = bounds.y + bounds.height / 2 - box.height / 2;
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) {
-		box.y = bounds.y + state->margin.top;
-	} else if (state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) {
-		box.y = bounds.y + bounds.height - box.height - state->margin.bottom;
-	} else {
-		box.y = bounds.y + bounds.height / 2 - box.height / 2;
-	}
-
-	layer.geo = box;
 	// configure() asserts on surfaces that have not done their initial commit.
 	if (ls->initialized) {
-		wlr_layer_surface_v1_configure(ls, box.width, box.height);
+		wlr_layer_surface_v1_configure(ls, layer.geo.width, layer.geo.height);
 	}
-
-	if (ls->surface->mapped && state->exclusive_zone > 0) {
-		wlr_edges edge = wlr_layer_surface_v1_get_exclusive_edge(ls);
-		switch (edge) {
-		case WLR_EDGE_TOP:
-			usable.y += state->exclusive_zone + state->margin.top;
-			usable.height -= state->exclusive_zone + state->margin.top;
-			break;
-		case WLR_EDGE_BOTTOM:
-			usable.height -= state->exclusive_zone + state->margin.bottom;
-			break;
-		case WLR_EDGE_LEFT:
-			usable.x += state->exclusive_zone + state->margin.left;
-			usable.width -= state->exclusive_zone + state->margin.left;
-			break;
-		case WLR_EDGE_RIGHT:
-			usable.width -= state->exclusive_zone + state->margin.right;
-			break;
-		default:
-			return;
-		}
-		if (usable.width < 0) {
-			usable.width = 0;
-		}
-		if (usable.height < 0) {
-			usable.height = 0;
-		}
-	}
+	reserve_zone(*ls, usable);
 }
 
 // Takes `layer` out of whichever of its output's vectors holds it.

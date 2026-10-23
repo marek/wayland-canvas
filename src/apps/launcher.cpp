@@ -1,10 +1,13 @@
 #include <cairo.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
+#include <xkbcommon/xkbcommon.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <iterator>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -458,6 +461,59 @@ void Launcher::finish() {
 
 // ---- keyboard ----
 
+namespace {
+
+enum class KeyAction {
+	close,
+	launch,
+	clear_query,
+	delete_word,
+	delete_char,
+	up,
+	down,
+	page_up,
+	page_down,
+	first,
+	last,
+};
+
+struct KeyBinding {
+	xkb_keysym_t sym; // lower case: a letter matches in either case
+	bool ctrl;        // Ctrl must be held; unset matches with or without it
+	KeyAction action;
+};
+
+// The first match wins, so a Ctrl entry precedes the plain one on its key.
+constexpr KeyBinding key_bindings[] = {
+	{XKB_KEY_Escape, false, KeyAction::close},
+	{XKB_KEY_Return, false, KeyAction::launch},
+	{XKB_KEY_KP_Enter, false, KeyAction::launch},
+	{XKB_KEY_u, true, KeyAction::clear_query},
+	{XKB_KEY_w, true, KeyAction::delete_word},
+	{XKB_KEY_BackSpace, true, KeyAction::delete_word},
+	{XKB_KEY_p, true, KeyAction::up},
+	{XKB_KEY_n, true, KeyAction::down},
+	{XKB_KEY_Up, false, KeyAction::up},
+	{XKB_KEY_ISO_Left_Tab, false, KeyAction::up},
+	{XKB_KEY_Down, false, KeyAction::down},
+	{XKB_KEY_Tab, false, KeyAction::down},
+	{XKB_KEY_Page_Up, false, KeyAction::page_up},
+	{XKB_KEY_Page_Down, false, KeyAction::page_down},
+	{XKB_KEY_Home, false, KeyAction::first},
+	{XKB_KEY_End, false, KeyAction::last},
+	{XKB_KEY_BackSpace, false, KeyAction::delete_char},
+};
+
+const KeyBinding *find_key_binding(xkb_keysym_t sym, bool ctrl) {
+	xkb_keysym_t lower = xkb_keysym_to_lower(sym);
+	auto found = std::ranges::find_if(key_bindings, [&](const KeyBinding &binding) {
+		return binding.sym == lower && (ctrl || !binding.ctrl);
+	});
+	return found != std::end(key_bindings) ? &*found : nullptr;
+}
+
+} // namespace
+
 void Launcher::key(const KeyPress &press) {
 	if (!open_ || press.syms.produced().empty() || press.logo) {
 		return;
@@ -473,82 +529,70 @@ void Launcher::key(const KeyPress &press) {
 }
 
 void Launcher::key_sym(xkb_keysym_t sym, uint32_t utf32, uint32_t mods) {
-	bool ctrl = (mods & WLR_MODIFIER_CTRL) != 0;
-	int rows = panel_layout(output_->width, output_->height).row_count;
-
-	if (sym == XKB_KEY_Escape) {
-		close();
-		return;
-	}
-	if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) {
-		if (selected_ < results_.size()) {
-			launch_selected();
+	const KeyBinding *binding = find_key_binding(sym, (mods & WLR_MODIFIER_CTRL) != 0);
+	if (binding == nullptr) {
+		bool plain = !(mods & (WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO));
+		if (utf32 >= 0x20 && utf32 != 0x7f && plain) {
+			char buf[4];
+			std::size_t n = utf8_encode(utf32, buf);
+			if (n > 0 && query_.size() + n <= query_max) {
+				query_.append(buf, n);
+				query_changed();
+			}
 		}
 		return;
 	}
-	if (ctrl && (sym == XKB_KEY_u || sym == XKB_KEY_U)) {
+
+	int rows = panel_layout(output_->width, output_->height).row_count;
+	switch (binding->action) {
+	case KeyAction::close:
+		close();
+		break;
+	case KeyAction::launch:
+		if (selected_ < results_.size()) {
+			launch_selected();
+		}
+		break;
+	case KeyAction::clear_query:
 		if (!query_.empty()) {
 			query_.clear();
 			query_changed();
 		}
-		return;
-	}
-	if (ctrl && (sym == XKB_KEY_w || sym == XKB_KEY_W
-			|| sym == XKB_KEY_BackSpace)) {
+		break;
+	case KeyAction::delete_word:
 		if (query_pop_word()) {
 			query_changed();
 		}
-		return;
-	}
-	if (ctrl && (sym == XKB_KEY_p || sym == XKB_KEY_P)) {
-		move_selection(rows, -1);
-		return;
-	}
-	if (ctrl && (sym == XKB_KEY_n || sym == XKB_KEY_N)) {
-		move_selection(rows, 1);
-		return;
-	}
-	if (sym == XKB_KEY_Up || sym == XKB_KEY_ISO_Left_Tab) {
-		move_selection(rows, -1);
-		return;
-	}
-	if (sym == XKB_KEY_Down || sym == XKB_KEY_Tab) {
-		move_selection(rows, 1);
-		return;
-	}
-	if (sym == XKB_KEY_Page_Up) {
-		move_selection(rows, -rows);
-		return;
-	}
-	if (sym == XKB_KEY_Page_Down) {
-		move_selection(rows, rows);
-		return;
-	}
-	if (sym == XKB_KEY_Home || sym == XKB_KEY_End) {
-		// Only meaningful while browsing the unfiltered list.
-		if (query_.empty() && !results_.empty()) {
-			selected_ = sym == XKB_KEY_Home ? 0 : results_.size() - 1;
-			std::size_t max_scroll = results_.size() > static_cast<std::size_t>(rows)
-				? results_.size() - static_cast<std::size_t>(rows) : 0;
-			scroll_ = sym == XKB_KEY_Home ? 0 : max_scroll;
-			panel_.invalidate(*output_);
-		}
-		return;
-	}
-	if (sym == XKB_KEY_BackSpace) {
+		break;
+	case KeyAction::delete_char:
 		if (query_pop_char()) {
 			query_changed();
 		}
-		return;
-	}
-	if (utf32 >= 0x20 && utf32 != 0x7f
-			&& !(mods & (WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO))) {
-		char buf[4];
-		std::size_t n = utf8_encode(utf32, buf);
-		if (n > 0 && query_.size() + n <= query_max) {
-			query_.append(buf, n);
-			query_changed();
+		break;
+	case KeyAction::up:
+		move_selection(rows, -1);
+		break;
+	case KeyAction::down:
+		move_selection(rows, 1);
+		break;
+	case KeyAction::page_up:
+		move_selection(rows, -rows);
+		break;
+	case KeyAction::page_down:
+		move_selection(rows, rows);
+		break;
+	case KeyAction::first:
+	case KeyAction::last:
+		// Only meaningful while browsing the unfiltered list.
+		if (query_.empty() && !results_.empty()) {
+			bool first = binding->action == KeyAction::first;
+			selected_ = first ? 0 : results_.size() - 1;
+			std::size_t max_scroll = results_.size() > static_cast<std::size_t>(rows)
+				? results_.size() - static_cast<std::size_t>(rows) : 0;
+			scroll_ = first ? 0 : max_scroll;
+			panel_.invalidate(*output_);
 		}
+		break;
 	}
 }
 
