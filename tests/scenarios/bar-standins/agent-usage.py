@@ -13,7 +13,8 @@ import json
 import os
 import sys
 
-ROOT = os.path.join(os.environ.get("CANVAS_TMP", "tmp"), "scenarios", "bar")
+ROOT = os.environ.get("CANVAS_BAR_DIR") or os.path.join(
+    os.environ.get("CANVAS_TMP", "tmp"), "scenarios", "bar")
 LOG = os.path.join(ROOT, "usage-requests.log")
 PAYLOAD = os.path.join(ROOT, "usage-response.json")
 

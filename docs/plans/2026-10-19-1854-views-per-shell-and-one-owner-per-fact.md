@@ -1097,7 +1097,7 @@ Tests:
     checks failed (the `holds_alternative<Forwarded>` checks still
     passed); with the hop binding a no-op the jump check failed; with
     the overview's empty-canvas press a no-op the click check failed.
-- [ ] Exact checks wait for the state they check, not a fixed time
+- [x] Exact checks wait for the state they check, not a fixed time
   - gestures.cpp:630-646 waits a fixed 700 or 600 ms and then requires
     the camera within 1 px, for a 280 ms animation (config.h:146).
   - Poll until the camera is no longer panning, with a budget; the same
@@ -1105,23 +1105,21 @@ Tests:
   - Apply the same to every fixed wait followed by an exact camera or
     pixel check: bar has 416 fixed returns against 298 polled, and
     gestures 149 against 38. List what was changed in the commit body.
-  - Done in gestures.cpp: `camera_easing()` (panning or zooming), and
-    the 23 steps whose first check reads where the camera ended, or takes
-    the camera as a baseline, now poll on it with a budget before they
-    act. Checks that nothing moved, and checks of a scale or a frame, stay
-    after their fixed wait.
-  - Left, in bar.cpp: its camera checks already poll (`camera_settled`,
-    `overview_settled`), but 39 pixel checks still read a shot taken after
-    a fixed wait, without a re-shot until the picture holds as the
-    network panel's dots do (cases 3, 11, 44, 51, 118, 122, 126, 130, 141,
-    145, 186, 187, 230, 241, 424 and 615, and the 23 steps that take the
-    shot before a check).
-  - Seen flaking on a loaded machine: `edge_checks`' "the strip is
-    centred along its edge" fails right after `toolbar_on_edge` holds,
-    and passes on a rerun. It checks the strip's place once instead of
-    polling until the strip has settled.
-  - Phase 8's harness (its `settled()` poll) and phase 10's bar split are
-    where the bar part gets done.
+  - Done: gestures.cpp has `camera_easing()` (panning or zooming), and the
+    23 steps whose first check reads where the camera ended, or takes the
+    camera as a baseline, poll on it with a budget before they act; checks
+    that nothing moved, and checks of a scale or a frame, stay after their
+    fixed wait. In the bar phases every check that reads a shot re-shoots
+    until the picture holds (`shot_holds`, with `bar_shows` and `bar_drawn`
+    for the bar's palette and its widgets: agents' light bar and light
+    panel, notes' second close and the other shot-then-check steps), the
+    strip's place and centring are read once the toolbar has settled on its
+    edge (`toolbar_settled_on`), and the budgets of the polls are 15 s.
+    The side-by-side run (`meson test --suite bar --num-processes 8`) was
+    red on a load-only flake, bar-settings: the shell reloaded on its own
+    shell.json write, which ShellConfig took for an edit when the inotify
+    event came more than 250 ms after `set()`; it now tells its own write
+    by content. All 22 phases are green side by side.
 
 ### 6. One owner per fact: the compositor
 
@@ -1713,7 +1711,7 @@ Tests:
     - layout helpers such as `deco_point(view, part)`, built on phase 6's
       title-bar list, and `bar_mid_y()`.
   - Port lock and nightlight to it.
-- [ ] The rest of the scenarios on the harness
+- [x] The rest of the scenarios on the harness
   - Port launcher, session, sharing, touch, xwayland, capture, ipc, input
     and gestures, a few files per commit, each run green.
   - The 14 call-site explanations of the return protocol ("without the
@@ -1721,11 +1719,11 @@ Tests:
   - Literal points become layout helpers: bar.cpp's 21 clicks at y = 13
     beside its `bar_h()` (1346), and `click(60.0, 700.0)` written five
     times.
-  - Done: every scenario but bar runs on the harness (launcher, session,
-    touch, capture, ipc, viewgone, sharing, xwayland, input, gestures, and
-    foreign, written on it), each green with every check kept; none of
-    them had a return-protocol explanation left. What is left is bar's:
-    its 17 explanations and its literal points go with the bar split.
+  - Done: every scenario runs on the harness (launcher, session, touch,
+    capture, ipc, viewgone, sharing, xwayland, input, gestures, foreign,
+    written on it, and bar, split into a file per phase), each green with
+    every check kept; none of them has a return-protocol explanation or a
+    literal bar point left.
 - [x] The media tour on the harness
   - Port `tools/media/tour.cpp` (its copies of the startup and bus code
     match session.cpp:171-191 and bar.cpp:363-376).
@@ -2175,7 +2173,7 @@ Tests:
     - A qmltestrunner test round-trips `noteFile.js` (mixed spans, empty
       paragraphs, no font family or colour kept), if qmltestrunner is
       installed; otherwise a node or qml6 script under `tests/`.
-- [ ] The bar scenario: one file per phase on the harness
+- [x] The bar scenario: one file per phase on the harness
   - Today `bar.cpp` is 9488 lines, with one `run_step` of 5124 lines and
     about 77 file-scope mutable variables.
   - It becomes one file per phase (the walk, the theme, the watcher,
@@ -2184,6 +2182,11 @@ Tests:
     late step no longer means running them all.
   - The unreachable `return 400;` (8085) goes.
   - Acceptance: the bar scenario is green as a whole and phase by phase.
+  - Done: `tests/scenarios/bar/` holds a file per phase on the harness
+    (`bar-<phase>` is a meson test of its own, `CANVAS_BAR_PHASE` or the
+    phase's name as an argument runs phases alone), each phase starting
+    from the bring-up. `meson test -C build --suite bar --num-processes 8`
+    runs all 22 phases side by side, green.
 
 ### 11. State shapes and dead code
 

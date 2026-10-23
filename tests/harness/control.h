@@ -1,15 +1,9 @@
 #pragma once
 
-// A raw client of the compositor's control socket (docs/intents/platform/
-// ipc.md), for what `wayland-canvas msg` cannot send: malformed lines, many
-// requests at once, a half-closed connection. It runs in a forked child,
-// because the compositor shares the scenario's thread and nothing here may
-// block it; what the compositor sends back is written to a file in the
-// scratch directory, which the scenario reads as it grows.
-//
-// The real `wayland-canvas msg` client is run the same way, beside the
-// compositor, its answers read from files; so is any shell command a
-// scenario starts and then waits for.
+// A raw client of the control socket (docs/intents/platform/ipc.md) for what `wayland-canvas
+// msg` cannot send: malformed lines, many requests at once, a half-closed connection. Clients
+// and shell commands run in forked children, since the compositor shares the scenario's thread,
+// and their answers go to files in the scratch directory.
 
 #include <functional>
 #include <json-glib/json-glib.h>
@@ -50,8 +44,6 @@ bool control_client_done(pid_t pid);
 
 // Kills the clients still running: called by run().
 void stop_control_clients();
-
-// ------------------------------------------------ the real msg client
 
 // Runs a shell command through the compositor's own spawn, so that it never
 // blocks the scenario, with its stdout, stderr and exit status in

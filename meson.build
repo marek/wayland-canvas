@@ -488,17 +488,12 @@ else
 	skipped += {'note-file': {'suite': 'unit', 'lack': 'qmltestrunner for Qt 6 is not installed'}}
 endif
 
-# End-to-end scenarios: the real compositor on the headless backend, real
-# foot clients, fake input devices, grim screenshots. They still need a GPU
-# render node at run time (headless GLES2 rendering). Serial: each owns the
-# display namespace.
-# Every scenario needs foot and grim on PATH. The bar and session scenarios
-# drive the shell against stand-in services, so they also need qs (the bar's
-# own client), a dbus-daemon to build private buses from, PipeWire's daemon
-# and tools (the audio widget's sink) and the dbusmock stand-in environment,
-# which the ensure script provisions under tmp/ at configure time. The
-# session scenario also needs notify-send, and may only ever run the shell's
-# notification server, locker and polkit agent on buses of the run's own.
+# End-to-end scenarios: the real compositor on the headless backend, real foot clients, fake
+# input devices, grim screenshots. They need a GPU render node at run time (headless GLES2)
+# and foot and grim on PATH. The bar and session scenarios drive the shell against stand-in
+# services, so they also need qs, a dbus-daemon, PipeWire's daemon and tools and the dbusmock
+# environment the ensure script provisions under tmp/ at configure time; session also needs
+# notify-send.
 scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
 	'nightlight', 'touch', 'viewgone', 'xwayland',
 	# adds the capture core, the capture protocols and the portal; skips its
@@ -657,36 +652,85 @@ if runnable.length() > 0
 		# scenario points its PATH at the build tree's copy.
 		scenario_env.set('WAYLAND_CANVAS_AGENT_USAGE', agent_usage.full_path())
 	endif
+	# The bar scenario is a file per phase under tests/scenarios/bar/.
+	bar_parts = [
+		'agent_helpers',
+		'agents',
+		'appbar',
+		'appbar_hover',
+		'barwrites',
+		'bring_up',
+		'bringup',
+		'edge_helpers',
+		'edges',
+		'handover',
+		'main',
+		'network',
+		'nightlight',
+		'note_helpers',
+		'notes',
+		'overview',
+		'pixels',
+		'plugin_settings',
+		'plugins',
+		'recording',
+		'screenshots',
+		'settings',
+		'settings_helpers',
+		'shared',
+		'socket',
+		'standins',
+		'starts',
+		'surfaces',
+		'theme',
+		'toolbar',
+		'walk',
+		'watcher',
+		'wheel',
+		'world',
+	]
 	foreach scenario : runnable
 		scenario_sources = ['tests/scenarios/' + scenario + '.cpp']
+		if scenario == 'bar'
+			scenario_sources = []
+			foreach part : bar_parts
+				scenario_sources += 'tests/scenarios/bar/' + part + '.cpp'
+			endforeach
+		endif
 		# The gestures scenario counts the allocations of its drag and pinch
 		# frames. A sanitizer owns malloc, so its builds leave the counter
 		# out and the scenario says so.
 		if scenario == 'gestures' and get_option('b_sanitize') == 'none'
 			scenario_sources += 'tests/scenarios/alloc-counter.c'
 		endif
-		test(
-			scenario,
-			executable(
-				'scenario-' + scenario,
-				scenario_sources,
-				protocol_headers,
-				include_directories: [src_inc, harness_inc],
-				link_with: [harness_lib, core_lib],
-				dependencies: core_deps,
-			),
-			suite: 'scenarios',
-			is_parallel: false,
-			# The bar scenario also walks every panel, the plugin reloads,
-			# the idle watch, the theme phase, the Wi-Fi phase (with the
-			# escaped names' roams) and the agents phase: its 200-odd steps
-			# (step 90's reload check alone waits out up to 105 s of
-			# retries by design, the agents phase's probe-reuse window
-			# 20 s, its refresh-setting reload 10 s) need the wider
-			# budget; the whole walk takes about 400 s.
-			timeout: scenario == 'bar' ? 600 : 180,
-			env: scenario_env,
+		exe = executable(
+			'scenario-' + scenario,
+			scenario_sources,
+			protocol_headers,
+			include_directories: [src_inc, harness_inc],
+			link_with: [harness_lib, core_lib],
+			dependencies: core_deps,
 		)
+		# Scenarios run side by side: each has its own display, control
+		# socket, scratch folder and buses.
+		if scenario != 'bar'
+			test(scenario, exe, suite: 'scenarios', timeout: 180, env: scenario_env)
+			continue
+		endif
+		# Each bar phase is a test of its own after the bring-up every run
+		# takes, so a change runs only the phases that cover it
+		# (`meson test -C build --suite bar` runs them all); bar-phases fails
+		# when the runner has a phase this list lacks.
+		bar_phases = ['walk', 'plugins', 'overview', 'toolbar', 'theme', 'watcher',
+			'nightlight', 'wheel', 'notes', 'network', 'agents', 'recording', 'edges',
+			'barwrites', 'socket', 'settings', 'appbar', 'plugin_settings',
+			'appbar_hover', 'screenshots', 'shared', 'handover']
+		test('bar-phases', exe, args: ['--phases', ','.join(bar_phases)],
+			suite: 'scenarios', env: scenario_env)
+		foreach phase : bar_phases
+			test('bar-' + phase, exe, args: [phase], suite: ['scenarios', 'bar'],
+				timeout: 300, env: scenario_env)
+		endforeach
 	endforeach
 endif
 

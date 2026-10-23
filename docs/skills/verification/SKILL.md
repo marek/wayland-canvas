@@ -36,7 +36,7 @@ All tools live in `tools/`; scenario sources in `tests/scenarios/`.
 | Everything | `tools/check.sh` | Builds and runs all three suites: unit, packaging, scenarios |
 | Unit | `meson test -C build --suite unit` | The pure canvas math (direction choice, tiling, zoom paths) and desktop-entry parsing |
 | Packaging | `meson test -C build --suite packaging` | The default-session tool against fake roots, one per supported display manager: set-default then restore byte-identical, no-op restore, idempotent set-default, missing previous session restored; the package checks; the plan tools, the autopilot hook and `agent-setup.sh` against scratch copies |
-| Scenarios | `meson test -C build --suite scenarios` | The real compositor on the headless backend: real foot clients, gestures injected through the same entry points libinput events reach, keyboard and pointer driven through fake devices announced to the backend, screenshots with grim via screencopy, wtype for the virtual keyboard |
+| Scenarios | `meson test -C build --suite scenarios` | The real compositor on the headless backend: real foot clients, gestures injected through the same entry points libinput events reach, keyboard and pointer driven through fake devices announced to the backend, screenshots with grim via screencopy, wtype for the virtual keyboard. Scenarios run side by side; each bar phase is its own test (`bar-<phase>`, all of them `--suite bar`) |
 | On screen, nested | `build/wayland-canvas -s foot` from a terminal inside another compositor | On-screen feel without leaving the session; the host may swallow gestures it binds, a lone Super tap passes through |
 | On screen, TTY | `timeout 15m build/wayland-canvas -s foot` from a spare TTY | The real backend: DRM/KMS, real touchpad gestures, the 2x panel |
 | Packages | `source .venv/bin/activate && tools/package.sh` | The release build of every target in both package roots: makepkg's flags (with `_FORTIFY_SOURCE`, `system()` and friends warn when their result is dropped), a Debian root holding only the declared build dependencies, and in each package the lock screen's shipped PAM settings naming a service file the package installs |
@@ -45,7 +45,7 @@ What each kind of change needs:
 
 | Change | Minimum |
 |---|---|
-| Any code | The build, plus the unit tests and the scenarios that cover the files changed (`meson test -C build <name>`); `tools/check.sh` once per batch of work, before a push, a pause or a merge; `tools/package.sh` before the work is called warning-free |
+| Any code | The build, plus the unit tests and the scenarios that cover the files changed (`meson test -C build <name>`; for the bar, only the phases that cover it, `bar-<phase>`), each run once; `tools/check.sh` once per batch of work, before a push, a pause or a merge; `tools/package.sh` before the work is called warning-free |
 | Input, gestures, canvas, overview, window management, launcher | + the scenarios that cover it |
 | Protocols, anything a client depends on | + a scenario with a real client (foot, grim) |
 | Rendering, title bars, the overview UI | + an on-screen run and a look |

@@ -101,6 +101,10 @@ public:
 
 	std::optional<Result> wait_for(bool ready, Wait wait = {},
 		std::source_location where = std::source_location::current());
+	// How many polls the wait that last said "again" has made in this visit,
+	// counting that one: for a step that repeats an interaction every few
+	// polls of its wait, such as a click that may have been lost.
+	int polls() const { return last_polls_; }
 
 	template <typename Act>
 	std::optional<Result> act_when(bool ready, Act &&act, Wait wait = {},
@@ -128,6 +132,7 @@ private:
 	bool done_ = false, finished_ = false;
 	std::string error_;
 	std::map<Key, int> polls_; // per wait, this visit
+	int last_polls_ = 0;
 	std::set<Key> acted_; // per act_when, this visit
 };
 
@@ -137,6 +142,10 @@ Sequencer &sequencer();
 inline std::optional<Result> wait_for(bool ready, Wait wait = {},
 		std::source_location where = std::source_location::current()) {
 	return sequencer().wait_for(ready, wait, where);
+}
+
+inline int polls() {
+	return sequencer().polls();
 }
 
 template <typename Act>

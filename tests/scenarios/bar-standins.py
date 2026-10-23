@@ -44,7 +44,8 @@ SYSTEM_NAMES = [
     "org.freedesktop.UPower",
     "org.freedesktop.UPower.PowerProfiles",
 ]
-LOG_DIR = os.path.join(os.environ.get("CANVAS_TMP", "tmp"), "scenarios", "bar")
+LOG_DIR = os.environ.get("CANVAS_BAR_DIR") or os.path.join(
+    os.environ.get("CANVAS_TMP", "tmp"), "scenarios", "bar")
 TRAY_NAME = "org.waylandcanvas.barstandins.Tray1"
 WATCHER_NAME = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"

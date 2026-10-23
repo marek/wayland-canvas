@@ -35,6 +35,23 @@ double fraction_y(double y) {
 	return y / output().height;
 }
 
+// The pointer is mapped to no output, so it reports where it is as a
+// fraction of the whole layout, which a second output widens. A scenario's
+// coordinates are the first output's own.
+double layout_fraction_x(double x) {
+	wlr_box layout{}, first{};
+	wlr_output_layout_get_box(server->output_layout, nullptr, &layout);
+	wlr_output_layout_get_box(server->output_layout, output().wlr, &first);
+	return (first.x - layout.x + x) / layout.width;
+}
+
+double layout_fraction_y(double y) {
+	wlr_box layout{}, first{};
+	wlr_output_layout_get_box(server->output_layout, nullptr, &layout);
+	wlr_output_layout_get_box(server->output_layout, output().wlr, &first);
+	return (first.y - layout.y + y) / layout.height;
+}
+
 } // namespace
 
 uint32_t event_time() {
@@ -101,8 +118,6 @@ void detach_devices() {
 	}
 	has_pointer = has_keyboard = has_touch = has_tablet = false;
 }
-
-// ------------------------------------------------------------ keyboard
 
 void key(uint32_t code, bool pressed) {
 	wlr_keyboard_key_event event = {.time_msec = event_time(), .keycode = code,
@@ -195,11 +210,9 @@ void type_text(std::string_view text) {
 	}
 }
 
-// ------------------------------------------------------------- pointer
-
 void move_to(double x, double y) {
 	wlr_pointer_motion_absolute_event event = {.pointer = &pointer_device,
-		.time_msec = event_time(), .x = fraction_x(x), .y = fraction_y(y)};
+		.time_msec = event_time(), .x = layout_fraction_x(x), .y = layout_fraction_y(y)};
 	wl_signal_emit_mutable(&pointer_device.events.motion_absolute, &event);
 	wl_signal_emit_mutable(&pointer_device.events.frame, &pointer_device);
 }
@@ -291,7 +304,15 @@ void touchpad_scroll(double delta) {
 	wl_signal_emit_mutable(&pointer_device.events.frame, &pointer_device);
 }
 
-// --------------------------------------------------------- touchscreen
+void wheel(int units) {
+	wlr_pointer_axis_event event = {.pointer = &pointer_device, .time_msec = event_time(),
+		.source = WL_POINTER_AXIS_SOURCE_WHEEL,
+		.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+		.delta = 15.0 * units / 120, .delta_discrete = units};
+	wl_signal_emit_mutable(&pointer_device.events.axis, &event);
+	wl_signal_emit_mutable(&pointer_device.events.frame, &pointer_device);
+}
 
 void touch_frame() {
 	wl_signal_emit_mutable(&touch_device.events.frame, nullptr);
@@ -335,8 +356,6 @@ void fingers_drag(std::span<const Point> from, double dx, double dy, int steps) 
 		finger_up(static_cast<int32_t>(10 + i));
 	}
 }
-
-// ----------------------------------------------------------------- pen
 
 void pen_proximity(double x, double y, bool in) {
 	wlr_tablet_tool_proximity_event event = {.tablet = &tablet_device, .tool = &pen,

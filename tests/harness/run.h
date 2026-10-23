@@ -45,12 +45,10 @@ std::string scratch_env(const char *name, std::string_view relative);
 // machine's own programs.
 void put_first_on_path(const std::string &dir);
 
-// Starts the compositor with `options`, runs `steps` until one finishes the
-// run or the compositor stops, and returns the exit status: 0 when every
-// check passed and the run reached its end, 1 when not, 2 when the
-// compositor did not start. `teardown`, when given, runs once the steps are
-// over, with the compositor still up: the place to take down what the
-// scenario hung on its event loop.
+// Starts the compositor with `options`, runs `steps` until one finishes the run or the
+// compositor stops, and returns 0 when every check passed and the run reached its end, 1 when
+// not, 2 when the compositor did not start. `teardown` runs once the steps are over, with the
+// compositor still up.
 int run(const Options &options, std::vector<Step> steps, std::function<void()> teardown = {});
 
 // Adds a headless output of `width` x `height` physical pixels, the way a

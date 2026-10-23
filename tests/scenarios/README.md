@@ -5,9 +5,11 @@ backend (`harness::run` calls `Server::init` and `Server::start`), spawns real
 `foot` clients, drives input, and takes `grim` screenshots. Every check prints
 a PASS/FAIL line; the scenario exits non-zero if any check failed, or if the
 compositor stopped before the run reached its last step (a lost backend, its
-own shutdown). Scenarios run serially (`is_parallel: false`, 180 s timeout,
-600 s for `bar`) because they each own the machine's Wayland display
-namespace and GPU.
+own shutdown). Scenarios run side by side, each on its own display, control
+socket, scratch folder and buses (180 s timeout each). The bar scenario is a
+test per phase (`bar-walk`, `bar-notes`, ...; `meson test -C build --suite
+bar` runs them all, 300 s each), so a change runs only the phases that
+cover it.
 
 ## The harness
 
@@ -352,9 +354,10 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   dialog, on the polkit plugin's stand-in flow, stays open on a wrong
   password and tells polkit so.
 
-- **`bar.cpp`** — the top bar's panels, on a private world: before the
+- **`bar/`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and
-  session buses on sockets in `<tmp>/bb/` (a bar process must
+  session buses on sockets in a short folder of the run's own under `<tmp>/`
+  (a bar process must
   never touch the machine's buses) and launches
   `tests/scenarios/bar-standins.py` on them, which provides deterministic
   stand-ins — NetworkManager with one Wi-Fi device and five networks

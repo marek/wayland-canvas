@@ -112,8 +112,11 @@ if [[ "$sanitize" -eq 0 ]]; then
 	suite_passed packaging
 fi
 
-echo "check.sh: meson test -C $build --suite scenarios ${test_args[*]}"
-meson test -C "$build" --suite scenarios "${test_args[@]}"
+# Each scenario starts a compositor, its clients and often a shell: half the
+# CPUs at a time keeps a loaded machine's frames coming.
+scenario_jobs=$(( $(nproc) / 2 > 0 ? $(nproc) / 2 : 1 ))
+echo "check.sh: meson test -C $build --suite scenarios --num-processes $scenario_jobs ${test_args[*]}"
+meson test -C "$build" --suite scenarios --num-processes "$scenario_jobs" "${test_args[@]}"
 suite_passed scenarios
 if [[ "$sanitize" -eq 1 ]]; then
 	finish "unit + scenarios, sanitized"

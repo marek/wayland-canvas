@@ -4,7 +4,8 @@
 // the path libinput's devices take, so what a scenario sends goes through
 // the compositor's own device handling. Coordinates are output-local logical
 // pixels on the first output, which is 1280 x 720 (screen_w, screen_h) unless
-// the scenario adds one of another size.
+// the scenario adds one of another size. The pointer's go on past the first
+// output's width onto an output laid beside it.
 
 #include <cstdint>
 #include <linux/input-event-codes.h>
@@ -37,8 +38,6 @@ void use_real_time();
 // Takes the devices away: called by run().
 void detach_devices();
 
-// ------------------------------------------------------------ keyboard
-
 void key(uint32_t code, bool pressed);
 void tap(uint32_t code);
 // Holds `modifiers` and taps `code`, then lets go in reverse.
@@ -59,8 +58,6 @@ inline constexpr uint32_t super_ctrl_shift[] = {KEY_LEFTMETA, KEY_LEFTCTRL, KEY_
 inline constexpr uint32_t super_alt[] = {KEY_LEFTMETA, KEY_LEFTALT};
 inline constexpr uint32_t alt[] = {KEY_LEFTALT};
 } // namespace mods
-
-// ------------------------------------------------------------- pointer
 
 void move_to(double x, double y);
 void button(uint32_t code, bool pressed);
@@ -84,8 +81,9 @@ void touchpad_pinch_end(bool cancelled = false);
 // A vertical two-finger scroll tick, as a touchpad with natural scrolling
 // sends it.
 void touchpad_scroll(double delta);
-
-// --------------------------------------------------------- touchscreen
+// A mouse wheel's vertical notches, in 120ths of a notch: 120 is one notch
+// away from the user (down the page), negative the other way.
+void wheel(int units);
 
 void finger_down(int32_t id, double x, double y);
 void touch_frame();
@@ -94,8 +92,6 @@ void finger_move(int32_t id, double x, double y, bool frame = true);
 void finger_up(int32_t id);
 // Fingers starting at `from`, moved together by (dx, dy), then lifted.
 void fingers_drag(std::span<const Point> from, double dx, double dy, int steps = 10);
-
-// ----------------------------------------------------------------- pen
 
 void pen_proximity(double x, double y, bool in);
 void pen_move(double x, double y, std::optional<double> pressure = std::nullopt,

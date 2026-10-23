@@ -152,7 +152,7 @@ pictures no longer show it, `tools/media.py` remakes them;
 | **Sanitizers** | `tools/check.sh --sanitize` | A change to ownership, lifetimes or buffers (who frees what, a listener's life, a pointer kept past a call). Not routine. |
 | **Unit** | `meson test -C build --suite unit` | The pure canvas math (direction choice, tiling, zoom paths) and desktop-entry parsing. |
 | **Packaging** | `meson test -C build --suite packaging` | The default-session tool against fake roots, one per supported display manager, the package checks, and the plan tools, the autopilot hook and `agent-setup.sh` against scratch copies; `tools/check.sh` runs it with the unit suite |
-| **Scenarios** | `meson test -C build --suite scenarios` | Anything touching gestures, the canvas, the overview, window management or the launcher. Headless, with assertions; sources in `tests/scenarios/`. |
+| **Scenarios** | `meson test -C build --suite scenarios` | Anything touching gestures, the canvas, the overview, window management or the launcher. Headless, with assertions; sources in `tests/scenarios/`. They run side by side, and each bar phase is a test of its own (`meson test -C build bar-notes`), so a change runs only what covers it. |
 | **On screen, nested** | `build/wayland-canvas -s foot` from a terminal inside another compositor | Anything drawn or felt. On-screen feel without leaving the session; the host may swallow gestures it binds itself, a lone Super tap passes through. |
 | **On screen, TTY** | `timeout 15m build/wayland-canvas -s foot` from a spare TTY | The real backend: DRM/KMS, real touchpad gestures, the 2x panel. A hung compositor holds the keyboard, so VT switching would not save you — the timeout is the safety net. |
 

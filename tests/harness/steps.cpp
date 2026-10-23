@@ -82,13 +82,14 @@ std::optional<Result> Sequencer::wait_for(bool ready, Wait wait, std::source_loc
 		return std::nullopt;
 	}
 	int allowed = std::max(wait.budget_ms / std::max(wait.poll_ms, 1), 1);
-	int &polls = polls_[key_of(where)];
-	if (polls < allowed) {
-		polls++;
+	int &made = polls_[key_of(where)];
+	if (made < allowed) {
+		made++;
+		last_polls_ = made;
 		return again(wait.poll_ms);
 	}
-	if (polls == allowed) {
-		polls++;
+	if (made == allowed) {
+		made++;
 		std::println(stderr, "  waited {} ms at {}:{} in step {}, and gave up",
 			wait.budget_ms, where.file_name(), where.line(), current());
 	}
