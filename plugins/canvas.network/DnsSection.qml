@@ -44,50 +44,44 @@ Column {
 
 	PanelSeparator {}
 
-	Item {
+	PanelSectionHeader {
+		text: "DNS provider"
+	}
+
+	Row {
+		id: pills
 		width: parent.width
-		height: dnsField.visible ? 84 : 48
+		spacing: UiTheme.panelSpacing
 
-		PanelSectionHeader {
-			text: "DNS provider"
-		}
+		Repeater {
+			model: Nm.dnsProviders
 
-		Row {
-			id: pills
-			y: 24
-			width: parent.width
-			spacing: 6
-
-			Repeater {
-				model: Nm.dnsProviders
-
-				Pill {
-					required property var modelData
-					readonly property bool typing: modelData.typed === true && root.editing
-					width: (parent.width - (Nm.dnsProviders.length - 1) * pills.spacing)
-						/ Nm.dnsProviders.length
-					text: modelData.name
-					active: root.service.dnsEffective === modelData.name && !typing
-					chosen: typing
-					onClicked: root.pick(modelData)
-				}
+			PanelPill {
+				required property var modelData
+				readonly property bool typing: modelData.typed === true && root.editing
+				width: (parent.width - (Nm.dnsProviders.length - 1) * pills.spacing)
+					/ Nm.dnsProviders.length
+				text: modelData.name
+				active: root.service.dnsEffective === modelData.name && !typing
+				chosen: typing
+				onClicked: root.pick(modelData)
 			}
 		}
+	}
 
-		PanelField {
-			id: dnsField
-			visible: root.editing
-			y: 54
-			width: parent.width
-			placeholderText: "DNS servers"
-			onTextChanged: if (root.editing) root.servers = text
-			onAccepted: root.submit()
-			TapHandler { onTapped: dnsField.forceActiveFocus() }
-			// the panel keeps the keys: Escape still closes after the
-			// field folded away
-			onVisibleChanged: if (!visible && root.open) {
-				root.forceActiveFocus()
-			}
+	PanelField {
+		id: dnsField
+		visible: root.editing
+		width: parent.width
+		height: UiTheme.fieldHeight
+		placeholderText: "DNS servers"
+		onTextChanged: if (root.editing) root.servers = text
+		onAccepted: root.submit()
+		TapHandler { onTapped: dnsField.forceActiveFocus() }
+		// the panel keeps the keys: Escape still closes after the
+		// field folded away
+		onVisibleChanged: if (!visible && root.open) {
+			root.forceActiveFocus()
 		}
 	}
 }

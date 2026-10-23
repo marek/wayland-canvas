@@ -332,7 +332,7 @@ Item {
 					root.modelData.width - 2 * root.edgeMargin
 						- (root.vertical ? root.squareSize + gap : 0))
 				height: labelText.implicitHeight + 2 * pad
-				radius: 4
+				radius: UiTheme.radius
 				color: UiTheme.background
 
 				PanelText {

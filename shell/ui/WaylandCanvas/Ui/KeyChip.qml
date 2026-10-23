@@ -17,7 +17,7 @@ Item {
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		color: UiTheme.fill
 		border.width: 1
 		border.color: mouse.containsMouse ? UiTheme.accent : "transparent"

@@ -45,25 +45,14 @@ PanelCard {
 		}
 	}
 
-	PanelRow {
+	PanelSwitchRow {
 		label: "Mute"
-		onClicked: if (root.sink != null && root.sink.audio != null)
+		checked: root.sink != null && root.sink.audio != null && root.sink.audio.muted
+		onToggled: if (root.sink != null && root.sink.audio != null)
 			root.sink.audio.muted = !root.sink.audio.muted
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.sink != null && root.sink.audio != null && root.sink.audio.muted
-			onToggled: if (root.sink != null && root.sink.audio != null)
-				root.sink.audio.muted = !root.sink.audio.muted
-		}
 	}
 
-	PanelText {
-		dim: true
-		width: parent.width
-		height: UiTheme.sectionHeight
+	PanelSectionHeader {
 		text: "Output device"
 	}
 
@@ -79,18 +68,10 @@ PanelCard {
 			marked: isDefault
 			onClicked: Pipewire.preferredDefaultAudioSink = node
 
-			Text {
+			PanelText {
 				visible: row.isDefault
-				anchors.right: parent.right
-				anchors.rightMargin: 8
-				anchors.verticalCenter: parent.verticalCenter
+				dim: true
 				text: "● default"
-				color: UiTheme.muted
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontBody
-				}
-				renderType: Text.NativeRendering
 			}
 		}
 	}

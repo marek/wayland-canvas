@@ -74,7 +74,7 @@ PanelWindow {
 	// The screen behind is dimmed, and a click on it cancels.
 	Rectangle {
 		anchors.fill: parent
-		color: Qt.rgba(0, 0, 0, 0.45)
+		color: UiTheme.scrim
 
 		MouseArea {
 			anchors.fill: parent
@@ -107,30 +107,24 @@ PanelWindow {
 			width: parent.width - 2 * UiTheme.panelPadding
 			spacing: UiTheme.panelSpacing
 
-			Text {
+			PanelText {
 				width: parent.width
 				text: "Administrator rights are needed"
-				color: UiTheme.text
-				font.family: UiTheme.fontFamily
 				font.pixelSize: UiTheme.fontTitle
 			}
 
-			Text {
+			PanelText {
 				width: parent.width
-				text: root.flow !== null ? root.flow.message : ""
-				color: UiTheme.text
 				wrapMode: Text.WordWrap
-				font.family: UiTheme.fontFamily
-				font.pixelSize: UiTheme.fontBody
+				text: root.flow !== null ? root.flow.message : ""
 			}
 
-			Text {
+			PanelText {
 				width: parent.width
 				visible: text !== ""
+				dim: true
 				text: root.flow !== null && root.flow.selectedIdentity !== null
 					? String(root.flow.selectedIdentity.userName) : ""
-				color: UiTheme.muted
-				font.family: UiTheme.fontFamily
 				font.pixelSize: UiTheme.fontSmall
 			}
 
@@ -146,14 +140,13 @@ PanelWindow {
 				onAccepted: root.submit()
 			}
 
-			Text {
+			PanelText {
 				width: parent.width
 				visible: text !== ""
+				wrapMode: Text.WordWrap
 				text: root.flow !== null ? root.flow.supplementaryMessage : ""
 				color: root.flow !== null && root.flow.supplementaryIsError
 					? UiTheme.attention : UiTheme.muted
-				wrapMode: Text.WordWrap
-				font.family: UiTheme.fontFamily
 				font.pixelSize: UiTheme.fontSmall
 			}
 
@@ -162,44 +155,17 @@ PanelWindow {
 				layoutDirection: Qt.RightToLeft
 				width: parent.width
 
-				Rectangle {
+				PanelButton {
+					kind: "primary"
 					width: 90
-					height: 24
-					radius: 4
-					color: UiTheme.accent
-
-					Text {
-						anchors.centerIn: parent
-						text: "Authenticate"
-						color: UiTheme.onAccent
-						font.family: UiTheme.fontFamily
-						font.pixelSize: UiTheme.fontSmall
-					}
-
-					MouseArea {
-						anchors.fill: parent
-						onClicked: root.submit()
-					}
+					text: "Authenticate"
+					onClicked: root.submit()
 				}
 
-				Rectangle {
+				PanelButton {
 					width: 70
-					height: 24
-					radius: 4
-					color: UiTheme.fill
-
-					Text {
-						anchors.centerIn: parent
-						text: "Cancel"
-						color: UiTheme.text
-						font.family: UiTheme.fontFamily
-						font.pixelSize: UiTheme.fontSmall
-					}
-
-					MouseArea {
-						anchors.fill: parent
-						onClicked: root.cancel()
-					}
+					text: "Cancel"
+					onClicked: root.cancel()
 				}
 			}
 		}

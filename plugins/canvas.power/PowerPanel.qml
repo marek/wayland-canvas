@@ -76,45 +76,13 @@ PanelCard {
 	}
 
 	// The battery: everything the bar glyph says, spelled out.
-	Item {
-		width: parent.width
-		height: 44
-
-		Row {
-			anchors.verticalCenter: parent.verticalCenter
-			spacing: 10
-
-			Text {
-				anchors.verticalCenter: parent.verticalCenter
-				text: root.present ? PowerState.glyph() : "󰁹"
-				color: UiTheme.text
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontIcon
-				}
-				renderType: Text.NativeRendering
-			}
-
-			Column {
-				spacing: 0
-				anchors.verticalCenter: parent.verticalCenter
-
-				PanelText {
-					text: root.present ? PowerState.level + "%" : "No battery"
-				}
-
-				PanelText {
-					dim: true
-					text: root.stateName() + (root.timeLeft() !== "" ? " · " + root.timeLeft() : "")
-				}
-			}
-		}
+	PanelHero {
+		glyph: root.present ? PowerState.glyph() : "󰁹"
+		title: root.present ? PowerState.level + "%" : "No battery"
+		meta: root.stateName() + (root.timeLeft() !== "" ? " · " + root.timeLeft() : "")
 	}
 
-	PanelText {
-		dim: true
-		width: parent.width
-		height: UiTheme.sectionHeight
+	PanelSectionHeader {
 		text: "Power profile"
 	}
 
@@ -132,10 +100,7 @@ PanelCard {
 		}
 	}
 
-	PanelText {
-		dim: true
-		width: parent.width
-		height: UiTheme.sectionHeight
+	PanelSectionHeader {
 		text: "Session"
 	}
 

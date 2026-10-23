@@ -20,14 +20,14 @@ Item {
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: root.chosen
 		color: UiTheme.selected
 	}
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: mouse.containsMouse
 		color: UiTheme.hover
 	}
@@ -37,9 +37,9 @@ Item {
 	// card's edge.
 	Column {
 		anchors.left: parent.left
-		anchors.leftMargin: 8
+		anchors.leftMargin: UiTheme.rowInset
 		anchors.verticalCenter: parent.verticalCenter
-		width: parent.width - 8 - 24
+		width: parent.width - UiTheme.rowInset - 24
 		spacing: 0
 
 		PanelText {
@@ -68,11 +68,11 @@ Item {
 
 	Rectangle {
 		anchors.right: parent.right
-		anchors.rightMargin: 8
+		anchors.rightMargin: UiTheme.rowInset
 		anchors.verticalCenter: parent.verticalCenter
 		width: 8
 		height: 8
-		radius: 4
+		radius: width / 2
 		visible: root.chosen
 		color: UiTheme.accent
 	}

@@ -57,41 +57,22 @@ PanelCard {
 		return "Found"
 	}
 
-	PanelRow {
+	PanelSwitchRow {
 		visible: root.adapter != null
 		label: "Bluetooth"
-		onClicked: if (root.adapter != null) root.adapter.enabled = !root.adapter.enabled
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.radioOn
-			onToggled: if (root.adapter != null)
-				root.adapter.enabled = !root.adapter.enabled
-		}
+		checked: root.radioOn
+		onToggled: if (root.adapter != null) root.adapter.enabled = !root.adapter.enabled
 	}
 
-	PanelRow {
+	PanelSwitchRow {
 		visible: root.radioOn
 		label: "Scan"
-		onClicked: if (root.adapter != null) root.adapter.discovering = !root.adapter.discovering
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.adapter != null && root.adapter.discovering
-			onToggled: if (root.adapter != null)
-				root.adapter.discovering = !root.adapter.discovering
-		}
+		checked: root.adapter != null && root.adapter.discovering
+		onToggled: if (root.adapter != null) root.adapter.discovering = !root.adapter.discovering
 	}
 
-	PanelText {
+	PanelSectionHeader {
 		visible: root.radioOn
-		dim: true
-		width: parent.width
-		height: UiTheme.sectionHeight
 		text: "Devices"
 	}
 
@@ -106,17 +87,9 @@ PanelCard {
 			marked: device.connected
 			onClicked: root.actOn(device)
 
-			Text {
-				anchors.right: parent.right
-				anchors.rightMargin: 8
-				anchors.verticalCenter: parent.verticalCenter
+			PanelText {
+				dim: true
 				text: root.stateName(row.device)
-				color: UiTheme.muted
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontBody
-				}
-				renderType: Text.NativeRendering
 			}
 		}
 	}

@@ -87,10 +87,10 @@ PanelWindow {
 	}
 
 	readonly property real screenW: anchorWindow && anchorWindow.screen
-		? anchorWindow.screen.width : 1280
+		? anchorWindow.screen.width : UiTheme.screenWidth
 	readonly property real screenH: anchorWindow && anchorWindow.screen
-		? anchorWindow.screen.height : 720
-	readonly property real barH: anchorWindow ? anchorWindow.height : 26
+		? anchorWindow.screen.height : UiTheme.screenHeight
+	readonly property real barH: anchorWindow ? anchorWindow.height : UiTheme.barHeight
 
 	// The card: placed by its anchor, kept inside the output. A bar
 	// widget hangs centred under its indicator. An anchor that Qt cannot

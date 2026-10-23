@@ -26,7 +26,7 @@ Item {
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: mouse.containsMouse
 		color: UiTheme.hover
 	}
@@ -45,7 +45,7 @@ Item {
 	KeyChip {
 		id: chip
 		anchors.left: parent.left
-		anchors.leftMargin: 8
+		anchors.leftMargin: UiTheme.rowInset
 		anchors.verticalCenter: parent.verticalCenter
 		chord: root.command && root.command.keys ? root.command.keys : "None"
 		onClicked: root.record(field.text)
@@ -54,38 +54,31 @@ Item {
 	PanelField {
 		id: field
 		anchors.left: chip.right
-		anchors.leftMargin: 8
-		anchors.right: removeText.left
-		anchors.rightMargin: 8
+		anchors.leftMargin: UiTheme.rowInset
+		anchors.right: removeButton.left
+		anchors.rightMargin: UiTheme.rowInset
 		anchors.verticalCenter: parent.verticalCenter
-		height: 24
+		height: UiTheme.controlHeight
 		text: root.command ? root.command.command : ""
 		onAccepted: root.save(text)
 	}
 
-	PanelText {
-		id: removeText
+	PanelButton {
+		id: removeButton
+		kind: "flat"
+		dim: true
 		anchors.right: parent.right
-		anchors.rightMargin: 8
+		anchors.rightMargin: UiTheme.rowInset
 		anchors.verticalCenter: parent.verticalCenter
 		text: "Remove"
-		color: removeMouse.containsMouse ? UiTheme.attention : UiTheme.muted
-
-		MouseArea {
-			id: removeMouse
-			anchors.fill: parent
-			anchors.margins: -6
-			hoverEnabled: true
-			cursorShape: Qt.PointingHandCursor
-			onClicked: root.remove()
-		}
+		onClicked: root.remove()
 	}
 
 	PanelText {
 		visible: root.detail !== ""
-		x: 8
+		x: UiTheme.rowInset
 		y: UiTheme.rowHeight
-		width: parent.width - 16
+		width: parent.width - 2 * UiTheme.rowInset
 		elide: Text.ElideRight
 		color: UiTheme.attention
 		text: root.detail

@@ -27,18 +27,12 @@ Column {
 	spacing: UiTheme.panelSpacing
 	enabled: ready
 
-	PanelRow {
+	PanelSwitchRow {
 		label: root.label
 		detail: root.ready ? root.kelvin + " K" : "—"
 		clickable: false
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.on
-			onToggled: root.chose("nightLight", !root.on)
-		}
+		checked: root.on
+		onToggled: root.chose("nightLight", !root.on)
 	}
 
 	PanelSlider {

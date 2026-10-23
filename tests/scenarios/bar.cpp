@@ -2861,9 +2861,10 @@ int walk() {
 		shot("power-profiles");
 		phase = 41;
 		return 400;
-	case 41: { // "Power saver" is the second row: the battery block above it
-		// and nothing below it is ever clicked — the Session rows (Suspend,
-		// Restart, Power off, Log out) sit below the other two profiles.
+	case 41: { // "Power saver" is the first profile row: the battery hero and the
+		// "Power profile" header sit above it, and nothing below it is ever
+		// clicked — the Session rows (Suspend, Restart, Power off, Log out)
+		// sit below the other two profiles.
 		if (!settle_advance("power-profiles")) {
 			return 400; // the rows are still settling under load
 		}
@@ -2872,8 +2873,9 @@ int walk() {
 			phase = 2;
 			return 300;
 		}
-		// rows: battery, Power saver, Balanced, Performance, 4 session rows
-		click(popup_box.x + popup_box.width / 2.0, rows[1].centre());
+		// the card's padding, the hero, the header, the gaps and half a row
+		constexpr int power_saver_y = 10 + 44 + 6 + 18 + 6 + 16;
+		click(popup_box.x + popup_box.width / 2.0, popup_box.y + power_saver_y);
 		phase = 42;
 		return 400;
 	}

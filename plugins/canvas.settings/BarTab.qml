@@ -30,22 +30,14 @@ Column {
 					return w.section === section.modelData
 				})
 
-				PanelRow {
-					id: widgetRow
+				PanelSwitchRow {
 					required property var modelData
 					label: modelData.pluginName
 					detail: modelData.description
 					marked: modelData.hidden
 					clickable: false
-
-					PanelSwitch {
-						anchors.right: parent.right
-						anchors.rightMargin: 8
-						anchors.verticalCenter: parent.verticalCenter
-						checked: !widgetRow.modelData.hidden
-						onToggled: root.shell.setBarHidden(widgetRow.modelData.name,
-							!widgetRow.modelData.hidden)
-					}
+					checked: !modelData.hidden
+					onToggled: root.shell.setBarHidden(modelData.name, !modelData.hidden)
 				}
 			}
 		}

@@ -16,7 +16,7 @@ Column {
 
 	Item {
 		width: parent.width
-		height: pills.visible ? 48 : 18
+		height: UiTheme.sectionHeight
 
 		PanelSectionHeader {
 			id: bandHeader
@@ -27,7 +27,7 @@ Column {
 		Row {
 			anchors.right: parent.right
 			anchors.verticalCenter: bandHeader.verticalCenter
-			spacing: 6
+			spacing: UiTheme.panelSpacing
 
 			PanelSectionHeader {
 				// inside the row: its own width, not the row's
@@ -41,26 +41,25 @@ Column {
 				onToggled: root.service.toggleAuto()
 			}
 		}
+	}
 
-		Row {
-			id: pills
-			visible: root.service.bandEffective !== "auto"
-				&& root.service.bandAvailable.length > 1
-			y: 24
-			width: parent.width
-			spacing: 6
+	Row {
+		id: pills
+		visible: root.service.bandEffective !== "auto"
+			&& root.service.bandAvailable.length > 1
+		width: parent.width
+		spacing: UiTheme.panelSpacing
 
-			Repeater {
-				model: root.service.bandAvailable
+		Repeater {
+			model: root.service.bandAvailable
 
-				Pill {
-					required property string modelData
-					width: (parent.width - 2 * pills.spacing) / 3
-					text: modelData + " GHz"
-					active: root.service.bandCurrent === modelData
-					chosen: root.service.bandEffective === modelData
-					onClicked: root.service.setBand(modelData)
-				}
+			PanelPill {
+				required property string modelData
+				width: (parent.width - 2 * pills.spacing) / 3
+				text: modelData + " GHz"
+				active: root.service.bandCurrent === modelData
+				chosen: root.service.bandEffective === modelData
+				onClicked: root.service.setBand(modelData)
 			}
 		}
 	}

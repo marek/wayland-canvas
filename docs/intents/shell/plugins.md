@@ -153,13 +153,17 @@ and no other's: the bars of the outputs that stay keep their widgets and what
 the widgets hold.
 
 Plugins draw with the shell's UI kit, a QML module they import as
-`WaylandCanvas.Ui`: the bar button, the panel card and its rows, sliders,
-switches, tabs, choice rows, key chips, text and fields, all coloured from
-`api.theme`, and the edge strip of the overview - its window, slide,
-label chip and the placement of a card beside it - which the toolbar and
-the app bar are both written on. The host offers only valid toolbar
-buttons: one naming none or more than one of `action`, `panel` and `menu`
-is dropped when the plugins load.
+`WaylandCanvas.Ui`: the bar button, the panel card and its hero, section
+headers and rows (a row takes a switch, a label or a control in a trailing
+slot; a switch row is the common case), buttons in four kinds, pills,
+meters, sliders, switches, tabs, choice rows, key chips, text and fields,
+all coloured from `api.theme`, and the edge strip of the overview - its
+window, slide, label chip and the placement of a card beside it - which the
+toolbar and the app bar are both written on. A plugin sizes its panel with
+the kit's metrics (`UiTheme.radius`, `rowInset`, `controlHeight`) rather
+than literals, so the kit's look changes in one place. The host offers only
+valid toolbar buttons: one naming none or more than one of `action`, `panel`
+and `menu` is dropped when the plugins load.
 
 ### Built-in plugins
 

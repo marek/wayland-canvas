@@ -50,7 +50,7 @@ Item {
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: mouse.containsMouse
 		color: UiTheme.hover
 	}
@@ -66,9 +66,9 @@ Item {
 	// The label line, with the buttons parked on its right, above the
 	// row's own mouse area.
 	PanelText {
-		x: 8
+		x: UiTheme.rowInset
 		y: (UiTheme.rowHeight - implicitHeight) / 2
-		width: parent.width - 16 - buttons.width - 8
+		width: parent.width - 3 * UiTheme.rowInset - buttons.width
 		elide: Text.ElideRight
 		text: root.entry ? root.entry.label : ""
 		color: root.fault !== "" ? UiTheme.attention : UiTheme.text
@@ -77,45 +77,31 @@ Item {
 	Row {
 		id: buttons
 		anchors.right: parent.right
-		anchors.rightMargin: 8
+		anchors.rightMargin: UiTheme.rowInset
 		anchors.verticalCenter: parent.top
 		anchors.verticalCenterOffset: UiTheme.rowHeight / 2
-		spacing: 8
+		spacing: UiTheme.rowInset
 
-		PanelText {
+		PanelButton {
+			kind: "flat"
+			dim: true
 			visible: root.differs
 			text: "Reset"
-			color: resetMouse.containsMouse ? UiTheme.attention : UiTheme.muted
-
-			MouseArea {
-				id: resetMouse
-				anchors.fill: parent
-				anchors.margins: -6
-				hoverEnabled: true
-				cursorShape: Qt.PointingHandCursor
-				onClicked: root.reset()
-			}
+			onClicked: root.reset()
 		}
 
-		PanelText {
+		PanelButton {
+			kind: "flat"
+			dim: true
 			visible: root.hasKeys
 			text: "Clear"
-			color: clearMouse.containsMouse ? UiTheme.attention : UiTheme.muted
-
-			MouseArea {
-				id: clearMouse
-				anchors.fill: parent
-				anchors.margins: -6
-				hoverEnabled: true
-				cursorShape: Qt.PointingHandCursor
-				onClicked: root.clear()
-			}
+			onClicked: root.clear()
 		}
 	}
 
 	// The chords line.
 	Row {
-		x: 8
+		x: UiTheme.rowInset
 		y: UiTheme.rowHeight + (UiTheme.rowHeight - height) / 2
 		spacing: 4
 
@@ -139,9 +125,9 @@ Item {
 	// The prompt, the moved-chord line or the error, only while there.
 	PanelText {
 		visible: root.detail !== ""
-		x: 8
+		x: UiTheme.rowInset
 		y: 2 * UiTheme.rowHeight
-		width: parent.width - 16
+		width: parent.width - 2 * UiTheme.rowInset
 		elide: Text.ElideRight
 		color: root.fault !== "" ? UiTheme.attention : UiTheme.muted
 		text: root.detail

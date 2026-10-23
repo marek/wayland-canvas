@@ -19,7 +19,7 @@ TextField {
 		pixelSize: UiTheme.fontBody
 	}
 	background: Rectangle {
-		radius: 4
+		radius: UiTheme.radius
 		color: UiTheme.fill
 		border.width: 1
 		border.color: root.activeFocus ? UiTheme.accent : "transparent"

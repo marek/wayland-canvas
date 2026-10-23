@@ -31,7 +31,7 @@ Item {
 				required property var modelData
 				width: root.width / root.tabs.length
 				height: UiTheme.rowHeight
-				radius: 4
+				radius: UiTheme.radius
 				color: tab.modelData.id === root.current
 					? UiTheme.selected : "transparent"
 

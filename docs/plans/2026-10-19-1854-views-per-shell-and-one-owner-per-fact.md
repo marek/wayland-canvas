@@ -1640,7 +1640,7 @@ Tests:
     `plugins/canvas.network/nmcli.js`. Applying one (`dnsRequest`), reading
     a connection back (`classifyDns`) and the pills all read it, and the
     typed one is the entry flagged `typed`.
-- [ ] The UI kit covers what the plugins rebuild by hand
+- [x] The UI kit covers what the plugins rebuild by hand
   - Add `PanelButton`, a trailing slot on `PanelRow`, `PanelSwitchRow`,
     `PanelMeter`, `PanelPill` and `UiTheme.radius` (PanelRow.qml:32, 39;
     ChoiceRow.qml:23, 30).
@@ -1664,7 +1664,23 @@ Tests:
   - Acceptance:
     - `git grep -c 'rightMargin: 8' -- plugins` finds none.
     - The bar scenario's screenshots are green.
-    - A nested run looks unchanged (on screen).
+    - A nested run looks unchanged (on screen owed).
+  - Done: the kit gained `PanelButton` (kinds fill, primary, outline and
+    flat, with an icon form), `PanelSwitchRow`, `PanelMeter`, `PanelPill`,
+    a default trailing slot on `PanelRow` (which also takes a colour
+    swatch, so the toolbar's flyout is a PanelRow and `FlyoutRow` is
+    gone), and `UiTheme.radius`, `rowInset`, `controlHeight`,
+    `fieldHeight`, `buttonSize`, `scrim`, `screenWidth` and
+    `screenHeight`. `PanelRow.reserve` went with the slot: the label is
+    elided before whatever the caller put there. PanelCard's fallbacks
+    read `UiTheme`; its clamp was already one `StripLayout.clampInside`.
+    The network plugin's Pill and HeroButton, PowerPanel's hero, the
+    hand-drawn meters, buttons and `Text` blocks of the agents, clock,
+    polkit, notification, tray and settings plugins, and the dim
+    section labels all use the kit now. The one bar.cpp change: the
+    power flow clicked "Power saver" as the second text band, which a
+    bold section header now also is, so it clicks by geometry.
+    The bar scenario is green (657 checks, 0 failures).
 
 ### 8. One owner per fact: tests, build and tools
 

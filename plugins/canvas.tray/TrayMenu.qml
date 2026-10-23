@@ -64,32 +64,17 @@ PanelCard {
 		width: parent.width
 		height: UiTheme.sectionHeight
 
-		PanelText {
+		PanelSectionHeader {
 			visible: root.stack.length === 0
-			anchors.left: parent.left
-			dim: true
 			text: root.entry ? (root.entry.title !== "" ? root.entry.title : root.entry.id) : ""
 		}
 
-		Text {
+		PanelButton {
+			kind: "flat"
 			visible: root.stack.length > 0
 			anchors.left: parent.left
 			text: "‹ " + (root.stack.length > 0 ? root.stack[root.stack.length - 1].title : "")
-			color: backMouse.containsMouse ? UiTheme.attention : UiTheme.text
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.fontBody
-			}
-			renderType: Text.NativeRendering
-
-			MouseArea {
-				id: backMouse
-				anchors.fill: parent
-				anchors.margins: -6
-				hoverEnabled: true
-				cursorShape: Qt.PointingHandCursor
-				onClicked: root.pop()
-			}
+			onClicked: root.pop()
 		}
 	}
 
@@ -110,8 +95,8 @@ PanelCard {
 			Rectangle {
 				visible: entry.menuEntry.isSeparator
 				anchors.verticalCenter: parent.verticalCenter
-				x: 8
-				width: parent.width - 16
+				x: UiTheme.rowInset
+				width: parent.width - 2 * UiTheme.rowInset
 				height: 1
 				color: UiTheme.muted
 			}
@@ -135,18 +120,10 @@ PanelCard {
 					}
 				}
 
-				Text {
+				PanelText {
 					visible: entry.menuEntry.hasChildren
-					anchors.right: parent.right
-					anchors.rightMargin: 8
-					anchors.verticalCenter: parent.verticalCenter
+					dim: true
 					text: "▸"
-					color: UiTheme.muted
-					font {
-						family: UiTheme.fontFamily
-						pixelSize: UiTheme.fontBody
-					}
-					renderType: Text.NativeRendering
 				}
 			}
 		}

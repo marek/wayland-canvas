@@ -8,4 +8,3 @@ BandSection BandSection.qml
 DnsSection DnsSection.qml
 ShareView ShareView.qml
 SpeedView SpeedView.qml
-Pill Pill.qml

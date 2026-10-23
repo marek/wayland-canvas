@@ -99,21 +99,15 @@ PanelCard {
 				radius: 12
 				color: chip.index === root.current ? UiTheme.selected : UiTheme.fill
 
-				Text {
+				PanelText {
 					id: chipText
 					anchors.centerIn: parent
 					width: parent.width - 12
 					horizontalAlignment: Text.AlignHCenter
-					textFormat: Text.PlainText
-					renderType: Text.NativeRendering
 					elide: Text.ElideRight
 					text: chip.modelData.name
-					color: UiTheme.text
-					font {
-						family: UiTheme.fontFamily
-						pixelSize: UiTheme.fontSmall
-						bold: chip.index === root.current
-					}
+					font.pixelSize: UiTheme.fontSmall
+					font.bold: chip.index === root.current
 				}
 
 				MouseArea {
@@ -130,24 +124,18 @@ PanelCard {
 		visible: root.provider != null && root.provider.usageStatusText !== ""
 		width: parent.width
 		height: 48
-		radius: 4
+		radius: UiTheme.radius
 		color: Qt.rgba(UiTheme.attention.r, UiTheme.attention.g,
 			UiTheme.attention.b, UiTheme.light ? 0.10 : 0.14)
 
-		Text {
+		PanelText {
 			anchors.fill: parent
-			anchors.leftMargin: 8
-			anchors.rightMargin: 8
-			textFormat: Text.PlainText
-			renderType: Text.NativeRendering
+			anchors.leftMargin: UiTheme.rowInset
+			anchors.rightMargin: UiTheme.rowInset
 			wrapMode: Text.WordWrap
 			verticalAlignment: Text.AlignVCenter
 			text: root.provider ? root.provider.authHelpText : ""
 			color: UiTheme.attention
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.fontBody
-			}
 		}
 	}
 
@@ -173,57 +161,31 @@ PanelCard {
 			width: parent.width
 			height: 39
 
-			Text {
+			PanelText {
 				text: window.limit.title
-				color: UiTheme.text
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontBody
-				}
-				renderType: Text.NativeRendering
 			}
 
-			Text {
+			PanelText {
 				anchors.right: parent.right
 				text: Math.round(window.limit.percent * 100) + "%"
 				color: window.spent ? UiTheme.attention : UiTheme.text
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontBody
-					bold: true
-				}
-				renderType: Text.NativeRendering
+				font.bold: true
 			}
 
-			// The meter: the track in the panel's own grey, the share in
-			// the accent — the attention colour once it is nearly spent.
-			Rectangle {
-				id: track
+			// The share in the accent — the attention colour once it is
+			// nearly spent.
+			PanelMeter {
 				y: 19
-				width: parent.width
-				height: 5
-				radius: 2
-				color: UiTheme.track
-
-				Rectangle {
-					width: Math.max(0, Math.min(window.limit.percent, 1))
-						* parent.width
-					height: parent.height
-					radius: 2
-					color: window.spent ? UiTheme.attention : UiTheme.accent
-				}
+				value: window.limit.percent
+				fill: window.spent ? UiTheme.attention : UiTheme.accent
 			}
 
-			Text {
+			PanelText {
 				y: 27
 				width: parent.width
+				dim: true
 				text: root.resetsIn(window.limit.resetsAt)
-				color: UiTheme.muted
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontSmall
-				}
-				renderType: Text.NativeRendering
+				font.pixelSize: UiTheme.fontSmall
 			}
 		}
 	}
@@ -254,46 +216,25 @@ PanelCard {
 				width: parent.width
 				height: 22
 
-				Text {
+				PanelText {
+					dim: !day.modelData.today
 					text: day.modelData.label
-					color: day.modelData.today ? UiTheme.text : UiTheme.muted
-					font {
-						family: UiTheme.fontFamily
-						pixelSize: UiTheme.fontBody
-						bold: day.modelData.today
-					}
-					renderType: Text.NativeRendering
+					font.bold: day.modelData.today
 				}
 
-				Rectangle {
+				PanelMeter {
 					x: 60
 					width: parent.width - 116
-					height: 5
-					radius: 2
 					anchors.verticalCenter: parent.verticalCenter
-					color: UiTheme.track
-
-					Rectangle {
-						width: day.busiest > 0
-							? day.modelData.tokens / day.busiest * parent.width
-							: 0
-						height: parent.height
-						radius: 2
-						color: day.modelData.today
-							? UiTheme.text : UiTheme.muted
-					}
+					value: day.busiest > 0 ? day.modelData.tokens / day.busiest : 0
+					fill: day.modelData.today ? UiTheme.text : UiTheme.muted
 				}
 
-				Text {
+				PanelText {
 					anchors.right: parent.right
+					dim: !day.modelData.today
 					text: day.modelData.tokensText
-					color: day.modelData.today ? UiTheme.text : UiTheme.muted
-					font {
-						family: UiTheme.fontFamily
-						pixelSize: UiTheme.fontBody
-						bold: day.modelData.today
-					}
-					renderType: Text.NativeRendering
+					font.bold: day.modelData.today
 				}
 			}
 		}
@@ -323,38 +264,28 @@ PanelCard {
 				width: parent.width
 				height: 26
 
-				Rectangle {
-					width: modelRow.heaviest > 0
-						? Math.max(0, Math.min(modelRow.modelData.total
-							/ modelRow.heaviest, 1)) * parent.width : 0
+				PanelMeter {
+					width: parent.width
 					height: parent.height
 					radius: 3
-					color: UiTheme.fill
+					color: "transparent"
+					value: modelRow.heaviest > 0
+						? modelRow.modelData.total / modelRow.heaviest : 0
+					fill: UiTheme.fill
 				}
 
-				Text {
+				PanelText {
 					x: 6
 					anchors.verticalCenter: parent.verticalCenter
 					text: modelRow.modelData.name
-					color: UiTheme.text
-					font {
-						family: UiTheme.fontFamily
-						pixelSize: UiTheme.fontBody
-					}
-					renderType: Text.NativeRendering
 				}
 
-				Text {
+				PanelText {
 					anchors.right: parent.right
 					anchors.rightMargin: 6
 					anchors.verticalCenter: parent.verticalCenter
+					dim: true
 					text: modelRow.modelData.totalText
-					color: UiTheme.muted
-					font {
-						family: UiTheme.fontFamily
-						pixelSize: UiTheme.fontBody
-					}
-					renderType: Text.NativeRendering
 				}
 			}
 		}
@@ -425,17 +356,12 @@ PanelCard {
 	Component {
 		id: glyphMark
 
-		Text {
+		PanelText {
 			text: "★"
-			textFormat: Text.PlainText
-			renderType: Text.NativeRendering
 			horizontalAlignment: Text.AlignHCenter
 			verticalAlignment: Text.AlignVCenter
 			color: UiTheme.accent
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.heroIcon - 4
-			}
+			font.pixelSize: UiTheme.heroIcon - 4
 		}
 	}
 

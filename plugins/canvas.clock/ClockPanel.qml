@@ -35,38 +35,23 @@ PanelCard {
 			&& date.getDate() === today.getDate()
 	}
 
+	function stepMonth(by) {
+		var month = new Date(viewYear, viewMonth + by, 1)
+		viewYear = month.getFullYear()
+		viewMonth = month.getMonth()
+	}
+
 	// Month stepper: ‹ name ›
 	Item {
 		width: parent.width
 		height: UiTheme.rowHeight
 
-		Text {
+		PanelButton {
+			kind: "flat"
 			anchors.left: parent.left
 			anchors.verticalCenter: parent.verticalCenter
 			text: "‹"
-			color: prevMouse.containsMouse ? UiTheme.attention : UiTheme.text
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.fontBody
-			}
-			renderType: Text.NativeRendering
-
-			MouseArea {
-				id: prevMouse
-				anchors.fill: parent
-				anchors.margins: -6
-				hoverEnabled: true
-				cursorShape: Qt.PointingHandCursor
-				onClicked: {
-					var month = root.viewMonth - 1
-					if (month < 0) {
-						root.viewMonth = 11
-						root.viewYear--
-					} else {
-						root.viewMonth = month
-					}
-				}
-			}
+			onClicked: root.stepMonth(-1)
 		}
 
 		PanelText {
@@ -74,33 +59,12 @@ PanelCard {
 			text: root.monthName
 		}
 
-		Text {
+		PanelButton {
+			kind: "flat"
 			anchors.right: parent.right
 			anchors.verticalCenter: parent.verticalCenter
 			text: "›"
-			color: nextMouse.containsMouse ? UiTheme.attention : UiTheme.text
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.fontBody
-			}
-			renderType: Text.NativeRendering
-
-			MouseArea {
-				id: nextMouse
-				anchors.fill: parent
-				anchors.margins: -6
-				hoverEnabled: true
-				cursorShape: Qt.PointingHandCursor
-				onClicked: {
-					var month = root.viewMonth + 1
-					if (month > 11) {
-						root.viewMonth = 0
-						root.viewYear++
-					} else {
-						root.viewMonth = month
-					}
-				}
-			}
+			onClicked: root.stepMonth(1)
 		}
 	}
 

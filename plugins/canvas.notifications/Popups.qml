@@ -85,12 +85,11 @@ PanelWindow {
 					width: parent.width - 2 * UiTheme.panelPadding
 					spacing: 4
 
-					Text {
+					PanelText {
 						width: parent.width
-						text: card.modelData.appName
-						color: UiTheme.muted
+						dim: true
 						elide: Text.ElideRight
-						font.family: UiTheme.fontFamily
+						text: card.modelData.appName
 						font.pixelSize: UiTheme.fontSmall
 					}
 
@@ -111,25 +110,19 @@ PanelWindow {
 								? 32 + UiTheme.panelSpacing : 0)
 							spacing: 2
 
-							Text {
+							PanelText {
 								width: parent.width
-								text: card.modelData.summary
-								color: UiTheme.text
 								wrapMode: Text.WordWrap
-								font.family: UiTheme.fontFamily
-								font.pixelSize: UiTheme.fontBody
+								text: card.modelData.summary
 								font.bold: true
 							}
 
-							Text {
+							PanelText {
 								width: parent.width
 								visible: card.modelData.body !== ""
-								text: card.modelData.body
-								color: UiTheme.text
 								wrapMode: Text.WordWrap
 								textFormat: Text.StyledText
-								font.family: UiTheme.fontFamily
-								font.pixelSize: UiTheme.fontBody
+								text: card.modelData.body
 							}
 						}
 					}
@@ -141,30 +134,13 @@ PanelWindow {
 						Repeater {
 							model: card.modelData.actions
 
-							delegate: Rectangle {
+							delegate: PanelButton {
 								required property var modelData
 
 								height: 22
-								width: label.implicitWidth + 2 * UiTheme.panelPadding
-								radius: 4
-								color: action.containsMouse ? UiTheme.hover : UiTheme.fill
-
-								Text {
-									id: label
-									anchors.centerIn: parent
-									text: parent.modelData.text
-									color: UiTheme.text
-									font.family: UiTheme.fontFamily
-									font.pixelSize: UiTheme.fontSmall
-								}
-
-								MouseArea {
-									id: action
-									anchors.fill: parent
-									hoverEnabled: true
-									onClicked: Notifications.invoke(card.modelData.id,
-										parent.modelData.id)
-								}
+								text: modelData.text
+								onClicked: Notifications.invoke(card.modelData.id,
+									modelData.id)
 							}
 						}
 					}

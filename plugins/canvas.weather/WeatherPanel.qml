@@ -32,17 +32,9 @@ PanelCard {
 			glyph: day.glyph
 			label: day.name
 
-			Text {
-				anchors.right: parent.right
-				anchors.rightMargin: 8
-				anchors.verticalCenter: parent.verticalCenter
+			PanelText {
+				dim: true
 				text: day.min + "° / " + day.max + "°"
-				color: UiTheme.muted
-				font {
-					family: UiTheme.fontFamily
-					pixelSize: UiTheme.fontBody
-				}
-				renderType: Text.NativeRendering
 			}
 		}
 	}

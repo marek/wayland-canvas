@@ -51,18 +51,12 @@ Column {
 		text: "The app bar"
 	}
 
-	PanelRow {
+	PanelSwitchRow {
 		label: "Show the app bar"
 		detail: "Every open app on an edge of the overview"
 		clickable: false
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.appBarEnabled
-			onToggled: root.shell.setAppBarEnabled(!root.appBarEnabled)
-		}
+		checked: root.appBarEnabled
+		onToggled: root.shell.setAppBarEnabled(!root.appBarEnabled)
 	}
 
 	ChoiceRow {

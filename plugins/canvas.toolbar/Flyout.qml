@@ -1,6 +1,5 @@
 import QtQuick
 import WaylandCanvas.Ui
-import "."
 
 // A menu button's flyout: rows of a glyph or a colour swatch and a
 // label, on the toolbar's inner side toward the screen's centre, level
@@ -46,12 +45,14 @@ Rectangle {
 		Repeater {
 			model: root.button != null ? root.button.spec.menu : []
 
-			FlyoutRow {
+			PanelRow {
 				required property var modelData
-				entry: modelData
-				onChosen: {
-					if (root.api != null && entry.action !== "") {
-						root.api.actions.run(entry.action, entry.args)
+				glyph: modelData.icon !== undefined ? modelData.icon : ""
+				swatch: modelData.color !== undefined ? modelData.color : ""
+				label: modelData.label !== undefined ? modelData.label : ""
+				onClicked: {
+					if (root.api != null && modelData.action !== "") {
+						root.api.actions.run(modelData.action, modelData.args)
 					}
 					root.surface.foldFlyout()
 				}

@@ -42,6 +42,9 @@ QtObject {
 	readonly property color fill: light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.06)
 	readonly property color track: light ? Qt.rgba(0, 0, 0, 0.14) : Qt.rgba(1, 1, 1, 0.14)
 
+	// The dim behind a modal dialog, over whatever the screen shows.
+	readonly property color scrim: Qt.rgba(0, 0, 0, 0.45)
+
 	readonly property string fontFamily: "monospace"
 	readonly property int fontBody: 12
 	readonly property int fontSmall: 11 // section headers, a hero's meta line
@@ -61,4 +64,17 @@ QtObject {
 	readonly property int detailHeight: 14
 	readonly property int heroHeight: 44
 	readonly property int heroIcon: 32
+
+	// The corner of every control: a row's tint, a field, a button, a pill.
+	readonly property int radius: 4
+	// How far a row's content sits from the row's edges, and the gap between
+	// its glyph and its label.
+	readonly property int rowInset: 8
+	readonly property int controlHeight: 24 // a button or a pill
+	readonly property int fieldHeight: 30 // a text field in a panel
+	readonly property int buttonSize: 26 // an icon button's square
+
+	// What a panel assumes of its output until its anchor's window has one.
+	readonly property int screenWidth: 1280
+	readonly property int screenHeight: 720
 }

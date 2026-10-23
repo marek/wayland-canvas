@@ -146,6 +146,7 @@ PanelWindow {
 
 	readonly property int stripPadding: 6
 	readonly property int bodyTop: 4
+	readonly property int bodyInset: 8
 	readonly property int bodyBottom: 16 // the grip's corner stays clear
 
 	Component.onCompleted: {
@@ -397,8 +398,8 @@ PanelWindow {
 
 			anchors.fill: parent
 			anchors.topMargin: strip.height + root.bodyTop
-			anchors.leftMargin: 8
-			anchors.rightMargin: 8
+			anchors.leftMargin: root.bodyInset
+			anchors.rightMargin: root.bodyInset
 			anchors.bottomMargin: root.bodyBottom
 			note: root.note
 			paper: root.paper

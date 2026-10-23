@@ -26,19 +26,13 @@ Column {
 
 	// A switch, a number and a text field each take one row; a choice takes
 	// a row per choice, its own label above them.
-	PanelRow {
+	PanelSwitchRow {
 		visible: root.entry != null && root.entry.type === "switch"
 		label: root.entry != null ? root.entry.label : ""
 		detail: root.entry != null ? root.entry.description : ""
 		clickable: false
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.entry != null && root.entry.value === true
-			onToggled: root.write(!(root.entry.value === true))
-		}
+		checked: root.entry != null && root.entry.value === true
+		onToggled: root.write(!(root.entry.value === true))
 	}
 
 	PanelRow {
@@ -50,9 +44,6 @@ Column {
 		// The kit's slider runs 0..1: the declared range maps onto it, and
 		// what comes back is rounded to the declared step.
 		PanelSlider {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
 			width: 120
 			value: root.span <= 0 ? 0
 				: (Number(root.entry.value) - root.entry.min) / root.span
@@ -74,9 +65,6 @@ Column {
 		clickable: false
 
 		PanelField {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
 			width: 140
 			text: root.entry != null && root.entry.value !== undefined
 				? String(root.entry.value) : ""

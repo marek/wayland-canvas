@@ -211,15 +211,19 @@ PanelCard {
 						? "Connected · " + root.service.bandCurrent + " GHz" : "Connected"
 				}
 
-				HeroButton {
+				PanelButton {
+					kind: "outline"
+					icon: true
 					visible: root.canShare
-					glyph: "󰐲"
+					text: "󰐲"
 					onClicked: root.service.shareQr()
 				}
 
-				HeroButton {
+				PanelButton {
+					kind: "outline"
+					icon: true
 					visible: root.canSpeedTest
-					glyph: "󰓅"
+					text: "󰓅"
 					onClicked: root.service.runSpeedTest()
 				}
 
@@ -238,7 +242,7 @@ PanelCard {
 				visible: root.connected
 				width: parent.width
 				columns: 2
-				spacing: 6
+				spacing: UiTheme.panelSpacing
 
 				Figure {
 					share: 0.55
@@ -356,16 +360,26 @@ PanelCard {
 
 						// The right edge: a lock while credentials are
 						// needed, Forget for known networks not in use.
-						Row {
-							anchors.right: parent.right
-							anchors.rightMargin: 8
-							anchors.verticalCenter: parent.verticalCenter
-							spacing: 6
+						Text {
+							visible: root.secured(entry.network)
+							text: "󰌾"
+							color: UiTheme.muted
+							font {
+								family: UiTheme.fontFamily
+								pixelSize: UiTheme.fontIcon
+							}
+							renderType: Text.NativeRendering
+						}
+
+						Item {
+							visible: entry.network.known && !entry.network.connected
+							width: 14
+							height: 14
 
 							Text {
-								visible: root.secured(entry.network)
-								text: "󰌾"
-								color: UiTheme.muted
+								anchors.centerIn: parent
+								text: "󰅙"
+								color: UiTheme.attention
 								font {
 									family: UiTheme.fontFamily
 									pixelSize: UiTheme.fontIcon
@@ -373,28 +387,11 @@ PanelCard {
 								renderType: Text.NativeRendering
 							}
 
-							Item {
-								visible: entry.network.known && !entry.network.connected
-								width: 14
-								height: 14
-
-								Text {
-									anchors.centerIn: parent
-									text: "󰅙"
-									color: UiTheme.attention
-									font {
-										family: UiTheme.fontFamily
-										pixelSize: UiTheme.fontIcon
-									}
-									renderType: Text.NativeRendering
-								}
-
-								MouseArea {
-									anchors.fill: parent
-									hoverEnabled: true
-									cursorShape: Qt.PointingHandCursor
-									onClicked: root.forget(entry.network)
-								}
+							MouseArea {
+								anchors.fill: parent
+								hoverEnabled: true
+								cursorShape: Qt.PointingHandCursor
+								onClicked: root.forget(entry.network)
 							}
 						}
 					}
@@ -412,7 +409,7 @@ PanelCard {
 							id: identity
 							visible: root.enterprise(entry.network)
 							width: parent.width
-							height: 30
+							height: UiTheme.fieldHeight
 							placeholderText: "Identity"
 							text: root.promptIdentity
 							onTextChanged: if (entry.promptMine
@@ -435,7 +432,7 @@ PanelCard {
 						PanelField {
 							id: passphrase
 							width: parent.width
-							height: 30
+							height: UiTheme.fieldHeight
 							password: true
 							placeholderText: root.enterprise(entry.network)
 								? "Passphrase" : "Password"
@@ -486,7 +483,7 @@ PanelCard {
 		// than its share: the last row's IP and its label together are
 		// wider than half, so that figure takes a little more of the row
 		property real share: 0.5
-		width: (parent.width - 6) * share
+		width: (parent.width - UiTheme.panelSpacing) * share
 		height: 16
 
 		Row {
@@ -522,43 +519,6 @@ PanelCard {
 					onClicked: root.copy(fig.value)
 				}
 			}
-		}
-	}
-
-	// A head control: a bordered glyph square.
-	component HeroButton: Item {
-		id: btn
-		property string glyph: ""
-		signal clicked()
-		width: 26
-		height: 26
-
-		Rectangle {
-			anchors.fill: parent
-			radius: 4
-			border.width: 1
-			border.color: UiTheme.border
-			color: mouse.containsMouse ? UiTheme.hover : "transparent"
-		}
-
-		Text {
-			anchors.centerIn: parent
-			text: btn.glyph
-			textFormat: Text.PlainText
-			renderType: Text.NativeRendering
-			color: UiTheme.text
-			font {
-				family: UiTheme.fontFamily
-				pixelSize: UiTheme.fontIcon
-			}
-		}
-
-		MouseArea {
-			id: mouse
-			anchors.fill: parent
-			hoverEnabled: true
-			cursorShape: Qt.PointingHandCursor
-			onClicked: btn.clicked()
 		}
 	}
 }

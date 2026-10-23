@@ -140,7 +140,7 @@ EdgeStrip {
 		color: UiTheme.panel
 		border.width: 1
 		border.color: UiTheme.border
-		radius: 4
+		radius: UiTheme.radius
 		x: spot.x
 		y: spot.y
 
@@ -160,10 +160,6 @@ EdgeStrip {
 
 				PanelRow {
 					required property var modelData
-
-					// Nothing is parked on the right of these rows: the
-					// title may use the card's full width, elided in it.
-					reserve: 8
 					label: modelData.title !== "" ? modelData.title
 						: (modelData.appId !== "" ? modelData.appId : "A window")
 					marked: modelData.focused === true

@@ -1,24 +1,23 @@
 import QtQuick
 import "."
 
-// One panel row: an optional leading glyph, a label, an optional smaller
-// detail under it, selection, hover, a click. A control the caller parks on
-// the row (a switch, a right-edge label) sits above the row's own mouse
-// area, so it keeps its clicks; plain text parked there does not take
-// clicks at all.
+// One panel row: an optional leading glyph or colour swatch, a label, an
+// optional smaller detail under it, selection, hover, a click. What the
+// caller declares inside the row (a switch, a right-edge label) goes into the
+// trailing slot: laid out right to left from the row's inset, above the
+// row's own mouse area so it keeps its clicks, with the label elided before
+// it. Plain text parked there does not take clicks at all.
 Item {
 	id: root
 
 	property string glyph: ""
+	property string swatch: "" // a colour, in place of the glyph
 	property string label: ""
 	property string detail: ""
 	property bool marked: false // the label in the attention colour
 	property bool selected: false // the accent-tinted fill of the chosen row
 	property bool clickable: true
-	// What the row keeps clear on its right for a control the caller parks
-	// there (a switch, a right-edge label): the text is elided before it, so
-	// nothing a row draws can run past it or out of the row.
-	property int reserve: 52
+	default property alias trailing: trailingRow.data
 	signal clicked()
 
 	width: parent ? parent.width : 0
@@ -29,14 +28,14 @@ Item {
 	// The chosen row's tint, with hover drawn over it.
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: root.selected && root.enabled
 		color: UiTheme.selected
 	}
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: mouse.containsMouse && root.enabled
 		color: UiTheme.hover
 	}
@@ -44,11 +43,11 @@ Item {
 	Row {
 		id: line
 		anchors.left: parent.left
-		anchors.leftMargin: 8
-		anchors.right: parent.right
-		anchors.rightMargin: root.reserve
+		anchors.leftMargin: UiTheme.rowInset
+		anchors.right: trailingRow.left
+		anchors.rightMargin: trailingRow.width > 0 ? UiTheme.panelSpacing : 0
 		anchors.verticalCenter: parent.verticalCenter
-		spacing: 8
+		spacing: UiTheme.rowInset
 
 		Text {
 			id: glyphText
@@ -62,10 +61,21 @@ Item {
 			renderType: Text.NativeRendering
 		}
 
-		// Bounded by what the glyph and the reserve leave: both lines are
-		// elided inside it, never drawn past the row.
+		Rectangle {
+			id: swatchBox
+			visible: root.swatch !== ""
+			width: UiTheme.iconSize
+			height: UiTheme.iconSize
+			radius: 3
+			color: root.swatch !== "" ? root.swatch : "transparent"
+		}
+
+		// Bounded by what the glyph or swatch and the trailing slot leave:
+		// both lines are elided inside it, never drawn past the row.
 		Column {
-			width: line.width - (glyphText.visible ? glyphText.width + line.spacing : 0)
+			width: line.width
+				- (glyphText.visible ? glyphText.width + line.spacing : 0)
+				- (swatchBox.visible ? swatchBox.width + line.spacing : 0)
 			spacing: 0
 
 			PanelText {
@@ -95,5 +105,13 @@ Item {
 		cursorShape: root.clickable && root.enabled
 			? Qt.PointingHandCursor : Qt.ArrowCursor
 		onClicked: root.clicked()
+	}
+
+	Row {
+		id: trailingRow
+		anchors.right: parent.right
+		anchors.rightMargin: UiTheme.rowInset
+		anchors.verticalCenter: parent.verticalCenter
+		spacing: UiTheme.panelSpacing
 	}
 }

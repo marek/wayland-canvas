@@ -4,4 +4,3 @@
 # a sibling names it here and imports "."
 ToolbarButton ToolbarButton.qml
 Flyout Flyout.qml
-FlyoutRow FlyoutRow.qml

@@ -9,18 +9,12 @@ PanelCard {
 
 	panelWidth: 310
 
-	PanelRow {
+	PanelSwitchRow {
 		label: "Silence popups"
 		detail: Notifications.silent
 			? "Notifications are kept, not shown" : "Popups show as they arrive"
-		onClicked: Notifications.setSilent(!Notifications.silent)
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.verticalCenter: parent.verticalCenter
-			checked: Notifications.silent
-			onToggled: Notifications.setSilent(!Notifications.silent)
-		}
+		checked: Notifications.silent
+		onToggled: Notifications.setSilent(!Notifications.silent)
 	}
 
 	PanelSeparator {}

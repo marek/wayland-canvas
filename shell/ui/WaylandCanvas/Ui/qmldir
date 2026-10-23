@@ -6,13 +6,17 @@ ChoiceRow ChoiceRow.qml
 EdgeStrip EdgeStrip.qml
 KeyChip KeyChip.qml
 NightLightControl NightLightControl.qml
+PanelButton PanelButton.qml
 PanelCard PanelCard.qml
 PanelField PanelField.qml
 PanelHero PanelHero.qml
+PanelMeter PanelMeter.qml
+PanelPill PanelPill.qml
 PanelRow PanelRow.qml
 PanelSectionHeader PanelSectionHeader.qml
 PanelSeparator PanelSeparator.qml
 PanelSlider PanelSlider.qml
 PanelSwitch PanelSwitch.qml
+PanelSwitchRow PanelSwitchRow.qml
 PanelTabs PanelTabs.qml
 PanelText PanelText.qml

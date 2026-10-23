@@ -82,18 +82,12 @@ Column {
 		text: "Pinch"
 	}
 
-	PanelRow {
+	PanelSwitchRow {
 		label: "Pinch to scale a desktop"
 		detail: "Super + 2 fingers"
 		clickable: false
-
-		PanelSwitch {
-			anchors.right: parent.right
-			anchors.rightMargin: 8
-			anchors.verticalCenter: parent.verticalCenter
-			checked: root.pinchScale
-			onToggled: root.model.setField("pinchScale", !root.pinchScale)
-		}
+		checked: root.pinchScale
+		onToggled: root.model.setField("pinchScale", !root.pinchScale)
 	}
 
 	PanelSectionHeader {
@@ -103,8 +97,7 @@ Column {
 	Repeater {
 		model: root.directions
 
-		delegate: PanelRow {
-			id: row
+		delegate: PanelSwitchRow {
 			required property var modelData
 			readonly property bool switchedOn: root.gestureWay(modelData.param,
 				modelData.onWay, modelData.onByDefault)
@@ -117,15 +110,9 @@ Column {
 				: switchedOn ? modelData.onLine : modelData.offLine
 			marked: failed
 			clickable: false
-
-			PanelSwitch {
-				anchors.right: parent.right
-				anchors.rightMargin: 8
-				anchors.verticalCenter: parent.verticalCenter
-				checked: row.switchedOn
-				onToggled: root.model.setField(row.modelData.param,
-					row.switchedOn ? row.modelData.offWay : row.modelData.onWay)
-			}
+			checked: switchedOn
+			onToggled: root.model.setField(modelData.param,
+				switchedOn ? modelData.offWay : modelData.onWay)
 		}
 	}
 }

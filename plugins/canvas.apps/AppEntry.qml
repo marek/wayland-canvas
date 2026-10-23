@@ -25,7 +25,7 @@ Item {
 
 	Rectangle {
 		anchors.fill: parent
-		radius: 4
+		radius: UiTheme.radius
 		visible: mouse.containsMouse || root.open
 		color: root.open ? UiTheme.selected : UiTheme.hover
 	}
