@@ -9,6 +9,7 @@
 class X11View final : public View {
 public:
 	X11View(Server &server, wlr_xwayland_surface *wlr);
+	~X11View() override;
 
 	// The view whose X11 window holds `surface`; nullptr for any other surface.
 	static X11View *from_surface(wlr_surface *surface);
@@ -53,6 +54,10 @@ public:
 	// Tells X the window's place and size; input for an X11 window then
 	// waits until X has taken it in.
 	void x11_configure(int16_t x, int16_t y, uint16_t width, uint16_t height);
+	// X's MapNotify for the window is being handled: the answer to the
+	// state ask sent at its map request is in, and wlroots has not yet
+	// rewritten the state from fields it has not read.
+	void handle_x11_map_notify();
 
 	wlr_xwayland_surface *const wlr;
 	// A menu, a tooltip or a drag icon, which the window manager must not
@@ -82,4 +87,9 @@ private:
 	Listener request_move_, request_resize_, request_maximize_, request_minimize_,
 		request_fullscreen_;
 	Listener set_title_, set_app_id_, set_parent_, map_request_;
+
+	// The ask for the window's _NET_WM_STATE sent at its map request, until
+	// its answer is taken or given up (Server::x11_ask_state).
+	std::optional<unsigned int> state_ask_;
+	void drop_state_ask();
 };

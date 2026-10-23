@@ -205,7 +205,9 @@ own the machine's Wayland display namespace and GPU.
   floating centred over its window and still floating after Super+T
   switches tiling off and on; a dialog that maps bare and joins the board,
   its parent and modal state arriving afterwards, leaving the board to
-  float centred over its window;
+  float centred over its window; a modal dialog whose map request finds
+  Xwayland stopped (SIGSTOP) leaving the compositor answering `msg state`
+  within 100 ms, and floating modal once Xwayland is continued;
   the keyboard following Super+1 and Super+2 to the window last used on
   each desktop; and last fullscreen: Super+F on a window beside another
   taking it to a new desktop of its own, overlapping none, the screen and

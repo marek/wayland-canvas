@@ -37,10 +37,12 @@ property changes first, which is why it failed only on a loaded machine.
 
 ## Fix
 
-The compositor reads `_NET_WM_STATE` itself at the map request, which comes
-before the map notify, and records `_NET_WM_STATE_MODAL` in wlroots' own
-field, so wlroots' rewrite keeps it. The scenario's client now sends a
-dialog's hints and its map in one flush, which fails every time without it.
+The compositor asks X for `_NET_WM_STATE` itself at the map request, which
+comes before the map notify, and takes the answer at the map notify, which
+X sends after it on the same connection, so taking it waits for nothing.
+It records `_NET_WM_STATE_MODAL` in wlroots' own field, so wlroots' rewrite
+keeps it. The scenario's client now sends a dialog's hints and its map in
+one flush, which fails every time without it.
 
 ## Playbook
 

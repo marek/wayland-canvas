@@ -8,9 +8,11 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 #include <xcb/xcbext.h>
 #include "core/config.h"
@@ -19,6 +21,10 @@
 #include "windows/view_x11.h"
 
 namespace {
+
+// An event's type is its response type less the top bit, which marks one
+// sent by another client.
+constexpr uint8_t x11_event_type_mask = 0x7f;
 
 // X positions are 16-bit: a window farther than that from the pointer waits
 // at the limit (docs/intents/windows/x11.md).
@@ -30,6 +36,12 @@ int16_t x11_coordinate(int value) {
 // MapNotify, at the bottom, which can come after the surface maps here.
 bool x11_stacked(const X11View &view) {
 	return !view.override_redirect && !wl_list_empty(&view.wlr->stack_link);
+}
+
+// Xwayland's window manager connection; nullptr while Xwayland is not up.
+xcb_connection_t *window_manager_connection(const Server &server) {
+	return server.xwayland != nullptr ? wlr_xwayland_get_xwm_connection(server.xwayland)
+		: nullptr;
 }
 
 } // namespace
@@ -60,6 +72,10 @@ X11View::X11View(Server &server, wlr_xwayland_surface *wlr)
 	set_app_id_.connect<&X11View::handle_set_app_id>(wlr->events.set_class, this);
 	set_parent_.connect<&X11View::handle_x11_set_parent>(wlr->events.set_parent, this);
 	map_request_.connect<&X11View::handle_x11_map_request>(wlr->events.map_request, this);
+}
+
+X11View::~X11View() {
+	drop_state_ask();
 }
 
 // ---- what the shared code asks ----
@@ -330,10 +346,31 @@ void X11View::handle_x11_set_parent() {
 // wlroots rewrites _NET_WM_STATE when the window maps, from what it has read
 // of it, and reads it only at the association, which comes after that
 // rewrite. A client that sets the state and maps in one flush would lose
-// _NET_WM_STATE_MODAL before wlroots saw it; the map request comes first,
-// with the property as the client left it.
+// _NET_WM_STATE_MODAL before wlroots saw it. The map request comes first,
+// with the property as the client left it: the compositor asks X for it
+// there, and the answer waits for the map notify.
 void X11View::handle_x11_map_request() {
-	wlr->modal = wlr->modal || server.x11_modal_requested(wlr);
+	drop_state_ask();
+	state_ask_ = server.x11_ask_state(wlr->window_id);
+}
+
+// X sent the answer before this MapNotify, on the same connection, so the
+// connection already holds it: taking it waits for nothing, however slow X
+// is. Setting the modal state here, ahead of wlroots' handling of the same
+// event, makes its rewrite keep it.
+void X11View::handle_x11_map_notify() {
+	if (!state_ask_.has_value()) {
+		return;
+	}
+	unsigned int ask = *std::exchange(state_ask_, std::nullopt);
+	bool modal = server.x11_state_modal(ask);
+	wlr->modal = wlr->modal || modal;
+}
+
+void X11View::drop_state_ask() {
+	if (state_ask_.has_value()) {
+		server.x11_drop_ask(*std::exchange(state_ask_, std::nullopt));
+	}
 }
 
 // ---- the Xwayland server ----
@@ -351,6 +388,11 @@ void Server::init_xwayland() {
 		xwayland->events.ready, this);
 	wlr_xwayland_set_seat(xwayland, seat);
 	setenv("DISPLAY", xwayland->display_name, true);
+	xwayland->data = this;
+	xwayland->user_event_handler = [](wlr_xwayland *wlr, xcb_generic_event_t *event) {
+		static_cast<Server *>(wlr->data)->handle_x11_event(*event);
+		return false;
+	};
 }
 
 void Server::finish_xwayland() {
@@ -371,7 +413,7 @@ void Server::handle_xwayland_ready() {
 	x11_settle_ask_.reset();
 	x11_unasked_ = false;
 	// The atoms of the state hint wlroots rewrites before it reads it
-	// (x11_modal_requested); each X server numbers its own.
+	// (x11_ask_state); each X server numbers its own.
 	xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(xwayland);
 	static constexpr std::string_view state_name = "_NET_WM_STATE",
 		modal_name = "_NET_WM_STATE_MODAL";
@@ -393,15 +435,41 @@ void Server::handle_new_xwayland_surface(wlr_xwayland_surface *surface) {
 	toplevels.push_back(std::make_unique<X11View>(*this, surface));
 }
 
-bool Server::x11_modal_requested(wlr_xwayland_surface *surface) {
-	xcb_connection_t *conn = xwayland != nullptr ? wlr_xwayland_get_xwm_connection(xwayland)
-		: nullptr;
+// The map notify is where the answer to the state ask is in
+// (X11View::handle_x11_map_notify).
+void Server::handle_x11_event(xcb_generic_event_t &event) {
+	if ((event.response_type & x11_event_type_mask) != XCB_MAP_NOTIFY) {
+		return;
+	}
+	xcb_window_t window = reinterpret_cast<xcb_map_notify_event_t *>(&event)->window;
+	for (const std::unique_ptr<View> &view : toplevels) {
+		X11View *x11 = view->as_x11();
+		if (x11 != nullptr && x11->wlr->window_id == window) {
+			x11->handle_x11_map_notify();
+			return;
+		}
+	}
+}
+
+// Not flushed: wlroots flushes after the event it is handling, and the
+// MapWindow it sends next goes out behind this request.
+std::optional<unsigned int> Server::x11_ask_state(xcb_window_t window) {
+	xcb_connection_t *conn = window_manager_connection(*this);
 	if (conn == nullptr || x11_atom_state_ == XCB_ATOM_NONE || x11_atom_modal_ == XCB_ATOM_NONE) {
+		return std::nullopt;
+	}
+	return xcb_get_property(conn, 0, window, x11_atom_state_, XCB_ATOM_ATOM, 0, 32).sequence;
+}
+
+bool Server::x11_state_modal(unsigned int ask) {
+	xcb_connection_t *conn = window_manager_connection(*this);
+	if (conn == nullptr) {
 		return false;
 	}
+	xcb_generic_error_t *error = nullptr;
 	xcb_get_property_reply_t *reply = xcb_get_property_reply(conn,
-		xcb_get_property(conn, 0, surface->window_id, x11_atom_state_, XCB_ATOM_ATOM, 0, 32),
-		nullptr);
+		xcb_get_property_cookie_t{ask}, &error);
+	std::free(error);
 	if (reply == nullptr) {
 		return false;
 	}
@@ -411,6 +479,12 @@ bool Server::x11_modal_requested(wlr_xwayland_surface *surface) {
 	bool modal = std::ranges::contains(states, x11_atom_modal_);
 	std::free(reply);
 	return modal;
+}
+
+void Server::x11_drop_ask(unsigned int ask) {
+	if (xcb_connection_t *conn = window_manager_connection(*this); conn != nullptr) {
+		xcb_discard_reply(conn, ask);
+	}
 }
 
 void Server::sync_x11() {

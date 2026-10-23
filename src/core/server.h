@@ -105,10 +105,15 @@ public:
 	// X did not answer within config::x11_input_wait_ms: input goes on
 	// without the answer, and the ask is dropped.
 	void x11_give_up();
-	// Whether the window's _NET_WM_STATE, as the client set it, holds
-	// _NET_WM_STATE_MODAL; read from X, one round trip, at the map request
-	// (X11View::handle_x11_map_request).
-	bool x11_modal_requested(wlr_xwayland_surface *surface);
+	// A window's _NET_WM_STATE, as the client set it, asked of X at the map
+	// request without waiting: the ask's sequence, nullopt when X is not
+	// there. X answers before it sends the window's MapNotify, so the answer
+	// is taken there (X11View::handle_x11_map_notify) and costs no wait.
+	std::optional<unsigned int> x11_ask_state(xcb_window_t window);
+	// Whether the answer to `ask` holds _NET_WM_STATE_MODAL; takes the answer.
+	bool x11_state_modal(unsigned int ask);
+	// Gives up an answer that will not be taken.
+	void x11_drop_ask(unsigned int ask);
 	// Whether `surface` belongs to an X11 window: input to one waits for X.
 	static bool on_x11_window(wlr_surface *surface);
 
@@ -220,6 +225,8 @@ private:
 	void finish_xwayland();
 	void handle_xwayland_ready();
 	void handle_new_xwayland_surface(wlr_xwayland_surface *surface);
+	// Sees every X event before wlroots handles it; wlroots still handles it.
+	void handle_x11_event(xcb_generic_event_t &event);
 	Listener new_xwayland_surface_, xwayland_ready_;
 	// X's stacking as last sent, bottom first, by view session id.
 	std::vector<uint64_t> x11_stack_;

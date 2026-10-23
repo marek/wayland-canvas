@@ -11,26 +11,35 @@
 // Super+right-drag, by its frame's left edge, by its own
 // _NET_WM_MOVERESIZE request), the session locks and unlocks over it, and
 // Super+Shift+4 shoots it, the compositor answering `msg state` after each.
+// A modal dialog whose map request finds Xwayland stopped leaves the
+// compositor answering `msg state` within 100 ms, and is laid out as a modal
+// one once X answers.
 // Writes only under $CANVAS_TMP, with canvas.conf in its own scratch config
 // dir.
+#include <algorithm>
 #include <cairo.h>
 #include <cerrno>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
 #include <linux/input-event-codes.h>
 #include <optional>
+#include <poll.h>
 #include <print>
 #include <signal.h>
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <variant>
@@ -299,6 +308,170 @@ void check_alive(std::string_view after) {
 	std::string said = read_text(std::format("{}/state-{}.out", shot_dir, state_asks));
 	check(code == "0" && said.find("\"windows\"") != std::string::npos,
 		std::format("the compositor answers `msg state` after {}", after));
+}
+
+// Xwayland's pid: the process of that name serving this compositor's X
+// display. wlroots starts it through a double fork and keeps the pid of the
+// parent that exits.
+pid_t xwayland_pid() {
+	std::string_view display = server->xwayland->display_name;
+	std::error_code ec;
+	for (const auto &entry : std::filesystem::directory_iterator("/proc", ec)) {
+		std::string name = entry.path().filename().string();
+		pid_t pid = 0;
+		const char *stop = name.data() + name.size();
+		auto [parsed_to, parsed] = std::from_chars(name.data(), stop, pid);
+		if (parsed != std::errc{} || parsed_to != stop) {
+			continue;
+		}
+		std::string args = read_text(entry.path().string() + "/cmdline");
+		std::vector<std::string_view> argv;
+		for (std::size_t at = 0; at < args.size();) {
+			std::size_t end = std::min(args.find('\0', at), args.size());
+			argv.push_back(std::string_view(args).substr(at, end - at));
+			at = end + 1;
+		}
+		if (!argv.empty() && std::filesystem::path(argv[0]).filename() == "Xwayland"
+				&& std::ranges::contains(argv, display)) {
+			return pid;
+		}
+	}
+	return -1;
+}
+
+long elapsed_ms(const timespec &since) {
+	timespec now{};
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (now.tv_sec - since.tv_sec) * 1000 + (now.tv_nsec - since.tv_nsec) / 1000000;
+}
+
+// Milliseconds one `state` request takes to be answered on the control
+// socket; -1 when no answer comes within `limit_ms`.
+long state_round_trip_ms(long limit_ms) {
+	const char *path = std::getenv("WAYLAND_CANVAS_SOCKET");
+	sockaddr_un addr{};
+	addr.sun_family = AF_UNIX;
+	if (path == nullptr || std::strlen(path) >= sizeof addr.sun_path) {
+		return -1;
+	}
+	std::strcpy(addr.sun_path, path);
+	timespec start{};
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	constexpr std::string_view request = "{\"id\":1,\"method\":\"state\"}\n";
+	if (fd < 0 || connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) < 0
+			|| write(fd, request.data(), request.size())
+				!= static_cast<ssize_t>(request.size())) {
+		if (fd >= 0) {
+			close(fd);
+		}
+		return -1;
+	}
+	std::string answer;
+	char buf[4096];
+	while (!answer.contains('\n')) {
+		pollfd pfd{.fd = fd, .events = POLLIN, .revents = 0};
+		long left = limit_ms - elapsed_ms(start);
+		ssize_t got = 0;
+		if (left <= 0 || poll(&pfd, 1, static_cast<int>(left)) <= 0
+				|| (got = read(fd, buf, sizeof buf)) <= 0) {
+			close(fd);
+			return -1;
+		}
+		answer.append(buf, static_cast<std::size_t>(got));
+	}
+	close(fd);
+	return answer.contains("\"windows\"") ? elapsed_ms(start) : -1;
+}
+
+// ---- Xwayland stopped at a window's map request ----
+
+// A stall: Xwayland stopped, by this process, at the map request of the next
+// X11 window the compositor is told of, and a child that times the
+// compositor's answer to `state` while X stays stopped. A child, because the
+// compositor runs in this process and a stalled loop cannot ask itself.
+struct Stall {
+	wl_listener new_surface{}, map_request{}, destroy{};
+	pid_t xwayland = -1, probe = -1;
+	std::string result;
+} stall;
+
+void unlisten(wl_listener &listener) {
+	if (listener.link.next != nullptr) {
+		wl_list_remove(&listener.link);
+	}
+}
+
+// The probe: leaves the milliseconds the compositor took to answer in
+// stall.result (-1: no answer within a second), then keeps Xwayland stopped
+// until the scenario has looked at what the compositor did meanwhile. When
+// the compositor gave no answer it waits on X and cannot go on, so X is
+// continued at once; it is also continued when the scenario is gone.
+[[noreturn]] void run_stall_probe(pid_t scenario) {
+	long ms = state_round_trip_ms(1000);
+	write_text(stall.result + ".part", std::to_string(ms));
+	std::rename((stall.result + ".part").c_str(), stall.result.c_str());
+	for (int waited = 0; ms >= 0 && waited < 10000 && getppid() == scenario; waited += 10) {
+		usleep(10000);
+	}
+	kill(stall.xwayland, SIGCONT);
+	_exit(0);
+}
+
+// Runs ahead of the compositor's own listener of the same signal, so that X
+// is stopped before the compositor asks it anything: one that came after
+// would find the ask already answered.
+void stall_at_map_request(wl_listener *, void *) {
+	unlisten(stall.map_request);
+	unlisten(stall.destroy);
+	kill(stall.xwayland, SIGSTOP);
+	pid_t scenario = getpid();
+	stall.probe = fork();
+	if (stall.probe == 0) {
+		run_stall_probe(scenario);
+	}
+}
+
+void stall_new_surface(wl_listener *, void *data) {
+	unlisten(stall.new_surface);
+	auto *surface = static_cast<wlr_xwayland_surface *>(data);
+	stall.map_request.notify = stall_at_map_request;
+	wl_list_insert(&surface->events.map_request.listener_list, &stall.map_request.link);
+	stall.destroy.notify = [](wl_listener *, void *) {
+		unlisten(stall.map_request);
+		unlisten(stall.destroy);
+	};
+	wl_signal_add(&surface->events.destroy, &stall.destroy);
+}
+
+// Arms the stall for the next X11 window; false when Xwayland's process is
+// not found.
+bool arm_stall() {
+	stall.xwayland = xwayland_pid();
+	stall.result = std::format("{}/stall-state.ms", shot_dir);
+	if (stall.xwayland <= 0) {
+		return false;
+	}
+	stall.new_surface.notify = stall_new_surface;
+	wl_signal_add(&server->xwayland->events.new_surface, &stall.new_surface);
+	return true;
+}
+
+// Nothing left of the stall, whatever it got to: the probe gone, and Xwayland
+// running again, as only a SIGCONT ends a stop.
+void reap_stall() {
+	unlisten(stall.new_surface);
+	unlisten(stall.map_request);
+	unlisten(stall.destroy);
+	if (stall.probe > 0) {
+		kill(stall.probe, SIGKILL);
+		waitpid(stall.probe, nullptr, 0);
+		stall.probe = -1;
+	}
+	if (stall.xwayland > 0) {
+		kill(stall.xwayland, SIGCONT);
+		stall.xwayland = -1;
+	}
 }
 
 // The newest file the shot hotkey saved, "" when there is none.
@@ -1414,6 +1587,69 @@ int run_step() {
 		reap_client(client);
 		return 300;
 	}
+	// ---- a modal dialog whose map request finds Xwayland stopped: the
+	// compositor goes on answering, and lays the dialog out as a modal one
+	// when X answers at last.
+	case 103: {
+		Desktop *shown = output().desktop_showing();
+		if (shown != nullptr && !shown->tiling()) {
+			super_key(KEY_T);
+		}
+		check(start_client(client, {"--size=600x400", "--title=x11-stall", "--dialog"}),
+			"an X11 window that opens a modal dialog started on a tiled desktop");
+		return 1500;
+	}
+	case 104: {
+		if (titled("x11-stall") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		return 800; // tiled by now
+	}
+	case 105: { // its first key opens the dialog, hints and map in one flush
+		check(arm_stall(), "Xwayland's process was found, and the stall armed for the next window");
+		key(KEY_D, true);
+		key(KEY_D, false);
+		return 100;
+	}
+	case 106: {
+		std::string said = read_text(stall.result);
+		if (said.empty() && retries++ < 100) {
+			return -20;
+		}
+		long ms = said.empty() ? -1 : std::strtol(said.c_str(), nullptr, 10);
+		check(stall.probe > 0, "the dialog's map request reached the compositor, which stopped Xwayland");
+		check(ms >= 0 && ms <= 100, std::format("with Xwayland stopped on the dialog's map "
+				"request, the compositor answers `msg state` within 100 ms (took {} ms)", ms));
+		check(titled("x11-stall-dialog") == nullptr,
+			"the dialog is still waiting on X after the compositor answered");
+		reap_stall();
+		return 300;
+	}
+	case 107: {
+		if (titled("x11-stall-dialog") == nullptr && retries++ < 200) {
+			return -100;
+		}
+		return 600;
+	}
+	case 108: { // X has answered: the dialog is laid out as a modal one
+		View *main = titled("x11-stall"), *dialog = titled("x11-stall-dialog");
+		check(dialog != nullptr && dialog->kind() == ViewKind::modal,
+			"once X answered, the dialog is a modal one");
+		check(dialog != nullptr && !dialog->tiled && !dialog->board_seat.has_value(),
+			"its modal dialog floats, off the board");
+		check(main != nullptr && dialog != nullptr && centred_on(*dialog, *main),
+			"centred over the window it blocks");
+		ask_state();
+		return 600;
+	}
+	case 109: {
+		if (!state_answered() && retries++ < 50) {
+			return -100;
+		}
+		check_alive("the dialog mapped late");
+		reap_client(client);
+		return 300;
+	}
 	case last_step: {
 		finished = true;
 		wl_display_terminate(server->display);
@@ -1485,6 +1721,7 @@ int main() {
 	reap_client(client);
 	reap_client(other);
 	reap_locker();
+	reap_stall();
 	wl_event_source_remove(timer);
 	wlr_pointer_finish(&ptr);
 	wlr_keyboard_finish(&kbd);

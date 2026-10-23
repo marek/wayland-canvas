@@ -693,7 +693,7 @@ The compositor:
     first failed 3 checks in each of the 4 runs made and the second 2
     checks; with it the scenario passed 20 runs in a row, other suites
     running on the machine.
-- [ ] The modal state read at map does not wait on X (found, not started)
+- [x] The modal state read at map does not wait on X
   - The problem: the modal-dialog fix reads `_NET_WM_STATE` at each X11
     map request with one blocking round trip on the window manager's
     connection (`Server::x11_modal_requested`). While Xwayland is slow or
@@ -705,6 +705,18 @@ The compositor:
   - Acceptance: a scenario that stalls the X server (SIGSTOP on
     Xwayland) while a dialog maps shows the compositor still answering
     IPC `state` within 100 ms. The modal-dialog checks stay green.
+  - Done: the map request sends the ask and returns; the answer is taken
+    at the map notify, which X sends after it on the same connection, so
+    taking it waits for nothing and the dialog is laid out as a modal one
+    at its map, with no second layout. The xwayland scenario stops
+    Xwayland from a listener that runs ahead of the compositor's own on
+    the dialog's map request, times `msg state` from a child process, and
+    checks the answer within 100 ms, the dialog still unmapped, then the
+    dialog modal once Xwayland is continued. A server grab by the client
+    does not hold up the window manager's connection, so it cannot make
+    the stall. Against the blocking read the scenario got no answer in a
+    second; with the ask it answered in 0 ms. The xwayland scenario also
+    passed under the sanitizers, and the unit suite.
 
 The shell and its plugins:
 
