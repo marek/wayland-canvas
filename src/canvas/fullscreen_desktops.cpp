@@ -65,7 +65,7 @@ void FullscreenDesktops::enter(View &view, wlr_box covers) {
 	// A window no screen shows gets its desktop without the view moving.
 	if (showing != nullptr) {
 		showing->goto_desktop(own);
-		server_.focus_view(&view);
+		server_.focus.focus_view(&view);
 	}
 }
 

@@ -182,7 +182,7 @@ void collect_windows(Server &server, std::vector<WindowRow> &rows) {
 		row.title.assign(view->shell_title() != nullptr ? view->shell_title() : "");
 		row.desktop = id_of(desktop);
 		row.minimized = view->minimized;
-		row.focused = server.focused_view == view;
+		row.focused = server.focus.focused_view() == view;
 	}
 	rows.resize(count);
 }

@@ -1846,8 +1846,11 @@ Tests:
     - cpp-standards.md's "One per compositor" row names the new
       subsystems.
     - The scenarios are green.
+  - Left: server.h still declares Server members defined in output.cpp,
+    view.cpp, view_xdg.cpp and layer.cpp (the output list, the xdg-shell
+    and layer-shell globals' handlers), under location comments.
   - Done: `ConfStore`, `SessionEnvironment`, and the options and process
-    files; `CanvasSurfaces` and `Focus` are still to do:
+    files:
     - `core/conf_store.{h,cpp}` holds canvas.conf as `Server::conf`: `path()`,
       `text()`, `errors()`, `resolved`, `load`, `write`, the watch, and
       `init`, which makes the file and watches it with one read of
@@ -1873,6 +1876,20 @@ Tests:
       views that calls `View::as_x11()`; view_x11.cpp holds the view alone.
     - tests/scenarios/xwayland.cpp reads the X server and the offset
       through `server->xwm`.
+  - Done: `CanvasSurfaces` and `Focus`:
+    - `platform/canvas_surfaces.{h,cpp}` is `Server::canvas_surfaces`: the
+      places by name and the stack are private, and `place`, `unplace`,
+      `place_of`, `add`, `remove`, `raise`, `bottom_up()` and `named` are
+      the only ways in. `LayerSurface::place` and `unplace` are private to
+      it, so an unplace always erases the remembered place.
+    - `windows/focus.{h,cpp}` is `Server::focus`: `focused_view()` and
+      `focused_layer()` are read-only, and `focus_view`, `focus_in`,
+      `focus_keyboard`, `offer_keyboard`, `return_keyboard`,
+      `refocus_layers`, `view_at` and `last_minimized_view` move over,
+      with the minimize counter. The window's `View::focus_changed` is
+      what Focus calls when a window gains or loses the focus.
+    - The ipc scenario unplaces a name from the compositor's own code and
+      checks the next surface of that name maps on no place.
 - [x] `Input` is the seat and the dispatch, nothing else
   - Like `Touch` and `Tablets`, these become classes of their own in
     `src/input/`:

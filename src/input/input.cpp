@@ -277,7 +277,7 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 			// A shell surface holding the keyboard (a panel, the note editor)
 			// takes the keys; Super chords stay the overview's, so Super+Tab
 			// still leaves it.
-			LayerSurface *holder = server.focused_layer;
+			LayerSurface *holder = server.focus.focused_layer();
 			bool shell_types = holder != nullptr && holder->mapped
 				&& (mods & WLR_MODIFIER_LOGO) == 0;
 			if (!shell_types) {

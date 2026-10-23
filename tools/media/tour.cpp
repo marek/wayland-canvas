@@ -831,7 +831,7 @@ void stage() {
 		return await_window("foot", "", [](View &view) { tests_view = &view; });
 	});
 	add("code: run the tests", [] {
-		server->focus_view(tests_view);
+		server->focus.focus_view(tests_view);
 		type_text("meson test -C build --suite unit --no-rebuild\n");
 		return after(400);
 	});
@@ -912,7 +912,7 @@ void stage() {
 void stills() {
 	add("still: tiling", [] {
 		look_at(*desktop_numbered(1));
-		server->focus_view(editor_view);
+		server->focus.focus_view(editor_view);
 		return after(1500);
 	});
 	add("still: tiling shot", [] { return take_still("tiling"); });
@@ -954,7 +954,7 @@ Point drag_from;
 void walkthrough() {
 	add("walk: start", [] {
 		look_at(*desktop_numbered(1));
-		server->focus_view(editor_view);
+		server->focus.focus_view(editor_view);
 		Point centre = on_screen(editor_view->content_box());
 		move_to(centre.x + 120, centre.y + 160);
 		return after(1200);
@@ -985,7 +985,7 @@ void walkthrough() {
 	add("walk: hop done", [] { return after_motion(1800); });
 	add("walk: slices", [] {
 		caption("Super+arrows move the window between tiles");
-		server->focus_view(research_view);
+		server->focus.focus_view(research_view);
 		chord(KEY_DOWN, mods::super);
 		return after(1500);
 	});

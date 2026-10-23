@@ -2247,7 +2247,7 @@ bool is_note_surface(const LayerSurface &l) {
 
 // The mapped surface of the note `id`; any note's when `id` is empty.
 LayerSurface *note_surface(std::string_view id = {}) {
-	for (LayerSurface *l : server->canvas_stack) {
+	for (LayerSurface *l : server->canvas_surfaces.bottom_up()) {
 		if (is_note_surface(*l) && (id.empty()
 				|| std::string_view{l->wlr->namespace_}.substr(note_surface_prefix.size())
 					== id)) {
@@ -2258,7 +2258,7 @@ LayerSurface *note_surface(std::string_view id = {}) {
 }
 
 int note_surfaces() {
-	return static_cast<int>(std::ranges::count_if(server->canvas_stack,
+	return static_cast<int>(std::ranges::count_if(server->canvas_surfaces.bottom_up(),
 		[](const LayerSurface *l) { return is_note_surface(*l); }));
 }
 
@@ -9754,9 +9754,9 @@ int run_step() {
 	case 473: { // out of the overview, the new window focused for the next key
 		View *keys = titled("keys");
 		bool ready = overview_settled(false) && toolbar_layer() == nullptr
-			&& keys != nullptr && server->focused_view == keys;
+			&& keys != nullptr && server->focus.focused_view() == keys;
 		if (!ready && retries++ < 150) {
-			if (retries == 12 && keys != nullptr && server->focused_view != keys) {
+			if (retries == 12 && keys != nullptr && server->focus.focused_view() != keys) {
 				wlr_box f = keys->frame_box();
 				click(f.x + f.width / 2.0, f.y + f.height / 2.0);
 			}
@@ -9764,7 +9764,7 @@ int run_step() {
 		}
 		retries = 0;
 		check(overview_settled(false), "Escape left the overview: no recording swallowed it");
-		check(keys != nullptr && server->focused_view == keys,
+		check(keys != nullptr && server->focus.focused_view() == keys,
 			"the terminal the chord opened is the focused client");
 		tap(KEY_Q); // one plain key, then Enter for the terminal's line discipline
 		tap(KEY_ENTER);
@@ -9860,7 +9860,7 @@ int run_step() {
 		retries = 0;
 		check(landed, "clicking an app left the overview and put its window "
 			"on the screen");
-		check(server->focused_view == app_bar_target,
+		check(server->focus.focused_view() == app_bar_target,
 			"and focused it");
 		check(set_app_bar_enabled(false), "appbar.enabled: false written");
 		return 900;
@@ -10217,14 +10217,14 @@ int run_step() {
 	case 300: { // the themed window focused, for the shelf's item
 		View *v = titled("themed");
 		wlr_box f = v != nullptr ? v->frame_box() : wlr_box{};
-		if (v != nullptr && server->focused_view != v) {
+		if (v != nullptr && server->focus.focused_view() != v) {
 			click(f.x + f.width / 2.0, f.y + f.height / 2.0);
 		}
-		if (server->focused_view != v && retries++ < 20) {
+		if (server->focus.focused_view() != v && retries++ < 20) {
 			return -400;
 		}
 		retries = 0;
-		check(server->focused_view == v, "the themed window is focused");
+		check(server->focus.focused_view() == v, "the themed window is focused");
 		chord(KEY_M, KEY_LEFTMETA); // Super+M minimizes it
 		return 400;
 	}

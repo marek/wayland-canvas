@@ -41,12 +41,6 @@ public:
 	// overview's bottom UI cut them out by hand. Decided when the surface
 	// is made, like belongs_on_canvas(): frames ask for it.
 	bool is_overview_strip() const;
-	// Puts it at `box` on the plane, remembered under its name; the
-	// client is told a new size, and every output showing it repaints.
-	void place(wlr_box box);
-	// Back to an ordinary layer surface on its screen; one whose name says
-	// it belongs on the plane is drawn nowhere until placed again.
-	void unplace();
 	// Repaints the outputs that show it: on the plane, every output whose
 	// view holds it; on a screen, its own.
 	void damage();
@@ -59,6 +53,14 @@ public:
 	void rehome(Output &to);
 
 private:
+	// What CanvasSurfaces asks of a surface; it keeps the places by name.
+	// Puts it at `box` on the plane: the client is told a new size, and
+	// every output showing it repaints.
+	void place(wlr_box box);
+	// Back to an ordinary layer surface on its screen; one whose name says
+	// it belongs on the plane is drawn nowhere until placed again.
+	void unplace();
+
 	void handle_map();
 	void handle_unmap();
 	void handle_commit();
@@ -70,10 +72,15 @@ private:
 	const bool on_canvas_;
 	const bool overview_strip_;
 
+	friend class CanvasSurfaces;
 	friend class Output;
 
 	Listener map_, unmap_, commit_, destroy_;
 };
+
+// The topmost mapped surface that holds the keyboard exclusively, overlay
+// before top, on any output; nullptr when none does.
+LayerSurface *exclusive_keyboard_holder(const Server &server);
 
 // The surface under an output-local point on a layer, with surface-local coordinates.
 struct LayerHit {

@@ -67,6 +67,9 @@ public:
 	// Moves the window and the box it restores to by the same offset.
 	void translate(int dx, int dy);
 	void activate();
+	// The window gained or lost the focus (Focus::focus_view): its client, its
+	// foreign toplevel handle and its title bar follow.
+	void focus_changed(bool focused);
 	void damage();
 	// What the view shows, or where, changed: repaints it and has every
 	// window's outputs worked out again before the next frame.
@@ -210,8 +213,6 @@ private:
 	ForeignToplevel foreign_;
 	// The kind the window was last laid out as: the map's, then each change.
 	ViewKind laid_out_kind_ = ViewKind::normal;
-
-	friend class Server;
 };
 
 // What a canvas point lies on: a surface of a view (surface-local coordinates), or a part

@@ -143,7 +143,7 @@ void Overview::finish_exit(const Camera &near, const Camera &far, double t) {
 	changed_ = true;
 	server.changed(Change::overview);
 	output_.camera.animate_zoom(near, far, t, 0);
-	server.focus_in(target_.box);
+	server.focus.focus_in(target_.box);
 	server.pointer_focus_stale = true;
 }
 

@@ -515,7 +515,7 @@ Result popup_is_placed() {
 		check(menu->x == server->xwm.canvas_x(120) && menu->y == server->xwm.canvas_y(140),
 			std::format("it sits where its client put it, through X's offset ({},{})",
 				menu->x, menu->y));
-		check(server->focused_view != menu, "and it took no focus from the window");
+		check(server->focus.focused_view() != menu, "and it took no focus from the window");
 	}
 	client.kill();
 	return after(800);
@@ -898,21 +898,21 @@ Result desktop_two_window_takes_the_keyboard() {
 	if (auto wait = wait_for(titled("x11-two") != nullptr, {.budget_ms = 20'000})) {
 		return *wait;
 	}
-	check(titled("x11-two") != nullptr && server->focused_view == titled("x11-two"),
+	check(titled("x11-two") != nullptr && server->focus.focused_view() == titled("x11-two"),
 		"it took the keyboard as it opened");
 	chord(KEY_1, mods::super);
 	return after(1000);
 }
 
 Result desktop_one_keeps_its_window() {
-	check(server->focused_view != nullptr && server->focused_view == titled("x11-tiled-dialog"),
+	check(server->focus.focused_view() != nullptr && server->focus.focused_view() == titled("x11-tiled-dialog"),
 		"Super+1 gave the keyboard to the window last used on desktop 1");
 	chord(KEY_2, mods::super);
 	return after(1000);
 }
 
 Result desktop_two_keeps_its_window() {
-	check(server->focused_view != nullptr && server->focused_view == titled("x11-two"),
+	check(server->focus.focused_view() != nullptr && server->focus.focused_view() == titled("x11-two"),
 		"Super+2 gave it back to the window on desktop 2");
 	client.kill();
 	other.kill();
@@ -944,7 +944,7 @@ Result fullscreen_over_another_window() {
 	View *fs = titled("x11-fs"), *beside = titled("x11-beside");
 	check(fs != nullptr && beside != nullptr && d2 != nullptr
 			&& server->canvas.desktop_of(*fs) == d2
-			&& server->canvas.desktop_of(*beside) == d2 && server->focused_view == fs,
+			&& server->canvas.desktop_of(*beside) == d2 && server->focus.focused_view() == fs,
 		"both stand on desktop 2, the newer focused");
 	desktops_before = server->canvas.desktops.size();
 	chord(KEY_F, mods::super);
@@ -965,7 +965,7 @@ Result fullscreen_has_a_desktop_of_its_own() {
 	check(clear, "beside the others, overlapping none");
 	check(beside != nullptr && server->canvas.desktop_of(*beside) == d2,
 		"the covered window stayed on desktop 2");
-	check(camera_on(own) && server->focused_view == fs,
+	check(camera_on(own) && server->focus.focused_view() == fs,
 		"the screen and the keyboard went with it");
 	chord(KEY_F, mods::super);
 	return after(800);
@@ -1105,7 +1105,7 @@ Result act_window_is_clicked() {
 // ...and the session locks.
 Result session_locks() {
 	View *view = titled("x11-act");
-	check(view != nullptr && server->focused_view == view, "a click on the window focused it");
+	check(view != nullptr && server->focus.focused_view() == view, "a click on the window focused it");
 	check(locker.start_client("CANVAS_LOCK_CLIENT"), "the scenarios' locker started");
 	return after(600);
 }

@@ -172,8 +172,8 @@ Server::Server()
 	launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), ipc(), ipc_events(*this, ipc),
 	image_capture(*this),
-	capture_ui(*this), lock(*this), night_light(*this), logind(*this), conf(*this),
-	xwm(*this) {
+	capture_ui(*this), lock(*this), night_light(*this), logind(*this), focus(*this),
+	canvas_surfaces(*this), conf(*this), xwm(*this) {
 	register_ipc_methods(ipc, *this);
 	input.set_layers({&capture_ui, &launcher});
 }

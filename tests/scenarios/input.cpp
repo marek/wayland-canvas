@@ -171,7 +171,7 @@ Result two_windows() {
 		return *wait;
 	}
 	View *a = titled("a"), *b = titled("b");
-	check(a && b && server->focused_view == b, "two windows, newest focused");
+	check(a && b && server->focus.focused_view() == b, "two windows, newest focused");
 	return after(100);
 }
 
@@ -240,9 +240,9 @@ Result minimize_and_restore() {
 	View *a = titled("a"), *b = titled("b");
 	Point mini = deco_point(*b, DecoPart::minimize);
 	click(mini.x, mini.y);
-	check(b->minimized && server->focused_view == a, "minimize button hid it, focus moved to a");
+	check(b->minimized && server->focus.focused_view() == a, "minimize button hid it, focus moved to a");
 	chord(KEY_M, mods::super_shift);
-	check(!b->minimized && server->focused_view == b, "Super+Shift+M restored it");
+	check(!b->minimized && server->focus.focused_view() == b, "Super+Shift+M restored it");
 	return after(200);
 }
 
@@ -517,7 +517,7 @@ Result window_d_took_the_top_half() {
 }
 
 Result c_focused_then_grown_over_d() {
-	check(server->focused_view == titled("c"), "the clicked window is focused");
+	check(server->focus.focused_view() == titled("c"), "the clicked window is focused");
 	chord(KEY_UP, mods::super); // bottom-left quarter widens to the left half, over d
 	return after(500);
 }
@@ -820,7 +820,7 @@ Result right_click_on_empty_canvas() {
 	Point c{d1->frame().x + d1->frame().width / 2.0,
 		d1->frame().y + d1->frame().height * 1.9};
 	check(server->canvas.desktops.at(c.x, c.y) == nullptr
-			&& !server->view_at(c.x, c.y, o.camera.drawn().zoom).has_value(),
+			&& !server->focus.view_at(c.x, c.y, o.camera.drawn().zoom).has_value(),
 		"the spot below Desktop 1 is empty canvas");
 	std::size_t before = server->canvas.desktops.size();
 	Point p = o.canvas_to_local(c.x, c.y);
@@ -1307,7 +1307,7 @@ Result the_x11_window_is_clicked() {
 // The shortcuts: each sends the client the app's own chord.
 Result the_clipboard_chords() {
 	View *v = x11_view();
-	check(v != nullptr && server->focused_view == v,
+	check(v != nullptr && server->focus.focused_view() == v,
 		"the X11 window holds the keyboard");
 	chord(KEY_C, mods::super);
 	chord(KEY_V, mods::super);

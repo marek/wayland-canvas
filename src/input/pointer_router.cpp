@@ -68,30 +68,24 @@ std::optional<LayerHit> shell_surface_at(Server &server, Output &output) {
 		server.cursor->y - output.ly);
 }
 
-// A click on a shell surface that takes the keyboard gives it the keyboard,
-// recorded as the holder so the keyboard goes back to the window when the
-// surface goes; an exclusive holder elsewhere keeps it. A surface on the
-// plane comes up above the others there, as a clicked window does.
+// A click on a shell surface that takes the keyboard offers it the keyboard.
+// A surface on the plane comes up above the others there, as a clicked
+// window does.
 void focus_layer_on_click(Server &server, LayerSurface &layer, wlr_surface *surface) {
 	if (layer.canvas_box.has_value()) {
-		server.raise_canvas_surface(layer);
+		server.canvas_surfaces.raise(layer);
 	}
-	if (!layer.wants_keyboard()) {
-		return;
-	}
-	LayerSurface *holder = server.focused_layer;
-	if (holder == nullptr || holder == &layer || !holder->holds_keyboard_exclusively()) {
-		server.focused_layer = &layer;
-		server.focus_keyboard(surface);
+	if (layer.wants_keyboard()) {
+		server.focus.offer_keyboard(layer, surface);
 	}
 }
 
 // A press on the empty canvas takes the keyboard from a shell surface that
 // holds it on demand (a note being written in) back to the focused window.
 void press_on_empty_canvas(Server &server) {
-	LayerSurface *holder = server.focused_layer;
+	LayerSurface *holder = server.focus.focused_layer();
 	if (holder != nullptr && !holder->holds_keyboard_exclusively()) {
-		server.return_keyboard();
+		server.focus.return_keyboard();
 	}
 }
 
@@ -109,7 +103,7 @@ PointerHit pointer_hit_test(Server &server, Output &output, double ox, double oy
 	Point p = output.local_to_canvas(ox, oy);
 
 	std::optional<ViewHit> view_hit =
-		server.view_at(p.x, p.y, output.camera.drawn().zoom);
+		server.focus.view_at(p.x, p.y, output.camera.drawn().zoom);
 	if (view_hit.has_value()) {
 		hit.view = view_hit->view;
 		hit.surface = view_hit->surface;
@@ -177,7 +171,7 @@ PressTarget overview_press_target(Server &server, Output &output, double ox,
 	}
 
 
-	std::optional<ViewHit> hit = server.view_at(cx, cy, zoom);
+	std::optional<ViewHit> hit = server.focus.view_at(cx, cy, zoom);
 	if (hit.has_value()) {
 		return PressOnView{.view = hit->view};
 	}
@@ -307,7 +301,7 @@ void PointerRouter::motion(uint32_t time) {
 		Camera cam = output->camera.drawn();
 		Point p = output->local_to_canvas(server.cursor->x - output->lx,
 			server.cursor->y - output->ly);
-		std::optional<ViewHit> hit = server.view_at(p.x, p.y, cam.zoom);
+		std::optional<ViewHit> hit = server.focus.view_at(p.x, p.y, cam.zoom);
 		DecoPart part = hit ? hit->part : DecoPart::none;
 		View *view = hit ? hit->view : nullptr;
 		wlr_surface *surface = hit ? hit->surface : nullptr;
@@ -450,12 +444,12 @@ void PointerRouter::button_press(uint32_t time, uint32_t button) {
 
 
 	if (hit.view != nullptr && super && button == BTN_LEFT) {
-		server.focus_view(hit.view);
+		server.focus.focus_view(hit.view);
 		input_.grab.begin_move(*hit.view, *output);
 		return;
 	}
 	if (hit.view != nullptr && super && button == BTN_RIGHT) {
-		server.focus_view(hit.view);
+		server.focus.focus_view(hit.view);
 		Point p = output->local_to_canvas(server.cursor->x - output->lx,
 			server.cursor->y - output->ly);
 		input_.grab.begin_resize(*hit.view, *output, quadrant_edges(*hit.view, p.x, p.y));
@@ -464,7 +458,7 @@ void PointerRouter::button_press(uint32_t time, uint32_t button) {
 
 	if (hit.surface != nullptr) {
 		if (hit.view != nullptr) {
-			server.focus_view(hit.view);
+			server.focus.focus_view(hit.view);
 		} else if (hit.layer != nullptr) {
 			focus_layer_on_click(server, *hit.layer, hit.surface);
 		}
@@ -475,7 +469,7 @@ void PointerRouter::button_press(uint32_t time, uint32_t button) {
 
 	if (hit.view != nullptr) {
 		// Somewhere on the server-side frame.
-		server.focus_view(hit.view);
+		server.focus.focus_view(hit.view);
 		switch (hit.part) {
 		case DecoPart::title:
 			if (button == BTN_LEFT) {
@@ -687,7 +681,7 @@ bool PointerRouter::canvas_at(double lx, double ly) {
 
 void PointerRouter::contact_focus(const ContactHit &hit) {
 	if (hit.view != nullptr) {
-		server_.focus_view(hit.view);
+		server_.focus.focus_view(hit.view);
 	} else if (hit.layer != nullptr) {
 		focus_layer_on_click(server_, *hit.layer, hit.surface);
 	}

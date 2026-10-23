@@ -269,7 +269,7 @@ void Xwm::put_pointer() {
 	}
 	Point p = output->local_to_canvas(server_.cursor->x - output->lx,
 		server_.cursor->y - output->ly);
-	std::optional<ViewHit> hit = server_.view_at(p.x, p.y, output->camera.drawn().zoom);
+	std::optional<ViewHit> hit = server_.focus.view_at(p.x, p.y, output->camera.drawn().zoom);
 	if (!hit.has_value() || hit->view->as_x11() == nullptr) {
 		return;
 	}

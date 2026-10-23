@@ -137,7 +137,7 @@ wlr_texture *Decoration::title_bar(float scale) {
 	const char *title = view_.shell_title();
 	wlr_box content = view_.content_box();
 	wanted_.width = std::max(content.width + 2 * border(), 1);
-	wanted_.active = view_.server.focused_view == &view_;
+	wanted_.active = view_.server.focus.focused_view() == &view_;
 	wanted_.maximized = view_.mode == WindowMode::maximized;
 	wanted_.hover = hover_;
 	wanted_.pressed = pressed_;

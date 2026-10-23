@@ -364,7 +364,7 @@ void PointerGrab::surface_drag_motion(SurfaceDrag &drag) {
 	if (drag.layer->canvas_box.has_value() && wlr_box_equal(&*drag.layer->canvas_box, &box)) {
 		return;
 	}
-	drag.layer->place(box);
+	server_.canvas_surfaces.place(*drag.layer, box);
 }
 
 void PointerGrab::release() {
@@ -416,7 +416,7 @@ void PointerGrab::overview_click(OverviewPress &press) {
 				return;
 			}
 			on.view->set_minimized(false);
-			server_.focus_view(on.view);
+			server_.focus.focus_view(on.view);
 			overview_target_view(server_, *output, *on.view);
 			output->overview.exit();
 		},
@@ -440,7 +440,7 @@ void PointerGrab::overview_click(OverviewPress &press) {
 			if (on.view == nullptr) {
 				return;
 			}
-			server_.focus_view(on.view);
+			server_.focus.focus_view(on.view);
 			overview_target_view(server_, *output, *on.view);
 			output->overview.exit();
 		},

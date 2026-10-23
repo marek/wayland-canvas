@@ -154,7 +154,7 @@ Result taskbar_activates() {
 	if (auto wait = wait_for(said_since("STATE tb foot activated"))) {
 		return *wait;
 	}
-	check(!titled("tb")->minimized && server->focused_view == titled("tb"),
+	check(!titled("tb")->minimized && server->focus.focused_view() == titled("tb"),
 		"an activate request restores and focuses it");
 	check(said_since("STATE tb foot activated"), "and the taskbar is told");
 	return after(0);

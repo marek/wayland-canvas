@@ -233,7 +233,7 @@ void Output::goto_desktop(const Desktop &desktop) {
 	// Going to a desktop eases onto it, at its scale, and gives the keyboard
 	// to the window last used there.
 	camera.animate_to(camera_for_box(desktop.frame(), desktop.scale()));
-	server.focus_in(desktop.frame());
+	server.focus.focus_in(desktop.frame());
 }
 
 void Output::goto_direction(double dx, double dy) {

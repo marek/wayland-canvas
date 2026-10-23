@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <optional>
 #include "input/bindings.h"
@@ -10,6 +9,7 @@
 #include "input/input.h"
 #include "core/changes.h"
 #include "core/conf_store.h"
+#include "platform/canvas_surfaces.h"
 #include "platform/ipc_events.h"
 #include "platform/ipc_server.h"
 #include "platform/image_capture.h"
@@ -25,6 +25,7 @@
 #include "core/util.h"
 #include "core/options.h"
 #include "platform/session_environment.h"
+#include "windows/focus.h"
 #include "windows/launches.h"
 #include "windows/popup.h"
 #include "windows/view.h"
@@ -85,27 +86,9 @@ public:
 	// drops it, here and nowhere else.
 	void view_gone(View &view);
 
-	// view.cpp
-	std::optional<ViewHit> view_at(double cx, double cy, double zoom);
-	View *top_visible_view(Output *output);
-	View *last_minimized_view();
 	// Brings `view` into sight: the camera pans to its desktop or its box, or
 	// an open overview exits onto it; nothing moves when it is already in view.
 	void reveal_view(View &view);
-	// Activates and raises `view`; nullptr clears the focus.
-	void focus_view(View *view);
-	// Keyboard focus follows a move onto `box`: the focused window keeps it
-	// when it stands there, else the topmost window there, the last used,
-	// takes it (docs/intents/windows/window-management.md).
-	void focus_in(wlr_box box);
-	void focus_keyboard(wlr_surface *surface);
-
-	// layer.cpp
-	void refocus_layers();
-	// The keyboard back from an on-demand shell surface to the focused window.
-	void return_keyboard();
-	// Puts a plugin's surface on the plane above the others.
-	void raise_canvas_surface(LayerSurface &layer);
 
 	wl_display *display = nullptr;
 	wl_event_loop *loop = nullptr;
@@ -135,9 +118,6 @@ public:
 	std::vector<View *> views; // mapped views in stacking order, front is topmost
 	std::vector<std::unique_ptr<Popup>> popups;
 
-	View *focused_view = nullptr;
-	LayerSurface *focused_layer = nullptr; // keyboard-interactive layer surface
-	uint64_t minimize_counter = 0;
 	// What the control socket's subscribers have not been told yet: the
 	// owner of a fact calls changed(), and IpcEvents reads the flags once per
 	// frame (docs/intents/shell/app-bar.md for the window list).
@@ -162,18 +142,10 @@ public:
 	SessionLock lock;
 	NightLight night_light;
 	Logind logind;
+	Focus focus;
+	CanvasSurfaces canvas_surfaces;
 	ConfStore conf;
 	Xwm xwm;
-
-	// Where a plugin asked for its surfaces to be on the plane, by name
-	// (docs/intents/platform/ipc.md). Kept here, not on the surface, so a
-	// placement asked for before the surface exists — or again after a
-	// shell reload — still lands when it maps.
-	std::map<std::string, wlr_box> canvas_places;
-	// The mapped surfaces that belong on the plane, bottom first: every
-	// output draws and hit-tests them in this order, whichever output each
-	// was made on.
-	std::vector<LayerSurface *> canvas_stack;
 
 private:
 	// output.cpp

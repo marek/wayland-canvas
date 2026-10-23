@@ -334,7 +334,7 @@ Result window_mapped() {
 	View *view = first_mapped_view();
 	check(view != nullptr, "one foot window mapped");
 	if (view != nullptr) {
-		server->focus_view(view);
+		server->focus.focus_view(view);
 	}
 	return after(2500); // any startup hint clears before the reference shot
 }

@@ -77,26 +77,26 @@ void act_clipboard_chord(Server &server, Output *, KeyArg arg) {
 }
 
 void act_close(Server &server, Output *, KeyArg) {
-	if (server.focused_view != nullptr) {
-		server.focused_view->close();
+	if (server.focus.focused_view() != nullptr) {
+		server.focus.focused_view()->close();
 	}
 }
 
 void act_minimize(Server &server, Output *, KeyArg) {
-	if (server.focused_view != nullptr && server.focused_view->mapped) {
-		server.focused_view->set_minimized(true);
+	if (server.focus.focused_view() != nullptr && server.focus.focused_view()->mapped) {
+		server.focus.focused_view()->set_minimized(true);
 	}
 }
 
 void act_restore_minimized(Server &server, Output *, KeyArg) {
-	View *view = server.last_minimized_view();
+	View *view = server.focus.last_minimized_view();
 	if (view != nullptr) {
 		view->activate();
 	}
 }
 
 void act_maximize(Server &server, Output *, KeyArg) {
-	View *view = server.focused_view;
+	View *view = server.focus.focused_view();
 	if (view != nullptr) {
 		view->set_maximized(view->mode != WindowMode::maximized);
 	}
@@ -106,7 +106,7 @@ void act_maximize(Server &server, Output *, KeyArg) {
 // slice; on a floating one only Super+Up does anything, toggling maximize.
 void act_arrow(Server &server, Output *, KeyArg arg) {
 	Dir dir = std::get<Dir>(arg);
-	View *view = server.focused_view;
+	View *view = server.focus.focused_view();
 	if (view == nullptr || !view->mapped || view->minimized) {
 		return;
 	}
@@ -120,7 +120,7 @@ void act_arrow(Server &server, Output *, KeyArg arg) {
 }
 
 void act_fullscreen(Server &server, Output *, KeyArg) {
-	View *view = server.focused_view;
+	View *view = server.focus.focused_view();
 	if (view != nullptr) {
 		view->set_fullscreen(view->mode != WindowMode::fullscreen);
 	}
@@ -148,7 +148,7 @@ void act_goto_dir(Server &, Output *output, KeyArg arg) {
 // (or by one screen when there is none) and follow it.
 void act_move_dir(Server &server, Output *output, KeyArg arg) {
 	Dir dir = std::get<Dir>(arg);
-	View *view = server.focused_view;
+	View *view = server.focus.focused_view();
 	if (view == nullptr || !view->mapped || output == nullptr) {
 		return;
 	}

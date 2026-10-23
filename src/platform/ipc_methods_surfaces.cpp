@@ -2,11 +2,9 @@
 #include <array>
 #include <cstdint>
 #include <expected>
-#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "core/json.h"
 #include "core/server.h"
@@ -20,22 +18,6 @@ namespace {
 
 // The request of a surface.move or surface.resize waits on the button's release.
 constexpr std::string_view drag_wait = "surface.drag";
-
-// Every layer surface carrying a plugin's name, on any output: one, or
-// briefly two while a reloading shell replaces it.
-std::vector<LayerSurface *> named_surfaces(Server &server, std::string_view name) {
-	std::vector<LayerSurface *> found;
-	for (const std::unique_ptr<Output> &output : server.outputs) {
-		for (auto &surfaces : output->layers) {
-			for (const std::unique_ptr<LayerSurface> &layer : surfaces) {
-				if (layer->name() == name) {
-					found.push_back(layer.get());
-				}
-			}
-		}
-	}
-	return found;
-}
 
 // The `edges` of a `surface.resize`: a list of edge names, as WLR_EDGE bits.
 std::optional<uint32_t> edge_bits(JsonObject *params) {
@@ -94,12 +76,7 @@ IpcServer::Reply surface_place(Server &server, JsonObject *params) {
 	}
 	wlr_box box{static_cast<int>(*(*x)), static_cast<int>(*(*y)),
 		static_cast<int>(*(*width)), static_cast<int>(*(*height))};
-	// Remembered by name: a surface that has not mapped yet takes it when
-	// it does, and a shell that reloads finds its places again.
-	server.canvas_places[*(*name)] = box;
-	for (LayerSurface *surface : named_surfaces(server, *(*name))) {
-		surface->place(box);
-	}
+	server.canvas_surfaces.place(*(*name), box);
 	return std::string{"true"};
 }
 
@@ -109,10 +86,7 @@ IpcServer::Reply surface_unplace(Server &server, JsonObject *params) {
 	if (!name.has_value() || !name->has_value() || (*name)->empty()) {
 		return std::unexpected(std::string{"params: surface (a layer surface's name)"});
 	}
-	server.canvas_places.erase(*(*name));
-	for (LayerSurface *surface : named_surfaces(server, *(*name))) {
-		surface->unplace();
-	}
+	server.canvas_surfaces.unplace(*(*name));
 	return std::string{"true"};
 }
 
@@ -157,7 +131,7 @@ IpcServer::Reply surface_drag(IpcServer &ipc, Server &server, JsonObject *params
 	// The surface of that name the pointer is pressed on: the press the
 	// plugin is answering, which the drag continues.
 	LayerSurface *held = nullptr;
-	for (LayerSurface *surface : named_surfaces(server, *(*name))) {
+	for (LayerSurface *surface : server.canvas_surfaces.named(*(*name))) {
 		if (surface->mapped && server.input.router.button_held_on(surface->wlr->surface)) {
 			held = surface;
 		}

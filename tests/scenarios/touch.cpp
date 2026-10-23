@@ -118,7 +118,7 @@ Result tap_arrived_then_a_drag() {
 			&& app.said_line("TOUCH UP 1", said_before),
 		std::format("a tap reached the window as touch, where it landed ({})",
 			app.since(said_before)));
-	check(view != nullptr && server->focused_view == view, "and focused it, as a click does");
+	check(view != nullptr && server->focus.focused_view() == view, "and focused it, as a click does");
 	// A drag: the finger stays the window's, at its own point, past its
 	// right edge too.
 	said_before = app.said().size();

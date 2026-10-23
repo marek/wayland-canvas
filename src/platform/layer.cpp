@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <string_view>
 
@@ -120,7 +121,7 @@ std::unique_ptr<LayerSurface> detach(LayerSurface &layer) {
 
 // Off the plane's stacking order, and out of any drag the pointer holds it in.
 void leave_canvas(LayerSurface &layer) {
-	std::erase(layer.server.canvas_stack, &layer);
+	layer.server.canvas_surfaces.remove(layer);
 	layer.server.input.grab.forget(layer);
 }
 
@@ -164,13 +165,12 @@ bool LayerSurface::holds_keyboard_exclusively() const {
 void LayerSurface::handle_map() {
 	// A placement asked for before this surface existed applies as it
 	// maps, so the ask can never race the surface.
-	auto found = server.canvas_places.find(name());
-	if (found != server.canvas_places.end()) {
-		canvas_box = found->second;
+	if (std::optional<wlr_box> asked = server.canvas_surfaces.place_of(name())) {
+		canvas_box = asked;
 	}
 	mapped = true;
 	if (belongs_on_canvas() || canvas_box.has_value()) {
-		server.canvas_stack.push_back(this); // the newest on top
+		server.canvas_surfaces.add(*this);
 	}
 	if (attached_) {
 		// The surface's exclusive zone (if any) takes effect now.
@@ -182,13 +182,10 @@ void LayerSurface::handle_map() {
 	zwlr_layer_shell_v1_layer layer = wlr->current.layer;
 	bool above_windows = layer == ZWLR_LAYER_SHELL_V1_LAYER_TOP
 		|| layer == ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
-	LayerSurface *holder = server.focused_layer;
-	if (above_windows && wants_keyboard()
-			&& (holder == nullptr || !holder->holds_keyboard_exclusively())) {
-		server.focused_layer = this;
-		server.focus_keyboard(wlr->surface);
+	if (above_windows && wants_keyboard()) {
+		server.focus.offer_keyboard(*this, wlr->surface);
 	}
-	server.refocus_layers();
+	server.focus.refocus_layers();
 }
 
 void LayerSurface::handle_unmap() {
@@ -198,7 +195,7 @@ void LayerSurface::handle_unmap() {
 		// Release the exclusive zone the surface was reserving.
 		output->arrange_layers();
 	}
-	server.refocus_layers();
+	server.focus.refocus_layers();
 }
 
 void LayerSurface::handle_commit() {
@@ -218,8 +215,8 @@ void LayerSurface::handle_commit() {
 				output->layers[ls->current.layer].begin(), std::move(owned));
 		}
 	}
-	if (server.focused_layer == this && !wants_keyboard()) {
-		server.return_keyboard(); // it stopped asking for the keyboard
+	if (server.focus.focused_layer() == this && !wants_keyboard()) {
+		server.focus.return_keyboard(); // it stopped asking for the keyboard
 	}
 	output->arrange_layers();
 }
@@ -234,13 +231,11 @@ void LayerSurface::handle_destroy() {
 	// Off the output's lists before anything below looks at them.
 	std::unique_ptr<LayerSurface> owned = detach(*this);
 
-	if (server.focused_layer == this) {
-		server.focused_layer = nullptr;
-	}
+	server.focus.forget(*this);
 	if (attached_) {
 		output->arrange_layers();
 	}
-	server.refocus_layers();
+	server.focus.refocus_layers();
 } // `owned` releasing destroys this
 
 std::string LayerSurface::name() const {
@@ -259,7 +254,6 @@ void LayerSurface::place(wlr_box box) {
 	bool resized = !canvas_box.has_value() || canvas_box->width != box.width
 		|| canvas_box->height != box.height;
 	canvas_box = box;
-	server.canvas_places[name()] = box;
 	// The client is told its new size; one that has not made its first
 	// commit is told by the arrange that commit runs (configure() asserts
 	// before it).
@@ -268,8 +262,8 @@ void LayerSurface::place(wlr_box box) {
 		wlr_layer_surface_v1_configure(wlr, static_cast<uint32_t>(box.width),
 			static_cast<uint32_t>(box.height));
 	}
-	if (mapped && std::ranges::find(server.canvas_stack, this) == server.canvas_stack.end()) {
-		server.canvas_stack.push_back(this);
+	if (mapped) {
+		server.canvas_surfaces.add(*this);
 	}
 	// Where it was and where it is now: both may be on any output.
 	server.damage_all();
@@ -279,7 +273,7 @@ void LayerSurface::unplace() {
 	server.input.grab.forget(*this);
 	canvas_box.reset();
 	if (!belongs_on_canvas()) {
-		std::erase(server.canvas_stack, this); // back on its screen
+		server.canvas_surfaces.remove(*this); // back on its screen
 	}
 	output->arrange_layers();
 	server.damage_all();
@@ -383,7 +377,7 @@ void Output::arrange_layers() {
 // follows the camera, and every output finds every such surface.
 std::optional<LayerHit> Output::canvas_surface_at(double ox, double oy) const {
 	Point on_plane = local_to_canvas(ox, oy);
-	for (LayerSurface *l : std::views::reverse(server.canvas_stack)) {
+	for (LayerSurface *l : std::views::reverse(server.canvas_surfaces.bottom_up())) {
 		if (!l->mapped || !l->canvas_box.has_value()) {
 			continue;
 		}
@@ -429,46 +423,18 @@ bool Output::has_wallpaper() const {
 	return false;
 }
 
-void Server::refocus_layers() {
-	// The topmost mapped exclusively keyboard-interactive surface, overlay
-	// before top, owns the keyboard.
-	for (std::size_t i = 0; i < 2; i++) {
-		for (const std::unique_ptr<Output> &output : outputs) {
-			for (const std::unique_ptr<LayerSurface> &layer :
-					output->layers[layer_order[i]]) {
-				if (!layer->mapped || !layer->holds_keyboard_exclusively()) {
-					continue;
+LayerSurface *exclusive_keyboard_holder(const Server &server) {
+	for (zwlr_layer_shell_v1_layer layer :
+			{ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, ZWLR_LAYER_SHELL_V1_LAYER_TOP}) {
+		for (const std::unique_ptr<Output> &output : server.outputs) {
+			for (const std::unique_ptr<LayerSurface> &surface : output->layers[layer]) {
+				if (surface->mapped && surface->holds_keyboard_exclusively()) {
+					return surface.get();
 				}
-				focused_layer = layer.get();
-				focus_keyboard(layer->wlr->surface);
-				return;
 			}
 		}
 	}
-
-	LayerSurface *focused = focused_layer;
-	if (focused == nullptr || focused->mapped) {
-		// A still-mapped on-demand surface keeps the keyboard it got on
-		// map or by a click.
-		return;
-	}
-	return_keyboard();
-}
-
-void Server::return_keyboard() {
-	focused_layer = nullptr;
-	View *view = focused_view;
-	focus_keyboard(view != nullptr && view->mapped ? view->surface() : nullptr);
-}
-
-void Server::raise_canvas_surface(LayerSurface &layer) {
-	auto it = std::ranges::find(canvas_stack, &layer);
-	if (it == canvas_stack.end() || std::next(it) == canvas_stack.end()) {
-		return;
-	}
-	canvas_stack.erase(it);
-	canvas_stack.push_back(&layer);
-	layer.damage();
+	return nullptr;
 }
 
 void Server::init_layers() {

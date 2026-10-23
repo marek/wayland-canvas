@@ -24,7 +24,7 @@ bool is_initialized(const View &view) {
 // Only honour requests stemming from a real button press on the focused
 // window; anything else is a client trying its luck.
 bool grab_allowed(const Server &server, const View &view) {
-	return server.focused_view == &view
+	return server.focus.focused_view() == &view
 		&& !server.input.grab.active()
 		&& server.seat->pointer_state.button_count > 0;
 }
@@ -155,8 +155,14 @@ void View::activate() {
 	if (minimized) {
 		set_minimized(false);
 	}
-	server.focus_view(this);
+	server.focus.focus_view(this);
 	server.reveal_view(*this);
+}
+
+void View::focus_changed(bool focused) {
+	tell_activated(focused);
+	foreign_.publish();
+	damage();
 }
 
 void View::set_minimized(bool want) {
@@ -165,10 +171,7 @@ void View::set_minimized(bool want) {
 	}
 	minimized = want;
 	if (want) {
-		minimize_seq = ++server.minimize_counter;
-		if (server.focused_view == this) {
-			server.focus_view(server.top_visible_view(server.output_under_cursor()));
-		}
+		server.focus.view_minimized(*this);
 	}
 	foreign_.publish();
 	visibility_changed();
@@ -336,7 +339,7 @@ void View::handle_map() {
 		// keyboard from the window in front of the user, and a hint says where.
 		server.hint.set(opened_where(*this));
 	} else {
-		server.focus_view(this);
+		server.focus.focus_view(this);
 	}
 	launched_for.reset();
 	visibility_changed();
@@ -344,19 +347,20 @@ void View::handle_map() {
 }
 
 void Server::view_gone(View &view) {
+	focus.forget(view);
 	input.forget(view);
 	capture_ui.forget(view);
 	image_capture.forget(view);
 }
 
 void View::handle_unmap() {
+	bool held_focus = server.focus.focused_view() == this;
 	server.view_gone(*this);
 	mapped = false;
 	std::erase(server.views, this);
 	foreign_.close();
-	if (server.focused_view == this) {
-		server.focused_view = nullptr;
-		server.focus_view(server.top_visible_view(server.output_under_cursor()));
+	if (held_focus) {
+		server.focus.focus_topmost();
 	}
 	// Reset state the client renegotiates when it remaps. The board needs no
 	// re-layout: an unmapped window holds no slice, so its own frees up.
@@ -422,9 +426,6 @@ void View::handle_commit() {
 
 void View::handle_destroy() {
 	server.view_gone(*this);
-	if (server.focused_view == this) {
-		server.focused_view = nullptr;
-	}
 	std::erase(server.views, this);
 	foreign_.close();
 	server.changed(Change::windows);
@@ -467,100 +468,6 @@ void Server::finish_views() {
 	toplevels.clear();
 }
 
-std::optional<ViewHit> Server::view_at(double cx, double cy, double zoom) {
-	for (View *view : views) {
-		if (!view->mapped || view->minimized) {
-			continue;
-		}
-		wlr_box geo = view->shell_geometry();
-		// Canvas point -> toplevel surface-local coordinates.
-		double lx = cx - (view->x - geo.x);
-		double ly = cy - (view->y - geo.y);
-		double sub_x = 0, sub_y = 0;
-		wlr_surface *found = view->surface_at(lx, ly, &sub_x, &sub_y);
-		if (found != nullptr) {
-			return ViewHit{view, found, sub_x, sub_y, DecoPart::none, 0};
-		}
-		DecoHit hit = view->deco.hit(cx, cy, zoom);
-		if (hit.part != DecoPart::none) {
-			return ViewHit{view, nullptr, 0, 0, hit.part, hit.edges};
-		}
-	}
-	return std::nullopt;
-}
-
-View *Server::top_visible_view(Output *output) {
-	for (View *view : views) {
-		if (!view->mapped || view->minimized || !takes_focus(view->kind())) {
-			continue;
-		}
-		if (output == nullptr
-				|| view->frame_rect().intersects(output->viewport())) {
-			return view;
-		}
-	}
-	return nullptr;
-}
-
-View *Server::last_minimized_view() {
-	View *best = nullptr;
-	for (View *view : views) {
-		if (!view->minimized) {
-			continue;
-		}
-		if (best == nullptr || view->minimize_seq > best->minimize_seq) {
-			best = view;
-		}
-	}
-	return best;
-}
-
-void Server::focus_view(View *view) {
-	View *prev = focused_view;
-	if (prev != view) {
-		changed(Change::windows);
-		focused_view = view;
-		if (prev != nullptr) {
-			prev->tell_activated(false);
-			prev->foreign_.publish();
-			prev->damage();
-		}
-		if (view != nullptr) {
-			// Raise to the top of the stacking order.
-			std::erase(views, view);
-			views.insert(views.begin(), view);
-			view->tell_activated(true);
-			view->foreign_.publish();
-			view->damage();
-		}
-	}
-	// The keyboard follows the focused window. An exclusive layer surface
-	// (a lock screen) keeps it; an on-demand one (a panel) gives it up to a
-	// window being focused, the one already focused behind it included.
-	if (view != nullptr && focused_layer != nullptr
-			&& !focused_layer->holds_keyboard_exclusively()) {
-		focused_layer = nullptr;
-	}
-	if (focused_layer == nullptr) {
-		focus_keyboard(view != nullptr ? view->surface() : nullptr);
-	}
-}
-
-void Server::focus_in(wlr_box box) {
-	if (focused_view != nullptr) {
-		Rect frame = focused_view->frame_rect();
-		if (wlr_box_contains_point(&box, frame.cx(), frame.cy())) {
-			return;
-		}
-	}
-	for (View *view : canvas.views_in(box)) {
-		if (takes_focus(view->kind())) {
-			focus_view(view);
-			return;
-		}
-	}
-}
-
 void Server::reveal_view(View &view) {
 	Output *output = output_under_cursor();
 	if (output == nullptr) {
@@ -586,20 +493,4 @@ void Server::reveal_view(View &view) {
 	}
 	output->camera.animate_to(
 		camera_for_box(box, desktop != nullptr ? desktop->scale() : 1.0));
-}
-
-void Server::focus_keyboard(wlr_surface *surface) {
-	if (surface == nullptr) {
-		wlr_seat_keyboard_notify_clear_focus(seat);
-		return;
-	}
-	// With no keyboard yet the focus is still recorded: wlroots enters the
-	// surface once its client binds the first keyboard that appears.
-	wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
-	if (keyboard == nullptr) {
-		wlr_seat_keyboard_notify_enter(seat, surface, nullptr, 0, nullptr);
-		return;
-	}
-	wlr_seat_keyboard_notify_enter(seat, surface,
-		keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
 }

@@ -683,7 +683,7 @@ Result window_minimized() {
 	Output *o = &output();
 	View *one = titled("one");
 	one->set_minimized(true);
-	check(one->minimized && server->focused_view != one,
+	check(one->minimized && server->focus.focused_view() != one,
 		"minimize hides the window and moves focus");
 	o->overview.enter();
 	return after(600);
@@ -707,7 +707,7 @@ Result minimized_window_on_the_shelf() {
 		button(BTN_LEFT, true);
 		button(BTN_LEFT, false);
 	}
-	check(!one->minimized && server->focused_view == one,
+	check(!one->minimized && server->focus.focused_view() == one,
 		"a click on the shelf's thumbnail restores the window");
 	// Restoring a window leaves the overview: open it again to click.
 	if (!o->overview.active()) {
@@ -881,7 +881,7 @@ Result pointer_through_the_camera() {
 		"the pointer focuses the window through the camera");
 	button(BTN_LEFT, true);
 	button(BTN_LEFT, false);
-	check(server->focused_view == marker, "the click focused the window");
+	check(server->focus.focused_view() == marker, "the click focused the window");
 	shot("15-click-80");
 	return after(300);
 }
@@ -1713,7 +1713,7 @@ Result late_window_in_the_free_spot() {
 			&& o->desktop_showing() == desk(hop_b),
 		std::format("the late window opened in the free spot it was launched for, not on B"
 			" where the overview closed to (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
-	check(tardy != nullptr && server->focused_view != tardy
+	check(tardy != nullptr && server->focus.focused_view() != tardy
 			&& server->hint.text() == "Opened in a free area",
 		std::format("unseen, it left the keyboard alone, and a hint said where (hint {})",
 			server->hint.text()));
@@ -1735,7 +1735,7 @@ Result maximized_window_filled_the_view() {
 	}
 	Rect fr = maxhere != nullptr ? maxhere->frame_rect() : Rect{};
 	check(maxhere != nullptr && maxhere->mode == WindowMode::maximized
-			&& o->viewport().contains(fr.cx(), fr.cy()) && server->focused_view == maxhere,
+			&& o->viewport().contains(fr.cx(), fr.cy()) && server->focus.focused_view() == maxhere,
 		std::format("a window starting maximized filled the screen being looked at, and"
 			" took the keyboard (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
 	shot("32-started-maximized-here");
@@ -2674,7 +2674,7 @@ Result subscriber_started() {
 Result title_grabbed_again() {
 	View *one = titled("one");
 	View *three = titled("three");
-	server->focus_view(three); // the subscriber is told; activate() would pan the camera
+	server->focus.focus_view(three); // the subscriber is told; activate() would pan the camera
 	grab_title(*one);
 	return after(100);
 }

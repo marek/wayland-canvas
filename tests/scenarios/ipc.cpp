@@ -377,7 +377,7 @@ Result window_mapped() {
 	check(mapped == 1, std::format("one foot window mapped ({})", mapped));
 	check(view != nullptr && view->deco.ssd, "foot negotiated a server-side title bar");
 	if (view != nullptr) {
-		server->focus_view(view); // an active title bar for the screenshot
+		server->focus.focus_view(view); // an active title bar for the screenshot
 	}
 	shot("titlebar-dark");
 	return after(500);
@@ -890,10 +890,9 @@ Result surface_role_answered() {
 			&& command_err("place-flat").find("area") != std::string::npos,
 		std::format("`surface.place` with no area: an error naming it ({})",
 			command_err("place-flat")));
-	auto remembered = server->canvas_places.find(surface_name);
+	std::optional<wlr_box> remembered = server->canvas_surfaces.place_of(surface_name);
 	check(command_code("place-ahead") == 0 && command_out("place-ahead") == "true"
-			&& remembered != server->canvas_places.end()
-			&& remembered->second.x == 10 && remembered->second.width == 40,
+			&& remembered.has_value() && remembered->x == 10 && remembered->width == 40,
 		"`surface.place` for a name no surface carries yet is remembered for it");
 	check(command_code("move-unheld") == 1
 			&& command_err("move-unheld").find("no button") != std::string::npos,
@@ -912,7 +911,7 @@ Result unplaced() {
 	if (auto wait = wait_for(command_done("unplace"))) {
 		return *wait;
 	}
-	check(command_code("unplace") == 0 && !server->canvas_places.contains(surface_name),
+	check(command_code("unplace") == 0 && !server->canvas_surfaces.place_of(surface_name),
 		"`surface.unplace` forgets the remembered place");
 	run_msg("state", "", "state-windows"); // read by the window list's check
 	return after(300);
@@ -1065,6 +1064,47 @@ Result socket_still_answers() {
 	return after(300);
 }
 
+// A surface of the plugin's name maps again, after its client left.
+Result layer_client_again() {
+	check(layer_client.start_client("CANVAS_LAYER_CLIENT", {surface_name}),
+		"the layer client started again");
+	return after(500);
+}
+
+// It lands where the plugin last placed it. The compositor then unplaces the
+// name from its own code, not through the socket.
+Result place_came_back() {
+	LayerSurface *layer = plugin_surface();
+	if (auto wait = wait_for(layer != nullptr)) {
+		return *wait;
+	}
+	std::optional<wlr_box> asked = server->canvas_surfaces.place_of(surface_name);
+	check(asked.has_value() && layer->canvas_box.has_value()
+			&& wlr_box_equal(&*asked, &*layer->canvas_box),
+		"a surface mapping again lands on the place remembered under its name");
+	server->canvas_surfaces.unplace(surface_name);
+	check(!server->canvas_surfaces.place_of(surface_name) && !layer->canvas_box.has_value(),
+		"unplacing from the compositor's own code forgets the remembered place too");
+	layer_client.signal(SIGTERM);
+	return after(400);
+}
+
+Result layer_client_third() {
+	return layer_client_again();
+}
+
+// An unplaced name's next surface maps on no place.
+Result place_stayed_gone() {
+	LayerSurface *layer = plugin_surface();
+	if (auto wait = wait_for(layer != nullptr)) {
+		return *wait;
+	}
+	check(!layer->canvas_box.has_value() && !server->canvas_surfaces.place_of(surface_name),
+		"after an unplace the name's next surface maps on no place");
+	layer_client.signal(SIGTERM);
+	return after(300);
+}
+
 // The state lists the open window, and a jump goes to it.
 Result window_listed() {
 	if (auto wait = wait_for(command_done("state-windows"))) {
@@ -1100,7 +1140,7 @@ Result window_focused() {
 	}
 	check(command_code("window-focus") == 0 && view != nullptr && output != nullptr
 			&& view->frame_rect().intersects(output->viewport())
-			&& server->focused_view == view,
+			&& server->focus.focused_view() == view,
 		"window.focus brought the view back to the window and focused it");
 	check(command_code("window-focus-bad") != 0,
 		"window.focus with an unknown id answers an error");
@@ -1301,6 +1341,10 @@ int main() {
 		{"keys act again", keys_act_again},
 		{"launcher closed again", launcher_closed_again},
 		{"socket still answers", socket_still_answers},
+		{"layer client again", layer_client_again},
+		{"place came back", place_came_back},
+		{"layer client third", layer_client_third},
+		{"place stayed gone", place_stayed_gone},
 		{"window listed", window_listed},
 		{"window focused", window_focused},
 		{"free window focused", free_window_focused},

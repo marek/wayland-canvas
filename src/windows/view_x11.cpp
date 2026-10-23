@@ -338,3 +338,4 @@ void X11View::drop_state_ask() {
 		server.xwm.drop_ask(*std::exchange(state_ask_, std::nullopt));
 	}
 }
+

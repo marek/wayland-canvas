@@ -117,7 +117,7 @@ Result the_popup_appears() {
 Result the_popup_is_top_right() {
 	long ink = ink_in("popup", {screen_w - 360, 26, 352, 160});
 	check(ink > 500, std::format("the popup is drawn top-right ({} px of ink)", ink));
-	check(server->focused_layer == nullptr, "no popup ever holds the keyboard");
+	check(server->focus.focused_layer() == nullptr, "no popup ever holds the keyboard");
 	return after(0);
 }
 
@@ -382,7 +382,7 @@ Result the_dialog_opens_and_holds_the_keyboard() {
 		return *wait;
 	}
 	check(polkit_dialog_shown(), "a privileged action opens the password dialog");
-	check(server->focused_layer != nullptr
+	check(server->focus.focused_layer() != nullptr
 			|| server->seat->keyboard_state.focused_surface != nullptr,
 		"the dialog holds the keyboard while it is open");
 	shot("polkit");

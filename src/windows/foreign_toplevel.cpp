@@ -79,7 +79,7 @@ void ForeignToplevel::publish() {
 		wlr_foreign_toplevel_handle_v1_set_fullscreen(handle,
 			view_.mode == WindowMode::fullscreen);
 		wlr_foreign_toplevel_handle_v1_set_activated(handle,
-			view_.server.focused_view == &view_);
+			view_.server.focus.focused_view() == &view_);
 	}
 	if (ext_handle_ != nullptr) {
 		wlr_ext_foreign_toplevel_handle_v1_state state{.title = title, .app_id = app_id};

@@ -49,7 +49,7 @@ void canvas_surface_iter(wlr_surface *surface, int sx, int sy, void *data) {
 }
 
 void draw_canvas_surfaces(const RenderCtx &ctx) {
-	for (const LayerSurface *layer : ctx.output->server.canvas_stack) {
+	for (const LayerSurface *layer : ctx.output->server.canvas_surfaces.bottom_up()) {
 		if (!layer->mapped || !layer->canvas_box.has_value()) {
 			continue;
 		}
@@ -145,7 +145,7 @@ void draw_view(const RenderCtx &ctx, View &view) {
 		if (bw > 0) {
 			const config::Palette &pal = server.theme.colors();
 			wlr_render_color border = color_rgba(
-				server.focused_view == &view ? pal.border_active : pal.border_inactive);
+				server.focus.focused_view() == &view ? pal.border_active : pal.border_inactive);
 			draw_canvas_rect(ctx, frame.x, frame.y + tb, frame.w, bw, border);
 			draw_canvas_rect(ctx, frame.x, frame.y + frame.h - bw, frame.w, bw, border);
 			draw_canvas_rect(ctx, frame.x, frame.y + tb, bw, frame.h - tb - bw, border);
