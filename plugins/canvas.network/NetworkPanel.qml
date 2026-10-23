@@ -3,6 +3,7 @@ import Quickshell.Networking
 import Quickshell.Io
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The network panel: the connection in use in the head — its name, state
 // and band, share-as-QR and speed-test buttons where the system has the
@@ -22,13 +23,13 @@ PanelCard {
 
 	// ---- what the service backends already know ----
 
-	readonly property var device: model ? model.device : null
-	readonly property var wifi: model ? model.wifi : null
-	readonly property var net: model ? model.connectedNetwork : null
+	readonly property var device: NetworkState.device
+	readonly property var wifi: NetworkState.wifi
+	readonly property var net: NetworkState.connectedNetwork
 	readonly property bool connected: device != null && device.connected
 	readonly property bool wifiOn: Networking.wifiEnabled
 	readonly property string iface: device != null ? device.name : ""
-	readonly property int strength: model ? model.strength : 0
+	readonly property int strength: NetworkState.strength
 
 	// ---- what NetworkManager's CLI fills in ----
 
@@ -864,7 +865,7 @@ PanelCard {
 					if (!wifiOn) {
 						return "󰤭"
 					}
-					return connected && net != null ? model.wifiGlyph(strength) : "󰤮"
+					return connected && net != null ? NetworkState.wifiGlyph(strength) : "󰤮"
 				}
 				title: {
 					if (wifi == null) {
@@ -1142,7 +1143,7 @@ PanelCard {
 					PanelRow {
 						width: parent.width
 						onClicked: root.rowClicked(entry.network)
-						glyph: model.wifiGlyph(model.percent(network))
+						glyph: NetworkState.wifiGlyph(NetworkState.percent(network))
 						label: network.name !== "" ? network.name
 							: "Hidden network"
 						detail: root.stateName(network)

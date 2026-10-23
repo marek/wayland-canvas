@@ -1,6 +1,7 @@
 import Quickshell.Bluetooth
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The Bluetooth panel: radio power, scanning, and the devices — paired ones
 // first, then what a scan turned up. A device row's click is its natural
@@ -10,8 +11,8 @@ PanelCard {
 
 	panelWidth: 300
 
-	readonly property var adapter: model ? model.adapter : null
-	readonly property bool radioOn: adapter != null && adapter.enabled
+	readonly property var adapter: BluetoothState.adapter
+	readonly property bool radioOn: BluetoothState.radioOn
 
 	// A device the system keeps: paired (with its keys stored, or not) or
 	// trusted. BlueZ sets Bonded only when the pairing keys are stored.

@@ -1,6 +1,6 @@
-import Quickshell
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The clock: `dddd HH:mm`; right-click cycles to the ISO-week date form. A
 // left click opens the calendar panel (the manifest names it, so BarButton
@@ -9,16 +9,11 @@ BarButton {
 	id: root
 
 	property bool alt: false
-	property date now: clock.date
-
-	SystemClock {
-		id: clock
-		precision: SystemClock.Minutes
-	}
 
 	text: {
 		var format = root.alt ? "d MMMM 'W'ww yyyy" : "dddd HH:mm"
-		return Qt.formatDateTime(root.now, format.replace(/ww/g, isoWeek(root.now)))
+		return Qt.formatDateTime(ClockState.now,
+			format.replace(/ww/g, isoWeek(ClockState.now)))
 	}
 
 	onPressed: function(button) {

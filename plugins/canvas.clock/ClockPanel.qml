@@ -1,5 +1,6 @@
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The clock panel: a month calendar with today marked. ‹ and › step the
 // month; it is a read-out, not a picker.
@@ -8,7 +9,7 @@ PanelCard {
 
 	panelWidth: 220
 
-	readonly property date today: model && model.now ? model.now : new Date()
+	readonly property date today: ClockState.now
 
 	property int viewYear: today.getFullYear()
 	property int viewMonth: today.getMonth()

@@ -1,14 +1,16 @@
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
-// The brightness panel: one slider for the backlight. The widget owns the
-// brightnessctl plumbing; the panel only drives it through `apply`.
+// The brightness panel: one slider for the backlight. BrightnessState owns
+// the value and the brightnessctl plumbing; the panel drives it through
+// `apply`.
 PanelCard {
 	id: root
 
 	panelWidth: 240
 
-	readonly property int percent: model ? model.percent : 0
+	readonly property int percent: BrightnessState.percent
 
 	PanelText {
 		width: parent.width
@@ -19,9 +21,7 @@ PanelCard {
 	PanelSlider {
 		value: root.percent / 100
 		onMoved: function(v) {
-			if (root.model != null) {
-				root.model.apply(Math.round(v * 100))
-			}
+			BrightnessState.apply(Math.round(v * 100))
 		}
 	}
 

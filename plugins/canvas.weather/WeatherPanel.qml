@@ -1,14 +1,25 @@
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The weather panel: the forecast for the coming days, from the same wttr.in
-// reading the widget shows. Rows are a read-out — nothing here acts.
+// reading the widget shows. Rows are a read-out — nothing here acts. While
+// it is open the weather is watched, so a panel opened with no widget up
+// still has a forecast to show.
 PanelCard {
 	id: root
 
 	panelWidth: 320
 
-	readonly property var forecast: model ? model.forecast : []
+	readonly property var forecast: WeatherState.forecast
+
+	onOpenChanged: {
+		if (open) {
+			WeatherState.watch()
+		} else {
+			WeatherState.unwatch()
+		}
+	}
 
 	Repeater {
 		model: root.forecast

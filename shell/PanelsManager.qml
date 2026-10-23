@@ -46,7 +46,6 @@ Item {
 			close()
 		}
 		instance.anchorItem = anchor
-		instance.model = anchor
 		instance.showPanel()
 		openName = name
 		openAnchor = anchor

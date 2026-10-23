@@ -1,5 +1,6 @@
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The agents panel: one tab per AI provider family. Claude and GPT carry
 // their limits windows beside the token figures; every other family with
@@ -19,7 +20,7 @@ PanelCard {
 	// would show another family after a refresh. The panel opens on the
 	// first provider and keeps its choice while that provider exists.
 	property string currentId: ""
-	readonly property var providers: model ? model.providers : []
+	readonly property var providers: AgentsState.providers
 	readonly property int current: {
 		for (var i = 0; i < providers.length; i++) {
 			if (providers[i].id === currentId) {
@@ -44,9 +45,7 @@ PanelCard {
 
 	function refreshOnOpen() {
 		nowMs = Date.now()
-		if (model != null) {
-			model.refresh()
-		}
+		AgentsState.refresh()
 	}
 
 	Timer {

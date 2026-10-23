@@ -1553,11 +1553,13 @@ Tests:
   - Acceptance: `git grep -nE 'canvas\.[a-z]+/' -- plugins shell` finds
     only a plugin's own names inside its own folder, and the bar and
     notes scenarios are green.
-  - Left open: TrayState stays. The panel box below stops the panel
-    manager passing the anchor, which leaves TrayState the one owner of
-    the menu's item. The tray widget keeps its `panel` property, which
-    now carries the manifest's panel name. The rest is done and green.
-- [ ] Every panel reads its state from its plugin, wherever it was opened
+  - Left open: the panel box below is done, so the panel manager passes no
+    anchor and TrayState is the one owner of the menu's item, as is. The
+    tray widget's `panel` property is how Bar hands every widget its
+    manifest panel name (BarButton declares the same), and the right click
+    toggles by it, so it stays unless `api.panels` learns a plugin's local
+    ids. The rest is done and green.
+- [x] Every panel reads its state from its plugin, wherever it was opened
   from
   - The problem: the panel manager hands a panel the item that opened it
     (`model = anchor`, PanelsManager.qml:48-49). Several panels read
@@ -1577,6 +1579,14 @@ Tests:
     - the weather is fetched once;
     - each of these panels opened through `api.panels.open` from an
       action shows its data.
+  - Done: network, bluetooth, power, clock, agents, brightness and weather
+    each hold their state in a plugin singleton (`NetworkState`,
+    `BluetoothState`, `PowerState`, `ClockState`, `AgentsState`,
+    `BrightnessState`, `WeatherState`) that the widgets and the panel read,
+    and the panel manager no longer passes the anchor as `model`. The bar
+    scenario's second output checks the weather fetched once, a wheel on
+    either bar's brightness shown on both, and each panel opened through
+    `api.panels.open` showing what its widget's click shows.
 - [x] The host rebuilds only what a write changes
   - The problem:
     - `rebuildRegistry()` runs on every host write (Host.qml:193, 223,

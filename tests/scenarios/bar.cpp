@@ -202,6 +202,7 @@ constexpr int power_panel = 260;
 constexpr int brightness_panel = 240;
 constexpr int clock_panel = 220;
 constexpr int tray_panel = 200;
+constexpr int agents_panel = 360;
 constexpr const char *bar_namespace = "wayland-canvas-bar";
 constexpr const char *toolbar_namespace = "wayland-canvas-toolbar";
 constexpr const char *app_bar_namespace = "wayland-canvas-app-bar";
@@ -1422,12 +1423,22 @@ void type(std::string_view s) {
 	}
 }
 
-void click(double x, double y, int button = BTN_LEFT) {
+// The pointer to (x, y) of the output layout, as an absolute device reports
+// it: a fraction of the layout's extents, so a point on a second output
+// lands there.
+void pointer_to(double x, double y) {
+	wlr_box layout{};
+	wlr_output_layout_get_box(server->output_layout, nullptr, &layout);
 	t += 8;
-	wlr_pointer_motion_absolute_event m = {
-		.pointer = &ptr, .time_msec = t, .x = x / double(screen_w), .y = y / double(screen_h)};
+	wlr_pointer_motion_absolute_event m = {.pointer = &ptr, .time_msec = t,
+		.x = (x - layout.x) / double(layout.width),
+		.y = (y - layout.y) / double(layout.height)};
 	wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
 	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+}
+
+void click(double x, double y, int button = BTN_LEFT) {
+	pointer_to(x, y);
 	for (int pressed = 1; pressed >= 0; pressed--) {
 		t += 8;
 		wlr_pointer_button_event b = {.pointer = &ptr, .time_msec = t, .button = uint32_t(button),
@@ -1440,12 +1451,7 @@ void click(double x, double y, int button = BTN_LEFT) {
 // The pointer at (x, y), without a click: parking it where no widget or
 // panel sits before a shot.
 void park(double x, double y) {
-	t += 8;
-	wlr_pointer_motion_absolute_event m = {
-		.pointer = &ptr, .time_msec = t, .x = x / double(screen_w),
-		.y = y / double(screen_h)};
-	wl_signal_emit_mutable(&ptr.events.motion_absolute, &m);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
+	pointer_to(x, y);
 }
 
 // One wheel event of `units` at the pointer, positive toward the user: 120
@@ -1603,6 +1609,22 @@ LayerSurface *toolbar_layer() {
 	return named_layer(toolbar_namespace);
 }
 
+// The mapped bars, one per output.
+int bar_layer_count() {
+	int n = 0;
+	for (const std::unique_ptr<Output> &output : server->outputs) {
+		for (auto &vec : output->layers) {
+			for (const std::unique_ptr<LayerSurface> &l : vec) {
+				if (l->mapped && l->wlr->namespace_ != nullptr
+						&& std::strcmp(l->wlr->namespace_, bar_namespace) == 0) {
+					n++;
+				}
+			}
+		}
+	}
+	return n;
+}
+
 // Mapped panels of any name: the one-at-a-time rule counts them.
 int panel_layers() {
 	int n = 0;
@@ -1683,6 +1705,28 @@ std::vector<Band> bands_in(cairo_surface_t *s, const wlr_box &rect) {
 // header or field of the panel's content.
 std::vector<Band> text_bands(cairo_surface_t *s, const wlr_box &card) {
 	return bands_in(s, {card.x + 8, card.y, card.width - 16, screen_h - card.y});
+}
+
+// The rows of the card itself, so what the desktop shows below the card is
+// not counted and the same card reads the same wherever it hangs: the
+// text bands down to the first pixel under the card's left padding that
+// is not the card's own fill.
+std::vector<Band> card_rows(cairo_surface_t *s, const wlr_box &card) {
+	if (s == nullptr) {
+		return {};
+	}
+	unsigned char *data = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	int h = cairo_image_surface_get_height(s);
+	auto sum = [&](int y) {
+		unsigned char *p = data + y * stride + (card.x + 6) * 4;
+		return p[0] + p[1] + p[2];
+	};
+	int fill = sum(card.y + 3), bottom = card.y + 3;
+	while (bottom < h && std::abs(sum(bottom) - fill) < 6) {
+		bottom++;
+	}
+	return bands_in(s, {card.x + 8, card.y, card.width - 16, bottom - card.y});
 }
 
 cairo_surface_t *load_png(const char *name); // defined with the screenshots
@@ -1919,6 +1963,49 @@ std::vector<Run> bar_runs(cairo_surface_t *s, const wlr_box &bar) {
 		}
 	}
 	return runs;
+}
+
+// The walk's positions go stale: the bell widens with its count, the
+// agents widget comes and goes, and the clock's text changes width, moving
+// what lies beside them. Every indicator is found again from a fresh
+// shot's runs, the same way the walk found them, so a click aims where
+// the widget is now.
+void remeasure_indicators(std::vector<Run> runs) {
+	static constexpr const char *right_to_left[] = {"power", "history",
+		"brightness", "audio", "network", "bluetooth"};
+	if (runs.size() < 2 + std::size(right_to_left)) {
+		return;
+	}
+	runs.erase(runs.begin()); // the logo
+	runs.pop_back(); // the theme switch
+	auto move = [](const char *name, double x) {
+		for (Indicator &ind : indicators) {
+			if (std::strcmp(ind.name, name) == 0) {
+				ind.x = x;
+			}
+		}
+	};
+	for (std::size_t i = 0; i < std::size(right_to_left); i++) {
+		move(right_to_left[i], runs[runs.size() - 1 - i].centre());
+	}
+	// The clock reads as two runs (the day, the time), the weather as one;
+	// the gap between two widgets is wider than a space inside one.
+	constexpr double widget_gap = 12;
+	std::vector<Run> centred; // the clock, then the weather
+	for (std::size_t i = 0; i + std::size(right_to_left) < runs.size(); i++) {
+		if (std::abs(runs[i].centre() - screen_w / 2.0) > 250) {
+			continue;
+		}
+		if (!centred.empty() && runs[i].x0 - centred.back().x1 <= widget_gap) {
+			centred.back().x1 = runs[i].x1;
+		} else {
+			centred.push_back(runs[i]);
+		}
+	}
+	if (centred.size() >= 2) {
+		move("clock", centred.front().centre());
+		move("weather", centred.back().centre());
+	}
 }
 
 // The provider chips of the open agents panel, as runs in its hero row.
@@ -3632,8 +3719,9 @@ bool shell_reloaded() {
 	return bar_layer() != nullptr && bar_surfaces_made != bar_surfaces_remembered;
 }
 
-// The weather widget fetches once each time it is made, so the curl
-// stand-in's calls for wttr.in count the times the widget was made.
+// The weather state fetches once as it starts (the first widget or panel
+// to need it), so the curl stand-in's calls for wttr.in count the times
+// the weather was started.
 int weather_fetch_count() {
 	std::string log = read_file(shot_dir + "/curl-standin.log");
 	int count = 0;
@@ -3826,6 +3914,15 @@ int shell_json_watch_writes() {
 constexpr int plugin_slider_w = 120;
 double slider_left = 0, slider_y = 0;
 int history_before = 0; // the history's length before the last notification
+
+// The handover walk's shared-state phase: the backlight before the wheels,
+// and the panel the walk is on, how far along it is and how many text bands
+// its widget's card showed.
+enum class SharedStage { widget_click, widget_open, widget_read, action_open, action_wait, action_read };
+int handover_percent = 0;
+size_t shared_panel = 0;
+SharedStage shared_stage = SharedStage::widget_click;
+int shared_widget_bands = 0;
 
 double plugins_row_y(int index) {
 	int column = settings_plugins_column();
@@ -7817,7 +7914,7 @@ int run_step() {
 		check(server->seat->keyboard_state.focused_surface
 				== panel->wlr->surface,
 			"the agents panel holds the keyboard as it opens");
-		agents_box = card_box(agents_x, 360);
+		agents_box = card_box(agents_x, agents_panel);
 		shot("agents");
 		return 700;
 	}
@@ -10412,6 +10509,7 @@ int run_step() {
 	// output the same size takes over, and the note made on the first is
 	// still on the plane, drawn by the output that is left.
 	case 551: {
+		weather_fetches = weather_fetch_count();
 		wlr_backend *headless = nullptr;
 		wlr_multi_for_each_backend(server->backend,
 			[](wlr_backend *backend, void *data) {
@@ -10429,12 +10527,167 @@ int run_step() {
 			return -100;
 		}
 		retries = 0;
-		// Two servers would each take the notification: with the second
-		// output's popups up, one notification must make one history entry.
-		history_before = notification_history_length();
-		notify_send("Handover A");
-		step = 558; // on to the second output's popups
-		return 1200;
+		step = 569; // on to what the two bars share
+		return 100;
+	}
+	// What two bars share (570-575): a plugin's state is the shell's, not a
+	// bar's. The weather is fetched once however many bars there are, a
+	// wheel on either bar's brightness steps the one backlight value, and a
+	// panel an action opens shows the data a click on its widget does.
+	case 570: { // both bars are up, each with its widgets made
+		if (bar_layer_count() < 2 && retries++ < 150) {
+			return -200;
+		}
+		retries = 0;
+		check(bar_layer_count() == 2, "the second output got a bar of its own");
+		return 1500; // its widgets are made and have asked for what they show
+	}
+	case 571:
+		check(weather_fetch_count() == weather_fetches, std::format("the weather is "
+			"fetched once with two bars ({} fetches, {} before the second output)",
+			weather_fetch_count(), weather_fetches));
+		shot("shared-bar"); // the indicators have moved since the walk measured them
+		return 500;
+	case 572: {
+		cairo_surface_t *s = load_png("shared-bar");
+		LayerSurface *layer = bar_layer();
+		remeasure_indicators(s != nullptr && layer != nullptr
+			? bar_runs(s, layer->geo) : std::vector<Run>{});
+		cairo_surface_destroy(s);
+		handover_percent = backlight_percent();
+		wheel_over_bar(indicator_x("brightness"), 120);
+		return 500;
+	}
+	case 573: { // the first bar's wheel stepped the backlight; the second bar's goes on from there
+		if (backlight_percent() != handover_percent + 5 && retries++ < 30) {
+			return -200;
+		}
+		retries = 0;
+		check(backlight_percent() == handover_percent + 5, std::format("a wheel on the "
+			"first bar's brightness stepped the backlight ({} %, was {} %)",
+			backlight_percent(), handover_percent));
+		wlr_box second{};
+		wlr_output_layout_get_box(server->output_layout, server->outputs.back()->wlr, &second);
+		wheel_over_bar(second.x + indicator_x("brightness"), 120);
+		return 500;
+	}
+	case 574: { // one backlight value, not one per bar
+		if (backlight_percent() != handover_percent + 10 && retries++ < 30) {
+			return -200;
+		}
+		retries = 0;
+		check(backlight_percent() == handover_percent + 10, std::format("a wheel on "
+			"the second bar's brightness went on from the first bar's step ({} %, "
+			"was {} %)", backlight_percent(), handover_percent));
+		shared_panel = 0;
+		shared_stage = SharedStage::widget_click;
+		return 100;
+	}
+	case 575: { // each panel, opened by a click on its widget and by an action
+		struct SharedPanel {
+			const char *name;
+			int width;
+			int min_bands; // the least a card with its data shows
+		};
+		static constexpr SharedPanel panels[] = {
+			{"network", network_panel, 10}, {"weather", weather_panel, 3},
+			{"bluetooth", bluetooth_panel, 5}, {"power", power_panel, 10},
+			{"brightness", brightness_panel, 5}, {"clock", clock_panel, 8},
+			{"agents", agents_panel, 10},
+		};
+		if (shared_panel >= std::size(panels)) {
+			// The notification's own handover, with both bars made. Two
+			// servers would each take the notification: with the second
+			// output's popups up, one notification must make one history entry.
+			history_before = notification_history_length();
+			notify_send("Handover A");
+			step = 558; // on to the second output's popups
+			return 1200;
+		}
+		const SharedPanel &panel = panels[shared_panel];
+		double x = indicator_x(panel.name); // 0 for a widget the bar does not show
+		// This step again, at the next stage: a positive return moves on.
+		auto next = [](SharedStage stage, int ms) {
+			shared_stage = stage;
+			step = 574;
+			return ms;
+		};
+		switch (shared_stage) {
+		case SharedStage::widget_click: // the widget's click opens the panel
+			if (x == 0) {
+				return next(SharedStage::action_open, 50);
+			}
+			click(x, 13);
+			return next(SharedStage::widget_open, 700);
+		case SharedStage::widget_open:
+			if (panel_layer(panel.name) == nullptr && retries++ < 40) {
+				return -200;
+			}
+			retries = 0;
+			check(panel_layer(panel.name) != nullptr,
+				std::format("the {} widget opened its panel", panel.name));
+			shot(std::format("shared-{}-widget", panel.name).c_str());
+			return next(SharedStage::widget_read, 700);
+		case SharedStage::widget_read: { // what the card shows, then close it
+			cairo_surface_t *s = load_png(std::format("shared-{}-widget", panel.name).c_str());
+			shared_widget_bands = s != nullptr
+				? int(card_rows(s, card_box(x, panel.width)).size()) : 0;
+			if (s != nullptr) {
+				cairo_surface_destroy(s);
+			}
+			std::println("  the {} widget's card: {} text bands", panel.name,
+				shared_widget_bands);
+			click(1100.0, 700.0); // outside the card: the panel closes
+			return next(SharedStage::action_open, 600);
+		}
+		case SharedStage::action_open: // the action opens the same panel, with no anchor
+			if (panel_layers() != 0 && retries++ < 40) {
+				return -200;
+			}
+			retries = 0;
+			if (std::strcmp(panel.name, "agents") == 0) {
+				// No widget shows them in the quiet world: the panel's own
+				// open asks the collector for what it shows.
+				drop_usage_fixtures();
+				agents_runs_before = codex_runs();
+			}
+			run_msg("action.run", std::format(R"({{"name":"canvas.scratch/open",)"
+				R"("args":{{"panel":"canvas.{0}/{0}"}}}})", panel.name),
+				std::format("open-{}", panel.name).c_str());
+			return next(SharedStage::action_wait, 700);
+		case SharedStage::action_wait:
+			if ((panel_layer(panel.name) == nullptr || (std::strcmp(panel.name, "agents") == 0
+					&& codex_runs() == agents_runs_before)) && retries++ < 60) {
+				return -250;
+			}
+			retries = 0;
+			check(panel_layer(panel.name) != nullptr, std::format("an action opened "
+				"the {} panel through api.panels.open", panel.name));
+			shot(std::format("shared-{}-action", panel.name).c_str());
+			return next(SharedStage::action_read, 1200);
+		case SharedStage::action_read: { // the widget's card, at the left edge
+			cairo_surface_t *s = load_png(std::format("shared-{}-action", panel.name).c_str());
+			int bands = s != nullptr
+				? int(card_rows(s, wlr_box{8, bar_h(), panel.width, 0}).size()) : 0;
+			if (s != nullptr) {
+				cairo_surface_destroy(s);
+			}
+			std::println("  the {} panel an action opened: {} text bands", panel.name, bands);
+			if (x != 0) {
+				check(bands == shared_widget_bands, std::format("the {} panel an action "
+					"opened shows what its widget's does ({} text bands, {} from the "
+					"widget)", panel.name, bands, shared_widget_bands));
+			}
+			check(bands >= panel.min_bands, std::format("the {} panel an action opened "
+				"shows its data, not an empty card ({} text bands, at least {} "
+				"expected)", panel.name, bands, panel.min_bands));
+			click(1100.0, 700.0); // outside the card: the panel closes
+			shared_panel++;
+			retries = 0;
+			return next(SharedStage::widget_click, 600);
+		}
+		}
+		return 100;
 	}
 	case 559: { // the notification landed, and both outputs draw it
 		int layers = notification_layers();
@@ -10667,6 +10920,8 @@ int main() {
 		"\t\t\t\t\"entry\": \"ScratchPanel.qml\"\n\t\t\t}\n\t\t],\n"
 		"\t\t\"actions\": [\n\t\t\t{\n\t\t\t\t\"id\": \"mark\",\n"
 		"\t\t\t\t\"entry\": \"Mark.qml\"\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"open\",\n"
+		"\t\t\t\t\"entry\": \"Open.qml\"\n\t\t\t},\n"
 		"\t\t\t{\n\t\t\t\t\"id\": \"write\",\n"
 		"\t\t\t\t\"entry\": \"Write.qml\"\n\t\t\t},\n"
 		"\t\t\t{\n\t\t\t\t\"id\": \"wait\",\n"
@@ -10719,6 +10974,14 @@ int main() {
 		"PanelCard {\n\tpanelWidth: 200\n"
 		"\tPanelRow { glyph: \"1\"; label: \"Scratch one\"; clickable: false }\n"
 		"\tPanelRow { glyph: \"2\"; label: \"Scratch two\"; clickable: false }\n}\n");
+	write_file(scratch_plugin + "/Open.qml",
+		"import QtQuick\n// The scratch open action: opens a panel by its global name\n"
+		"// through api.panels, with no widget or button to open it from, so the\n"
+		"// scenario can see the panel read its state from its plugin.\n"
+		"Item {\n\tproperty var api: null\n"
+		"\tfunction run(args) {\n"
+		"\t\tapi.panels.open(args.panel, null)\n"
+		"\t}\n}\n");
 
 	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
 	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);

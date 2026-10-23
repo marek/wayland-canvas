@@ -6,23 +6,24 @@ import "."
 // One indicator panel: a full-output overlay layer surface holding a card
 // centred under its indicator and clamped inside the output. The host's
 // panel manager instantiates one per manifest panel entry, hidden, hands it
-// the api, and on open the anchor item and the widget to read state from
-// (`model`); it owns the one-at-a-time rule and the second-toggle close. A
-// click outside the card (the overlay below the bar strip) and Escape close
-// the panel here — `dismissed` tells the manager it went; the bar strip is
-// masked out of the surface, so a second click of the icon reaches the bar
-// and closes the panel through the manager's toggle. The card is a layer
-// surface rather than an xdg popup: the Qt platform refuses to attach a
-// popup to a layer-shell parent. It asks for the keyboard on demand, which
-// the compositor gives a surface above the windows as it maps, so a text
-// field in a panel receives typing without a click first and Escape is
-// caught here before any field sees it.
+// the api, and on open the anchor item; it owns the one-at-a-time rule and
+// the second-toggle close. What a panel shows it reads from its own
+// plugin's state, never from the item that opened it, so a panel opened by
+// an action looks as it does from its widget. A click outside the card
+// (the overlay below the bar strip) and Escape close the panel here —
+// `dismissed` tells the manager it went; the bar strip is masked out of
+// the surface, so a second click of the icon reaches the bar and closes
+// the panel through the manager's toggle. The card is a layer surface
+// rather than an xdg popup: the Qt platform refuses to attach a popup to a
+// layer-shell parent. It asks for the keyboard on demand, which the
+// compositor gives a surface above the windows as it maps, so a text field
+// in a panel receives typing without a click first and Escape is caught
+// here before any field sees it.
 PanelWindow {
 	id: root
 
 	property var api: null
 	property var anchorItem: null // the bar widget the panel hangs from
-	property var model: null // the widget the panel reads its state from
 	// The panel's manifest id, which the host sets: it names the layer
 	// surface `wayland-canvas-panel-<panelName>`.
 	property string panelName: ""

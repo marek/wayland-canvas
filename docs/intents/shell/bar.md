@@ -84,6 +84,10 @@ successful fetch, bluetooth without an adapter, brightness without a
 controllable backlight, power without a battery, agents while no provider
 has any usage.
 
+What a widget shows belongs to its plugin, not to the bar it is on: with
+two outputs a wheel step on either bar's brightness shows on both, and the
+weather and the agents' usage are fetched once however many bars there are.
+
 ## Panels
 
 Each indicator opens one panel: a card anchored under its icon and kept
@@ -91,6 +95,9 @@ inside the output. A panel closes on a click outside it, on Escape and on a
 second click of its icon; only one panel is open at a time. While a panel is
 open it holds the keyboard, so a text field in it receives typing without
 anything else being clicked.
+
+A panel shows its plugin's state, not its indicator's: one opened by an
+action or by another plugin shows what a click on its icon shows.
 
 | Panel | Offers |
 |---|---|

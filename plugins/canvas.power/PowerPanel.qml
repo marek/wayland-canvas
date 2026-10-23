@@ -2,6 +2,7 @@ import Quickshell.Io
 import Quickshell.Services.UPower
 import QtQuick
 import WaylandCanvas.Ui
+import "."
 
 // The power panel: the battery (level, state, time left), the power profile
 // where the system offers one, and the session actions — the power menu
@@ -11,8 +12,8 @@ PanelCard {
 
 	panelWidth: 260
 
-	readonly property var battery: model ? model.battery : null
-	readonly property bool present: battery != null && battery.isPresent
+	readonly property var battery: PowerState.battery
+	readonly property bool present: PowerState.present
 
 	// Power profiles the system offers; balanced always, power saver with
 	// it, performance only where the platform has one.
@@ -85,7 +86,7 @@ PanelCard {
 
 			Text {
 				anchors.verticalCenter: parent.verticalCenter
-				text: root.model && root.present ? root.model.glyph() : "󰁹"
+				text: root.present ? PowerState.glyph() : "󰁹"
 				color: UiTheme.text
 				font {
 					family: UiTheme.fontFamily
@@ -99,7 +100,7 @@ PanelCard {
 				anchors.verticalCenter: parent.verticalCenter
 
 				PanelText {
-					text: root.present ? root.model.level + "%" : "No battery"
+					text: root.present ? PowerState.level + "%" : "No battery"
 				}
 
 				PanelText {

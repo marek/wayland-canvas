@@ -118,6 +118,11 @@ without code of its own. A toolbar button names an `action` (it runs), a
 `panel` (it opens beside the toolbar) or a `menu` (a list of label and
 action entries opening beside the toolbar).
 
+A panel and the widgets of its plugin read one state, which the plugin
+holds once for the whole shell; a panel never reads the item that opened
+it. So a panel opened by an action, by another plugin's button or by a
+widget on another output shows what a click on its own widget shows.
+
 An action also runs from outside the shell: the compositor's `action.run`
 method pushes an `action` event, and the host runs the named plugin
 action with its args ([../platform/ipc.md](../platform/ipc.md)) — so a
