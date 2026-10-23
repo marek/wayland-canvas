@@ -3,6 +3,7 @@
 #include <optional>
 #include <ranges>
 #include <utility>
+#include "core/process.h"
 #include "harness/run.h"
 #include "platform/output.h"
 

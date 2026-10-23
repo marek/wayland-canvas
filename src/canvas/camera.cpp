@@ -6,6 +6,7 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/process.h"
 
 CameraMotion::CameraMotion(Output &output)
 	: output_(output) {

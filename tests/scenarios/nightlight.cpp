@@ -18,6 +18,7 @@
 #include <vector>
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/settings.h"
 #include "core/wlr.h"
 #include <wlr/interfaces/wlr_output.h>
@@ -122,7 +123,7 @@ Result night_light_starts_off() {
 		return *wait;
 	}
 	check(!server->views.empty(), "a window on the output");
-	check(!server->conf.night_light, "the night light starts off");
+	check(!server->conf.resolved.night_light, "the night light starts off");
 	// A headless output has no gamma ramp, so nothing it shows can carry the
 	// filter: what the frames look like is a check for the real backend (the
 	// plan's on-screen box).
@@ -146,11 +147,11 @@ Result turn_on() {
 }
 
 Result night_light_in_conf() {
-	if (auto wait = wait_for(server->conf.night_light)) {
+	if (auto wait = wait_for(server->conf.resolved.night_light)) {
 		return *wait;
 	}
-	check(server->conf.night_light, "the night light is on in canvas.conf");
-	check(server->conf.night_light_k == settings::night_light_temperature.fallback,
+	check(server->conf.resolved.night_light, "the night light is on in canvas.conf");
+	check(server->conf.resolved.night_light_k == settings::night_light_temperature.fallback,
 		"at the default temperature");
 	float want[3];
 	night_light_multipliers(settings::night_light_temperature.fallback, want);
@@ -180,35 +181,35 @@ Result no_ramp_leaves_the_frame() {
 }
 
 Result temperature_written() {
-	if (auto wait = wait_for(server->conf.night_light_k == 2000)) {
+	if (auto wait = wait_for(server->conf.resolved.night_light_k == 2000)) {
 		return *wait;
 	}
-	check(server->conf.night_light_k == 2000, "the temperature is written to canvas.conf");
+	check(server->conf.resolved.night_light_k == 2000, "the temperature is written to canvas.conf");
 	set_session("{\"nightLightTemperature\":99}");
 	return after(1000);
 }
 
 Result temperature_out_of_range() {
-	check(server->conf.night_light_k == 2000,
+	check(server->conf.resolved.night_light_k == 2000,
 		"a temperature outside the range changes nothing");
 	chord(KEY_N, mods::super_ctrl);
 	return after(1200);
 }
 
 Result toggle_key_turns_it_off() {
-	if (auto wait = wait_for(!server->conf.night_light)) {
+	if (auto wait = wait_for(!server->conf.resolved.night_light)) {
 		return *wait;
 	}
-	check(!server->conf.night_light, "the toggle key turned the night light off");
+	check(!server->conf.resolved.night_light, "the toggle key turned the night light off");
 	chord(KEY_N, mods::super_ctrl);
 	return after(1200);
 }
 
 Result toggle_key_turns_it_on() {
-	if (auto wait = wait_for(server->conf.night_light)) {
+	if (auto wait = wait_for(server->conf.resolved.night_light)) {
 		return *wait;
 	}
-	check(server->conf.night_light, "and the next press turned it back on");
+	check(server->conf.resolved.night_light, "and the next press turned it back on");
 	check(gamma.start_client("CANVAS_GAMMA_CLIENT"), "a gamma-control client started");
 	return after(1500);
 }
@@ -226,7 +227,7 @@ Result no_ramp_tells_the_client() {
 
 Result client_gone() {
 	gamma.stop();
-	check(server->conf.night_light,
+	check(server->conf.resolved.night_light,
 		"the built-in setting is untouched by a client coming and going");
 	return after(300);
 }
@@ -243,7 +244,7 @@ Result output_gains_a_ramp() {
 }
 
 Result built_in_filter_committed() {
-	check(server->conf.night_light, "the night light is still on");
+	check(server->conf.resolved.night_light, "the night light is still on");
 	check(ramp_commits.size() == 1 && ramp_commits.back() != nullptr,
 		std::format("the built-in filter is committed once with the ramp ({} commits)",
 			ramp_commits.size()));
@@ -279,10 +280,10 @@ Result client_table_committed() {
 
 // The built-in filter is off, but the client's table is still shown.
 Result client_keeps_the_output() {
-	if (auto wait = wait_for(!server->conf.night_light)) {
+	if (auto wait = wait_for(!server->conf.resolved.night_light)) {
 		return *wait;
 	}
-	check(!server->conf.night_light, "the night light is off in canvas.conf");
+	check(!server->conf.resolved.night_light, "the night light is off in canvas.conf");
 	check(ramp_commits.size() == 2,
 		std::format("a client holding the output keeps it ({} commits)", ramp_commits.size()));
 	gamma.signal(SIGUSR1);

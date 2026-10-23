@@ -12,6 +12,7 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "input/ui_layer.h"
 
 namespace {
@@ -157,8 +158,8 @@ void Input::new_pointer(wlr_input_device *device) {
 void Input::apply_pointer_settings(libinput_device *dev) {
 	if (libinput_device_config_scroll_has_natural_scroll(dev)) {
 		bool touchpad = libinput_device_config_tap_get_finger_count(dev) > 0;
-		bool traditional = touchpad ? server_.conf.touchpad_traditional
-			: server_.conf.mouse_traditional;
+		bool traditional = touchpad ? server_.conf.resolved.touchpad_traditional
+			: server_.conf.resolved.mouse_traditional;
 		libinput_device_config_scroll_set_natural_scroll_enabled(dev, !traditional);
 	}
 }

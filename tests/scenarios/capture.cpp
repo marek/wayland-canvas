@@ -32,6 +32,7 @@
 #include <vector>
 #include "apps/capture_toolbar_layout.h"
 #include "core/config.h"
+#include "core/process.h"
 #include "core/server.h"
 #include "harness/check.h"
 #include "harness/child.h"

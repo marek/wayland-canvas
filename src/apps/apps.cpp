@@ -15,7 +15,7 @@
 #include "apps/apps.h"
 #include "core/config.h"
 #include "core/fs.h"
-#include "core/server.h"
+#include "core/process.h"
 
 namespace {
 

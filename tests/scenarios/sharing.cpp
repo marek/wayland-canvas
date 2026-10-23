@@ -28,6 +28,7 @@
 #include "platform/output.h"
 #include "render/capture.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/wlr.h"
 #include "windows/view.h"
 

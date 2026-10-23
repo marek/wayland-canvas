@@ -3,6 +3,7 @@
 #include <utility>
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 
 XInputGate::XInputGate(Server &server) : server_(server) {}
 

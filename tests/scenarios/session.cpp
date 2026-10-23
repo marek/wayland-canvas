@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include "core/process.h"
 #include "core/server.h"
 #include "harness/bus.h"
 #include "harness/check.h"

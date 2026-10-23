@@ -25,6 +25,7 @@
 #include "apps/capture_ui.h"
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/wlr.h"
 #include "platform/output.h"
 

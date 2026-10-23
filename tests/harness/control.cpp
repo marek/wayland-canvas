@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include "core/process.h"
 #include "core/server.h"
 #include "harness/check.h"
 #include "harness/files.h"

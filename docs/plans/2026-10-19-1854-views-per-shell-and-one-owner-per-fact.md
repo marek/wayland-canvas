@@ -1827,6 +1827,19 @@ Tests:
     - cpp-standards.md's "One per compositor" row names the new
       subsystems.
     - The scenarios are green.
+  - Done: `ConfStore`, `SessionEnvironment`, and the options and process
+    files; `Xwm`, `CanvasSurfaces` and `Focus` are still to do:
+    - `core/conf_store.{h,cpp}` holds canvas.conf as `Server::conf`: `path()`,
+      `text()`, `errors()`, `resolved`, `load`, `write`, the watch, and
+      `init`, which makes the file and watches it with one read of
+      `config_home()`.
+    - `platform/session_environment.{h,cpp}` is made at `start()` and reset
+      first in `~Server`, so the services stop and the portal goes back
+      before the clients go; the bus owner is read once.
+    - `core/options.h` holds `Options`; `core/process.{h,cpp}` holds
+      `now_ms`, `spawn` and `ignore_sigpipe`, which keeps the SIGPIPE
+      disposition `spawn` hands back. apps.cpp and launches.cpp include
+      only process.h.
 - [x] `Input` is the seat and the dispatch, nothing else
   - Like `Touch` and `Tablets`, these become classes of their own in
     `src/input/`:

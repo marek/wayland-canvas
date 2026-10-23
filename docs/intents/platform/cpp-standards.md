@@ -64,7 +64,7 @@ sits on the object it acts on.
 |---|---|
 | A value (`Rect`, `Camera`, `Point`) | `struct`, public fields with default member initialisers, `constexpr` members, defaulted `==` |
 | An object with a lifetime (`Server`, `Output`, `View`, `LayerSurface`, `Keyboard`) | `class`, neither copyable nor movable. Listeners, wlroots handles and caches are private; state other classes read or legitimately set is public, changed through the member function that keeps an invariant where one exists (`move`, `set_minimized`) |
-| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations, ipc, ipc_events) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
+| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations, ipc, ipc_events, conf, the session environment) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
 | Fallible setup | `bool init()` after construction; a constructor never fails |
 | Teardown order | `~Server` releases wlroots resources explicitly, in reverse order of creation; each subsystem's `finish()` releases its own before the display goes |
 | Inheritance | Only where something is polymorphic; not for sharing code |
@@ -83,12 +83,12 @@ stays at the root.
 
 | Folder | Holds |
 |---|---|
-| `src/core/` | `Server`, the wlroots wrapper, ownership helpers, tunables, canvas geometry |
+| `src/core/` | `Server`, canvas.conf's store (`ConfStore`), the startup `Options` and the process helpers (`spawn`, `now_ms`), the wlroots wrapper, ownership helpers, tunables, canvas geometry |
 | `src/canvas/` | The canvas and its desktops; a screen's camera and overview, and the overview's chrome (the tabs, the shelf, the help line: their layout, labels and drawing) |
 | `src/windows/` | Views, popups and their title bars |
 | `src/input/` | Devices and the seat; the pointer's routing, the Super tap, shortcut capture, drag and drop and the X wait queue, one class each; gestures, touch, the pen, pointer grabs, key bindings |
 | `src/render/` | The painter, the drawing primitives of a render pass, the hint and text drawing |
-| `src/platform/` | Outputs, layer surfaces, the control socket |
+| `src/platform/` | Outputs, layer surfaces, the control socket, the session environment (the bus hand-over and the services a login starts and stops) |
 | `src/apps/` | The launcher, installed applications, icons, desktop entries |
 | `src/shell/` | Helper programs the shell's plugins run as child processes (the agents panel's usage collector) |
 

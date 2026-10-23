@@ -144,7 +144,7 @@ void NightLight::apply_to_output(Output &output, wlr_output_state &state) {
 		}
 		slot.client.reset();
 	}
-	const settings::Resolved &conf = server_.conf;
+	const settings::Resolved &conf = server_.conf.resolved;
 	int wanted_k = conf.night_light ? conf.night_light_k : 0;
 	if (wanted_k != slot.filter_k || ramp != slot.filter_ramp) {
 		slot.filter = wanted_k != 0 ? built_in_filter(wanted_k, ramp) : ColorTransform{};

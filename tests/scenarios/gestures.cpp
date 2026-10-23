@@ -33,6 +33,7 @@
 #include "platform/output.h"
 #include "canvas/overview_chrome.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/wlr.h"
 
 // The allocation counter alloc-counter.c adds; absent in sanitizer builds.
@@ -2476,7 +2477,7 @@ int run_step() {
 		check(moved > 100, std::format("with pan natural, Super and fingers scrolling up "
 			"move the content up, the view down ({:+.0f})", moved));
 		o->camera.jump(scrolled_from);
-		server->conf.pan_traditional = true;
+		server->conf.resolved.pan_traditional = true;
 		key(KEY_LEFTMETA, true);
 		for (int i = 0; i < 4; i++) {
 			scroll(40);
@@ -2488,7 +2489,7 @@ int run_step() {
 		double moved = o->camera.current().cy - scrolled_from.cy;
 		check(moved < -100, std::format("with pan traditional, the same scroll moves the "
 			"view up instead ({:+.0f})", moved));
-		server->conf.pan_traditional = false;
+		server->conf.resolved.pan_traditional = false;
 		return 300;
 	}
 	case 142: {

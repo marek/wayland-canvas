@@ -225,7 +225,7 @@ void SessionLock::arm_idle_timer() {
 	if (idle_timer_ == nullptr) {
 		return;
 	}
-	int minutes = server_.conf.lock_idle_minutes;
+	int minutes = server_.conf.resolved.lock_idle_minutes;
 	idle_armed_ = minutes > 0 && !locked_ && !idle_inhibited_;
 	if (!idle_armed_) {
 		wl_event_source_timer_update(idle_timer_.get(), 0);

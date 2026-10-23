@@ -222,7 +222,7 @@ void overview_right_click(Output &output, const PressTarget &target, Point p) {
 double pan_delta(const Server &server, const wlr_pointer_axis_event &event) {
 	double traditional = event.relative_direction == WL_POINTER_AXIS_RELATIVE_DIRECTION_INVERTED
 		? -event.delta : event.delta;
-	return (server.conf.pan_traditional ? traditional : -traditional)
+	return (server.conf.resolved.pan_traditional ? traditional : -traditional)
 		* config::scroll_pan_speed;
 }
 

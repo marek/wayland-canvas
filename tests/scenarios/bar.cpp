@@ -56,6 +56,7 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/theme.h"
 #include "core/wlr.h"
 #include "canvas/overview_chrome.h"
@@ -3624,7 +3625,7 @@ bool holds_chord(std::string_view action, const settings::Chord &chord) {
 				|| registry[i].name != action) {
 			continue;
 		}
-		for (settings::Chord held : server->conf.keys[i]) {
+		for (settings::Chord held : server->conf.resolved.keys[i]) {
 			if (held == chord) {
 				return true;
 			}
@@ -5471,7 +5472,7 @@ int run_step() {
 		if (theme_x <= 0) {
 			return end_run("the theme switch was not found on the bar");
 		}
-		::spawn("foot -T themed sh -c 'exec sleep 600'"); // Server's double-forked spawn
+		::spawn("foot -T themed sh -c 'exec sleep 600'"); // the compositor's double-forked spawn
 		return 500;
 	case 61:
 		if (titled("themed") == nullptr && retries++ < 100) {
@@ -9382,7 +9383,7 @@ int run_step() {
 	case 490: { // the draft holds the chord; the file, errors and hint are untouched
 		check(read_file(canvas_conf).find("Super+Y") == std::string::npos,
 			"recording the draft's chord wrote nothing into canvas.conf");
-		check(server->conf_errors.empty()
+		check(server->conf.errors().empty()
 				&& !server->hint.text().starts_with("canvas.conf line"),
 			"and no file error followed it (none in the settings, no hint)");
 		settings_last_png.clear();
@@ -9429,7 +9430,7 @@ int run_step() {
 		retries = 0;
 		check(command == "markcmd", std::format("Enter on the typed command line "
 			"wrote Super+Y = markcmd into [commands] (\"{}\")", command));
-		check(server->conf_errors.empty(), "and the file has no error");
+		check(server->conf.errors().empty(), "and the file has no error");
 		check(!std::filesystem::exists(command_marker),
 			"the command had not run before its chord was pressed");
 		chord(KEY_Y, KEY_LEFTMETA);
@@ -9465,7 +9466,7 @@ int run_step() {
 		return 1000;
 	}
 	case 498: { // saved nothing; Remove on the row
-		check(conf_value("Super+Y") == "markcmd" && server->conf_errors.empty(),
+		check(conf_value("Super+Y") == "markcmd" && server->conf.errors().empty(),
 			"an emptied command field saved nothing: the line still holds markcmd");
 		click(settings_card_x + settings_panel - 40, settings_command_y);
 		return 400;
@@ -9478,7 +9479,7 @@ int run_step() {
 		retries = 0;
 		check(text.find("Super+Y") == std::string::npos,
 			"Remove took the command's line out of canvas.conf");
-		check(server->conf.commands.empty(),
+		check(server->conf.resolved.commands.empty(),
 			"the running session has no command left");
 		settings_last_png.clear();
 		scroll(settings_card_x + 100, 400, 40);
@@ -9520,7 +9521,7 @@ int run_step() {
 	}
 	case 504: { // typing wrote nothing; the chord chip is clicked, the row records
 		check(read_file(canvas_conf).find("Super+U =") == std::string::npos
-				&& server->conf_errors.empty(),
+				&& server->conf.errors().empty(),
 			"the typed command line alone wrote nothing into canvas.conf");
 		click(settings_card_x + settings_pad + 8 + 12, settings_command_y);
 		return 400;
@@ -9543,7 +9544,7 @@ int run_step() {
 		check(command == "markcmd" && lines == 1, std::format("recording the "
 			"chord after typing, without Enter, wrote Super+U = markcmd once "
 			"(\"{}\", {} line(s))", command, lines));
-		check(server->conf_errors.empty()
+		check(server->conf.errors().empty()
 				&& !server->hint.text().starts_with("canvas.conf line"),
 			"and no file error followed it");
 		check(!std::filesystem::exists(command_marker),
@@ -9582,7 +9583,7 @@ int run_step() {
 		retries = 0;
 		check(text.find("Super+U =") == std::string::npos,
 			"Remove took the second command's line out of canvas.conf");
-		check(server->conf.commands.empty() && server->conf_errors.empty(),
+		check(server->conf.resolved.commands.empty() && server->conf.errors().empty(),
 			"the running session has no command left, and no file error");
 		settings_last_png.clear();
 		scroll(settings_card_x + 100, 400, -150);

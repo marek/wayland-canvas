@@ -6,6 +6,7 @@
 
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/text.h"
 #include "core/theme.h"
 #include "platform/output.h"

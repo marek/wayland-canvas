@@ -46,6 +46,7 @@
 #include <vector>
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/wlr.h"
 #include "platform/output.h"
 #include "windows/view.h"

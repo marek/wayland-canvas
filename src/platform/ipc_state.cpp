@@ -227,10 +227,10 @@ void add_settings(JsonBuilder *builder, Server &server) {
 		}
 		json_builder_end_array(builder);
 	};
-	add_string("path", server.conf_path);
+	add_string("path", server.conf.path());
 	json_builder_set_member_name(builder, "errors");
 	json_builder_begin_array(builder);
-	for (const settings::Error &error : server.conf_errors) {
+	for (const settings::Error &error : server.conf.errors()) {
 		json_builder_begin_object(builder);
 		json_builder_set_member_name(builder, "line");
 		json_builder_add_int_value(builder, error.line);
@@ -249,7 +249,7 @@ void add_settings(JsonBuilder *builder, Server &server) {
 		add_string("label", def.label);
 		add_string("group", def.group);
 		json_builder_set_member_name(builder, "keys");
-		add_chords(server.conf.keys[i]);
+		add_chords(server.conf.resolved.keys[i]);
 		json_builder_set_member_name(builder, "defaults");
 		add_chords(def.defaults);
 		json_builder_end_object(builder);
@@ -257,7 +257,7 @@ void add_settings(JsonBuilder *builder, Server &server) {
 	json_builder_end_array(builder);
 	json_builder_set_member_name(builder, "commands");
 	json_builder_begin_array(builder);
-	for (const settings::Command &command : server.conf.commands) {
+	for (const settings::Command &command : server.conf.resolved.commands) {
 		json_builder_begin_object(builder);
 		json_builder_set_member_name(builder, "keys");
 		json_builder_add_string_value(builder,
@@ -278,7 +278,7 @@ void add_settings(JsonBuilder *builder, Server &server) {
 			json_builder_begin_object(builder);
 		}
 		json_builder_set_member_name(builder, std::string{field.param}.c_str());
-		add_field_value(builder, field, field.read(server.conf));
+		add_field_value(builder, field, field.read(server.conf.resolved));
 	}
 	json_builder_end_object(builder);
 	json_builder_set_member_name(builder, "fields");

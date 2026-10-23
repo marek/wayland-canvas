@@ -204,7 +204,7 @@ IpcServer::Reply settings_set(Server &server, JsonObject *params) {
 	if (named != 1) {
 		return std::unexpected(settings_set_usage());
 	}
-	settings::File file{server.conf_text};
+	settings::File file{server.conf.text()};
 	std::expected<settings::Edit, std::string> edit = std::unexpected(std::string{});
 	if (field != nullptr) {
 		std::expected<long long, std::string> value = field_value(*field, params);
@@ -220,9 +220,9 @@ IpcServer::Reply settings_set(Server &server, JsonObject *params) {
 	if (!edit.has_value()) {
 		return std::unexpected(edit.error());
 	}
-	if (!server.write_conf(edit->text)) {
+	if (!server.conf.write(edit->text)) {
 		return std::unexpected(std::format("{} is unwritable",
-			server.conf_path));
+			server.conf.path()));
 	}
 	// The settings now, with where a taken chord came from.
 	return object_text([&](JsonBuilder *builder) {

@@ -4,12 +4,12 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <sys/types.h>
 #include "input/bindings.h"
 #include "canvas/canvas.h"
 #include "input/gesture.h"
 #include "input/input.h"
 #include "core/changes.h"
+#include "core/conf_store.h"
 #include "platform/ipc_events.h"
 #include "platform/ipc_server.h"
 #include "platform/image_capture.h"
@@ -23,24 +23,14 @@
 #include "render/render.h"
 #include "render/text_cache.h"
 #include "core/util.h"
-#include "platform/session_bus.h"
+#include "core/options.h"
+#include "platform/session_environment.h"
 #include "windows/launches.h"
 #include "windows/popup.h"
 #include "windows/view.h"
 
 class LayerSurface;
 class Output;
-
-struct Options {
-	const char *startup_cmd = nullptr;
-	bool start_bar = true; // autostart the top bar when qs is available
-	double scale = 0; // 0: pick per output
-};
-
-double now_ms();
-// Runs `cmd` through /bin/sh -c, double-forked so it never becomes a zombie.
-// Returns the shell's pid (the command's own when the shell execs it), or -1.
-pid_t spawn(const char *cmd);
 
 // The compositor: wlroots globals, every object on the canvas, and the subsystems.
 class Server {
@@ -186,6 +176,7 @@ public:
 	SessionLock lock;
 	NightLight night_light;
 	Logind logind;
+	ConfStore conf;
 
 	// Where a plugin asked for its surfaces to be on the plane, by name
 	// (docs/intents/platform/ipc.md). Kept here, not on the surface, so a
@@ -196,17 +187,6 @@ public:
 	// output draws and hit-tests them in this order, whichever output each
 	// was made on.
 	std::vector<LayerSurface *> canvas_stack;
-
-	// canvas.conf (core/settings.h): the file, its text as last read, the
-	// resolved settings, and the lines it ignored. `load_conf` applies them
-	// to the bindings and the gestures; `write_conf` writes a new text
-	// atomically and applies it at once.
-	std::string conf_path;
-	std::string conf_text;
-	settings::Resolved conf;
-	std::vector<settings::Error> conf_errors;
-	void load_conf(bool first);
-	bool write_conf(const std::string &text);
 
 private:
 	// output.cpp
@@ -262,17 +242,10 @@ private:
 	static int handle_terminate_signal(int signal, void *data);
 	void start_bar();
 	void handle_new_inhibitor(wlr_idle_inhibitor_v1 *inhibitor);
-	// A change of canvas.conf: read the inotify events of its directory,
-	// re-read the file when it was saved or deleted.
-	static int handle_conf_change(int fd, uint32_t mask, void *data);
-	int conf_inotify_fd_ = -1;
-	EventSourcePtr conf_inotify_source_;
 	EventSourcePtr sigint_source_, sigterm_source_;
 	std::vector<std::unique_ptr<SurfaceTracker>> trackers_;
 	std::vector<std::unique_ptr<Inhibitor>> inhibitors_;
 	Listener new_surface_, request_activate_, new_inhibitor_;
-	// A login's hand-over of the portal, handed back on exit.
-	std::optional<session_bus::HandOver> hand_over_;
-	// Whether this run started the session's services and so stops them.
-	bool manages_services_ = false;
+	// Present from start() to the end of the run.
+	std::optional<SessionEnvironment> environment_;
 };

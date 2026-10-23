@@ -32,6 +32,7 @@
 #include "platform/output.h"
 #include "canvas/overview_chrome.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/wlr.h"
 
 namespace {
@@ -239,7 +240,7 @@ bool holds_chord(std::string_view action, const settings::Chord &chord) {
 				|| registry[i].name != action) {
 			continue;
 		}
-		for (settings::Chord held : server->conf.keys[i]) {
+		for (settings::Chord held : server->conf.resolved.keys[i]) {
 			if (held == chord) {
 				return true;
 			}
@@ -1187,11 +1188,11 @@ int run_step() {
 		return 300;
 	}
 	case 71: {
-		if (server->conf_errors.empty() && retries++ < 100) {
+		if (server->conf.errors().empty() && retries++ < 100) {
 			return -100;
 		}
-		check(!server->conf_errors.empty()
-				&& server->conf_errors.front().text == "unknown action 'lancher'",
+		check(!server->conf.errors().empty()
+				&& server->conf.errors().front().text == "unknown action 'lancher'",
 			"the ignored line is listed with its reason");
 		check(server->hint.text().starts_with("canvas.conf line ")
 				&& server->hint.text().find("unknown action 'lancher'")

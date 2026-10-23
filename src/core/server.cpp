@@ -1,28 +1,19 @@
-#include <cerrno>
 #include <csignal>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
-#include <format>
 #include <limits.h>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <sys/inotify.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "core/config.h"
-#include "core/fs.h"
+#include "core/process.h"
 #include "core/text.h"
 #include "platform/ipc_methods.h"
 #include "platform/layer.h"
 #include "platform/output.h"
-#include "platform/session_bus.h"
-#include "platform/session_services.h"
 #include "core/server.h"
 #include "core/theme_prefs.h"
 #include "input/ui_layer.h"
@@ -103,31 +94,6 @@ std::optional<std::string> bar_shell_dir() {
 	return std::nullopt;
 }
 
-
-// ---- canvas.conf (core/settings.h) ----
-
-// $XDG_CONFIG_HOME when absolute, else ~/.config.
-std::string config_home() {
-	if (const char *xdg = getenv("XDG_CONFIG_HOME");
-			xdg != nullptr && xdg[0] == '/') {
-		return xdg;
-	}
-	if (const char *home = getenv("HOME"); home != nullptr && home[0] == '/') {
-		return std::string(home) + "/.config";
-	}
-	return {};
-}
-
-// The gesture code's own options from the settings in force.
-GestureOptions gesture_options(const settings::Resolved &conf) {
-	return {
-		.swipes = conf.swipes,
-		.pinch_scale = conf.pinch_scale,
-		.overview_down = conf.overview_down,
-		.hops_away = conf.hops_away,
-	};
-}
-
 // Keeps the idle notifier inhibited while at least one inhibitor is alive;
 // `delta` adjusts for the one whose destroy signal is running.
 void update_idle_inhibit(Server &server, int delta) {
@@ -136,148 +102,7 @@ void update_idle_inhibit(Server &server, int delta) {
 	server.lock.set_idle_inhibited(count > 0);
 }
 
-// SIGPIPE as the compositor found it. The compositor ignores the signal for
-// itself (see Server::init); what it starts gets this back, since an ignored
-// signal stays ignored across exec.
-void (*inherited_sigpipe)(int) = SIG_DFL;
-bool sigpipe_recorded = false;
-
-// The desktop name every client sees; "wlroots" lets the portal pick its
-// wlroots backend where our portals config is not installed.
-constexpr const char *desktop_name = "wayland-canvas:wlroots";
-// The portals a hand-over and a hand-back restart, so they serve the display
-// the systemd environment now names.
-constexpr const char *portal_units =
-	"xdg-desktop-portal.service xdg-desktop-portal-wlr.service xdg-desktop-portal-gtk.service";
-
-// The handed-over values in the user's systemd environment, read now.
-session_bus::Handed systemd_handed() {
-	FILE *pipe = popen("systemctl --user show-environment", "r");
-	if (pipe == nullptr) {
-		return {};
-	}
-	std::string out;
-	char chunk[4096];
-	std::size_t n = 0;
-	while ((n = std::fread(chunk, 1, sizeof chunk, pipe)) > 0) {
-		out.append(chunk, n);
-	}
-	pclose(pipe);
-	return session_bus::handed_in(out);
-}
-
-// Puts this compositor's WAYLAND_DISPLAY and desktop name into the
-// activation environment of the services the session bus starts — the
-// screen-sharing portal and its wlroots backend first among them — when
-// the bus is this run's to take (docs/intents/platform/protocols.md). A
-// login returns the values it replaced, for the hand-back on exit.
-session_bus::Owner bus_owner(bool login) {
-	const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
-	const char *runtime = getenv("XDG_RUNTIME_DIR");
-	return session_bus::owner(address ? address : "", runtime ? runtime : "", login);
-}
-
-std::optional<session_bus::Handed> hand_over_session_bus(bool login) {
-	switch (bus_owner(login)) {
-	case session_bus::Owner::none:
-	case session_bus::Owner::host:
-		return std::nullopt;
-	case session_bus::Owner::own:
-		spawn("dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP");
-		return std::nullopt;
-	case session_bus::Owner::login: {
-		session_bus::Handed before = systemd_handed();
-		// Portals an earlier session left running still serve that
-		// session's display: restart the ones that run.
-		spawn(std::format("dbus-update-activation-environment --systemd WAYLAND_DISPLAY"
-			" XDG_CURRENT_DESKTOP && systemctl --user try-restart {}", portal_units).c_str());
-		return before;
-	}
-	}
-	return std::nullopt;
-}
-
-// Gives the portal back to the session a login took it from: the values it
-// replaced restored (unset ones unset) and the portals restarted, unless
-// another session has taken it since.
-void hand_back_session_bus(const session_bus::HandOver &hand_over) {
-	std::optional<session_bus::Handed> restore =
-		session_bus::hand_back(hand_over, systemd_handed());
-	if (!restore.has_value()) {
-		return;
-	}
-	std::string set, unset;
-	auto add = [&set, &unset](const char *name, const std::optional<std::string> &value) {
-		if (value.has_value()) {
-			set += " " + text::shell_quote(std::format("{}={}", name, *value));
-			return;
-		}
-		unset += std::format(" {}", name);
-	};
-	add("WAYLAND_DISPLAY", restore->wayland_display);
-	add("XDG_CURRENT_DESKTOP", restore->current_desktop);
-	std::string cmd;
-	if (!set.empty()) {
-		cmd += "dbus-update-activation-environment --systemd" + set + " && ";
-	}
-	if (!unset.empty()) {
-		cmd += "systemctl --user unset-environment" + unset + " && ";
-	}
-	spawn((cmd + "systemctl --user try-restart " + portal_units).c_str());
-}
-
 } // namespace
-
-double now_ms() {
-	timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
-}
-
-pid_t spawn(const char *cmd) {
-	// The intermediate child reports the command's pid through a pipe, so a
-	// launch can be traced to the windows its processes open.
-	int report[2];
-	if (pipe2(report, O_CLOEXEC) < 0) {
-		wlr_log_errno(WLR_ERROR, "pipe failed");
-		return -1;
-	}
-	pid_t pid = fork();
-	if (pid < 0) {
-		wlr_log_errno(WLR_ERROR, "fork failed");
-		close(report[0]);
-		close(report[1]);
-		return -1;
-	}
-	if (pid == 0) {
-		// Double fork so the command is reparented and never becomes a zombie.
-		close(report[0]);
-		setsid();
-		sigset_t set;
-		sigemptyset(&set);
-		sigprocmask(SIG_SETMASK, &set, nullptr);
-		std::signal(SIGPIPE, inherited_sigpipe);
-		pid_t command = fork();
-		if (command == 0) {
-			// The command starts with only its three standard fds:
-			// nothing the compositor holds open reaches it.
-			close_range(STDERR_FILENO + 1, ~0U, 0);
-			execl("/bin/sh", "/bin/sh", "-c", cmd, static_cast<char *>(nullptr));
-			_exit(127);
-		}
-		ssize_t sent = write(report[1], &command, sizeof command);
-		_exit(sent == static_cast<ssize_t>(sizeof command) ? 0 : 1);
-	}
-	close(report[1]);
-	pid_t command = -1;
-	ssize_t got = 0;
-	do {
-		got = read(report[0], &command, sizeof command);
-	} while (got < 0 && errno == EINTR);
-	close(report[0]);
-	waitpid(pid, nullptr, 0);
-	return got == static_cast<ssize_t>(sizeof command) ? command : -1;
-}
 
 // Per-surface commit tracking: repaint only the outputs showing the surface.
 struct Server::SurfaceTracker {
@@ -347,7 +172,7 @@ Server::Server()
 	launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), ipc(), ipc_events(*this, ipc),
 	image_capture(*this),
-	capture_ui(*this), lock(*this), night_light(*this), logind(*this) {
+	capture_ui(*this), lock(*this), night_light(*this), logind(*this), conf(*this) {
 	register_ipc_methods(ipc, *this);
 	input.set_layers({&capture_ui, &launcher});
 }
@@ -360,20 +185,10 @@ Server::~Server() {
 	// down, not wait in a source nobody dispatches.
 	sigint_source_.reset();
 	sigterm_source_.reset();
-	if (manages_services_) {
-		// The session ends: its services go with it. A crash runs nothing
-		// here, and the next login stops what it left behind.
-		spawn(session_services::stop_command().c_str());
-	}
+	// The session ends: its services go with it, and the portal goes back.
+	environment_.reset();
 	logind.finish();
-	if (hand_over_.has_value()) {
-		hand_back_session_bus(*hand_over_);
-	}
-	conf_inotify_source_.reset();
-	if (conf_inotify_fd_ >= 0) {
-		close(conf_inotify_fd_);
-		conf_inotify_fd_ = -1;
-	}
+	conf.finish();
 	// The clients go before the subsystems that listen to them.
 	if (display != nullptr) {
 		wl_display_destroy_clients(display);
@@ -425,15 +240,8 @@ bool Server::init(const Options &options) {
 	loop = wl_display_get_event_loop(display);
 	// IPC writes to clients that exit mid-line must fail with EPIPE, not
 	// take the compositor down: Ipc::flush already keeps such writes queued
-	// until the connection's EOF is dispatched. The disposition found here
-	// is what spawned commands get back; a second Server in the same process
-	// would find the first one's ignore instead, so only the first records.
-	void (*previous)(int) = std::signal(SIGPIPE, SIG_IGN);
-	if (!sigpipe_recorded) {
-		// A handler would not survive exec: only an ignore is passed on.
-		inherited_sigpipe = previous == SIG_IGN ? SIG_IGN : SIG_DFL;
-		sigpipe_recorded = true;
-	}
+	// until the connection's EOF is dispatched.
+	ignore_sigpipe();
 	sigint_source_.reset(wl_event_loop_add_signal(loop, SIGINT, handle_terminate_signal, this));
 	sigterm_source_.reset(wl_event_loop_add_signal(loop, SIGTERM, handle_terminate_signal, this));
 
@@ -536,55 +344,12 @@ bool Server::start() {
 	unsetenv("NIRI_SOCKET");
 	// Before any client is spawned, so they inherit the socket path.
 	ipc.init(display, loop);
-	// canvas.conf: written with every default when missing (its directory
-	// created with it), then watched — a save or a delete re-reads it and
-	// applies to the running session (docs/intents/input/config-file.md).
-	conf_path = config_home() + "/wayland-canvas/canvas.conf";
-	if (config_home().size() > 0) {
-		if (access(conf_path.c_str(), F_OK) != 0) {
-			fs::mkdir_p(config_home() + "/wayland-canvas");
-			if (!fs::write_text_atomic(conf_path, settings::template_text())) {
-				wlr_log(WLR_ERROR, "could not write %s: the defaults apply",
-					conf_path.c_str());
-			}
-		}
-		conf_inotify_fd_ = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-		if (conf_inotify_fd_ < 0 || inotify_add_watch(conf_inotify_fd_,
-				(config_home() + "/wayland-canvas").c_str(),
-				IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE) < 0) {
-			wlr_log(WLR_ERROR, "could not watch %s for changes",
-				conf_path.c_str());
-			if (conf_inotify_fd_ >= 0) {
-				close(conf_inotify_fd_);
-				conf_inotify_fd_ = -1;
-			}
-		} else {
-			conf_inotify_source_.reset(wl_event_loop_add_fd(
-				wl_display_get_event_loop(display), conf_inotify_fd_,
-				WL_EVENT_READABLE, handle_conf_change, this));
-		}
-	} else {
-		wlr_log(WLR_ERROR, "neither $XDG_CONFIG_HOME nor $HOME is set: "
-			"canvas.conf is unreadable, the defaults apply");
-	}
-	load_conf(true);
-	// Every client is in a wayland-canvas session.
-	setenv("XDG_CURRENT_DESKTOP", desktop_name, true);
-	if (std::optional<session_bus::Handed> before = hand_over_session_bus(session != nullptr)) {
-		hand_over_ = session_bus::HandOver{
-			.ours = {.wayland_display = socket, .current_desktop = desktop_name},
-			.before = *before,
-		};
-	}
+	// canvas.conf: written with every default when missing, then watched
+	// (docs/intents/input/config-file.md).
+	conf.init();
 	// A login watches its logind session: lock-session and sleep lock it.
 	logind.init(session != nullptr);
-	// ...and brings the session's own services up, once its environment is
-	// where the user manager can see it
-	// (docs/intents/workspace/session-services.md).
-	if (session_services::manages(bus_owner(session != nullptr))) {
-		manages_services_ = true;
-		spawn(session_services::start_command().c_str());
-	}
+	environment_.emplace(socket, session != nullptr);
 	wlr_log(WLR_INFO, "Running wayland-canvas on WAYLAND_DISPLAY=%s", socket);
 	if (options.start_bar) {
 		start_bar();
@@ -619,84 +384,6 @@ void Server::start_bar() {
 		cmd = "PATH=" + text::shell_quote(*self) + ":$PATH " + cmd;
 	}
 	spawn(cmd.c_str());
-}
-
-// Reads canvas.conf and applies it to the running session: the bindings'
-// tables, the gesture options, and — when the file has lines it ignored —
-// the hint that names the first on every screen. The first load never
-// emits the settings event; later ones only when something changed, so
-// the watch's own echo of a write_conf is silent.
-void Server::load_conf(bool first) {
-	// a missing or unreadable file reads as empty: every default applies
-	// (docs/intents/input/config-file.md)
-	std::string text = fs::read_text_file(conf_path).value_or("");
-	settings::Parsed parsed = settings::parse(text);
-	settings::Resolved resolved = settings::resolve(parsed);
-	bool differs = !first && !(resolved == conf);
-	conf = std::move(resolved);
-	conf_text = text;
-	conf_errors = std::move(parsed.errors);
-	bindings.apply(conf);
-	gestures.set_options(gesture_options(conf));
-	input.settings_changed();
-	lock.settings_changed();
-	night_light.settings_changed();
-	if (!conf_errors.empty()) {
-		for (const settings::Error &error : conf_errors) {
-			wlr_log(WLR_ERROR, "canvas.conf line %d: %s", error.line,
-				error.text.c_str());
-		}
-		const settings::Error &first_error = conf_errors.front();
-		std::string hint_text = std::format("canvas.conf line {}: {}",
-			first_error.line, first_error.text);
-		if (conf_errors.size() > 1) {
-			hint_text += std::format(" (+{} more)", conf_errors.size() - 1);
-		}
-		hint.set(hint_text);
-	}
-	if (differs) {
-		changed(Change::settings);
-	}
-}
-
-// Writes `text` as canvas.conf — beside the old file, then renamed over
-// it, so neither an editor nor a crash sees half a file — and applies it
-// at once. False, logged, when the file cannot be written: the running
-// settings stay.
-bool Server::write_conf(const std::string &text) {
-	if (!fs::write_text_atomic(conf_path, text)) {
-		wlr_log(WLR_ERROR, "could not write %s: the running settings stay",
-			conf_path.c_str());
-		return false;
-	}
-	load_conf(false); // the settings event leaves with it; the watch echoes
-	return true;
-}
-
-int Server::handle_conf_change(int fd, uint32_t mask, void *data) {
-	auto *server = static_cast<Server *>(data);
-	if ((mask & WL_EVENT_READABLE) == 0) {
-		return 0;
-	}
-	// Read every event pending: a save of canvas.conf — written in place
-	// or renamed over, as editors do — or its deletion re-reads it.
-	alignas(struct inotify_event) char buf[4096];
-	bool reload = false;
-	ssize_t n = 0;
-	while ((n = read(fd, buf, sizeof buf)) > 0) {
-		char *at = buf;
-		while (at + sizeof(struct inotify_event) <= buf + n) {
-			auto *event = reinterpret_cast<struct inotify_event *>(at);
-			at += sizeof(struct inotify_event) + event->len;
-			if (event->len > 0 && strcmp(event->name, "canvas.conf") == 0) {
-				reload = true;
-			}
-		}
-	}
-	if (reload) {
-		server->load_conf(false);
-	}
-	return 0;
 }
 
 void Server::set_theme(ThemeMode mode) {

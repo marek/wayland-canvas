@@ -9,6 +9,7 @@
 #include <linux/input-event-codes.h>
 #include <optional>
 #include "core/server.h"
+#include "core/process.h"
 #include "input/input.h"
 #include "platform/output.h"
 

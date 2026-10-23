@@ -19,6 +19,7 @@
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/settings_file.h"
 
 namespace {
@@ -269,10 +270,10 @@ void act_lock(Server &server, Output *, KeyArg) {
 // The night light on or off, written into canvas.conf so the choice holds
 // across a restart and the settings window shows it.
 void act_night_light(Server &server, Output *, KeyArg) {
-	settings::File file{server.conf_text};
+	settings::File file{server.conf.text()};
 	std::expected<settings::Edit, std::string> edit =
-		file.set(settings::night_light, server.conf.night_light ? 0 : 1);
-	if (!edit.has_value() || !server.write_conf(edit->text)) {
+		file.set(settings::night_light, server.conf.resolved.night_light ? 0 : 1);
+	if (!edit.has_value() || !server.conf.write(edit->text)) {
 		wlr_log(WLR_ERROR, "the night light could not be written to canvas.conf");
 	}
 }

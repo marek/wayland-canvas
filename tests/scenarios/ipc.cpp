@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <variant>
 #include <vector>
+#include "core/process.h"
 #include "core/server.h"
 #include "core/settings.h"
 #include "core/theme.h"
@@ -1143,7 +1144,7 @@ Result free_window_focused() {
 
 // settings.set compares the number with its range before narrowing it.
 Result settings_wrap_asked() {
-	conf_before = server->conf_text;
+	conf_before = server->conf.text();
 	// 4294967301 is 2^32 + 5 and 4294971296 is 2^32 + 4000: as an int, the
 	// first is a valid idle time and the second a valid temperature.
 	run_msg("settings.set", R"({"lockIdleMinutes":4294967301})", "idle-wraps");
@@ -1164,9 +1165,9 @@ Result settings_wrap_refused() {
 				!= std::string::npos,
 		std::format("`settings.set` of a temperature past an int is an error ({})",
 			command_err("temperature-wraps")));
-	check(server->conf_text == conf_before
-			&& server->conf.lock_idle_minutes == settings::lock_idle.fallback
-			&& server->conf.night_light_k == settings::night_light_temperature.fallback,
+	check(server->conf.text() == conf_before
+			&& server->conf.resolved.lock_idle_minutes == settings::lock_idle.fallback
+			&& server->conf.resolved.night_light_k == settings::night_light_temperature.fallback,
 		"canvas.conf and the settings in force are unchanged");
 	run_msg("settings.set", R"({"lockIdleMinutes":7})", "idle-seven");
 	return after(400);
@@ -1175,12 +1176,13 @@ Result settings_wrap_refused() {
 // The settings table, end to end: what settings.get reports of every row,
 // what settings.set refuses of each, and the usage naming all.
 Result settings_table_asked() {
-	if (auto wait = wait_for(command_done("idle-seven") && server->conf.lock_idle_minutes == 7)) {
+	if (auto wait = wait_for(command_done("idle-seven")
+			&& server->conf.resolved.lock_idle_minutes == 7)) {
 		return *wait;
 	}
-	check(command_code("idle-seven") == 0 && server->conf.lock_idle_minutes == 7,
+	check(command_code("idle-seven") == 0 && server->conf.resolved.lock_idle_minutes == 7,
 		"a lockIdleMinutes in range is still written");
-	conf_before = server->conf_text;
+	conf_before = server->conf.text();
 	asked = refusals();
 	run_msg("settings.get", "", "settings-get");
 	run_msg("settings.set", "", "settings-usage");
@@ -1214,7 +1216,7 @@ Result settings_table_answered() {
 			std::format("`settings.set` {} is refused naming the setting ({})",
 				refusal.params, command_err(refusal.name)));
 	}
-	check(server->conf_text == conf_before, "no refused settings.set changed canvas.conf");
+	check(server->conf.text() == conf_before, "no refused settings.set changed canvas.conf");
 	return after(300);
 }
 

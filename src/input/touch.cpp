@@ -10,6 +10,7 @@
 #include <optional>
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "input/gesture.h"
 #include "input/input.h"
 #include "platform/output.h"

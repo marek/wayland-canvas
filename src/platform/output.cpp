@@ -7,6 +7,7 @@
 #include "core/box.h"
 #include "platform/layer.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "input/ui_layer.h"
 #include "windows/view.h"
 

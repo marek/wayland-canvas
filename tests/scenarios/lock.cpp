@@ -15,6 +15,7 @@
 #include <string_view>
 #include "core/config.h"
 #include "core/server.h"
+#include "core/process.h"
 #include "core/settings.h"
 #include "harness/check.h"
 #include "harness/child.h"
@@ -193,7 +194,7 @@ Result windows_are_back() {
 
 // The idle timeout: armed from canvas.conf, and what it does.
 Result idle_timeout() {
-	check(server->conf.lock_idle_minutes == settings::lock_idle.fallback,
+	check(server->conf.resolved.lock_idle_minutes == settings::lock_idle.fallback,
 		"canvas.conf starts with the default idle lock");
 	check(server->lock.idle_armed(), "the idle countdown is running");
 	server->lock.idle_elapsed();

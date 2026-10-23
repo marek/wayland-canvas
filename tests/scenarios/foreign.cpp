@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "core/server.h"
+#include "core/process.h"
 #include "harness/check.h"
 #include "harness/child.h"
 #include "harness/devices.h"

@@ -4,7 +4,7 @@
 
 #include "windows/launches.h"
 #include "core/config.h"
-#include "core/server.h"
+#include "core/process.h"
 #include "platform/output.h"
 
 namespace {
