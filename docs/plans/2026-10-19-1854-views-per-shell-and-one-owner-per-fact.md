@@ -2034,20 +2034,22 @@ Tests:
   - fullscreen_desktops.cpp:17 and view.cpp:727 compare
     `ViewKind::client_placed` directly, though view_kind.h:3-8 says
     every rule goes through its predicates.
-- [ ] Dead code goes
-  - In the compositor:
-    - `draw_item_card`, `scale_rgba` and `wrap_layout` (draw.cpp:22-41,
-      106-133; draw.h:17-21), and `config::item_*` (config.h:110-117);
-    - `MethodFn` (ipc.h:78-81) and `Request::ok` (ipc.cpp:691, 744);
-    - `have_scale` in main, which only repeats `scale > 0`.
-  - In the shell and plugins:
-    - `CanvasApi.surfaceName` (CanvasApi.qml:17-19);
-    - `registry.barWidgets` (Host.qml:615);
-    - Compositor.qml's `available` (14);
-    - Notes.qml's unused `registry` and `modelData` (12-14);
-    - Network.qml's unread `networks` (20-21).
+- [ ] Dead code goes: the compositor
+  - `draw_item_card`, `scale_rgba` and `wrap_layout` (draw.cpp:22-41,
+    106-133; draw.h:17-21), and `config::item_*` (config.h:110-117).
+  - `MethodFn` (ipc.h:78-81), and `Request::ok` (ipc.cpp:691, 744) if it
+    is still there.
+  - `have_scale` in main, which only repeats `scale > 0`.
   - Acceptance: grep finds none of these names, `-Wunused` is clean, and
-    the suites are green.
+    the unit suite and the scenarios that cover the files changed pass.
+- [ ] Dead code goes: the shell and plugins
+  - `CanvasApi.surfaceName` (CanvasApi.qml:17-19).
+  - `registry.barWidgets` (Host.qml:615).
+  - Compositor.qml's `available` (14).
+  - Notes.qml's unused `registry` and `modelData` (12-14).
+  - Network.qml's unread `networks` (20-21).
+  - Acceptance: grep finds none of these names, and the bar and notes
+    scenarios pass.
 - [x] Every build has Xwayland; configure fails without it
   - The compile-time variant without Xwayland, its second build tree and the build script's option for it are gone: X11 apps are always supported, the packages bundle wlroots with Xwayland, and a missing Xwayland program is the runtime case.
 
