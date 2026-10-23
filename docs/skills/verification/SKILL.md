@@ -52,6 +52,7 @@ What each kind of change needs:
 | A restructuring | The suites that cover the moved code; behaviour must not change |
 | Ownership, lifetimes, buffers | + `tools/check.sh --sanitize` |
 | Dependencies, build options, `meson.build`, `packaging/` | + `tools/package.sh` |
+| Comments only | No test run: the diff with comments stripped is empty |
 
 A run is repeated only when something it covers changed since it last
 passed: a full suite run after a commit that touched one area proves
