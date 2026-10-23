@@ -261,7 +261,7 @@ IpcServer::Reply shortcut_capture(IpcServer &ipc, Server &server, JsonObject *pa
 		return std::unexpected(scope.error());
 	}
 	// A capture under way is answered null as this one begins.
-	server.input.begin_shortcut_capture([&ipc](std::optional<settings::Chord> chord) {
+	server.input.shortcut_capture.begin([&ipc](std::optional<settings::Chord> chord) {
 		ipc.answer(capture_wait, chord_answer(chord));
 	});
 	return IpcServer::Wait{capture_wait};
@@ -269,7 +269,7 @@ IpcServer::Reply shortcut_capture(IpcServer &ipc, Server &server, JsonObject *pa
 
 IpcServer::Reply shortcut_cancel(Server &server) {
 	// A capture under way is cancelled: its client is answered null now.
-	server.input.cancel_shortcut_capture();
+	server.input.shortcut_capture.cancel();
 	return std::string{"true"};
 }
 
@@ -277,7 +277,7 @@ IpcServer::Reply shortcut_cancel(Server &server) {
 
 void register_settings_methods(IpcServer &ipc, Server &server) {
 	// The capture ends with its client: no keys are swallowed for a dead one.
-	ipc.on_abandoned(capture_wait, [&server] { server.input.cancel_shortcut_capture(); });
+	ipc.on_abandoned(capture_wait, [&server] { server.input.shortcut_capture.cancel(); });
 	ipc.register_method("settings.get", [&server](JsonObject *) { return settings_get(server); });
 	ipc.register_method("settings.set",
 		[&server](JsonObject *params) { return settings_set(server, params); });

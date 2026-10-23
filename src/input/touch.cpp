@@ -64,7 +64,7 @@ void Touch::map_devices() {
 }
 
 void Touch::device_gone(Device *device) {
-	input_.run_waiting(); // a waiting event names this device
+	input_.x_gate.run_waiting(); // a waiting event names this device
 	end_all(static_cast<uint32_t>(now_ms()));
 	destroy_owned(devices_, device);
 	input_.update_capabilities();
@@ -103,8 +103,8 @@ void Touch::handle_down(wlr_touch_down_event *event) {
 	// A finger on an X11 window waits until X has taken in its window moves.
 	double lx = 0, ly = 0;
 	place(event->touch, event->x, event->y, lx, ly);
-	std::optional<Input::ContactHit> landed = input_.client_at(lx, ly);
-	if (input_.waits<&Touch::handle_down>(this, event,
+	std::optional<PointerRouter::ContactHit> landed = input_.router.client_at(lx, ly);
+	if (input_.x_gate.waits<&Touch::handle_down>(this, event,
 			landed.has_value() && Server::on_x11_window(landed->surface))) {
 		return;
 	}
@@ -121,14 +121,15 @@ void Touch::handle_down(wlr_touch_down_event *event) {
 		return;
 	}
 
-	std::optional<Input::ContactHit> hit = input_.client_at(contact.lx, contact.ly);
+	std::optional<PointerRouter::ContactHit> hit =
+		input_.router.client_at(contact.lx, contact.ly);
 	if (hit.has_value() && wlr_surface_accepts_touch(hit->surface, server_.seat)) {
 		contact.role = Role::client;
 		contact.sx = hit->sx;
 		contact.sy = hit->sy;
 		contact.scale = hit->scale;
 		if (fingers == 1) {
-			input_.contact_focus(*hit); // a first finger is a click: focus and raise
+			input_.router.contact_focus(*hit); // a first finger is a click: focus and raise
 		}
 		wlr_seat_touch_notify_down(server_.seat, hit->surface, time, contact.id,
 			hit->sx, hit->sy);
@@ -143,7 +144,7 @@ void Touch::handle_down(wlr_touch_down_event *event) {
 		contact.role = Role::pointer;
 		state_ = Press{};
 		contacts_.push_back(contact);
-		input_.contact_motion(time, contact.lx, contact.ly);
+		input_.router.contact_motion(time, contact.lx, contact.ly);
 		arm_hold();
 		return;
 	}
@@ -175,8 +176,8 @@ bool Touch::join_gesture(Contact &contact, std::size_t fingers, uint32_t time) {
 	// two move the view, and the first one's tap is off.
 	const Press *press = std::get_if<Press>(&state_);
 	if (fingers != 2 || press == nullptr || press->phase != Press::Phase::waiting
-			|| !input_.canvas_at(contacts_[0].lx0, contacts_[0].ly0)
-			|| !input_.canvas_at(contact.lx, contact.ly)) {
+			|| !input_.router.canvas_at(contacts_[0].lx0, contacts_[0].ly0)
+			|| !input_.router.canvas_at(contact.lx, contact.ly)) {
 		return false;
 	}
 	if (hold_timer_) {
@@ -196,7 +197,7 @@ bool Touch::join_gesture(Contact &contact, std::size_t fingers, uint32_t time) {
 }
 
 void Touch::handle_motion(wlr_touch_motion_event *event) {
-	if (input_.waits<&Touch::handle_motion>(this, event, false)) {
+	if (input_.x_gate.waits<&Touch::handle_motion>(this, event, false)) {
 		return;
 	}
 	Contact *contact = find(event->touch_id);
@@ -227,10 +228,10 @@ void Touch::handle_motion(wlr_touch_motion_event *event) {
 				wl_event_source_timer_update(hold_timer_.get(), 0);
 			}
 			press->phase = Press::Phase::pressed;
-			input_.contact_button(time, BTN_LEFT, true);
+			input_.router.contact_button(time, BTN_LEFT, true);
 		}
 		if (press->phase == Press::Phase::pressed) {
-			input_.contact_motion(time, lx, ly);
+			input_.router.contact_motion(time, lx, ly);
 		}
 		break;
 	}
@@ -245,7 +246,7 @@ void Touch::handle_motion(wlr_touch_motion_event *event) {
 }
 
 void Touch::handle_up(wlr_touch_up_event *event) {
-	if (input_.waits<&Touch::handle_up>(this, event, false)) {
+	if (input_.x_gate.waits<&Touch::handle_up>(this, event, false)) {
 		return;
 	}
 	auto it = std::ranges::find(contacts_, event->touch_id, &Contact::id);
@@ -267,8 +268,8 @@ void Touch::handle_up(wlr_touch_up_event *event) {
 		end_press(time);
 		if (tap) {
 			// A tap: a click where the finger landed.
-			input_.contact_button(time, BTN_LEFT, true);
-			input_.contact_button(time, BTN_LEFT, false);
+			input_.router.contact_button(time, BTN_LEFT, true);
+			input_.router.contact_button(time, BTN_LEFT, false);
 		}
 		break;
 	}
@@ -283,7 +284,7 @@ void Touch::handle_up(wlr_touch_up_event *event) {
 }
 
 void Touch::handle_cancel(wlr_touch_cancel_event *event) {
-	if (input_.waits<&Touch::handle_cancel>(this, event, false)) {
+	if (input_.x_gate.waits<&Touch::handle_cancel>(this, event, false)) {
 		return;
 	}
 	auto it = std::ranges::find(contacts_, event->touch_id, &Contact::id);
@@ -317,7 +318,7 @@ void Touch::handle_cancel(wlr_touch_cancel_event *event) {
 }
 
 void Touch::handle_frame() {
-	if (input_.waits<&Touch::handle_frame>(this)) {
+	if (input_.x_gate.waits<&Touch::handle_frame>(this)) {
 		return;
 	}
 	apply_moves();
@@ -401,7 +402,7 @@ void Touch::update_two(TwoFinger &two, uint32_t time) {
 	}
 	if (two.phase == TwoFinger::Phase::looking) {
 		// The content follows the fingers.
-		input_.look_away(*output, two.cx - cx, two.cy - cy);
+		input_.router.look_away(*output, two.cx - cx, two.cy - cy);
 	} else {
 		server_.gestures.pinch_update(time, cx - two.cx, cy - two.cy, dist / two.dist0, 0);
 	}
@@ -460,7 +461,7 @@ void Touch::end_press(uint32_t time) {
 		return;
 	}
 	if (press->phase == Press::Phase::pressed) {
-		input_.contact_button(time, BTN_LEFT, false);
+		input_.router.contact_button(time, BTN_LEFT, false);
 	}
 	state_ = Idle{};
 }
@@ -497,6 +498,6 @@ void Touch::held() {
 	// Held still: a right click where the finger landed; its lift does nothing.
 	press->phase = Press::Phase::held;
 	uint32_t time = static_cast<uint32_t>(now_ms());
-	input_.contact_button(time, BTN_RIGHT, true);
-	input_.contact_button(time, BTN_RIGHT, false);
+	input_.router.contact_button(time, BTN_RIGHT, true);
+	input_.router.contact_button(time, BTN_RIGHT, false);
 }

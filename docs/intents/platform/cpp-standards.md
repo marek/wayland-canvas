@@ -86,7 +86,7 @@ stays at the root.
 | `src/core/` | `Server`, the wlroots wrapper, ownership helpers, tunables, canvas geometry |
 | `src/canvas/` | The canvas and its desktops; a screen's camera and overview, and the overview's chrome (the tabs, the shelf, the help line: their layout, labels and drawing) |
 | `src/windows/` | Views, popups and their title bars |
-| `src/input/` | Devices and the seat, gestures, pointer grabs, key bindings |
+| `src/input/` | Devices and the seat; the pointer's routing, the Super tap, shortcut capture, drag and drop and the X wait queue, one class each; gestures, touch, the pen, pointer grabs, key bindings |
 | `src/render/` | The painter, the drawing primitives of a render pass, the hint and text drawing |
 | `src/platform/` | Outputs, layer surfaces, the control socket |
 | `src/apps/` | The launcher, installed applications, icons, desktop entries |

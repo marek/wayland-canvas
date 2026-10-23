@@ -88,16 +88,16 @@ void Tablets::map_devices() {
 }
 
 void Tablets::device_gone(Device *device) {
-	input_.run_waiting(); // a waiting event names this tablet
+	input_.x_gate.run_waiting(); // a waiting event names this tablet
 	// The pen leaves what it is on while the tablet's twin is still there.
 	end_all(static_cast<uint32_t>(now_ms()));
 	destroy_owned(devices_, device);
 }
 
 void Tablets::tool_gone(Tool *tool) {
-	input_.run_waiting(); // a waiting event names this tool
+	input_.x_gate.run_waiting(); // a waiting event names this tool
 	if (tool->tip_as_button) {
-		input_.contact_button(static_cast<uint32_t>(now_ms()), BTN_LEFT, false);
+		input_.router.contact_button(static_cast<uint32_t>(now_ms()), BTN_LEFT, false);
 	}
 	destroy_owned(tools_, tool);
 }
@@ -132,9 +132,9 @@ void Tablets::move(Tool &tool, Device &device, uint32_t time) {
 		return;
 	}
 	// The tip down as the mouse's button stays the mouse until it lifts.
-	std::optional<Input::ContactHit> hit;
+	std::optional<PointerRouter::ContactHit> hit;
 	if (!tool.tip_as_button) {
-		hit = input_.client_at(lx, ly);
+		hit = input_.router.client_at(lx, ly);
 	}
 	if (hit.has_value() && device.v2 != nullptr
 			&& wlr_surface_accepts_tablet_v2(hit->surface, device.v2)) {
@@ -157,7 +157,7 @@ void Tablets::move(Tool &tool, Device &device, uint32_t time) {
 	if (v2->focused_surface != nullptr) {
 		wlr_tablet_v2_tablet_tool_notify_proximity_out(v2);
 	}
-	input_.contact_motion(time, lx, ly);
+	input_.router.contact_motion(time, lx, ly);
 }
 
 void Tablets::send_axes(Tool &tool, const wlr_tablet_tool_axis_event &event) {
@@ -191,7 +191,7 @@ void Tablets::send_axes(Tool &tool, const wlr_tablet_tool_axis_event &event) {
 // ---- the cursor's tablet events ----
 
 void Tablets::handle_proximity(wlr_tablet_tool_proximity_event *event) {
-	if (input_.waits<&Tablets::handle_proximity>(this, event, false)) {
+	if (input_.x_gate.waits<&Tablets::handle_proximity>(this, event, false)) {
 		return;
 	}
 	input_.contact_activity();
@@ -212,7 +212,7 @@ void Tablets::handle_proximity(wlr_tablet_tool_proximity_event *event) {
 void Tablets::leave(Tool &tool, uint32_t time) {
 	if (tool.tip_as_button) {
 		tool.tip_as_button = false;
-		input_.contact_button(time, BTN_LEFT, false);
+		input_.router.contact_button(time, BTN_LEFT, false);
 	}
 	if (tool.v2 != nullptr && tool.v2->focused_surface != nullptr) {
 		if (tool.v2->is_down) {
@@ -229,7 +229,7 @@ void Tablets::end_all(uint32_t time) {
 }
 
 void Tablets::handle_axis(wlr_tablet_tool_axis_event *event) {
-	if (input_.waits<&Tablets::handle_axis>(this, event, false)) {
+	if (input_.x_gate.waits<&Tablets::handle_axis>(this, event, false)) {
 		return;
 	}
 	input_.contact_activity();
@@ -257,7 +257,7 @@ void Tablets::handle_axis(wlr_tablet_tool_axis_event *event) {
 void Tablets::handle_tip(wlr_tablet_tool_tip_event *event) {
 	Tool *tool = tool_for(event->tool);
 	// The tip down on an X11 window waits until X has taken in its window moves.
-	if (input_.waits<&Tablets::handle_tip>(this, event,
+	if (input_.x_gate.waits<&Tablets::handle_tip>(this, event,
 			event->state == WLR_TABLET_TOOL_TIP_DOWN && tool->v2 != nullptr
 			&& Server::on_x11_window(tool->v2->focused_surface))) {
 		return;
@@ -269,15 +269,15 @@ void Tablets::handle_tip(wlr_tablet_tool_tip_event *event) {
 	if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
 		if (tool->v2->focused_surface != nullptr) {
 			// The tip down is a click: its window is focused and raised.
-			if (std::optional<Input::ContactHit> hit =
-					input_.client_at(server_.cursor->x, server_.cursor->y)) {
-				input_.contact_focus(*hit);
+			if (std::optional<PointerRouter::ContactHit> hit =
+					input_.router.client_at(server_.cursor->x, server_.cursor->y)) {
+				input_.router.contact_focus(*hit);
 			}
 			wlr_tablet_v2_tablet_tool_notify_down(tool->v2);
 			wlr_tablet_tool_v2_start_implicit_grab(tool->v2);
 		} else {
 			tool->tip_as_button = true;
-			input_.contact_button(event->time_msec, BTN_LEFT, true);
+			input_.router.contact_button(event->time_msec, BTN_LEFT, true);
 		}
 		return;
 	}
@@ -285,13 +285,13 @@ void Tablets::handle_tip(wlr_tablet_tool_tip_event *event) {
 		wlr_tablet_v2_tablet_tool_notify_up(tool->v2);
 	} else if (tool->tip_as_button) {
 		tool->tip_as_button = false;
-		input_.contact_button(event->time_msec, BTN_LEFT, false);
+		input_.router.contact_button(event->time_msec, BTN_LEFT, false);
 	}
 }
 
 void Tablets::handle_button(wlr_tablet_tool_button_event *event) {
 	Tool *tool = tool_for(event->tool);
-	if (input_.waits<&Tablets::handle_button>(this, event,
+	if (input_.x_gate.waits<&Tablets::handle_button>(this, event,
 			event->state == WLR_BUTTON_PRESSED && tool->v2 != nullptr
 			&& Server::on_x11_window(tool->v2->focused_surface))) {
 		return;
@@ -310,6 +310,6 @@ void Tablets::handle_button(wlr_tablet_tool_button_event *event) {
 	uint32_t button = event->button == BTN_STYLUS ? BTN_RIGHT
 		: event->button == BTN_STYLUS2 ? BTN_MIDDLE : 0;
 	if (button != 0) {
-		input_.contact_button(event->time_msec, button, pressed);
+		input_.router.contact_button(event->time_msec, button, pressed);
 	}
 }

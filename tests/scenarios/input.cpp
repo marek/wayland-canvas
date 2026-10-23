@@ -529,7 +529,7 @@ int run_step() {
 	}
 	case 12:
 		check(mapped() == 1 && titled("b") == nullptr, "close button closed the window");
-		check(server->input.last_title_view != closed_view,
+		check(server->input.router.last_title_view != closed_view,
 			"a closed window is no longer the double-click candidate");
 		chord(KEY_ENTER, SUPER);
 		return 300;

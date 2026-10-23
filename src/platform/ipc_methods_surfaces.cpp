@@ -158,7 +158,7 @@ IpcServer::Reply surface_drag(IpcServer &ipc, Server &server, JsonObject *params
 	// plugin is answering, which the drag continues.
 	LayerSurface *held = nullptr;
 	for (LayerSurface *surface : named_surfaces(server, *(*name))) {
-		if (surface->mapped && server.input.button_held_on(surface->wlr->surface)) {
+		if (surface->mapped && server.input.router.button_held_on(surface->wlr->surface)) {
 			held = surface;
 		}
 	}
@@ -172,8 +172,8 @@ IpcServer::Reply surface_drag(IpcServer &ipc, Server &server, JsonObject *params
 	if (server.input.grab.active() || ipc.waiting(drag_wait) || output == nullptr) {
 		return std::unexpected(std::string{"the pointer is already in a drag"});
 	}
-	server.input.grab.begin_surface_drag(*held, *output, server.input.press_lx(),
-		server.input.press_ly(), edges, min_w, min_h);
+	server.input.grab.begin_surface_drag(*held, *output, server.input.router.press_lx(),
+		server.input.router.press_ly(), edges, min_w, min_h);
 	return IpcServer::Wait{drag_wait};
 }
 

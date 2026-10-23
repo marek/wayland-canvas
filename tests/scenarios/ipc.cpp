@@ -1269,7 +1269,7 @@ int run_step() {
 		Point at = output->canvas_to_local(layer->canvas_box->x + 100, layer->canvas_box->y + 50);
 		move_to(at.x, at.y);
 		button(BTN_LEFT, true);
-		check(server->input.button_held_on(layer->wlr->surface),
+		check(server->input.router.button_held_on(layer->wlr->surface),
 			"the pointer's press is held on the plugin's surface");
 		pending_pid = fork_hangup(std::format(
 			R"({{"id":1,"method":"surface.move","params":{{"surface":"{}"}}}})", surface_name),

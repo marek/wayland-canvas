@@ -279,16 +279,16 @@ void draw_pinch_preview(const RenderCtx &ctx) {
 
 void draw_drag_icon(const RenderCtx &ctx) {
 	Server &server = ctx.output->server;
-	if (server.input.drag_icon == nullptr || server.input.drag_icon->surface == nullptr) {
+	std::optional<DragAndDrop::Icon> icon = server.input.dnd.icon();
+	if (!icon.has_value()) {
 		return;
 	}
 	ScreenIter it = {
 		.ctx = &ctx,
-		.ox = server.cursor->x - ctx.output->lx + server.input.drag_icon_dx,
-		.oy = server.cursor->y - ctx.output->ly + server.input.drag_icon_dy,
+		.ox = server.cursor->x - ctx.output->lx + icon->dx,
+		.oy = server.cursor->y - ctx.output->ly + icon->dy,
 	};
-	wlr_surface_for_each_surface(server.input.drag_icon->surface,
-		screen_surface_iter, &it);
+	wlr_surface_for_each_surface(icon->surface, screen_surface_iter, &it);
 }
 
 // ------------------------------------------------- frame done/enter/present

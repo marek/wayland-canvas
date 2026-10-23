@@ -1824,7 +1824,7 @@ Tests:
     - cpp-standards.md's "One per compositor" row names the new
       subsystems.
     - The scenarios are green.
-- [ ] `Input` is the seat and the dispatch, nothing else
+- [x] `Input` is the seat and the dispatch, nothing else
   - Like `Touch` and `Tablets`, these become classes of their own in
     `src/input/`:
     - `SuperTap` (input.cpp:710-773);
