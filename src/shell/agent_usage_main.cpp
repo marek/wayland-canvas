@@ -374,21 +374,18 @@ ProviderLimits codex_limits() {
 
 int main() {
 	Paths paths;
-	paths.claude_dir = home_path("CLAUDE_CONFIG_DIR", ".claude");
-	paths.codex_home = home_path("CODEX_HOME", ".codex");
-	const char *home = std::getenv("HOME");
-	std::string home_dir = home != nullptr && *home != '\0' ? home : ".";
-	paths.pi_sessions = home_dir + "/.pi/agent/sessions";
-	paths.omp_sessions = home_dir + "/.omp/agent/sessions";
-	paths.opencode_db = home_path("XDG_DATA_HOME", ".local/share")
-		+ "/opencode/opencode.db";
+	for (const SourceRoot &source : source_roots()) {
+		paths.roots[source.name] = home_path(source.env, source.home)
+			+ source.rest;
+	}
 	std::string cache_dir = home_path("XDG_CACHE_HOME", ".cache")
 		+ "/wayland-canvas";
 	paths.cache_file = cache_dir + "/agent-usage.json";
 
 	std::map<std::string, ProviderLimits> limits;
-	limits["claude"] = claude_limits(paths.claude_dir, cache_dir);
-	limits["gpt"] = codex_limits();
+	limits[std::string{family_claude}] = claude_limits(
+		paths.roots.at("claude"), cache_dir);
+	limits[std::string{family_gpt}] = codex_limits();
 
 	Record record = collect(paths, limits);
 	std::string json = record_json(record);

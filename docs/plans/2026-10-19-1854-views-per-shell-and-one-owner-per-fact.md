@@ -1873,7 +1873,7 @@ Tests:
     resolve and the template.
   - `core/settings_file.{h,cpp}`: `File` and its edits.
   - Acceptance: the unit suite is green.
-- [ ] The usage collector: one table of sources and one of families
+- [x] The usage collector: one table of sources and one of families
   - Sources:
     - A `SourceKind{name, files(Paths), scan(path)}` table replaces the
       hard-coded roots (agent_usage.cpp:1215-1225).

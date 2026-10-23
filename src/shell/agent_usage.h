@@ -26,6 +26,11 @@ struct Usage {
 	}
 };
 
+// The two families the helper probes limits for; Claude Code's and Codex's
+// own records always belong to them.
+inline constexpr std::string_view family_claude = "claude";
+inline constexpr std::string_view family_gpt = "gpt";
+
 // ---------------------------------------------------------- display names
 
 // `246.1M`, `811.5K`, `0` — one decimal above a thousand, plain below.
@@ -79,15 +84,25 @@ struct CodexLimits {
 
 // ------------------------------------------------------------- collection
 
-// Every root the scan reads; the helper fills them from the environment
-// and the tests from their fixture dirs. Empty roots are skipped.
+// Where one tool keeps its records. The base is the `env` variable when it
+// is set and `home` under $HOME when it is not (`env` is nullptr when no
+// variable moves it); `rest` follows the base. `name` keys `Paths::roots`.
+struct SourceRoot {
+	const char *name;
+	const char *env;
+	const char *home;
+	const char *rest;
+};
+
+// The tools the scan reads, in the order their records are counted.
+[[nodiscard]] std::vector<SourceRoot> source_roots();
+
+// Every root the scan reads, by source name; the helper fills them from
+// `source_roots()` and the environment, the tests from their fixture dirs.
+// A source with no root, or an empty one, is skipped.
 struct Paths {
-	std::string claude_dir;   // holds projects/ and .credentials.json
-	std::string codex_home;   // holds sessions/ and archived_sessions/
-	std::string pi_sessions;  // ~/.pi/agent/sessions
-	std::string omp_sessions; // ~/.omp/agent/sessions
-	std::string opencode_db;  // the opencode database, "" when absent
-	std::string cache_file;   // the incremental scan cache
+	std::map<std::string, std::string> roots;
+	std::string cache_file; // the incremental scan cache
 };
 
 // The probe's cache: a fresh probe is reused for a short window, so a

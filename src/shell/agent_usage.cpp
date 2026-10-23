@@ -12,7 +12,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -459,7 +458,7 @@ std::optional<Counted> transcript_message(const std::string &line,
 	return Counted{
 		.key = std::move(key),
 		.day = local_day_of_value(timestamp_member(entry, message, "timestamp")),
-		.family = "claude",
+		.family = std::string{family_claude},
 		.model = std::move(model),
 		.session = std::move(session),
 		.usage = tokens,
@@ -581,7 +580,7 @@ FileEntry scan_codex_file(const std::string &path) {
 			.key = path + ":" + std::to_string(line_no),
 			.day = local_day_of_value(day.empty()
 				? std::to_string(stat_mtime_epoch(path)) : day),
-			.family = "gpt",
+			.family = std::string{family_gpt},
 			.model = current_model,
 			.session = path,
 			.usage = tokens,
@@ -590,9 +589,10 @@ FileEntry scan_codex_file(const std::string &path) {
 	return entry;
 }
 
-FileEntry scan_jsonl(const std::string &path,
-	const std::function<std::optional<Counted>(const std::string &,
-		const std::string &, int)> &parse) {
+using ParseLine = std::optional<Counted> (*)(const std::string &line,
+	const std::string &path, int line_no);
+
+FileEntry scan_jsonl(const std::string &path, ParseLine parse) {
 	FileEntry entry;
 	entry.mtime = stat_signature(path);
 	entry.size = stat_size(path);
@@ -607,14 +607,12 @@ FileEntry scan_jsonl(const std::string &path,
 }
 
 // The opencode database's assistant messages, one row each. Read-only and
-// tolerant: opencode may be writing, and one malformed row skips itself.
+// tolerant of a writer: opencode may be writing, and one malformed row
+// skips itself.
 FileEntry scan_opencode_db(const std::string &db) {
 	FileEntry entry;
 	entry.mtime = stat_signature(db);
 	entry.size = stat_size(db);
-	std::string uri = std::filesystem::path(db).string();
-	// The URI form wants a scheme and percent-safe path; open the plain
-	// path with the immutable flag instead, which is read-only too.
 	sqlite3 *handle = nullptr;
 	if (sqlite3_open_v2(db.c_str(), &handle, SQLITE_OPEN_READONLY, nullptr)
 			!= SQLITE_OK) {
@@ -662,11 +660,7 @@ FileEntry scan_opencode_db(const std::string &db) {
 			if (usage.total() <= 0) {
 				continue;
 			}
-			std::string model = str_member(message, "modelID");
-			std::size_t slash = model.rfind('/');
-			if (slash != std::string::npos && slash + 1 < model.size()) {
-				model = model.substr(slash + 1);
-			}
+			std::string model = model_key(str_member(message, "modelID"));
 			if (model.empty()) {
 				model = "unknown";
 			}
@@ -709,6 +703,68 @@ std::vector<std::string> jsonl_files(const std::string &root) {
 	std::sort(files.begin(), files.end());
 	return files;
 }
+
+// ---------------------------------------------------------------- sources
+
+std::vector<std::string> claude_files(const std::string &claude_dir) {
+	return jsonl_files(claude_dir + "/projects");
+}
+
+// Session files older than thirty days are not read, the same window the
+// CLI keeps hot, in the live and the archived folder alike.
+std::vector<std::string> codex_files(const std::string &codex_home) {
+	constexpr time_t hot_seconds = 30 * 86400;
+	const time_t oldest = time(nullptr) - hot_seconds;
+	std::vector<std::string> files;
+	for (const char *folder : {"/sessions", "/archived_sessions"}) {
+		for (std::string &path : jsonl_files(codex_home + folder)) {
+			if (stat_mtime_epoch(path) >= oldest) {
+				files.push_back(std::move(path));
+			}
+		}
+	}
+	return files;
+}
+
+std::vector<std::string> opencode_files(const std::string &db) {
+	std::error_code ec;
+	return std::filesystem::is_regular_file(db, ec)
+		? std::vector<std::string>{db} : std::vector<std::string>{};
+}
+
+// Claude transcripts and pi/omp sessions are both jsonl of assistant
+// messages; they differ in where the provider lives, which decides the
+// family.
+FileEntry scan_transcript(const std::string &path) {
+	return scan_jsonl(path, transcript_message);
+}
+
+FileEntry scan_agent_session(const std::string &path) {
+	return scan_jsonl(path, agent_message);
+}
+
+// One tool whose records the scan reads: where it keeps them, which files
+// under a resolved root hold them and how one file is counted. Rows are
+// read in order, and a message key an earlier row counted is skipped in a
+// later one. A tool that writes a known format adds only its row; a new
+// format adds its scanner above the table as well.
+struct SourceKind {
+	SourceRoot root;
+	std::vector<std::string> (*files)(const std::string &root);
+	FileEntry (*scan)(const std::string &path);
+};
+
+constexpr SourceKind source_kinds[] = {
+	{{"claude", "CLAUDE_CONFIG_DIR", ".claude", ""}, claude_files,
+		scan_transcript},
+	{{"pi", nullptr, ".pi/agent/sessions", ""}, jsonl_files,
+		scan_agent_session},
+	{{"omp", nullptr, ".omp/agent/sessions", ""}, jsonl_files,
+		scan_agent_session},
+	{{"codex", "CODEX_HOME", ".codex", ""}, codex_files, scan_codex_file},
+	{{"opencode", "XDG_DATA_HOME", ".local/share", "/opencode/opencode.db"},
+		opencode_files, scan_opencode_db},
+};
 
 // ---------------------------------------------------------------- caching
 
@@ -881,6 +937,14 @@ std::string format_tokens(long long tokens) {
 
 namespace {
 
+std::string capitalised(std::string_view word) {
+	std::string out{word};
+	if (!out.empty()) {
+		out[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[0])));
+	}
+	return out;
+}
+
 std::string word_case(const std::string &word) {
 	// The acronyms read as themselves; every other segment is a plain word
 	// with a capital.
@@ -890,11 +954,7 @@ std::string word_case(const std::string &word) {
 	if (auto acronym = acronyms.find(word); acronym != acronyms.end()) {
 		return acronym->second;
 	}
-	std::string out = word;
-	if (!out.empty()) {
-		out[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[0])));
-	}
-	return out;
+	return capitalised(word);
 }
 
 std::string lower_copy(std::string_view text) {
@@ -908,11 +968,7 @@ std::string lower_copy(std::string_view text) {
 } // namespace
 
 std::string model_display_name(std::string_view model_id) {
-	std::string name{model_id};
-	std::size_t slash = name.rfind('/');
-	if (slash != std::string::npos && slash + 1 < name.size()) {
-		name = name.substr(slash + 1);
-	}
+	std::string name = model_key(std::string{model_id});
 	if (name.starts_with("claude-")) {
 		name = name.substr(7);
 	}
@@ -958,78 +1014,119 @@ std::string model_display_name(std::string_view model_id) {
 	return out.empty() ? "Unknown" : out;
 }
 
+namespace {
+
+// A family a usage entry can belong to: how entries find it, what it is
+// called and whether it leads the panel. A label no row claims roots a
+// family of its own by its first segment, a model no row claims is Other,
+// and either is titled by its capitalised key.
+struct Family {
+	std::string_view key;
+	std::string_view chip;  // the switch's label; the title when empty
+	std::string_view title; // the hero's title; the capitalised key when empty
+	bool pinned = false;    // listed ahead of the rest, in table order
+	// Space-separated lists of what claims an entry for this family.
+	std::string_view labels;         // the whole provider label, as written
+	std::string_view providers;      // the label's first segment, lower-cased
+	std::string_view model_prefixes; // the start of the model id, lower-cased
+	std::string_view model_words;    // anywhere in the model id, lower-cased
+};
+
+constexpr Family families[] = {
+	{.key = family_claude, .chip = "Claude", .title = "Claude Code",
+		.pinned = true, .labels = "anthropic", .model_prefixes = "claude"},
+	{.key = family_gpt, .chip = "GPT", .title = "GPT", .pinned = true,
+		.providers = "openai", .model_prefixes = "gpt codex o1 o3 o4"},
+	{.key = "gemini", .providers = "google gemini", .model_words = "gemini"},
+	// An anthropic-* gateway still runs Claude models; the tab says so, and
+	// stays separate from the subscription tab whose figures Omarchy's own
+	// counter equals. Its chip stays short: the pill is narrow, and the hero
+	// right above the rows says the full name.
+	{.key = "anthropic", .chip = "Claude GW", .title = "Claude (gateway)"},
+};
+
+// Whether `match` holds for any word of a space-separated list.
+template <typename Match>
+bool any_word(std::string_view list, Match &&match) {
+	while (!list.empty()) {
+		const std::size_t space = list.find(' ');
+		if (match(list.substr(0, space))) {
+			return true;
+		}
+		list.remove_prefix(space == std::string_view::npos ? list.size()
+								   : space + 1);
+	}
+	return false;
+}
+
+const Family *family_named(std::string_view key) {
+	for (const Family &family : families) {
+		if (family.key == key) {
+			return &family;
+		}
+	}
+	return nullptr;
+}
+
+// The row whose `list` holds `word` as one of its words.
+const Family *family_listing(std::string_view Family::*list,
+	std::string_view word) {
+	for (const Family &family : families) {
+		if (any_word(family.*list, [word](std::string_view listed) {
+			    return listed == word;
+		    })) {
+			return &family;
+		}
+	}
+	return nullptr;
+}
+
+const Family *family_of_model(std::string_view model) {
+	for (const Family &family : families) {
+		if (any_word(family.model_prefixes, [model](std::string_view prefix) {
+			    return model.starts_with(prefix);
+		    })
+			|| any_word(family.model_words, [model](std::string_view word) {
+				   return model.find(word) != std::string_view::npos;
+			   })) {
+			return &family;
+		}
+	}
+	return nullptr;
+}
+
+} // namespace
+
 std::string family_of(std::string_view provider, std::string_view api,
 	std::string_view model_id) {
 	std::string label{!provider.empty() ? provider : api};
 	if (!label.empty()) {
-		if (label == "anthropic") {
-			return "claude";
+		if (const Family *named = family_listing(&Family::labels, label)) {
+			return std::string{named->key};
 		}
-		std::string first = label.substr(0, label.find('-'));
-		std::string lowered = lower_copy(first);
-		if (lowered == "openai") {
-			return "gpt";
+		std::string first = lower_copy(label.substr(0, label.find('-')));
+		if (const Family *aliased = family_listing(&Family::providers, first)) {
+			return std::string{aliased->key};
 		}
-		if (lowered == "google" || lowered == "gemini") {
-			return "gemini";
-		}
-		return lowered;
+		return first;
 	}
 	// No label of its own: the model id names the family.
-	std::string model = lower_copy(model_id);
-	std::size_t slash = model.rfind('/');
-	if (slash != std::string::npos && slash + 1 < model.size()) {
-		model = model.substr(slash + 1);
-	}
-	if (model.starts_with("claude")) {
-		return "claude";
-	}
-	if (model.starts_with("gpt") || model.starts_with("codex")
-			|| model.starts_with("o1") || model.starts_with("o3")
-			|| model.starts_with("o4")) {
-		return "gpt";
-	}
-	if (model.find("gemini") != std::string::npos) {
-		return "gemini";
+	if (const Family *named = family_of_model(model_key(lower_copy(model_id)))) {
+		return std::string{named->key};
 	}
 	return "other";
 }
 
 std::string family_chip(std::string_view family) {
-	if (family == "claude") {
-		return "Claude";
-	}
-	if (family == "gpt") {
-		return "GPT";
-	}
-	// The gateway families' chips stay short: the pill is narrow, and the
-	// hero right above the rows says the full name.
-	if (family == "anthropic") {
-		return "Claude GW";
-	}
-	return family_title(family);
+	const Family *row = family_named(family);
+	return row != nullptr && !row->chip.empty() ? std::string{row->chip}
+						   : family_title(family);
 }
+
 std::string family_title(std::string_view family) {
-	if (family == "claude") {
-		return "Claude Code";
-	}
-	if (family == "gpt") {
-		return "GPT";
-	}
-	// An anthropic-* gateway still runs Claude models; the tab says so,
-	// and stays separate from the subscription tab whose figures
-	// Omarchy's own counter equals.
-	if (family == "anthropic") {
-		return "Claude (gateway)";
-	}
-	if (family == "other") {
-		return "Other";
-	}
-	std::string out{family};
-	if (!out.empty()) {
-		out[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[0])));
-	}
-	return out;
+	const Family *row = family_named(family);
+	return row != nullptr && !row->title.empty() ? std::string{row->title}
+						   : capitalised(family);
 }
 
 
@@ -1048,12 +1145,7 @@ std::string plan_label(std::string_view tier, std::string_view subscription) {
 				+ "x";
 		}
 	}
-	if (!subscription.empty()) {
-		std::string out{subscription};
-		out[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[0])));
-		return out;
-	}
-	return {};
+	return capitalised(subscription);
 }
 
 // ----------------------------------------------------------------- limits
@@ -1145,66 +1237,62 @@ CodexLimits parse_codex_limits(const std::string &account_result,
 
 // ------------------------------------------------------------- collection
 
-Record collect(const Paths &paths,
-	const std::map<std::string, ProviderLimits> &limits) {
-	Record record;
-	record.updated_at = iso_utc(time(nullptr));
-	std::map<std::string, FileEntry> cached = read_cache(paths.cache_file);
-	std::map<std::string, FileEntry> fresh;
-	std::set<std::string> seen;
-	std::map<std::string, FamilyStats> families;
-
-	// A source file and how it is parsed. Codex session files older than
-	// thirty days are not read, the same window the CLI keeps hot.
-	struct Source {
-		std::string path;
-		bool codex = false;
-	};
-	std::vector<Source> sources;
-	auto add = [&](const std::string &root, bool codex, bool age_cutoff) {
-		for (const std::string &path : jsonl_files(root)) {
-			if (age_cutoff && stat_mtime_epoch(path) < time(nullptr) - 30 * 86400) {
-				continue;
-			}
-			sources.push_back({.path = path, .codex = codex});
-		}
-	};
-	add(paths.claude_dir + "/projects", false, false);
-	add(paths.pi_sessions, false, false);
-	add(paths.omp_sessions, false, false);
-	add(paths.codex_home + "/sessions", true, true);
-	add(paths.codex_home + "/archived_sessions", true, true);
-	std::error_code ec;
-	if (!paths.opencode_db.empty()
-			&& std::filesystem::is_regular_file(paths.opencode_db, ec)) {
-		sources.push_back({.path = paths.opencode_db});
+std::vector<SourceRoot> source_roots() {
+	std::vector<SourceRoot> roots;
+	for (const SourceKind &kind : source_kinds) {
+		roots.push_back(kind.root);
 	}
+	return roots;
+}
 
-	for (const Source &source : sources) {
-		FileEntry entry;
-		std::string signature = stat_signature(source.path);
-		long long size = stat_size(source.path);
-		if (auto hit = cached.find(source.path); hit != cached.end()
-				&& hit->second.mtime == signature && hit->second.size == size) {
-			entry = hit->second; // unchanged since the last scan
-		} else if (source.path == paths.opencode_db) {
-			entry = scan_opencode_db(source.path);
-		} else if (source.codex) {
-			entry = scan_codex_file(source.path);
-		} else {
-			// Claude transcripts and pi/omp sessions are both jsonl of
-			// assistant messages; they differ in where the provider
-			// lives, which decides the family.
-			bool transcript = source.path.rfind(paths.claude_dir + "/projects",
-				0) == 0;
-			entry = scan_jsonl(source.path, transcript
-				? transcript_message : agent_message);
+namespace {
+
+using StatsByFamily = std::map<std::string, FamilyStats>;
+
+// The local days a provider's figures cover, today last.
+struct Week {
+	std::vector<std::string> dates;
+	std::string today;
+};
+
+// Every source file's entry, with the files listed in the order the
+// sources are read: the merge counts a message under the first file that
+// has it.
+struct Scan {
+	std::vector<std::string> order;
+	std::map<std::string, FileEntry> entries;
+};
+
+// A file whose stat still matches the cache is not reparsed.
+Scan scan_all(const Paths &paths,
+	const std::map<std::string, FileEntry> &cached) {
+	Scan scan;
+	for (const SourceKind &kind : source_kinds) {
+		auto root = paths.roots.find(kind.root.name);
+		if (root == paths.roots.end() || root->second.empty()) {
+			continue;
 		}
-		for (const Counted &counted : entry.messages) {
+		for (const std::string &path : kind.files(root->second)) {
+			auto hit = cached.find(path);
+			const bool unchanged = hit != cached.end()
+				&& hit->second.mtime == stat_signature(path)
+				&& hit->second.size == stat_size(path);
+			scan.entries[path] = unchanged ? hit->second : kind.scan(path);
+			scan.order.push_back(path);
+		}
+	}
+	return scan;
+}
+
+StatsByFamily aggregate(const Scan &scan) {
+	StatsByFamily by_family;
+	std::set<std::string> seen;
+	for (const std::string &path : scan.order) {
+		for (const Counted &counted : scan.entries.at(path).messages) {
 			if (!seen.insert(counted.key).second) {
 				continue;
 			}
-			FamilyStats &stats = families[counted.family];
+			FamilyStats &stats = by_family[counted.family];
 			stats.day_tokens[counted.day] += counted.usage.total();
 			Usage &bucket = stats.model_usage[counted.model];
 			bucket.input += counted.usage.input;
@@ -1214,94 +1302,118 @@ Record collect(const Paths &paths,
 			stats.prompts++;
 			stats.sessions.insert(counted.session);
 		}
-		fresh[source.path] = std::move(entry);
 	}
-	if (!same_cache(cached, fresh)) {
-		write_cache(paths.cache_file, fresh);
-	}
+	return by_family;
+}
 
-	// A provider earns its place by having something to show: usage of its
-	// own, or limits a signed-in CLI reported.
+// The value under `key`, or a default one when the map has none.
+template <typename Map>
+const typename Map::mapped_type &find_or_empty(const Map &map,
+	const std::string &key) {
+	static const typename Map::mapped_type empty{};
+	auto hit = map.find(key);
+	return hit != map.end() ? hit->second : empty;
+}
+
+long long week_tokens(const FamilyStats &stats, const Week &week) {
+	long long tokens = 0;
+	for (const std::string &date : week.dates) {
+		if (auto day = stats.day_tokens.find(date);
+				day != stats.day_tokens.end()) {
+			tokens += day->second;
+		}
+	}
+	return tokens;
+}
+
+// A provider earns its place by having something to show: usage of its
+// own, or limits a signed-in CLI reported. The pinned families lead in
+// table order, the rest follow by the week's tokens, heaviest first.
+std::vector<std::string> provider_order(const StatsByFamily &by_family,
+	const std::map<std::string, ProviderLimits> &limits, const Week &week) {
 	auto visible = [&](const std::string &family) {
-		auto stats = families.find(family);
-		auto lim = limits.find(family);
-		return (stats != families.end()
-			     && (stats->second.prompts > 0 || !stats->second.sessions.empty()))
-			|| (lim != limits.end() && !lim->second.limits.empty());
+		const FamilyStats &stats = find_or_empty(by_family, family);
+		return stats.prompts > 0 || !stats.sessions.empty()
+			|| !find_or_empty(limits, family).limits.empty();
 	};
 	std::vector<std::string> order;
-	for (const char *first : {"claude", "gpt"}) {
-		if (visible(first)) {
-			order.push_back(first);
+	for (const Family &family : families) {
+		if (family.pinned && visible(std::string{family.key})) {
+			order.emplace_back(family.key);
 		}
 	}
 	std::vector<std::pair<long long, std::string>> rest;
-	for (const auto &[family, stats] : families) {
-		if (family == "claude" || family == "gpt" || !visible(family)) {
+	for (const auto &[family, stats] : by_family) {
+		const Family *row = family_named(family);
+		if ((row != nullptr && row->pinned) || !visible(family)) {
 			continue;
 		}
-		long long week = 0;
-		for (const std::string &date : recent_dates()) {
-			if (auto day = stats.day_tokens.find(date);
-					day != stats.day_tokens.end()) {
-				week += day->second;
-			}
-		}
-		rest.push_back({-week, family});
+		rest.push_back({-week_tokens(stats, week), family});
 	}
 	std::sort(rest.begin(), rest.end());
-	for (const auto &entry : rest) {
-		order.push_back(entry.second);
+	for (auto &entry : rest) {
+		order.push_back(std::move(entry.second));
 	}
+	return order;
+}
 
-	std::string today = today_string();
-	std::vector<std::string> dates = recent_dates();
-	for (const std::string &family : order) {
-		ProviderRecord provider;
-		provider.id = family;
-		provider.chip = family_chip(family);
-		provider.title = family_title(family);
-		if (auto lim = limits.find(family); lim != limits.end()) {
-			provider.limits = lim->second.limits;
-			provider.tier = lim->second.tier;
-			provider.status = lim->second.status;
-			provider.help = lim->second.help;
-		}
-		for (const std::string &date : dates) {
-			long long tokens = 0;
-			if (auto stats = families.find(family); stats != families.end()) {
-				if (auto day = stats->second.day_tokens.find(date);
-						day != stats->second.day_tokens.end()) {
-					tokens = day->second;
-				}
-			}
-			provider.days.push_back(DayTokens{
-				.date = date,
-				.label = date == today ? "Today" : weekday_label(date),
-				.today = date == today,
-				.tokens = tokens,
-				.tokens_text = format_tokens(tokens),
-			});
-		}
-		if (auto stats = families.find(family); stats != families.end()) {
-			for (const auto &[model, usage] : stats->second.model_usage) {
-				provider.models.push_back(ModelUsage{
-					.id = model,
-					.name = model_display_name(model),
-					.usage = usage,
-					.total_text = format_tokens(usage.total()),
-				});
-			}
-			std::sort(provider.models.begin(), provider.models.end(),
-				[](const ModelUsage &a, const ModelUsage &b) {
-					return a.total() != b.total() ? a.total() > b.total()
-						: a.id < b.id;
-				});
-			provider.total_prompts = stats->second.prompts;
-			provider.total_sessions = static_cast<long long>(
-				stats->second.sessions.size());
-		}
-		record.providers.push_back(std::move(provider));
+ProviderRecord make_provider(const std::string &family,
+	const FamilyStats &stats, const ProviderLimits &limits,
+	const Week &week) {
+	ProviderRecord provider;
+	provider.id = family;
+	provider.chip = family_chip(family);
+	provider.title = family_title(family);
+	provider.limits = limits.limits;
+	provider.tier = limits.tier;
+	provider.status = limits.status;
+	provider.help = limits.help;
+	for (const std::string &date : week.dates) {
+		auto day = stats.day_tokens.find(date);
+		long long tokens = day != stats.day_tokens.end() ? day->second : 0;
+		provider.days.push_back(DayTokens{
+			.date = date,
+			.label = date == week.today ? "Today" : weekday_label(date),
+			.today = date == week.today,
+			.tokens = tokens,
+			.tokens_text = format_tokens(tokens),
+		});
+	}
+	for (const auto &[model, usage] : stats.model_usage) {
+		provider.models.push_back(ModelUsage{
+			.id = model,
+			.name = model_display_name(model),
+			.usage = usage,
+			.total_text = format_tokens(usage.total()),
+		});
+	}
+	std::sort(provider.models.begin(), provider.models.end(),
+		[](const ModelUsage &a, const ModelUsage &b) {
+			return a.total() != b.total() ? a.total() > b.total()
+				: a.id < b.id;
+		});
+	provider.total_prompts = stats.prompts;
+	provider.total_sessions = static_cast<long long>(stats.sessions.size());
+	return provider;
+}
+
+} // namespace
+
+Record collect(const Paths &paths,
+	const std::map<std::string, ProviderLimits> &limits) {
+	Record record;
+	record.updated_at = iso_utc(time(nullptr));
+	std::map<std::string, FileEntry> cached = read_cache(paths.cache_file);
+	Scan scan = scan_all(paths, cached);
+	if (!same_cache(cached, scan.entries)) {
+		write_cache(paths.cache_file, scan.entries);
+	}
+	const StatsByFamily by_family = aggregate(scan);
+	const Week week{.dates = recent_dates(), .today = today_string()};
+	for (const std::string &family : provider_order(by_family, limits, week)) {
+		record.providers.push_back(make_provider(family,
+			find_or_empty(by_family, family), find_or_empty(limits, family),
+			week));
 	}
 	return record;
 }

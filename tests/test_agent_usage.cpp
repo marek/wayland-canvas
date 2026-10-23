@@ -249,11 +249,11 @@ Fixture make_fixture() {
 
 Record collect_fixture(const Fixture &fixture,
 	const std::map<std::string, ProviderLimits> &limits = {}) {
-	Paths paths{.claude_dir = fixture.claude_dir,
-		.codex_home = fixture.codex_home,
-		.pi_sessions = root + "/pi-sessions",
-		.omp_sessions = fixture.sessions,
-		.opencode_db = fixture.opencode_db,
+	Paths paths{.roots = {{"claude", fixture.claude_dir},
+			      {"codex", fixture.codex_home},
+			      {"pi", root + "/pi-sessions"},
+			      {"omp", fixture.sessions},
+			      {"opencode", fixture.opencode_db}},
 		.cache_file = fixture.cache};
 	return collect(paths, limits);
 }
@@ -616,11 +616,7 @@ void test_midnight_buckets() {
 		R"("provider":"anthropic","model":"claude-opus-5-5",)"
 		R"("usage":{"input":200,"output":200}}})", "\n",
 	}));
-	Paths paths{.claude_dir = root + "/none",
-		.codex_home = root + "/none",
-		.pi_sessions = root + "/midnight",
-		.omp_sessions = root + "/none",
-		.opencode_db = "",
+	Paths paths{.roots = {{"pi", root + "/midnight"}},
 		.cache_file = root + "/midnight-cache.json"};
 	Record record = collect(paths, {});
 	const ProviderRecord *claude = find_provider(record, "claude");
@@ -660,11 +656,7 @@ void test_opencode_null_columns() {
 		sqlite3_free(error);
 	}
 	sqlite3_close(db);
-	Paths paths{.claude_dir = root + "/none",
-		.codex_home = root + "/none",
-		.pi_sessions = root + "/none",
-		.omp_sessions = root + "/none",
-		.opencode_db = db_path,
+	Paths paths{.roots = {{"opencode", db_path}},
 		.cache_file = root + "/opencode-null-cache.json"};
 	Record record = collect(paths, {});
 	const ProviderRecord *claude = find_provider(record, "claude");
@@ -675,6 +667,35 @@ void test_opencode_null_columns() {
 			std::format("rows with a NULL session_id or data are skipped "
 				"and the rest count ({})", today));
 	}
+}
+
+// The helper resolves one root per table row, so the rows are the whole
+// list of tools the scan reads and each is named once.
+void test_source_roots() {
+	std::vector<std::string> names;
+	bool described = true;
+	for (const SourceRoot &source : source_roots()) {
+		names.emplace_back(source.name);
+		described = described && source.home != nullptr && *source.home != '\0'
+			&& source.rest != nullptr;
+	}
+	check(names == std::vector<std::string>{"claude", "pi", "omp", "codex",
+			"opencode"},
+		"the table lists Claude, pi, omp, Codex and opencode, in the order "
+		"a message is first counted");
+	check(described, "every source says where its root is under $HOME");
+}
+
+// A source with no root, or an empty one, is skipped: nothing is read and
+// no provider appears.
+void test_sources_without_roots() {
+	Paths none{.cache_file = root + "/no-roots-cache.json"};
+	check(collect(none, {}).providers.empty(), "no roots, no providers");
+	Paths blank{.roots = {{"claude", ""}, {"codex", ""}, {"pi", ""},
+			      {"omp", ""}, {"opencode", ""}},
+		.cache_file = root + "/blank-roots-cache.json"};
+	check(collect(blank, {}).providers.empty(),
+		"empty roots, no providers");
 }
 
 void test_record_json() {
@@ -730,6 +751,8 @@ int main() {
 	test_cache_reuse();
 	test_midnight_buckets();
 	test_opencode_null_columns();
+	test_source_roots();
+	test_sources_without_roots();
 	test_record_json();
 
 	return unit::summary();
