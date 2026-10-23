@@ -614,6 +614,30 @@ if foot_prog.found() and grim_prog.found()
 		# scenario points its PATH at the build tree's copy.
 		scenario_env.set('WAYLAND_CANVAS_AGENT_USAGE', agent_usage.full_path())
 	endif
+	# What every scenario shares (tests/harness/): the step driver, checks,
+	# scratch space, shots, fake devices, the control-socket client, child
+	# processes, the private buses and layout helpers.
+	harness_inc = include_directories('tests')
+	harness_lib = static_library(
+		'canvas-harness',
+		files(
+			'tests/harness/bus.cpp',
+			'tests/harness/check.cpp',
+			'tests/harness/child.cpp',
+			'tests/harness/control.cpp',
+			'tests/harness/devices.cpp',
+			'tests/harness/files.cpp',
+			'tests/harness/image.cpp',
+			'tests/harness/layout.cpp',
+			'tests/harness/run.cpp',
+			'tests/harness/steps.cpp',
+		),
+		protocol_headers,
+		include_directories: [src_inc, harness_inc],
+		link_with: core_lib,
+		dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, json_glib,
+			libinput, libdrm],
+	)
 	foreach scenario : scenarios
 		scenario_sources = ['tests/scenarios/' + scenario + '.cpp']
 		# The gestures scenario counts the allocations of its drag and pinch
@@ -628,8 +652,8 @@ if foot_prog.found() and grim_prog.found()
 				'scenario-' + scenario,
 				scenario_sources,
 				protocol_headers,
-				include_directories: src_inc,
-				link_with: core_lib,
+				include_directories: [src_inc, harness_inc],
+				link_with: [harness_lib, core_lib],
 				dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
 					json_glib, libinput, libdrm],
 			),

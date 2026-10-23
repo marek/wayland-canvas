@@ -169,3 +169,11 @@ private:
 // `msg subscribe` prints each event as one line until interrupted. argv[1]
 // is the method; a transport failure is an error too. Used by main().
 int msg_command(int argc, char *argv[]);
+
+// The client half of the control socket, which `msg_command` and the
+// scenarios' raw clients share. Connects to $WAYLAND_CANVAS_SOCKET, else to
+// the socket of the compositor $WAYLAND_DISPLAY names: a connected fd, or -1
+// explained on stderr.
+int connect_to_socket();
+// Blocking write of the whole buffer; false on failure.
+bool write_request(int fd, std::string_view bytes);

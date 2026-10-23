@@ -8,6 +8,27 @@ before the run reached its last step (a lost backend, its own shutdown).
 Scenarios run serially (`is_parallel: false`, 180 s timeout) because they each
 own the machine's Wayland display namespace and GPU.
 
+## The harness
+
+What every scenario shares lives in `tests/harness/`, a static library the
+scenarios link (`harness_lib` in meson.build). A scenario is a table of named
+steps run by `harness::run`; `steps.h` documents the driver once - the
+results a step returns (`after`, `again`, `go_to`, `finish`), the per-wait
+budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
+
+| Header | Holds |
+|---|---|
+| `steps.h` | the step driver and its waits |
+| `run.h` | `begin`, `run`, the compositor under test, `settled()` |
+| `check.h` | `check` and `check_near`, a failure printing where it was called |
+| `files.h` | scratch directories under `$CANVAS_TMP`, small file helpers |
+| `image.h` | `shot` (grim) and PNG reading |
+| `devices.h` | the fake keyboard, pointer, touchscreen and tablet |
+| `control.h` | a raw client of the control socket, run in a forked child |
+| `child.h` | child processes: pipe for stdout, SIGTERM first, killed with the run |
+| `bus.h` | the private system and session D-Bus |
+| `layout.h` | `deco_point`, `bar_mid_y` and the other asks of the layout |
+
 ## What each scenario proves
 
 - **`gestures.cpp`** — touchpad gesture semantics through the `Gestures`

@@ -1641,7 +1641,7 @@ Tests:
 
 ### 8. One owner per fact: tests, build and tools
 
-- [ ] One scenario harness, proven on the small scenarios
+- [x] One scenario harness, proven on the small scenarios
   - The copies:
     - All 12 scenario files and `tools/media/tour.cpp` define their own
       `check`, `mkdir_p`, `handle_timer`, `run_step` driver and `main`;

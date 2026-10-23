@@ -659,11 +659,11 @@ std::expected<settings::Edit, std::string> edit_commands(settings::File &file,
 	return file.set_commands(commands);
 }
 
+} // namespace
+
 // ------------------------------------------------------------ the client
 
-// Connects to $WAYLAND_CANVAS_SOCKET, else to the socket of the compositor
-// $WAYLAND_DISPLAY names: a service the session bus starts (the portal's
-// chooser) knows only the display. -1 (explained on stderr) on failure.
+// Declared in ipc.h.
 int connect_to_socket() {
 	const char *exported = std::getenv("WAYLAND_CANVAS_SOCKET");
 	std::string path = exported != nullptr && *exported != '\0' ? std::string(exported)
@@ -688,7 +688,6 @@ int connect_to_socket() {
 	return fd;
 }
 
-// Blocking write of the whole buffer; false on failure.
 bool write_request(int fd, std::string_view bytes) {
 	std::size_t done = 0;
 	while (done < bytes.size()) {
@@ -703,6 +702,8 @@ bool write_request(int fd, std::string_view bytes) {
 	}
 	return true;
 }
+
+namespace {
 
 // Blocking: one newline-terminated line, or nullopt on EOF or error.
 std::optional<std::string> read_line(int fd) {
