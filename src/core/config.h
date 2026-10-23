@@ -170,6 +170,7 @@ inline constexpr int shelf_thumb_h = 100;
 inline constexpr int shelf_gap = 12;
 inline constexpr int shelf_backing = 10; // the panel behind the shelf, beyond its thumbnails
 inline constexpr int shelf_title_strip = 16; // under a thumbnail, for the title
+inline constexpr int hint_bottom_margin = 48; // the hint's gap above the bottom edge outside the overview
 
 inline constexpr double abandon_distance = 200.0; // 4-finger sideways travel that abandons a desktop
 inline constexpr double pinch_tile_scale = 1.30; // 3-finger spread past this tiles

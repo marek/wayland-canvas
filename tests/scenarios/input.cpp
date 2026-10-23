@@ -30,7 +30,7 @@
 #include "core/box.h"
 #include "core/config.h"
 #include "platform/output.h"
-#include "render/render.h"
+#include "canvas/overview_chrome.h"
 #include "core/server.h"
 #include "core/wlr.h"
 
@@ -587,7 +587,7 @@ int run_step() {
 		shot("three-desktops");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		Desktop *d3 = server->canvas.desktops.by_number(3);
-		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d3);
+		std::optional<TabLayout> layout = overview_tab_layout(*o, *d3);
 		Point tx = o->canvas_to_local(d2->frame().x, d2->frame().y);
 		Point sx = o->canvas_to_local(d3->frame().x, d3->frame().y);
 		drag(layout->tab.x + 30, layout->tab.y + 14, layout->tab.x + 30 + (tx.x - sx.x),
@@ -599,7 +599,7 @@ int run_step() {
 	}
 	case 22: { // drag Desktop 2's frame over the windows of Desktop 1 (frames move, windows don't)
 		Desktop *d2 = server->canvas.desktops.by_number(2);
-		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d2);
+		std::optional<TabLayout> layout = overview_tab_layout(*o, *d2);
 		int ax = a->x;
 		wlr_box before = d2->frame();
 		drag(layout->tab.x + 30, layout->tab.y + 14, layout->tab.x + 30, layout->tab.y + 14 + 40);
@@ -608,7 +608,7 @@ int run_step() {
 	}
 	case 23: { // click the Tile switch on Desktop 1's tab: tiling on
 		Desktop *d1 = server->canvas.desktops.by_number(1);
-		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d1);
+		std::optional<TabLayout> layout = overview_tab_layout(*o, *d1);
 		click(layout->tile_button.x + layout->tile_button.width / 2.0,
 			layout->tile_button.y + layout->tile_button.height / 2.0, BTN_LEFT);
 		return 500; // clients commit the new sizes asynchronously
@@ -646,7 +646,7 @@ int run_step() {
 			"left the overview onto Desktop 2");
 		// An empty desktop takes the switch too; its first window fills it.
 		chord(KEY_T, SUPER);
-		check(d2->tiling() && server->hint.text == "Tiling on for Desktop 2",
+		check(d2->tiling() && server->hint.text() == "Tiling on for Desktop 2",
 			"Super+T switched tiling on for the empty desktop");
 		spawn("foot -T c sh -c 'echo c; exec sleep 600'");
 		return 400;
@@ -858,7 +858,7 @@ int run_step() {
 	case 46: {
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		check(o->desktop_showing() == d2 && !o->camera.panning()
-				&& server->hint.text == "No desktop that way",
+				&& server->hint.text() == "No desktop that way",
 			"a 3-finger swipe toward no desktop stays on Desktop 2 and says so");
 		// The free view beside it is a pan away.
 		for (int i = 0; i < 3; i++) chord(KEY_RIGHT, SUPER_ALT);
@@ -893,7 +893,7 @@ int run_step() {
 		Desktop *d3 = server->canvas.desktops.by_number(3);
 		check(d3 && d3->tiling() && o->desktop_showing() == d3,
 			"Super+T pinned the free view as a desktop with tiling on");
-		check(server->hint.text == "Tiling on for Desktop 3",
+		check(server->hint.text() == "Tiling on for Desktop 3",
 			"the hint names the new tiled desktop");
 		return 400;
 	}
@@ -956,7 +956,7 @@ int run_step() {
 			"not a pixel moved when the board went away");
 		shot("tiled-off-kept");
 		// The tab's Tile switch brings it back: re-placed as they stood.
-		std::optional<TabLayout> layout = server->painter.overview_tab_layout(*o, *d1);
+		std::optional<TabLayout> layout = overview_tab_layout(*o, *d1);
 		click(layout->tile_button.x + layout->tile_button.width / 2.0,
 			layout->tile_button.y + layout->tile_button.height / 2.0, BTN_LEFT);
 		return 500;
@@ -1040,7 +1040,7 @@ int run_step() {
 		DesktopId id = d1->id();
 		View *d = titled("d"), *f = titled("f");
 		Rect d0 = d->frame_rect(), f0 = f->frame_rect();
-		std::optional<TabLayout> tab = server->painter.overview_tab_layout(*o, *d1);
+		std::optional<TabLayout> tab = overview_tab_layout(*o, *d1);
 		if (tab.has_value()) {
 			click(tab->tab.x + 30, tab->tab.y + tab->tab.height / 2.0, BTN_RIGHT);
 		}
@@ -1193,11 +1193,11 @@ int run_step() {
 		check(!server->conf_errors.empty()
 				&& server->conf_errors.front().text == "unknown action 'lancher'",
 			"the ignored line is listed with its reason");
-		check(server->hint.text.starts_with("canvas.conf line ")
-				&& server->hint.text.find("unknown action 'lancher'")
+		check(server->hint.text().starts_with("canvas.conf line ")
+				&& server->hint.text().find("unknown action 'lancher'")
 					!= std::string::npos,
 			std::format("the first error shows as a hint ({})",
-				server->hint.text));
+				server->hint.text()));
 		return 300;
 	}
 	case 72: { // the gesture choices from the file reach the gesture engine

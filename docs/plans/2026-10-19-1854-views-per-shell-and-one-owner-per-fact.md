@@ -1856,7 +1856,7 @@ Tests:
     `run_action`, an alias of `emit_action` (1681-1683), goes.
   - Acceptance: a new method is one `register_method` call in its owner,
     and the ipc scenario is green.
-- [ ] `Painter` draws frames; the overview's chrome belongs to the
+- [x] `Painter` draws frames; the overview's chrome belongs to the
   overview
   - The drawing primitives (render.cpp:19-227) move to
     `render/pass.{h,cpp}`.

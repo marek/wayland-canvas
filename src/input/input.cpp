@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 #include <linux/input-event-codes.h>
+#include "canvas/overview_chrome.h"
 #include "core/config.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -232,7 +233,7 @@ PressTarget overview_press_target(Server &server, Output &output, double ox,
 	}
 
 	for (const Desktop &desktop : server.canvas.desktops.all()) {
-		std::optional<TabLayout> tab = server.painter.overview_tab_layout(output, desktop);
+		std::optional<TabLayout> tab = overview_tab_layout(output, desktop);
 		if (!tab.has_value()) {
 			continue;
 		}

@@ -58,7 +58,7 @@
 #include "core/server.h"
 #include "core/theme.h"
 #include "core/wlr.h"
-#include "render/render.h"
+#include "canvas/overview_chrome.h"
 
 namespace {
 
@@ -2344,7 +2344,7 @@ bool target_tab_is(const char *name, uint32_t want) {
 	Desktop *d = o != nullptr
 		? o->server.canvas.desktops.find(o->overview.target().desktop) : nullptr;
 	std::optional<TabLayout> layout = d != nullptr
-		? o->server.painter.overview_tab_layout(*o, *d) : std::nullopt;
+		? overview_tab_layout(*o, *d) : std::nullopt;
 	cairo_surface_t *s = load_png(name);
 	int x = layout.has_value() ? layout->tab.x + 4 : 0;
 	int y = layout.has_value() ? layout->tab.y + 4 : 0;
@@ -9286,7 +9286,7 @@ int run_step() {
 		check(read_file(canvas_conf).find("Super+Y") == std::string::npos,
 			"recording the draft's chord wrote nothing into canvas.conf");
 		check(server->conf_errors.empty()
-				&& !server->hint.text.starts_with("canvas.conf line"),
+				&& !server->hint.text().starts_with("canvas.conf line"),
 			"and no file error followed it (none in the settings, no hint)");
 		settings_last_png.clear();
 		scroll(settings_card_x + 100, 400, 40);
@@ -9447,7 +9447,7 @@ int run_step() {
 			"chord after typing, without Enter, wrote Super+U = markcmd once "
 			"(\"{}\", {} line(s))", command, lines));
 		check(server->conf_errors.empty()
-				&& !server->hint.text.starts_with("canvas.conf line"),
+				&& !server->hint.text().starts_with("canvas.conf line"),
 			"and no file error followed it");
 		check(!std::filesystem::exists(command_marker),
 			"the command had not run before its chord was pressed");

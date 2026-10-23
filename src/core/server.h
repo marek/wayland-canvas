@@ -17,6 +17,7 @@
 #include "apps/capture_ui.h"
 #include "core/theme.h"
 #include "platform/night_light.h"
+#include "render/hint.h"
 #include "render/render.h"
 #include "render/text_cache.h"
 #include "core/util.h"

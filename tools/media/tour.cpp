@@ -38,7 +38,7 @@
 #include "core/wlr.h"
 #include "platform/output.h"
 #include "render/capture.h"
-#include "render/render.h"
+#include "canvas/overview_chrome.h"
 #include "windows/view.h"
 
 namespace {
@@ -1288,7 +1288,7 @@ void walkthrough() {
 	// frame carries its board along.
 	add("walk: frame", [] {
 		caption("Dragging a desktop's frame leaves its windows in place");
-		std::optional<TabLayout> tab = server->painter.overview_tab_layout(*out(),
+		std::optional<TabLayout> tab = overview_tab_layout(*out(),
 			*desktop_numbered(3));
 		if (!tab) {
 			fail("the table's tab is not on the screen");

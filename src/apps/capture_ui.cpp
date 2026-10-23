@@ -18,7 +18,7 @@
 #include "core/server.h"
 #include "platform/output.h"
 #include "render/draw.h"
-#include "render/render.h"
+#include "render/pass.h"
 
 namespace {
 

@@ -31,7 +31,7 @@
 #include "core/config.h"
 #include "core/geometry.h"
 #include "platform/output.h"
-#include "render/render.h"
+#include "canvas/overview_chrome.h"
 #include "core/server.h"
 #include "core/wlr.h"
 
@@ -700,9 +700,9 @@ int run_step() {
 		check(!o->overview.active() && o->camera.current().cx == cam0.cx
 			&& o->camera.current().cy == cam0.cy && o->camera.current().zoom == 1
 			&& !o->camera.panning() && o->interactive()
-			&& server->hint.text == "No desktop that way",
+			&& server->hint.text() == "No desktop that way",
 			std::format("with no desktop that way, a 3-finger swipe stays on the desktop"
-				" (dx={:.0f}, hint {})", o->camera.current().cx - cam0.cx, server->hint.text));
+				" (dx={:.0f}, hint {})", o->camera.current().cx - cam0.cx, server->hint.text()));
 		// The free area to the right is a pan away (a drag, a scroll, or
 		// Super+Alt+arrows for the user).
 		o->pan(o->width, 0);
@@ -1007,7 +1007,7 @@ int run_step() {
 			"settled at 80 %, the tiled board kept every box{}", changed));
 		check(told_output_scale(),
 			"the clients were not told the scale: still the output's");
-		check(server->hint.text == "Desktop 1 · 80 %",
+		check(server->hint.text() == "Desktop 1 · 80 %",
 			"the settle is named like a completed action");
 		shot("14-desktop-80");
 		return 400;
@@ -1322,7 +1322,7 @@ int run_step() {
 		key(KEY_0, true);
 		key(KEY_0, false);
 		key(KEY_LEFTMETA, false);
-		check(desk(d1)->scale() == 1.0 && server->hint.text == "Desktop 1 · 100 %",
+		check(desk(d1)->scale() == 1.0 && server->hint.text() == "Desktop 1 · 100 %",
 			"Super+0 returned the desktop shown to 100 %, named in a hint");
 		check(!server->launcher.is_open(), "Super+0 opens no launcher");
 		return 700;
@@ -1365,7 +1365,7 @@ int run_step() {
 			"0 in the overview returned the target desktop to 100 %, its frame the base size");
 		check(t.x == f.x && t.y == f.y && t.width == f.width && t.height == f.height,
 			"the overview's target follows the resized frame");
-		check(server->hint.text == "Desktop 1 · 100 %", "the overview's reset is named in a hint");
+		check(server->hint.text() == "Desktop 1 · 100 %", "the overview's reset is named in a hint");
 		shot("25-overview-reset");
 		o->overview.exit();
 		return 700;
@@ -1571,9 +1571,9 @@ int run_step() {
 			return -100;
 		}
 		check(o->camera.current().zoom == 1 && o->interactive()
-			&& server->hint.text == "Free area · 100 %",
+			&& server->hint.text() == "Free area · 100 %",
 			std::format("Super+0 returns a free view to 100 % (zoom {:.2f}, hint {})",
-				o->camera.current().zoom, server->hint.text));
+				o->camera.current().zoom, server->hint.text()));
 		return 300;
 	case 72: {
 		// Hops in the normal view, on a row far from the rest: A, B at 80 %
@@ -1612,9 +1612,9 @@ int run_step() {
 		Camera c = camera_for_box(desk(hop_c)->frame(), 1);
 		Camera cam = o->camera.current();
 		check(cam.cx == c.cx && cam.cy == c.cy && cam.zoom == 1 && !o->camera.panning()
-			&& o->interactive() && server->hint.text == "No desktop that way",
+			&& o->interactive() && server->hint.text() == "No desktop that way",
 			std::format("with no desktop right of C, a swipe stays on C and says so (hint {})",
-				server->hint.text));
+				server->hint.text()));
 		swipe(3, -1500, 0, 60); // a long swipe left: one hop all the same
 		return 900;
 	}
@@ -1658,7 +1658,7 @@ int run_step() {
 	case 78: {
 		Camera cam = o->camera.current();
 		check(o->desktop_showing() == nullptr && cam.cx == hop_from.cx && cam.cy == hop_from.cy
-			&& !o->camera.panning() && server->hint.text == "No desktop that way",
+			&& !o->camera.panning() && server->hint.text() == "No desktop that way",
 			"on a free view, a swipe toward no desktop stays and says so");
 		swipe(3, 0, -300, 10);
 		return 900;
@@ -1750,9 +1750,9 @@ int run_step() {
 			std::format("the late window opened in the free spot it was launched for, not on B"
 				" where the overview closed to (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
 		check(tardy != nullptr && server->focused_view != tardy
-				&& server->hint.text == "Opened in a free area",
+				&& server->hint.text() == "Opened in a free area",
 			std::format("unseen, it left the keyboard alone, and a hint said where (hint {})",
-				server->hint.text));
+				server->hint.text()));
 		return 300;
 	}
 	case 89: // on B, far from the canvas origin: a window asking to start maximized
@@ -1908,10 +1908,10 @@ int run_step() {
 			server->gestures.pinch_update(t_ms, 0, 0, 1 + 0.5 * i / 10, 0);
 		}
 		check(server->gestures.pinch() != nullptr
-				&& server->hint.text == std::format("Release to tile Desktop {}",
+				&& server->hint.text() == std::format("Release to tile Desktop {}",
 					desk(hop_a)->number()),
 			std::format("a 4-finger spread previews tiling (hint {})",
-				server->hint.text));
+				server->hint.text()));
 		t_ms += 8;
 		server->gestures.pinch_end(t_ms, true); // cancelled: the preview is the point
 		server->gestures.pinch_begin(t_ms, 4);
@@ -1920,11 +1920,11 @@ int run_step() {
 			server->gestures.pinch_update(t_ms, 0, 0, 1 - 0.4 * i / 10, 0);
 		}
 		check(server->gestures.pinch() != nullptr
-				&& server->hint.text == std::format(
+				&& server->hint.text() == std::format(
 					"Release to combine Desktop {} into Desktop {}",
 					desk(hop_b)->number(), desk(hop_a)->number()),
 			std::format("a 4-finger gather previews combining (hint {})",
-				server->hint.text));
+				server->hint.text()));
 		t_ms += 8;
 		server->gestures.pinch_end(t_ms, true);
 		return 400;
@@ -2007,7 +2007,7 @@ int run_step() {
 		server->gestures.pinch_end(t_ms += 8, false);
 		Camera now = o->camera.current();
 		check(o->overview.active() && now.cx == before.cx && now.cy == before.cy
-				&& now.zoom == before.zoom && server->hint.text.empty()
+				&& now.zoom == before.zoom && server->hint.text().empty()
 				&& o->overview.target().desktop == target_before
 				&& std::holds_alternative<Gestures::Idle>(server->gestures.state()),
 			"in the overview, 3- and 4-finger gestures did nothing at all");
@@ -2645,7 +2645,7 @@ int run_step() {
 			tick++;
 			return -17;
 		}
-		bool previewing = server->gestures.pinch() != nullptr && !server->hint.text.empty();
+		bool previewing = server->gestures.pinch() != nullptr && !server->hint.text().empty();
 		pinch_up(true);
 		check(previewing, "the pinch previewed what release would do");
 		check(frames >= counted_frames && made == 0,

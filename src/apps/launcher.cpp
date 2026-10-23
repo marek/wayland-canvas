@@ -12,7 +12,7 @@
 
 #include "core/config.h"
 #include "render/draw.h"
-#include "render/render.h"
+#include "render/pass.h"
 #include "platform/output.h"
 #include "core/server.h"
 

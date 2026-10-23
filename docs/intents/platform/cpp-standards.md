@@ -84,13 +84,18 @@ stays at the root.
 | Folder | Holds |
 |---|---|
 | `src/core/` | `Server`, the wlroots wrapper, ownership helpers, tunables, canvas geometry |
-| `src/canvas/` | The canvas and its desktops; a screen's camera and overview |
+| `src/canvas/` | The canvas and its desktops; a screen's camera and overview, and the overview's chrome (the tabs, the shelf, the help line: their layout, labels and drawing) |
 | `src/windows/` | Views, popups and their title bars |
 | `src/input/` | Devices and the seat, gestures, pointer grabs, key bindings |
-| `src/render/` | The painter and text drawing |
+| `src/render/` | The painter, the drawing primitives of a render pass, the hint and text drawing |
 | `src/platform/` | Outputs, layer surfaces, the control socket |
 | `src/apps/` | The launcher, installed applications, icons, desktop entries |
 | `src/shell/` | Helper programs the shell's plugins run as child processes (the agents panel's usage collector) |
+
+Input and rendering meet only at the drawing types: `src/input/` includes
+nothing from `src/render/` but `RenderCtx`, which a UI layer draws with. What
+the overview draws and what a press on it hits read one layout, the overview
+chrome's.
 
 A new file goes in the folder of the concept it belongs to. Includes are
 written from `src/` (`#include "canvas/desktop.h"`), so a moved file changes
