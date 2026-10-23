@@ -31,10 +31,9 @@ Item {
 	// shell.json changed by anything but set().
 	signal edited()
 
-	// One write is seen as several inotify events: a change inside this
-	// window is taken to be set()'s own, not an edit to reload on.
-	readonly property int ownWriteGraceMs: 250
-	property double lastWrite: 0
+	// What set() last wrote: a change that leaves the file holding it is
+	// set()'s own, however late it is seen. Null until the first write.
+	property var lastWritten: null
 
 	function xdgHome(variable, fallback) {
 		var value = Quickshell.env(variable)
@@ -56,7 +55,8 @@ Item {
 		printErrors: false
 		watchChanges: true
 		onFileChanged: {
-			if (Date.now() - root.lastWrite >= root.ownWriteGraceMs) {
+			file.reload()
+			if (root.lastWritten === null || file.text() !== root.lastWritten) {
 				root.edited()
 			}
 		}
@@ -97,7 +97,7 @@ Item {
 		node[keys[keys.length - 1]] = value
 		var raw = JSON.stringify(data, null, "\t") + "\n"
 		if (valid) {
-			lastWrite = Date.now()
+			lastWritten = raw
 			file.setText(raw)
 		} else if (!skipLogged) {
 			skipLogged = true
