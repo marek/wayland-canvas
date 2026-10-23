@@ -19,6 +19,21 @@ struct SizeLimit {
 	int width = 0, height = 0;
 };
 
+// What a window is showing as; one at a time. `normal` is the window's own
+// box, any other fills an area the compositor picks (windows/view.cpp).
+enum class WindowMode {
+	normal,
+	maximized, // the output's usable area, the title bar kept
+	fullscreen, // the whole output, no decorations
+};
+
+// A window's place on a tiled desktop's board: the desktop, and its slice of
+// the board in board fractions.
+struct BoardSeat {
+	DesktopId desktop;
+	Slice slice;
+};
+
 // A window on the canvas, whichever shell its client speaks. The canvas, the
 // renderer, the input path and the capture path know only this class; the
 // two shells are XdgView (view_xdg.h) and X11View (view_x11.h), each holding
@@ -41,12 +56,15 @@ public:
 	Point surface_origin() const;
 	void close();
 	void set_minimized(bool minimized);
-	void set_maximized(bool maximized);
-	void set_fullscreen(bool fullscreen);
+	void set_maximized(bool maximized); // false leaves only maximized
+	void set_fullscreen(bool fullscreen); // false leaves only fullscreen
+	void set_mode(WindowMode mode);
 	void set_tiled(bool tiled); // the xdg tiled state only, no move or resize
 	// Slice placement: sized to the slice's box and told it is tiled.
 	void set_frame(wlr_box frame);
 	void move(int x, int y);
+	// Moves the window and the box it restores to by the same offset.
+	void translate(int dx, int dy);
 	void activate();
 	void damage();
 	// What the view shows, or where, changed: repaints it and has every
@@ -126,17 +144,18 @@ public:
 
 	// Canvas position of the window geometry's top-left corner.
 	int x = 0, y = 0;
-	bool mapped = false, minimized = false, maximized = false, fullscreen = false,
-		tiled = false;
-	// The tiled desktop whose board holds the window. A zoom moves a frame's
-	// edges past windows without moving them, so the board, not the centre,
+	bool mapped = false, minimized = false, tiled = false;
+	WindowMode mode = WindowMode::normal;
+	// The window's seat on a tiled desktop's board. A zoom moves a frame's
+	// edges past windows without moving them, so the seat, not the centre,
 	// says whose it is until it leaves the board; a minimized window keeps
-	// its slice remembered while it is away, and a maximized or fullscreen
+	// its seat remembered while it is away, and a maximized or fullscreen
 	// one holds its slice reserved.
-	std::optional<DesktopId> board;
-	// The window's slice of that desktop's board, board fractions.
-	std::optional<Slice> slice;
-	wlr_box saved{}; // content box to restore after maximize/fullscreen
+	std::optional<BoardSeat> board_seat;
+	bool seated_on(DesktopId desktop) const {
+		return board_seat.has_value() && board_seat->desktop == desktop;
+	}
+	wlr_box saved{}; // content box to restore when the window leaves maximized or fullscreen
 	// Leaving maximize/fullscreen restores the size through a configure: the
 	// board return waits for the commit that carries it.
 	bool settle_pending = false;
@@ -180,6 +199,11 @@ protected:
 private:
 	void create_foreign();
 	void destroy_foreign();
+
+	// Changes the mode and tells the client and the foreign toplevel handle:
+	// the old mode off, the new one on.
+	void switch_mode(WindowMode want);
+	void announce_mode(WindowMode of, bool on);
 
 	void handle_foreign_activate();
 	void handle_foreign_maximize(const wlr_foreign_toplevel_handle_v1_maximized_event *event);

@@ -270,7 +270,7 @@ bool fullscreen_covers(const RenderCtx &ctx) {
 		return false;
 	}
 	for (const View *view : ctx.output->server.views) {
-		if (!view->mapped || view->minimized || !view->fullscreen) {
+		if (!view->mapped || view->minimized || view->mode != WindowMode::fullscreen) {
 			continue;
 		}
 		if (view->frame_rect().overlap_area(ctx.viewport) >= 0.95 * area) {

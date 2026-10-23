@@ -21,9 +21,7 @@ bool covered_by(const View &other, const View &view) {
 void move_dialogs(Server &server, const View &view, int dx, int dy) {
 	for (View *other : server.views) {
 		if (other->shell_parent() == &view) {
-			other->move(other->x + dx, other->y + dy);
-			other->saved.x += dx;
-			other->saved.y += dy;
+			other->translate(dx, dy);
 		}
 	}
 }
@@ -84,7 +82,7 @@ void FullscreenDesktops::reconcile() {
 	std::vector<Away> ending;
 	std::erase_if(away_, [this, &ending](const Away &away) {
 		View *view = view_of(away.view);
-		if (view != nullptr && view->mapped && view->fullscreen) {
+		if (view != nullptr && view->mapped && view->mode == WindowMode::fullscreen) {
 			return false;
 		}
 		ending.push_back(away);

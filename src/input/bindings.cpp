@@ -95,7 +95,7 @@ void act_restore_minimized(Server &server, Output *, KeyArg) {
 void act_maximize(Server &server, Output *, KeyArg) {
 	View *view = server.focused_view;
 	if (view != nullptr) {
-		view->set_maximized(!view->maximized);
+		view->set_maximized(view->mode != WindowMode::maximized);
 	}
 }
 
@@ -107,7 +107,7 @@ void act_arrow(Server &server, Output *, KeyArg arg) {
 	if (view == nullptr || !view->mapped || view->minimized) {
 		return;
 	}
-	if (view->board.has_value() && !view->maximized && !view->fullscreen) {
+	if (view->board_seat.has_value() && view->mode == WindowMode::normal) {
 		server.canvas.step(*view, dir.dx != 0 ? 0 : 1, dir.dx != 0 ? dir.dx : dir.dy);
 		return;
 	}
@@ -119,7 +119,7 @@ void act_arrow(Server &server, Output *, KeyArg arg) {
 void act_fullscreen(Server &server, Output *, KeyArg) {
 	View *view = server.focused_view;
 	if (view != nullptr) {
-		view->set_fullscreen(!view->fullscreen);
+		view->set_fullscreen(view->mode != WindowMode::fullscreen);
 	}
 }
 

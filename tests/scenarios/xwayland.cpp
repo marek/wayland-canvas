@@ -512,10 +512,10 @@ int run_step() {
 	}
 	case 5: {
 		View *view = x11_view();
-		if (view != nullptr && !view->maximized && retries++ < 50) {
+		if (view != nullptr && view->mode != WindowMode::maximized && retries++ < 50) {
 			return -100;
 		}
-		check(view != nullptr && view->maximized,
+		check(view != nullptr && view->mode == WindowMode::maximized,
 			"the title bar's maximize button maximized the X11 window");
 		check(view != nullptr && client_said().find(std::format("CONFIGURED {}x{}",
 				view->as_x11()->wlr->width,
@@ -898,9 +898,9 @@ int run_step() {
 	}
 	case 45: {
 		View *main = titled("x11-tiled"), *dialog = titled("x11-tiled-dialog");
-		check(main != nullptr && main->tiled && main->board.has_value(),
+		check(main != nullptr && main->tiled && main->board_seat.has_value(),
 			"the window joined the tiled desktop's board");
-		check(dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+		check(dialog != nullptr && !dialog->tiled && !dialog->board_seat.has_value(),
 			"its modal dialog floats, off the board");
 		check(main != nullptr && dialog != nullptr && centred_on(*dialog, *main),
 			"centred over the window it blocks");
@@ -915,8 +915,8 @@ int run_step() {
 	}
 	case 47: {
 		View *main = titled("x11-tiled"), *dialog = titled("x11-tiled-dialog");
-		check(main != nullptr && main->tiled && main->board.has_value()
-				&& dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+		check(main != nullptr && main->tiled && main->board_seat.has_value()
+				&& dialog != nullptr && !dialog->tiled && !dialog->board_seat.has_value(),
 			"switched off and on, tiling leaves the modal dialog floating");
 		// Going to a desktop gives the keyboard to the window last used there.
 		super_key(KEY_2);
@@ -981,7 +981,8 @@ int run_step() {
 		View *fs = titled("x11-fs"), *beside = titled("x11-beside");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		Desktop *own = fs != nullptr ? server->canvas.desktop_of(*fs) : nullptr;
-		check(fs != nullptr && fs->fullscreen && own != nullptr && own != d2
+		check(fs != nullptr && fs->mode == WindowMode::fullscreen && own != nullptr
+				&& own != d2
 				&& server->canvas.desktops.size() == desktops_before + 1,
 			"Super+F over another window took it to a new desktop of its own");
 		bool clear = own != nullptr;
@@ -999,7 +1000,8 @@ int run_step() {
 	case 56: {
 		View *fs = titled("x11-fs");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
-		check(fs != nullptr && !fs->fullscreen && server->canvas.desktop_of(*fs) == d2
+		check(fs != nullptr && fs->mode != WindowMode::fullscreen
+				&& server->canvas.desktop_of(*fs) == d2
 				&& server->canvas.desktops.size() == desktops_before,
 			"Super+F again brought it back to desktop 2, and its desktop went");
 		check(camera_on(d2), "the screen came back to desktop 2 with it");
@@ -1016,7 +1018,8 @@ int run_step() {
 	case 58: {
 		View *fs = titled("x11-fs");
 		Desktop *d2 = server->canvas.desktops.by_number(2);
-		check(fs != nullptr && fs->fullscreen && server->canvas.desktop_of(*fs) == d2
+		check(fs != nullptr && fs->mode == WindowMode::fullscreen
+				&& server->canvas.desktop_of(*fs) == d2
 				&& server->canvas.desktops.size() == desktops_before,
 			"alone on its desktop, it went fullscreen in place");
 		super_key(KEY_F);
@@ -1370,10 +1373,10 @@ int run_step() {
 	}
 	case 99: { // mapped bare it is a window like any: the board holds it
 		View *main = titled("x11-late"), *dialog = titled("x11-late-dialog");
-		check(main != nullptr && main->tiled && main->board.has_value(),
+		check(main != nullptr && main->tiled && main->board_seat.has_value(),
 			"the window joined the tiled desktop's board");
 		check(dialog != nullptr && dialog->kind() == ViewKind::normal && dialog->tiled
-				&& dialog->board.has_value(),
+				&& dialog->board_seat.has_value(),
 			"its dialog, mapped before its hints, joined the board as a plain window");
 		// The second key gives the dialog its hints, after the map.
 		key(KEY_D, true);
@@ -1392,7 +1395,7 @@ int run_step() {
 		View *main = titled("x11-late");
 		check(dialog != nullptr && dialog->kind() == ViewKind::modal,
 			"the dialog is a modal one now");
-		check(dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+		check(dialog != nullptr && !dialog->tiled && !dialog->board_seat.has_value(),
 			"its modal dialog floats, off the board");
 		check(main != nullptr && dialog != nullptr && centred_on(*dialog, *main),
 			"centred over the window it blocks");
@@ -1405,8 +1408,8 @@ int run_step() {
 	}
 	case 102: {
 		View *main = titled("x11-late"), *dialog = titled("x11-late-dialog");
-		check(main != nullptr && main->tiled && main->board.has_value()
-				&& dialog != nullptr && !dialog->tiled && !dialog->board.has_value(),
+		check(main != nullptr && main->tiled && main->board_seat.has_value()
+				&& dialog != nullptr && !dialog->tiled && !dialog->board_seat.has_value(),
 			"switched off and on, tiling leaves the late modal dialog floating");
 		reap_client(client);
 		return 300;

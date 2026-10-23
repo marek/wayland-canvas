@@ -283,7 +283,7 @@ void X11View::handle_x11_configure(wlr_xwayland_surface_configure_event *event) 
 	}
 	// A window the compositor is not placing itself gets the size it asks
 	// for, where the canvas has put it.
-	if (maximized || fullscreen || tiled) {
+	if (mode != WindowMode::normal || tiled) {
 		configure_size(shell_geometry().width, shell_geometry().height);
 		return;
 	}

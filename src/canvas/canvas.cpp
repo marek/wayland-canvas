@@ -60,8 +60,10 @@ std::vector<View *> Canvas::views_in(wlr_box box) const {
 Desktop *Canvas::desktop_of(const View &view) {
 	// A window a tiled desktop's grid holds is that desktop's wherever a zoom
 	// has moved the frame's edges; any other is the desktop its centre is in.
-	if (Desktop *holder = desktops.find(view.board)) {
-		return holder;
+	if (view.board_seat.has_value()) {
+		if (Desktop *holder = desktops.find(view.board_seat->desktop)) {
+			return holder;
+		}
 	}
 	Point centre = box_centre(view.frame_box());
 	return desktops.at(centre.x, centre.y);
@@ -75,7 +77,7 @@ std::vector<View *> Canvas::board_views(const Desktop &desktop) {
 		}
 		// Minimized windows keep their slice remembered but hold none of the
 		// board while they are away.
-		if (view->board == desktop.id() && view->mapped && !view->minimized) {
+		if (view->seated_on(desktop.id()) && view->mapped && !view->minimized) {
 			out.push_back(view);
 		}
 	}
@@ -87,7 +89,7 @@ std::vector<Slice> Canvas::held_slices(const Desktop &desktop) {
 	std::vector<Slice> out;
 	out.reserve(views.size());
 	for (View *view : views) {
-		out.push_back(*view->slice);
+		out.push_back(view->board_seat->slice);
 	}
 	return out;
 }
@@ -148,8 +150,8 @@ void Canvas::toggle_tiling(DesktopId id) {
 			if (standing.size() == box_views_max) {
 				break;
 			}
-			if (view->mapped && !view->minimized && !view->maximized
-					&& !view->fullscreen && desktop->contains(
+			if (view->mapped && !view->minimized && view->mode == WindowMode::normal
+					&& desktop->contains(
 						view->frame_rect().cx(), view->frame_rect().cy())) {
 				standing.push_back(view);
 			}
@@ -166,10 +168,8 @@ void Canvas::toggle_tiling(DesktopId id) {
 	// the board and every remembered slice, minimized windows' included, is
 	// dropped with it.
 	for (View *view : server_.views) {
-		if (view->board == id) {
-			view->set_tiled(false);
-			view->board = std::nullopt;
-			view->slice = std::nullopt;
+		if (view->seated_on(id)) {
+			leave_board(*view);
 		}
 	}
 	server_.hint.set(std::format("Tiling off for Desktop {}",
@@ -177,14 +177,12 @@ void Canvas::toggle_tiling(DesktopId id) {
 }
 
 void Canvas::place_on_slice(View &view, const Desktop &desktop, Slice slice) {
+	view.board_seat = BoardSeat{desktop.id(), slice};
 	// A maximized or fullscreen view keeps its box: the slice is only its
 	// reservation while the state lasts.
-	if (view.maximized || view.fullscreen) {
-		view.slice = slice;
+	if (view.mode != WindowMode::normal) {
 		return;
 	}
-	view.slice = slice;
-	view.board = desktop.id();
 	view.set_frame(slice_frame(tiling_area(desktop), slice));
 }
 
@@ -202,21 +200,21 @@ void Canvas::join(Desktop &desktop, View &view) {
 	}
 	if (placed->halved != no_slice) {
 		View *holder = views[placed->halved];
-		place_on_slice(*holder, desktop, halve_slice(*holder->slice).first);
+		place_on_slice(*holder, desktop, halve_slice(holder->board_seat->slice).first);
 	}
 	place_on_slice(view, desktop, placed->slice);
 }
 void Canvas::step(View &view, int axis, int dir) {
-	if (!view.slice.has_value() || !view.board.has_value()) {
+	if (!view.board_seat.has_value()) {
 		return;
 	}
-	Desktop *desktop = desktops.find(*view.board);
-	if (desktop == nullptr || !desktop->tiling() || view.maximized
-			|| view.fullscreen || view.minimized) {
+	Desktop *desktop = desktops.find(view.board_seat->desktop);
+	if (desktop == nullptr || !desktop->tiling() || view.mode != WindowMode::normal
+			|| view.minimized) {
 		return;
 	}
-	Slice moved = step_slice(*view.slice, axis, dir);
-	if (moved == *view.slice) {
+	Slice moved = step_slice(view.board_seat->slice, axis, dir);
+	if (moved == view.board_seat->slice) {
 		return; // already on that half; the near edge stays put
 	}
 
@@ -229,11 +227,11 @@ void Canvas::step(View &view, int axis, int dir) {
 		if (other == &view) {
 			continue;
 		}
-		if (other->slice->intersects(moved)) {
+		if (other->board_seat->slice.intersects(moved)) {
 			covered.push_back(other);
 		} else {
 			views.push_back(other);
-			occupied.push_back(*other->slice);
+			occupied.push_back(other->board_seat->slice);
 		}
 	}
 	std::sort(covered.begin(), covered.end(), standing_before);
@@ -265,18 +263,18 @@ void Canvas::step(View &view, int axis, int dir) {
 
 void Canvas::drop(View &view) {
 	Point centre = box_centre(view.frame_box());
-	if (view.board.has_value()) {
+	if (view.board_seat.has_value()) {
 		// Dropped back on its own desktop: swap slices with the window
 		// under the drop, or take the largest free slice under it.
-		Desktop *home = desktops.find(*view.board);
+		Desktop *home = desktops.find(view.board_seat->desktop);
 		if (home != nullptr && home->tiling() && home->contains(centre.x, centre.y)) {
 			Rect area = tiling_area(*home);
 			Point at{(centre.x - area.x) / area.w, (centre.y - area.y) / area.h};
 			for (View *other : board_views(*home)) {
-				if (other != &view && other->slice->contains(at.x, at.y)) {
-					std::swap(view.slice, other->slice);
-					place_on_slice(view, *home, *view.slice);
-					place_on_slice(*other, *home, *other->slice);
+				if (other != &view && other->board_seat->slice.contains(at.x, at.y)) {
+					std::swap(view.board_seat->slice, other->board_seat->slice);
+					place_on_slice(view, *home, view.board_seat->slice);
+					place_on_slice(*other, *home, other->board_seat->slice);
 					return;
 				}
 			}
@@ -285,7 +283,8 @@ void Canvas::drop(View &view) {
 				place_on_slice(view, *home, *under);
 				return;
 			}
-			place_on_slice(view, *home, *view.slice); // nothing under: back to its slice
+			// Nothing under: back to its slice.
+			place_on_slice(view, *home, view.board_seat->slice);
 			return;
 		}
 		// Dropped outside its desktop: it leaves the board.
@@ -295,7 +294,7 @@ void Canvas::drop(View &view) {
 	// Not on a board: join whichever tiled desktop the drop landed in, or
 	// stay a floating window where it was dropped.
 	if (Desktop *onto = desktops.at(centre.x, centre.y); onto != nullptr
-			&& onto->tiling() && !view.maximized && !view.fullscreen) {
+			&& onto->tiling() && view.mode == WindowMode::normal) {
 		join(*onto, view);
 	} else {
 		view.set_tiled(false);
@@ -304,31 +303,21 @@ void Canvas::drop(View &view) {
 
 void Canvas::leave_board(View &view) {
 	view.set_tiled(false);
-	view.board = std::nullopt;
-	view.slice = std::nullopt;
+	view.board_seat.reset();
 }
 
 void Canvas::settle(View &view) {
 	// Opened, moved, minimized or a state toggled: the window returns to its
 	// slice when it is still free, joins the board where it stands, or
 	// leaves the board behind.
-	if (view.board.has_value()) {
-		Desktop *home = desktops.find(*view.board);
-		bool holds = view.slice.has_value() && !view.minimized;
+	if (view.board_seat.has_value()) {
+		Desktop *home = desktops.find(view.board_seat->desktop);
 		if (home == nullptr || !home->tiling()) {
 			leave_board(view);
-		} else if (view.minimized) {
-			// Away: the slice stays remembered but frees up for takers.
-			if (view.tiled) {
-				view.set_tiled(false);
-			}
-		} else if (!holds) {
-			join(*home, view);
-		} else if (view.maximized || view.fullscreen) {
-			// Its slice stays reserved through the state.
-			if (view.tiled) {
-				view.set_tiled(false);
-			}
+		} else if (view.minimized || view.mode != WindowMode::normal) {
+			// The slice stays: remembered but free for takers while minimized,
+			// reserved while maximized or fullscreen.
+			view.set_tiled(false);
 		} else {
 			Point centre = box_centre(view.frame_box());
 			if (!home->contains(centre.x, centre.y)) {
@@ -341,10 +330,10 @@ void Canvas::settle(View &view) {
 			// else placed like a new one.
 			std::vector<Slice> occupied = held_slices(*home);
 			occupied.erase(std::remove_if(occupied.begin(), occupied.end(),
-				[&view](const Slice &s) { return s == *view.slice; }),
+				[&view](const Slice &s) { return s == view.board_seat->slice; }),
 				occupied.end());
-			if (largest_free_slice(occupied) == *view.slice) {
-				place_on_slice(view, *home, *view.slice);
+			if (largest_free_slice(occupied) == view.board_seat->slice) {
+				place_on_slice(view, *home, view.board_seat->slice);
 			} else {
 				join(*home, view);
 			}
@@ -355,14 +344,12 @@ void Canvas::settle(View &view) {
 	if (view.mapped && !view.minimized) {
 		Point centre = box_centre(view.frame_box());
 		if (Desktop *onto = desktops.at(centre.x, centre.y); onto != nullptr
-				&& onto->tiling() && !view.maximized && !view.fullscreen) {
+				&& onto->tiling() && view.mode == WindowMode::normal) {
 			join(*onto, view);
 			return;
 		}
 	}
-	if (view.tiled) {
-		view.set_tiled(false);
-	}
+	view.set_tiled(false);
 }
 
 void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
@@ -378,12 +365,9 @@ void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
 	int dy = into_desktop->frame().y - from_area.y;
 	std::vector<View *> incoming = views_in(from_area);
 	for (View *view : incoming) {
-		view->move(view->x + dx, view->y + dy);
-		view->saved.x += dx;
-		view->saved.y += dy;
+		view->translate(dx, dy);
 		// Whatever board they came from is gone with their desktop.
-		view->board = std::nullopt;
-		view->slice = std::nullopt;
+		view->board_seat.reset();
 	}
 	std::sort(incoming.begin(), incoming.end(), standing_before);
 	int from_number = from_desktop->number(), into_number = into_desktop->number();
@@ -392,7 +376,7 @@ void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
 	if (into_desktop->tiling()) {
 		// The incoming windows join the board like new ones.
 		for (View *view : incoming) {
-			if (!view->maximized && !view->fullscreen) {
+			if (view->mode == WindowMode::normal) {
 				join(*into_desktop, *view);
 			}
 		}

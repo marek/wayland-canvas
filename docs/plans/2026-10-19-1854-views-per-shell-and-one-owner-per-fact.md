@@ -1998,7 +1998,7 @@ Tests:
   - Make it a `std::variant<Still, Pan, Zoom>`, with the end rule written
     once.
   - Acceptance: the unit and gestures suites are green.
-- [ ] A window's mode is one enum
+- [x] A window's mode is one enum
   - Today `maximized` and `fullscreen` are two mutually exclusive bools.
     `set_maximized`, `set_fullscreen` and `set_frame` (view.cpp:431-592)
     repeat the restore-from-saved block (463-469, 525-531) and clear the
@@ -2009,7 +2009,7 @@ Tests:
     - one restore;
     - the public setters stay as one-line calls.
   - Acceptance: the input and gestures scenarios are green.
-- [ ] A window's board seat and its moves have one shape
+- [x] A window's board seat and its moves have one shape
   - `board` and `slice` (view.h:156-158) must agree, and four places
     clear them as a pair. Make them a `std::optional<BoardSeat>`.
   - `saved` is shifted by hand (canvas.cpp:418-419,

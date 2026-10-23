@@ -74,6 +74,23 @@ wlr_box fullscreen_area(View &view) {
 	return box_of_viewport(picked->viewport());
 }
 
+// The area a window in `mode` fills; none for a window in its own box.
+std::optional<wlr_box> area_for(View &view, WindowMode mode) {
+	if (mode == WindowMode::maximized) {
+		return maximize_area(view);
+	}
+	if (mode == WindowMode::fullscreen) {
+		return fullscreen_area(view);
+	}
+	return std::nullopt;
+}
+
+// The mode a window ends in when `off` is switched off: normal when it is in
+// that mode, else the one it is in.
+WindowMode without(WindowMode current, WindowMode off) {
+	return current == off ? WindowMode::normal : current;
+}
+
 // ---- placement ----
 
 // The screen-sized canvas box a new window opens centred in, the zoom its
@@ -142,16 +159,9 @@ void place(View &view) {
 	int fw = geo.width + 2 * bw;
 	int fh = geo.height + tb + 2 * bw;
 
-	if (view.fullscreen) {
-		wlr_box area = fullscreen_area(view);
-		view.x = area.x;
-		view.y = area.y;
-		return;
-	}
-	if (view.maximized) {
-		wlr_box area = maximize_area(view);
-		view.x = area.x;
-		view.y = area.y + view.deco.titlebar();
+	if (std::optional<wlr_box> area = area_for(view, view.mode)) {
+		view.x = area->x;
+		view.y = area->y + tb;
 		return;
 	}
 	// A dialog sits over the window it belongs to, its title bar never above
@@ -287,6 +297,12 @@ void View::move(int new_x, int new_y) {
 	server.windows_dirty = true;
 }
 
+void View::translate(int dx, int dy) {
+	move(x + dx, y + dy);
+	saved.x += dx;
+	saved.y += dy;
+}
+
 void View::close() {
 	send_close();
 }
@@ -322,114 +338,80 @@ void View::set_minimized(bool want) {
 }
 
 void View::set_maximized(bool want) {
-	if (maximized == want) {
-		return;
-	}
-	drop_resize(); // a pending resize anchor must not fight the new box
-	if (want) {
-		if (!maximized && !fullscreen) {
-			saved = content_box();
-		}
-		maximized = true;
-		if (fullscreen) {
-			fullscreen = false;
-			if (is_initialized(*this)) {
-				tell_fullscreen(false);
-			}
-			if (foreign_) {
-				wlr_foreign_toplevel_handle_v1_set_fullscreen(foreign_.get(), false);
-			}
-		}
-		wlr_box area = maximize_area(*this);
-		int tb = deco.titlebar();
-		x = area.x;
-		y = area.y + tb;
-		if (is_initialized(*this)) {
-			tell_maximized(true);
-			configure_size(area.width, area.height - tb);
-		}
-	} else {
-		maximized = false;
-		if (is_initialized(*this)) {
-			tell_maximized(false);
-			if (!wlr_box_empty(&saved)) {
-				configure_size(saved.width, saved.height);
-				x = saved.x;
-				y = saved.y;
-			} else {
-				configure_size(0, 0);
-			}
-		}
-	}
-	if (foreign_) {
-		wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), want);
-	}
-	visibility_changed();
-	if (want || !is_initialized(*this)) {
-		server.canvas.settle(*this);
-	} else {
-		// The restored size arrives with the client's next commit; settling on
-		// the stale maximized geometry would lose its slice.
-		settle_pending = true;
-	}
+	set_mode(want ? WindowMode::maximized : without(mode, WindowMode::maximized));
 }
 
 void View::set_fullscreen(bool want) {
-	if (fullscreen == want) {
+	set_mode(want ? WindowMode::fullscreen : without(mode, WindowMode::fullscreen));
+}
+
+void View::set_mode(WindowMode want) {
+	if (mode == want) {
 		return;
 	}
-	drop_resize();
-	if (want) {
-		if (!maximized && !fullscreen) {
-			saved = content_box();
-		}
-		fullscreen = true;
-		if (maximized) {
-			maximized = false;
-			if (is_initialized(*this)) {
-				tell_maximized(false);
-			}
-			if (foreign_) {
-				wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), false);
-			}
-		}
+	drop_resize(); // a pending resize anchor must not fight the new box
+	if (mode == WindowMode::normal) {
+		saved = content_box();
+	}
+	switch_mode(want);
+	if (want == WindowMode::fullscreen) {
 		// Over other windows it goes to a desktop of its own and covers that
 		// (canvas/fullscreen_desktops.h).
 		server.canvas.fullscreen_desktops.enter(*this, fullscreen_area(*this));
-		wlr_box area = fullscreen_area(*this);
-		x = area.x;
-		y = area.y;
-		if (is_initialized(*this)) {
-			tell_fullscreen(true);
-			configure_size(area.width, area.height);
-		}
 		// Fullscreen windows sit above everything else.
 		if (mapped) {
 			std::erase(server.views, this);
 			server.views.insert(server.views.begin(), this);
 		}
-	} else {
-		fullscreen = false;
+	}
+	if (std::optional<wlr_box> area = area_for(*this, want)) {
+		int tb = deco.titlebar();
+		x = area->x;
+		y = area->y + tb;
 		if (is_initialized(*this)) {
-			tell_fullscreen(false);
-			if (!wlr_box_empty(&saved)) {
-				configure_size(saved.width, saved.height);
-				x = saved.x;
-				y = saved.y;
-			} else {
-				configure_size(0, 0);
-			}
+			configure_size(area->width, area->height - tb);
+		}
+	} else if (is_initialized(*this)) {
+		if (!wlr_box_empty(&saved)) {
+			configure_size(saved.width, saved.height);
+			x = saved.x;
+			y = saved.y;
+		} else {
+			configure_size(0, 0);
 		}
 	}
-	if (foreign_) {
-		wlr_foreign_toplevel_handle_v1_set_fullscreen(foreign_.get(), want);
-	}
 	visibility_changed();
-	if (want || !is_initialized(*this)) {
+	if (want != WindowMode::normal || !is_initialized(*this)) {
 		server.canvas.settle(*this);
 	} else {
-		// As with unmaximize: the board return waits for the size commit.
+		// The restored size arrives with the client's next commit; settling on
+		// the stale maximized or fullscreen geometry would lose its slice.
 		settle_pending = true;
+	}
+}
+
+void View::switch_mode(WindowMode want) {
+	WindowMode was = mode;
+	mode = want;
+	announce_mode(was, false);
+	announce_mode(want, true);
+}
+
+void View::announce_mode(WindowMode of, bool on) {
+	if (of == WindowMode::maximized) {
+		if (is_initialized(*this)) {
+			tell_maximized(on);
+		}
+		if (foreign_) {
+			wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), on);
+		}
+	} else if (of == WindowMode::fullscreen) {
+		if (is_initialized(*this)) {
+			tell_fullscreen(on);
+		}
+		if (foreign_) {
+			wlr_foreign_toplevel_handle_v1_set_fullscreen(foreign_.get(), on);
+		}
 	}
 }
 
@@ -450,27 +432,10 @@ void View::set_frame(wlr_box frame) {
 	if (content.height < 1) {
 		content.height = 1;
 	}
-	bool was_maximized = maximized;
-	bool was_fullscreen = fullscreen;
-	maximized = false;
-	fullscreen = false;
+	switch_mode(WindowMode::normal);
 	if (is_initialized(*this)) {
-		if (was_maximized) {
-			tell_maximized(false);
-		}
-		if (was_fullscreen) {
-			tell_fullscreen(false);
-		}
 		tell_tiled(true);
 		configure_size(content.width, content.height);
-	}
-	if (foreign_) {
-		if (was_maximized) {
-			wlr_foreign_toplevel_handle_v1_set_maximized(foreign_.get(), false);
-		}
-		if (was_fullscreen) {
-			wlr_foreign_toplevel_handle_v1_set_fullscreen(foreign_.get(), false);
-		}
 	}
 	x = content.x;
 	y = content.y;
@@ -541,13 +506,13 @@ void View::create_foreign() {
 	if (shell_app_id() != nullptr) {
 		wlr_foreign_toplevel_handle_v1_set_app_id(handle, shell_app_id());
 	}
-	if (maximized) {
+	if (mode == WindowMode::maximized) {
 		wlr_foreign_toplevel_handle_v1_set_maximized(handle, true);
 	}
 	if (minimized) {
 		wlr_foreign_toplevel_handle_v1_set_minimized(handle, true);
 	}
-	if (fullscreen) {
+	if (mode == WindowMode::fullscreen) {
 		wlr_foreign_toplevel_handle_v1_set_fullscreen(handle, true);
 	}
 	foreign_activate_.connect<&View::handle_foreign_activate>(
@@ -659,11 +624,9 @@ void View::handle_unmap() {
 	}
 	// Reset state the client renegotiates when it remaps. The board needs no
 	// re-layout: an unmapped window holds no slice, so its own frees up.
-	maximized = false;
-	fullscreen = false;
+	mode = WindowMode::normal;
 	tiled = false;
-	board = std::nullopt;
-	slice = std::nullopt;
+	board_seat.reset();
 	settle_pending = false;
 	saved = wlr_box{0, 0, 0, 0};
 	drop_resize();

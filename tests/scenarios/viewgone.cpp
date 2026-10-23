@@ -265,7 +265,7 @@ int run_step() {
 	}
 	case 9: {
 		View *view = titled("full");
-		check(view != nullptr && view->fullscreen
+		check(view != nullptr && view->mode == WindowMode::fullscreen
 				&& server->canvas.fullscreen_desktops.area(*view).has_value()
 				&& server->canvas.desktops.size() == desktops_before + 1,
 			"fullscreen over another window made a desktop of its own");

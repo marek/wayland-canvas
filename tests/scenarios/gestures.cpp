@@ -465,6 +465,11 @@ bool on_slice(View *view, const wlr_box &expected) {
 		&& e.w - f.w < 12 && e.h - f.h < 12;
 }
 
+// The slice a view holds on its board; none for a window with no seat.
+std::optional<Slice> slice_of(const View *view) {
+	return view->board_seat.transform(&BoardSeat::slice);
+}
+
 // Remembers these windows' frames, to compare after a zoom.
 void keep(std::initializer_list<View *> views) {
 	kept.clear();
@@ -1075,7 +1080,7 @@ int run_step() {
 					&& now.y == box.y && now.w == box.w && now.h == box.h;
 			}
 		}
-		check(marker != nullptr && marker->board == d1 && marker->tiled
+		check(marker != nullptr && marker->seated_on(*d1) && marker->tiled
 				&& inside(marker->frame_rect(), desk(d1)->frame()),
 			"the window opened on the 80 % desktop joined the board in its frame");
 		check(on_slice(marker, slice_frame_of(*desk(d1), RB))
@@ -1267,7 +1272,8 @@ int run_step() {
 		}
 		Rect fr = three->frame_rect();
 		Rect vp = o->viewport();
-		check(three->maximized && std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
+		check(three->mode == WindowMode::maximized
+			&& std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
 			&& std::fabs(fr.w - vp.w) < 1 && std::fabs(fr.h - vp.h) < 1,
 			std::format("maximized at 80 %, the window fills the screen ({:.0f}x{:.0f})",
 				fr.w, fr.h));
@@ -1331,7 +1337,8 @@ int run_step() {
 			&& std::fabs(o->camera.current().cy - want.cy) < 1,
 			"the camera eased with it and rests on the desktop at 100 %");
 		std::string changed = changed_boxes();
-		check(changed.empty() && told_output_scale() && three->maximized, std::format(
+		check(changed.empty() && told_output_scale()
+			&& three->mode == WindowMode::maximized, std::format(
 			"the reset changed no window either, the maximized one included{}", changed));
 		const wlr_box &f = desk(d1)->frame();
 		check(f.x == frame0.x && f.y == frame0.y && f.width == frame0.width
@@ -1391,8 +1398,8 @@ int run_step() {
 		return 600;
 	case 59: {
 		View *marker = view_titled("marker");
-		check(desk(d1)->tiling() && one->board == d1 && two->board == d1
-			&& marker != nullptr && marker->board == d1 && !three->board.has_value(),
+		check(desk(d1)->tiling() && one->seated_on(*d1) && two->seated_on(*d1)
+			&& marker != nullptr && marker->seated_on(*d1) && !three->board_seat.has_value(),
 			"Super+T tiled the 50 % desktop, the maximized window off the board");
 		keep({one, two, marker});
 		super_pinch_to(0.5, 2.0);
@@ -1427,8 +1434,8 @@ int run_step() {
 		View *marker = view_titled("marker");
 		// The join already moved the halved slice's holder onto its kept
 		// half: after it, exactly one window holds the top-right quarter.
-		View *rholder = one->slice == RT ? one
-			: two->slice == RT ? two : marker;
+		View *rholder = slice_of(one) == RT ? one
+			: slice_of(two) == RT ? two : marker;
 		bool others_kept = late != nullptr && rholder != nullptr;
 		for (const auto &[view, box] : kept) {
 			if (view != rholder) {
@@ -1437,10 +1444,10 @@ int run_step() {
 					&& now.y == box.y && now.w == box.w && now.h == box.h;
 			}
 		}
-		check(late != nullptr && late->tiled && late->board == d1
+		check(late != nullptr && late->tiled && late->seated_on(*d1)
 				&& inside(late->frame_rect(), desk(d1)->frame()),
 			"a window opened at 200 % joined the board in its frame");
-		check(rholder != nullptr && rholder->slice == RT && late->slice == RB
+		check(rholder != nullptr && slice_of(rholder) == RT && slice_of(late) == RB
 				&& others_kept,
 			"it halved the right half; every other window kept its box");
 		shot("26-tiled-200-join");
@@ -1708,7 +1715,7 @@ int run_step() {
 		Rect fr = launched != nullptr ? launched->frame_rect() : Rect{};
 		check(launched != nullptr && o->overview.active()
 			&& wlr_box_contains_point(&target, fr.cx(), fr.cy())
-			&& !launched->board.has_value(),
+			&& !launched->board_seat.has_value(),
 			std::format("an app launched from the overview opened in its target, the free"
 				" spot, not on B (centre {:.0f},{:.0f}; target {},{} {}x{})", fr.cx(), fr.cy(),
 				target.x, target.y, target.width, target.height));
@@ -1758,7 +1765,7 @@ int run_step() {
 			return -100;
 		}
 		Rect fr = maxhere != nullptr ? maxhere->frame_rect() : Rect{};
-		check(maxhere != nullptr && maxhere->maximized
+		check(maxhere != nullptr && maxhere->mode == WindowMode::maximized
 				&& o->viewport().contains(fr.cx(), fr.cy()) && server->focused_view == maxhere,
 			std::format("a window starting maximized filled the screen being looked at, and"
 				" took the keyboard (centre {:.0f},{:.0f})", fr.cx(), fr.cy()));
@@ -1792,7 +1799,8 @@ int run_step() {
 			return -100;
 		}
 		Rect fr = belated != nullptr ? belated->frame_rect() : Rect{};
-		check(belated != nullptr && belated->maximized && !o->overview.active()
+		check(belated != nullptr && belated->mode == WindowMode::maximized
+				&& !o->overview.active()
 				&& wlr_box_contains_point(&launch_box, fr.cx(), fr.cy())
 				&& o->desktop_showing() == desk(hop_b),
 			std::format("a late window starting maximized filled the free spot it was launched"
@@ -2489,8 +2497,7 @@ int run_step() {
 		int x0 = 200000, y0 = 200000;
 		check(one != nullptr && two != nullptr && one->mapped && two->mapped
 				&& !one->minimized && !two->minimized
-				&& !one->maximized && !two->maximized
-				&& !one->fullscreen && !two->fullscreen,
+				&& one->mode == WindowMode::normal && two->mode == WindowMode::normal,
 			"two plain windows are left to carry onto a board");
 		if (one == nullptr || two == nullptr) {
 			return 0;
@@ -2499,15 +2506,13 @@ int run_step() {
 		one->move(x0 + 100, y0 + 100);
 		two->move(x0 + w / 2, y0 + 100);
 		server->canvas.toggle_tiling(boarded);
-		check(desk(boarded)->tiling() && one->board == boarded && two->board == boarded
-				&& one->slice.has_value() && two->slice.has_value()
+		check(desk(boarded)->tiling() && one->seated_on(boarded) && two->seated_on(boarded)
 				&& one->tiled && two->tiled,
 			"tiling the desktop put both windows on its board");
 		o->overview.abandon(boarded);
 		check(server->canvas.desktops.find(boarded) == nullptr,
 			"the tiled desktop is abandoned");
-		check(!one->board.has_value() && !two->board.has_value()
-				&& !one->slice.has_value() && !two->slice.has_value()
+		check(!one->board_seat.has_value() && !two->board_seat.has_value()
 				&& !one->tiled && !two->tiled,
 			"abandoning a tiled desktop released its windows' board seats");
 		return 300;

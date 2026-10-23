@@ -137,6 +137,11 @@ bool on_slice(View *view, const wlr_box &expected) {
 		&& e.w - f.w < 12 && e.h - f.h < 12;
 }
 
+// The slice a view holds on its board; none for a window with no seat.
+std::optional<Slice> slice_of(const View *view) {
+	return view->board_seat.transform(&BoardSeat::slice);
+}
+
 // Pointer at output-local logical (x, y) on the single 1280x720 output.
 void move_to(double x, double y) {
 	t += 8;
@@ -464,7 +469,7 @@ int run_step() {
 		move_to(f.x + 80, f.y + 16);
 		click(f.x + 80, f.y + 16, BTN_LEFT);
 		click(f.x + 80, f.y + 16, BTN_LEFT);
-		check(b->maximized, "double-click on the title maximized");
+		check(b->mode == WindowMode::maximized, "double-click on the title maximized");
 		return 400;
 	}
 	case 5: { // the maximize button now shows restore; click it
@@ -472,7 +477,7 @@ int run_step() {
 		shot("maximized");
 		Point restore = button_centre(f, DecoPart::maximize);
 		click(restore.x, restore.y, BTN_LEFT);
-		check(!b->maximized, "restore button restored the window");
+		check(b->mode != WindowMode::maximized, "restore button restored the window");
 		return 400;
 	}
 	case 6: { // resize from the top-left corner: right/bottom edges must stay put
@@ -654,7 +659,7 @@ int run_step() {
 	case 28: { // Super+Left takes the whole board's window to the left half
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		View *c = titled("c");
-		check(c && c->board == d2->id() && c->tiled
+		check(c && c->seated_on(d2->id()) && c->tiled
 				&& on_slice(c, slice_frame_of(*d2, WHOLE)),
 			"the first window on the empty tiled desktop filled it");
 		shot("tiled-first-fills");
@@ -798,8 +803,8 @@ int run_step() {
 	case 42: {
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		View *c = titled("c"), *d = titled("d"), *f = titled("f");
-		check(c && c->maximized && !c->tiled && c->board == d2->id()
-				&& c->slice == RIGHT,
+		check(c && c->mode == WindowMode::maximized && !c->tiled && c->seated_on(d2->id())
+				&& slice_of(c) == RIGHT,
 			"maximize left the board but kept the window's slice");
 		check(on_slice(d, slice_frame_of(*d2, TL))
 				&& on_slice(f, slice_frame_of(*d2, BL)),
@@ -814,7 +819,7 @@ int run_step() {
 	case 43: {
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		View *c = titled("c"), *d = titled("d"), *f = titled("f");
-		check(!c->maximized && c->tiled && c->board == d2->id()
+		check(c->mode != WindowMode::maximized && c->tiled && c->seated_on(d2->id())
 				&& on_slice(c, slice_frame_of(*d2, RIGHT))
 				&& on_slice(d, slice_frame_of(*d2, TL))
 				&& on_slice(f, slice_frame_of(*d2, BL)),
@@ -829,8 +834,8 @@ int run_step() {
 	case 44: {
 		Desktop *d2 = server->canvas.desktops.by_number(2);
 		View *c = titled("c"), *d = titled("d"), *f = titled("f");
-		check(c && c->minimized && !c->tiled && c->board == d2->id()
-				&& c->slice == RIGHT,
+		check(c && c->minimized && !c->tiled && c->seated_on(d2->id())
+				&& slice_of(c) == RIGHT,
 			"minimize freed the slice but kept it remembered");
 		check(on_slice(d, slice_frame_of(*d2, TL))
 				&& on_slice(f, slice_frame_of(*d2, BL)),
@@ -863,7 +868,7 @@ int run_step() {
 	}
 	case 47: {
 		View *c = titled("c");
-		check(c && !c->tiled && !c->board.has_value()
+		check(c && !c->tiled && !c->board_seat.has_value()
 				&& server->canvas.desktop_of(*c) == nullptr,
 			"moving out freed the window's slice and left the board");
 		chord(KEY_UP, SUPER); // a floating window still maximizes
@@ -872,7 +877,8 @@ int run_step() {
 	case 48: {
 		View *c = titled("c");
 		Rect fr = c->frame_rect(), vp = o->viewport();
-		check(c->maximized && std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
+		check(c->mode == WindowMode::maximized
+				&& std::fabs(fr.x - vp.x) < 1 && std::fabs(fr.y - vp.y) < 1
 				&& std::fabs(fr.w - vp.w) < 1 && std::fabs(fr.h - vp.h) < 1,
 			"Super+Up still toggles maximize on a floating desktop");
 		shot("floating-maximized");
@@ -881,7 +887,7 @@ int run_step() {
 	}
 	case 49: {
 		View *c = titled("c");
-		check(c && !c->maximized, "Super+Up restored the floating window");
+		check(c && c->mode != WindowMode::maximized, "Super+Up restored the floating window");
 		// Pin this free view as a desktop with tiling on: c joins it.
 		chord(KEY_T, SUPER);
 		Desktop *d3 = server->canvas.desktops.by_number(3);
@@ -894,7 +900,7 @@ int run_step() {
 	case 50: {
 		Desktop *d3 = server->canvas.desktops.by_number(3);
 		View *c = titled("c");
-		check(c && c->board == d3->id() && on_slice(c, slice_frame_of(*d3, WHOLE)),
+		check(c && c->seated_on(d3->id()) && on_slice(c, slice_frame_of(*d3, WHOLE)),
 			"the window standing there joined the new desktop's board");
 		// Back to Desktop 1 (via 2): its tiling survived, boxes unmoved.
 		chord(KEY_LEFT, SUPER_CTRL);
@@ -941,7 +947,7 @@ int run_step() {
 		View *right = left == a ? second : a;
 		Rect fl = left->frame_rect(), fr = right->frame_rect();
 		check(d1 && !d1->tiling() && !a->tiled && !second->tiled
-				&& !a->board.has_value() && !second->board.has_value(),
+				&& !a->board_seat.has_value() && !second->board_seat.has_value(),
 			"`t` in the overview switched tiling off, boards dropped");
 		check(on_slice(left, slice_frame_of(*d1, LEFT))
 				&& on_slice(right, slice_frame_of(*d1, RIGHT)),

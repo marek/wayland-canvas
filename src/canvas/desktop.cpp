@@ -228,7 +228,7 @@ void Desktops::remove(DesktopId id) {
 		// Abandoning a tiled desktop leaves its windows where they are,
 		// off its board.
 		for (View *view : server_.views) {
-			if (view->board == id) {
+			if (view->seated_on(id)) {
 				server_.canvas.leave_board(*view);
 			}
 		}

@@ -743,7 +743,7 @@ View *fresh_view(std::string_view app_id, std::string_view title) {
 
 // The window's frame at the spot's corner, its content at the spot's size.
 void place(View &view, const Spot &spot) {
-	if (view.maximized) {
+	if (view.mode == WindowMode::maximized) {
 		view.set_maximized(false);
 	}
 	view.configure_size(spot.w, spot.h);

@@ -85,7 +85,7 @@ void draw_button(cairo_t *cr, const View &view, DecoPart part, const wlr_box &bo
 
 	double gx = x + (bw - 10) / 2.0;
 	double gy = (bh - 10) / 2.0;
-	if (part == DecoPart::maximize && view.maximized) {
+	if (part == DecoPart::maximize && view.mode == WindowMode::maximized) {
 		draw_restore_glyph(cr, gx, gy, base, overlay);
 	} else {
 		draw_glyph(cr, part, gx, gy);
@@ -105,11 +105,11 @@ Decoration::~Decoration() = default;
 // ---- metrics ----
 
 int Decoration::titlebar() const {
-	return ssd && !view_.fullscreen ? config::titlebar_height : 0;
+	return ssd && view_.mode != WindowMode::fullscreen ? config::titlebar_height : 0;
 }
 
 int Decoration::border() const {
-	return ssd && !view_.fullscreen && !view_.maximized ? config::border_width : 0;
+	return ssd && view_.mode == WindowMode::normal ? config::border_width : 0;
 }
 
 bool Decoration::set_hover(DecoPart part) {
@@ -138,7 +138,7 @@ wlr_texture *Decoration::title_bar(float scale) {
 	wlr_box content = view_.content_box();
 	wanted_.width = std::max(content.width + 2 * border(), 1);
 	wanted_.active = view_.server.focused_view == &view_;
-	wanted_.maximized = view_.maximized;
+	wanted_.maximized = view_.mode == WindowMode::maximized;
 	wanted_.hover = hover_;
 	wanted_.pressed = pressed_;
 	if (wanted_.title != (title != nullptr ? title : "")) {
@@ -189,7 +189,7 @@ DecoHit Decoration::hit(double cx, double cy, double zoom) const {
 	double fw = frame.width, fh = frame.height;
 	int tb = titlebar();
 	int bw = border();
-	bool can_resize = !view_.maximized && !view_.fullscreen;
+	bool can_resize = view_.mode == WindowMode::normal;
 	double margin = config::resize_margin / zoom;
 	double corner = 16.0 / zoom;
 

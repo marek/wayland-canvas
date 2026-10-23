@@ -1051,7 +1051,7 @@ void Input::cursor_button_press(uint32_t time, uint32_t button) {
 				if (last_title_view == hit.view &&
 						time - last_title_click <= config::double_click_ms) {
 					last_title_view = nullptr;
-					hit.view->set_maximized(!hit.view->maximized);
+					hit.view->set_maximized(hit.view->mode != WindowMode::maximized);
 				} else {
 					last_title_click = time;
 					last_title_view = hit.view;

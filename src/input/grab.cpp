@@ -83,7 +83,7 @@ void PointerGrab::begin_move(View &view, Output &output) {
 		.start = view.content_box(),
 		.moved = false,
 	};
-	if (view.maximized) {
+	if (view.mode == WindowMode::maximized) {
 		// Remember where on the title bar the grab started so the
 		// drag-restore below can keep the cursor at the same spot.
 		wlr_box frame = view.frame_box();
@@ -171,7 +171,7 @@ void PointerGrab::move_motion(Move &move) {
 	View *view = move.view;
 	Output *output = move.output;
 	double dist = move.anchor.distance(server_.cursor->x, server_.cursor->y);
-	if (view->maximized) {
+	if (view->mode == WindowMode::maximized) {
 		if (dist < config::drag_threshold) {
 			return;
 		}
@@ -394,7 +394,7 @@ void PointerGrab::release_title_button(TitleButton &button) {
 				view->set_minimized(true);
 				break;
 			case DecoPart::maximize:
-				view->set_maximized(!view->maximized);
+				view->set_maximized(view->mode != WindowMode::maximized);
 				break;
 			case DecoPart::close:
 				view->close();
