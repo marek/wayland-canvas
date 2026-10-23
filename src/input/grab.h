@@ -77,7 +77,7 @@ public:
 	bool panning(const Output &output) const;
 	std::optional<DesktopId> drop_target() const; // the desktop a dragged frame would combine into
 	void forget(const View &view); // unmapped or destroyed
-	void forget(const Output &output); // unplugged
+	void output_gone(const Output &output); // unplugged
 	void forget(const LayerSurface &layer); // unmapped or destroyed
 
 private:

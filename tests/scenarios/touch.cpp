@@ -576,6 +576,44 @@ Result a_tap_on_the_second_output() {
 	return after(300);
 }
 
+// The output a touchscreen names is unplugged under two fingers.
+Result the_second_output_unplugged_under_two_fingers() {
+	if (auto wait = wait_for(server->outputs.size() >= 2, {.budget_ms = 5000})) {
+		return *wait;
+	}
+	Output *second = server->outputs.back().get();
+	check(server->outputs.size() == 2 && std::string_view{second->wlr->name} == "HEADLESS-2",
+		"the touchscreen's output is the second of two");
+	double x = screen_w / 4.0, y = screen_h / 2.0;
+	finger_down(60, x - 60, y);
+	finger_down(61, x + 60, y);
+	for (int i = 1; i <= 3; i++) {
+		finger_move(60, x - 60 - 20 * i, y, false);
+		finger_move(61, x + 60 + 20 * i, y);
+	}
+	Output *under = server->output_at(server->cursor->x, server->cursor->y);
+	check(under == second, "two fingers are down on the second output");
+	wlr_output_destroy(second->wlr);
+	check(server->outputs.size() == 1, "the second output is gone");
+	for (int i = 1; i <= 3; i++) {
+		finger_move(60, x - 120 - 20 * i, y, false);
+		finger_move(61, x + 120 + 20 * i, y);
+	}
+	finger_up(60);
+	finger_up(61);
+	return after(400);
+}
+
+// The output left takes a tap.
+Result a_tap_after_the_unplug() {
+	finger_down(62, screen_w / 4.0, screen_h / 2.0);
+	finger_up(62);
+	Output *under = server->output_at(server->cursor->x, server->cursor->y);
+	check(under == &output(), std::format("a tap after the unplug acts on the output left "
+		"(the pointer is on {})", under != nullptr ? under->wlr->name : "nothing"));
+	return after(300);
+}
+
 } // namespace
 
 int main() {
@@ -628,5 +666,8 @@ int main() {
 		{"the pen reached the X11 window", the_pen_reached_the_x11_window},
 		{"a second output", a_second_output},
 		{"a tap on the second output", a_tap_on_the_second_output},
+		{"the second output unplugged under two fingers",
+			the_second_output_unplugged_under_two_fingers},
+		{"a tap after the unplug", a_tap_after_the_unplug},
 	});
 }

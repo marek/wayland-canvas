@@ -421,6 +421,16 @@ void Input::outputs_changed() {
 	tablets.map_devices();
 }
 
+void Input::output_gone(Output &output) {
+	// The layout every touch and pen is placed in changes: they end first,
+	// a drag on the compositor's UI as a release would, while all is whole.
+	end_contacts();
+	grab.output_gone(output);
+	for (UiLayer *layer : layers_) {
+		layer->output_gone(output);
+	}
+}
+
 // ---- cursor event handlers ----
 
 void Input::handle_cursor_motion(wlr_pointer_motion_event *event) {

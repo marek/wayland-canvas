@@ -8,7 +8,6 @@
 #include "platform/layer.h"
 #include "core/server.h"
 #include "core/process.h"
-#include "input/ui_layer.h"
 #include "windows/view.h"
 
 namespace {
@@ -49,16 +48,8 @@ void update_output_geometry(Output &output) {
 
 } // namespace
 
-Output::Output(Server &server, wlr_output *wlr)
-	: server(server), wlr(wlr), camera(*this), overview(*this) {
-	uint32_t used = 0;
-	for (const std::unique_ptr<Output> &existing : server.outputs) {
-		used |= existing->bit;
-	}
-	bit = 1;
-	while (used & bit) {
-		bit <<= 1;
-	}
+Output::Output(Server &server, wlr_output *wlr, uint32_t bit)
+	: server(server), wlr(wlr), bit(bit), camera(*this), overview(*this) {
 	wlr->data = this;
 	frame_.connect<&Output::handle_frame>(wlr->events.frame, this);
 	needs_frame_.connect<&Output::handle_needs_frame>(wlr->events.needs_frame, this);
@@ -332,19 +323,34 @@ void Server::update_visibility() {
 	}
 }
 
+uint32_t Server::free_output_bit() const {
+	uint32_t used = 0;
+	for (const std::unique_ptr<Output> &output : outputs) {
+		used |= output->bit;
+	}
+	// The lowest clear bit of `used` is the lowest set bit of `used + 1`,
+	// which wraps to 0 once all 32 are taken.
+	return ~used & (used + 1);
+}
+
+void Server::output_gone(Output &output) {
+	input.output_gone(output);
+	gestures.output_gone(output);
+	for (View *view : views) {
+		view->output_gone(output);
+	}
+	output.release_layers();
+	visibility_changed();
+}
+
+void Server::outputs_changed() {
+	changed(Change::outputs);
+	input.outputs_changed();
+}
+
 void Output::handle_frame() {
 	bool animating = tick(now_ms());
-	Server &server = this->server;
-	// A window that left fullscreen, by any path, comes back from its own
-	// desktop before this frame shows where it is.
-	server.canvas.fullscreen_desktops.reconcile();
-	server.update_visibility();
-	server.ipc_events.flush();
-	if (server.pointer_focus_stale) {
-		server.pointer_focus_stale = false;
-		server.input.rebase_cursor();
-	}
-	server.sync_x11();
+	server.flush_pending();
 	// needs_frame: screencopy clients and software cursors wait for a commit.
 	if (!dirty && !animating && !wlr->needs_frame) {
 		return;
@@ -369,58 +375,17 @@ void Output::handle_request_state(wlr_output_event_request_state *event) {
 
 void Output::handle_destroy() {
 	Server &server = this->server;
-
-	// The layout every touch and pen is placed in changes: they end first,
-	// a drag on the compositor's UI as a release would, while all is whole.
-	server.input.end_contacts();
-	server.input.grab.forget(*this);
-	server.gestures.output_gone(*this);
-	for (View *view : server.views) {
-		view->output_mask &= ~bit;
-	}
-	for (UiLayer *layer : server.input.layers()) {
-		layer->output_gone(*this);
-	}
-
-	// The layer surfaces die with the output; destroying each wlroots object
-	// runs its own destroy handler, which takes it out of these vectors. A
-	// surface on the plane is not the output's: another output takes it.
-	Output *heir = nullptr;
-	for (const std::unique_ptr<Output> &other : server.outputs) {
-		if (other.get() != this) {
-			heir = other.get();
-			break;
-		}
-	}
-	std::vector<LayerSurface *> doomed, kept;
-	for (const std::vector<std::unique_ptr<LayerSurface>> &vec : layers) {
-		for (const std::unique_ptr<LayerSurface> &layer : vec) {
-			bool on_plane = layer->belongs_on_canvas() || layer->canvas_box.has_value();
-			(heir != nullptr && on_plane ? kept : doomed).push_back(layer.get());
-		}
-	}
-	for (LayerSurface *layer : kept) {
-		layer->rehome(*heir);
-	}
-	for (LayerSurface *layer : doomed) {
-		layer->attached_ = false;
-		wlr_layer_surface_v1_destroy(layer->wlr);
-	}
-	server.visibility_changed();
+	server.output_gone(*this);
 	destroy_owned(server.outputs, this);
-	server.changed(Change::outputs); // the state no longer lists this output
-	server.input.outputs_changed(); // a touchscreen or a pen loses its output
+	server.outputs_changed();
 }
 
 void Server::handle_new_output(wlr_output *wlr) {
 	if (wlr->non_desktop) {
 		return;
 	}
-	uint32_t used = 0;
-	for (const std::unique_ptr<Output> &existing : outputs) {
-		used |= existing->bit;
-	}
-	if (used == UINT32_MAX) {
+	uint32_t bit = free_output_bit();
+	if (bit == 0) {
 		wlr_log(WLR_ERROR, "too many outputs, ignoring %s", wlr->name);
 		return;
 	}
@@ -443,12 +408,12 @@ void Server::handle_new_output(wlr_output *wlr) {
 	}
 	wlr_output_state_finish(&state);
 
-	outputs.push_back(std::make_unique<Output>(*this, wlr));
+	outputs.push_back(std::make_unique<Output>(*this, wlr, bit));
 	Output &output = *outputs.back();
 
 	wlr_output_layout_add_auto(output_layout, wlr);
 	update_output_geometry(output);
-	input.outputs_changed(); // a touchscreen or a pen may be built into it
+	outputs_changed();
 	// The canvas starts out aligned with the output layout.
 	output.camera.jump(Camera{
 		.cx = output.lx + output.width / 2.0,

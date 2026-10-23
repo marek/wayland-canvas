@@ -148,6 +148,9 @@ public:
 	void update_capabilities();
 	// Outputs came or went: every touchscreen and tablet is mapped again.
 	void outputs_changed();
+	// `output` is about to be destroyed: every contact ends, a grab on it is
+	// cancelled, and the compositor's UIs on it close.
+	void output_gone(Output &output);
 
 	Touch touch;
 	Tablets tablets;

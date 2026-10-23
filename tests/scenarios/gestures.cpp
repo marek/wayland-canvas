@@ -2971,6 +2971,61 @@ Result text_cache_frames() {
 	return after(700);
 }
 
+// The second output is unplugged in the middle of a swipe and of a pan.
+Result second_output_unplugged_mid_gesture() {
+	Output *o = &output();
+	if (auto wait = wait_for(server->outputs.size() == 2 && settled(), {.budget_ms = 5000})) {
+		return *wait;
+	}
+	Output *second = server->outputs.back().get();
+	check(server->outputs.size() == 2 && second != o, "two outputs are plugged");
+	Camera before = o->camera.current();
+	wlr_cursor_warp(server->cursor, nullptr, second->lx + second->width / 2.0,
+		second->ly + second->height / 2.0);
+	check(server->output_under_cursor() == second, "the pointer is on the second output");
+	touchpad_swipe_begin(4);
+	for (int i = 0; i < 5; i++) {
+		touchpad_swipe_update(4, 0, -40);
+	}
+	const Gestures::Zoom *zoom = std::get_if<Gestures::Zoom>(&server->gestures.state());
+	check(zoom != nullptr && zoom->output == second,
+		"a 4-finger swipe up is zooming the second output out");
+	server->input.grab.begin_pan(*second);
+	check(server->input.grab.panning(*second), "a pan grab holds the second output");
+	wlr_output_destroy(second->wlr);
+	check(server->outputs.size() == 1 && server->outputs.front().get() == o,
+		"the second output is gone");
+	check(std::holds_alternative<Gestures::Ignored>(server->gestures.state()),
+		"the swipe ended with the output it was on");
+	check(!server->input.grab.active(), "the pan ended with the output it held");
+	for (int i = 0; i < 3; i++) {
+		touchpad_swipe_update(4, 0, -40);
+	}
+	touchpad_swipe_end(false);
+	check(!o->overview.active() && same_camera(o->camera.current(), before),
+		"the rest of the swipe changed nothing on the output left");
+	return after(600);
+}
+
+// The output left still takes a gesture.
+Result the_output_left_takes_a_swipe() {
+	Output *o = &output();
+	wlr_cursor_warp(server->cursor, nullptr, o->lx + o->width / 2.0, o->ly + o->height / 2.0);
+	check(server->output_under_cursor() == o, "the pointer is on the output left");
+	swipe(4, 0, -300, 20);
+	return after(900);
+}
+
+Result the_output_left_opened_its_overview() {
+	Output *o = &output();
+	if (auto wait = wait_for(settled())) {
+		return *wait;
+	}
+	check(o->overview.active(), "a 4-finger swipe up on the output left opened its overview");
+	o->overview.exit();
+	return after(900);
+}
+
 void write_entry(const std::string &path, const char *name, const char *exec) {
 	FILE *f = std::fopen(path.c_str(), "w");
 	if (f == nullptr) {
@@ -3175,5 +3230,8 @@ int main() {
 		{"outputs at scales 1 and 2", outputs_at_scales_1_and_2},
 		{"both in the overview", both_in_the_overview},
 		{"text cache frames", text_cache_frames},
+		{"second output unplugged mid-gesture", second_output_unplugged_mid_gesture},
+		{"the output left takes a swipe", the_output_left_takes_a_swipe},
+		{"the output left opened its overview", the_output_left_opened_its_overview},
 	});
 }

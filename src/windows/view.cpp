@@ -123,6 +123,10 @@ void View::update_outputs(uint32_t mask) {
 	}
 }
 
+void View::output_gone(const Output &output) {
+	output_mask &= ~output.bit;
+}
+
 void View::move(int new_x, int new_y) {
 	if (x == new_x && y == new_y) {
 		return;

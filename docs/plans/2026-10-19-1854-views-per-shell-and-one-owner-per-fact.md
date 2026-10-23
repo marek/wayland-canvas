@@ -1955,7 +1955,7 @@ Tests:
     the unused `uri` (629).
   - Acceptance: adding a source is one table row, and
     `test_agent_usage` is green.
-- [ ] `Output` is the output, nothing else
+- [x] `Output` is the output, nothing else
   - `handle_frame` (output.cpp:411-438) runs the server-wide flushes on
     every output's frame: fullscreen reconcile, visibility, the window
     list, cursor rebase and X11 sync. They become one
@@ -1966,6 +1966,18 @@ Tests:
     lives in one place.
   - Acceptance: the scenarios are green, including a second output
     unplugged mid-gesture.
+  - Done:
+    - `Server::flush_pending()` (server.cpp) is the one call at the head
+      of `Output::handle_frame`, after the camera tick and before the
+      render.
+    - `Server::output_gone` (output.cpp) names every holder, as `view_gone`
+      does: `Input::output_gone` (contacts, the grab, the UI layers),
+      `Gestures`, `View::output_gone`, `Output::release_layers`
+      (layer.cpp). `outputs_changed` follows the erase.
+    - `Server::free_output_bit` allocates the bit, and `Output` takes it
+      by constructor.
+    - The unplug is driven by gestures.cpp steps 168-170 and touch.cpp
+      steps 38-39.
 - [x] `Canvas` owns the board rules
   - The problem:
     - `desktops` is a public member that other code changes directly

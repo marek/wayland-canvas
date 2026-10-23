@@ -61,9 +61,24 @@ public:
 	// Works every window's outputs out again when visibility_changed() said
 	// they may differ.
 	void update_visibility();
+	// An output is about to be destroyed: every holder of a pointer to it
+	// drops it, here and nowhere else, as view_gone does for a window.
+	void output_gone(Output &output);
+	// An output came or went: the state the control socket tells lists it
+	// differently, and every touchscreen and pen is mapped to one again.
+	void outputs_changed();
 
 	// server.cpp: switches the palette, repaints, tells the subscribers.
 	void set_theme(ThemeMode mode);
+	// Settles what the events since the last frame left pending, before a
+	// frame draws: a window that left fullscreen goes back to its desktop,
+	// every window's outputs are worked out again, the control socket's
+	// subscribers are told what changed, the pointer's focus is rebased on
+	// a canvas that moved under it, and X is told the canvas's places. An
+	// output's frame runs it first; every step consumes what is pending or
+	// compares with what it last sent, so the frame of a second output in
+	// the same refresh finds nothing left to do.
+	void flush_pending();
 
 	// A window was unmapped or destroyed: every holder of a pointer to it
 	// drops it, here and nowhere else.
@@ -195,6 +210,9 @@ private:
 	void handle_new_output(wlr_output *wlr);
 	void handle_layout_change();
 	Listener new_output_, layout_change_;
+	// The lowest bit no output holds, the one it marks View::output_mask
+	// with; 0 when all 32 are taken.
+	uint32_t free_output_bit() const;
 	bool visibility_dirty_ = false; // see visibility_changed()
 
 	// view.cpp

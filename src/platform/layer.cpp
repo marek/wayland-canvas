@@ -314,6 +314,33 @@ void LayerSurface::rehome(Output &to) {
 	to.arrange_layers();
 }
 
+// The layer surfaces die with the output; destroying each wlroots object
+// runs its own destroy handler, which takes it out of these vectors. A
+// surface on the plane is not the output's: another output takes it.
+void Output::release_layers() {
+	Output *heir = nullptr;
+	for (const std::unique_ptr<Output> &other : server.outputs) {
+		if (other.get() != this) {
+			heir = other.get();
+			break;
+		}
+	}
+	std::vector<LayerSurface *> doomed, kept;
+	for (const std::vector<std::unique_ptr<LayerSurface>> &vec : layers) {
+		for (const std::unique_ptr<LayerSurface> &layer : vec) {
+			bool on_plane = layer->belongs_on_canvas() || layer->canvas_box.has_value();
+			(heir != nullptr && on_plane ? kept : doomed).push_back(layer.get());
+		}
+	}
+	for (LayerSurface *layer : kept) {
+		layer->rehome(*heir);
+	}
+	for (LayerSurface *layer : doomed) {
+		layer->attached_ = false;
+		wlr_layer_surface_v1_destroy(layer->wlr);
+	}
+}
+
 void Output::arrange_layers() {
 	wlr_box full{0, 0, width, height};
 	wlr_box usable = full;

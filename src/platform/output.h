@@ -16,7 +16,7 @@ class Server;
 // A monitor: its own camera onto the canvas, its overview and its layer surfaces.
 class Output {
 public:
-	Output(Server &server, wlr_output *wlr);
+	Output(Server &server, wlr_output *wlr, uint32_t bit);
 	~Output();
 	Output(const Output &) = delete;
 	Output &operator=(const Output &) = delete;
@@ -59,6 +59,10 @@ public:
 
 	// layer.cpp
 	void arrange_layers();
+	// Releases what this output holds before it is destroyed: its layer
+	// surfaces are destroyed, and the ones on the plane go to another
+	// output when one is left.
+	void release_layers();
 	std::optional<LayerHit> layer_surface_at(int layer, double ox, double oy) const;
 	// A plugin's surface on the plane under an output-local point.
 	std::optional<LayerHit> canvas_surface_at(double ox, double oy) const;
@@ -66,7 +70,7 @@ public:
 
 	Server &server;
 	wlr_output *const wlr;
-	uint32_t bit = 0;
+	const uint32_t bit; // View::output_mask's bit for this output; Server::free_output_bit
 	int lx = 0, ly = 0, width = 0, height = 0; // layout position and logical size
 
 	CameraMotion camera;

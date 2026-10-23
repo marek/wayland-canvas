@@ -27,6 +27,20 @@ move because of it — they live on the canvas, not on any output.
 - A layer surface's output going away leaves the surface without an
   output; code that walks layer surfaces tolerates that
   ([protocols.md](protocols.md)).
+- An output unplugged mid-gesture ends what depended on it, once, before
+  it is destroyed: every touch contact and pen ends as if lifted, a pointer
+  grab or a touchpad gesture on it is dropped, and the compositor's own UIs
+  on it close. The rest of the gesture changes nothing on the outputs
+  left. A plugin's surface on the plane goes to another output; the
+  output's own layer surfaces go with it.
+- What the events since the last frame left pending (a window back from
+  fullscreen, which outputs show which window, the control socket's
+  events, the pointer's focus, X's picture of the canvas) is settled at the
+  head of an output's frame, before it draws, by whichever output's frame
+  comes first: not one output's own business, and not tied to a first
+  output that may be off or idle while another animates.
+- At most 32 outputs run at once, one bit each of a window's output mask,
+  the lowest free one; a 33rd is ignored and logged.
 
 ## Cross-links
 

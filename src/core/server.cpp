@@ -411,6 +411,19 @@ void Server::changed(Change what) {
 	}
 }
 
+void Server::flush_pending() {
+	// A window that left fullscreen, by any path, comes back from its own
+	// desktop before the frame shows where it is.
+	canvas.fullscreen_desktops.reconcile();
+	update_visibility();
+	ipc_events.flush();
+	if (pointer_focus_stale) {
+		pointer_focus_stale = false;
+		input.rebase_cursor();
+	}
+	sync_x11();
+}
+
 void Server::handle_new_surface(wlr_surface *surface) {
 	trackers_.push_back(std::make_unique<SurfaceTracker>(*this, surface));
 }

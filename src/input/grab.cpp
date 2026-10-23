@@ -511,7 +511,7 @@ void PointerGrab::forget(const View &view) {
 	}
 }
 
-void PointerGrab::forget(const Output &output) {
+void PointerGrab::output_gone(const Output &output) {
 	if (grab_output(state_) == &output) {
 		cancel();
 	}
