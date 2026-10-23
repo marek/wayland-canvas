@@ -1409,7 +1409,7 @@ void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	// A shell surface under the pointer scrolls, in the overview too.
 	if (output->overview.active() && !shell_surface_at(server, *output)) {
 		if (seat_modifiers(server) & WLR_MODIFIER_CTRL) {
-			output->overview.zoom_by(std::exp(-event->delta / 200.0),
+			output->overview.zoom_by(std::exp(-event->delta / config::overview_scroll_zoom_travel),
 				server.cursor->x - output->lx, server.cursor->y - output->ly);
 		} else {
 			double delta = pan_delta(server, *event);

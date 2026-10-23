@@ -102,7 +102,6 @@ int main(int argc, char *argv[]) {
 	Options options;
 	bool debug = false;
 	double scale = 0;
-	bool have_scale = false;
 
 	// The one non-compositor mode: speak the control socket's JSON-lines
 	// protocol to a running compositor.
@@ -114,7 +113,6 @@ int main(int argc, char *argv[]) {
 	const char *scale_env = getenv("WAYLAND_CANVAS_SCALE");
 	if (scale_env != nullptr) {
 		scale = strtod(scale_env, nullptr);
-		have_scale = scale > 0;
 	}
 
 	int opt;
@@ -125,7 +123,6 @@ int main(int argc, char *argv[]) {
 			break;
 		case 'S':
 			scale = strtod(optarg, nullptr);
-			have_scale = scale > 0;
 			break;
 		case 'd':
 			debug = true;
@@ -141,7 +138,7 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 	}
-	if (have_scale) {
+	if (scale > 0) {
 		options.scale = scale;
 	}
 

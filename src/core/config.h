@@ -118,15 +118,6 @@ inline constexpr Palette palette_light{
 	.launcher_backdrop = 0x00000060,
 };
 
-// Canvas items (sticky notes and whatever else plugins put there): a card
-// of the item's colour, a darker strip along the top, its text in dark ink
-// wrapped to the width and clipped to the card.
-inline constexpr double item_strip_darken = 0.85; // the strip's ink relative to the card's
-inline constexpr int item_strip_height = 26; // canvas px
-inline constexpr int item_text_padding = 10; // canvas px around the text
-inline constexpr const char *item_font = "Sans 10";
-inline constexpr uint32_t item_text_color = 0x1f2430ff; // dark ink on any card colour
-
 // Panning.
 inline constexpr double scroll_pan_speed = 1.5; // 2-finger scroll over empty canvas
 
@@ -134,6 +125,10 @@ inline constexpr double scroll_pan_speed = 1.5; // 2-finger scroll over empty ca
 // Touchpad units are libinput's (roughly pointer pixels).
 inline constexpr double hop_threshold = 36.0; // 3-finger travel that triggers a jump to the next desktop
 inline constexpr double hop_cone_deg = 60.0; // how far off the swipe direction a desktop may lie
+
+// Releasing a zoom swipe reads how fast the fingers were moving.
+inline constexpr double swipe_velocity_weight = 0.2; // share of the newest event in a swipe's smoothed speed: one jittery event does not decide a flick
+inline constexpr double swipe_flick_velocity = 0.5; // touchpad units per ms past which a released zoom swipe completes whatever its travel
 
 // Per-desktop scale (Super + 2-finger pinch): a desktop's frame is its
 // base size divided by its scale, and its windows are shown at it.
@@ -146,6 +141,8 @@ inline constexpr double desktop_scale_step = 0.05;
 // Overview (zoomed-out view).
 inline constexpr double overview_swipe_distance = 260.0; // 4-finger travel for a full zoom transition
 inline constexpr double overview_commit = 0.25; // progress past which a released zoom gesture completes
+inline constexpr double overview_swipe_zoom_travel = 400.0; // 4-finger travel that scales the overview zoom by a factor of e
+inline constexpr double overview_scroll_zoom_travel = 200.0; // Ctrl + scroll distance that scales the overview zoom by a factor of e
 inline constexpr double overview_max_zoom = 0.30; // relative to a view at 100 %; further out below it
 inline constexpr double overview_min_zoom = 0.02;
 inline constexpr double overview_zoom_limit = 0.75; // the closest a pinch or the wheel zooms the overview in

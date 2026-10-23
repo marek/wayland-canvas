@@ -2017,7 +2017,7 @@ Tests:
   - The `if (view.tiled)` guards at canvas.cpp:358, 365 and 399 go:
     `set_tiled` already returns early.
   - Acceptance: the gestures scenario is green.
-- [ ] The gesture machine has no unchecked corners
+- [x] The gesture machine has no unchecked corners
   - `state_output`'s catch-all (gesture.cpp:48-61) silently drops a
     forgotten state. Use a generic lambda the compiler checks, like
     `grab_output` (grab.cpp:39-44).
@@ -2034,7 +2034,7 @@ Tests:
   - fullscreen_desktops.cpp:17 and view.cpp:727 compare
     `ViewKind::client_placed` directly, though view_kind.h:3-8 says
     every rule goes through its predicates.
-- [ ] Dead code goes: the compositor
+- [x] Dead code goes: the compositor
   - `draw_item_card`, `scale_rgba` and `wrap_layout` (draw.cpp:22-41,
     106-133; draw.h:17-21), and `config::item_*` (config.h:110-117).
   - `MethodFn` (ipc.h:78-81), and `Request::ok` (ipc.cpp:691, 744) if it

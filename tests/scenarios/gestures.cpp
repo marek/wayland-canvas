@@ -56,6 +56,7 @@ int zoom_round = 0;
 std::string zoom_changes;
 wlr_box frame0{}; // Desktop 1's frame at 100 % before any zoom, for the drift check
 Camera scrolled_from{}; // the camera before the 25 % scroll
+Camera swipe_from{}; // the camera before a zoom swipe
 Camera hop_from{}; // where the camera was going when a hop began
 Camera look_from{}; // the view a look away began from
 std::optional<DesktopId> hop_a, hop_b, hop_c; // the row the normal-view hops walk
@@ -138,14 +139,14 @@ void shot(const char *name) {
 	}
 }
 
-void swipe(uint32_t fingers, double dx, double dy, int steps) {
+void swipe(uint32_t fingers, double dx, double dy, int steps, bool cancelled = false) {
 	server->gestures.swipe_begin(t_ms, fingers);
 	for (int i = 0; i < steps; i++) {
 		t_ms += 8;
 		server->gestures.swipe_update(t_ms, dx / steps, dy / steps);
 	}
 	t_ms += 8;
-	server->gestures.swipe_end(t_ms, false);
+	server->gestures.swipe_end(t_ms, cancelled);
 }
 
 void pinch(uint32_t fingers, double scale, int steps) {
@@ -374,6 +375,12 @@ void check_client_got(const std::string &want, std::string_view what,
 // Whether the camera is still easing: a check of where it ended waits.
 bool camera_easing() {
 	return out()->camera.panning() || out()->camera.zooming();
+}
+
+// Whether two cameras show the same canvas, to a hundredth of a pixel.
+bool same_camera(const Camera &a, const Camera &b) {
+	return std::fabs(a.cx - b.cx) < 0.01 && std::fabs(a.cy - b.cy) < 0.01
+		&& std::fabs(a.zoom - b.zoom) < 1e-6;
 }
 
 bool inside(const Rect &r, const wlr_box &b) {
@@ -2696,7 +2703,83 @@ int run_step() {
 		shot("38-cascade");
 		return 300;
 	}
-	case 156: { // a second output at scale 2 joins the first, at scale 1
+	// A zoom swipe released short of the commit travel completes when the
+	// fingers were fast and springs back when they were slow; one that was
+	// cancelled springs back whatever it travelled.
+	case 156: {
+		if ((camera_easing() || !o->interactive()) && retries++ < 100) {
+			return -100;
+		}
+		static_assert(60 < config::overview_swipe_distance * config::overview_commit);
+		swipe_from = o->camera.current();
+		swipe(4, 0, -50, 50); // slow: 50 units over 400 ms
+		return 900;
+	}
+	case 157: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		check(!o->overview.active() && same_camera(o->camera.current(), swipe_from),
+			"a short, slow 4-finger swipe up sprang back to the normal view");
+		swipe(4, 0, -60, 5); // fast: 60 units over 40 ms
+		return 900;
+	}
+	case 158: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		check(o->overview.active() && o->camera.current().zoom < 0.5,
+			"a short, fast 4-finger swipe up opened the overview");
+		swipe_from = o->camera.current();
+		swipe(4, 0, 50, 50);
+		return 900;
+	}
+	case 159: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		check(o->overview.active() && same_camera(o->camera.current(), swipe_from),
+			"a short, slow 4-finger swipe down sprang back to the overview");
+		swipe(4, 0, 50, 4);
+		return 900;
+	}
+	case 160: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		check(!o->overview.active() && o->camera.current().zoom == 1,
+			"a short, fast 4-finger swipe down left the overview");
+		swipe_from = o->camera.current();
+		swipe(4, 0, -150, 10, true);
+		return 900;
+	}
+	case 161: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		check(!o->overview.active() && same_camera(o->camera.current(), swipe_from),
+			"a cancelled 4-finger swipe up sprang back past the commit travel");
+		o->overview.enter();
+		return 900;
+	}
+	case 162: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		swipe_from = o->camera.current();
+		swipe(4, 0, 150, 10, true);
+		return 900;
+	}
+	case 163: {
+		if (camera_easing() && retries++ < 100) {
+			return -100;
+		}
+		check(o->overview.active() && same_camera(o->camera.current(), swipe_from),
+			"a cancelled 4-finger swipe down sprang back past the commit travel");
+		o->overview.exit();
+		return 900;
+	}
+	case 164: { // a second output at scale 2 joins the first, at scale 1
 		wlr_backend *headless = nullptr;
 		wlr_multi_for_each_backend(server->backend,
 			[](wlr_backend *backend, void *data) {
@@ -2708,7 +2791,7 @@ int run_step() {
 			"a second output was added for the text cache");
 		return 600;
 	}
-	case 157: {
+	case 165: {
 		if (server->outputs.size() < 2 && retries++ < 50) {
 			return -100;
 		}
@@ -2723,13 +2806,13 @@ int run_step() {
 			"two outputs, at scales 1 and 2");
 		return 400;
 	}
-	case 158: { // both in the overview, with a minimized window on the shelf
+	case 166: { // both in the overview, with a minimized window on the shelf
 		two->set_minimized(true);
 		o->overview.enter();
 		server->outputs.back()->overview.enter();
 		return 900;
 	}
-	case 159: {
+	case 167: {
 		// Frames are rendered here, one after the other, so that none is
 		// skipped and the hint's 2 s cannot run out between them.
 		auto frames = [](int n) {
