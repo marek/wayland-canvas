@@ -2,10 +2,24 @@ pragma Singleton
 
 import Quickshell.Networking
 import QtQuick
+import "."
 
 // What the network widget on every bar and the network panel share: the
-// device the connection is on, its Wi-Fi side, and the network in use.
-QtObject {
+// device the connection is on, its Wi-Fi side, the network in use, and the
+// service that reads the rest of the connection (band, DNS, address, the
+// live figures).
+Item {
+	id: root
+
+	readonly property alias service: networkService
+
+	NetworkService {
+		id: networkService
+		device: root.device
+		wifi: root.wifi
+		network: root.connectedNetwork
+	}
+
 	// The device to describe: a connected one, else the first (the backend
 	// only lists devices the system actually has).
 	readonly property var device: currentDevice()

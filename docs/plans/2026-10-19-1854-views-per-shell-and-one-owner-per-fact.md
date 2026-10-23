@@ -1613,7 +1613,7 @@ Tests:
   - Acceptance, in the bar scenario:
     - a recording started over IPC lights the recording widget;
     - when the shell's socket drops, its callbacks get an error.
-- [ ] Facts copied inside a plugin are stated once
+- [x] Facts copied inside a plugin are stated once
   - NetworkPanel's DNS providers come from one list. Today they are
     written out in setDns (517-550), classifyDns (742-755), dnsClicked
     (552-558) and four pills (1006-1033).
@@ -1633,9 +1633,13 @@ Tests:
     because every consumer (the widget, the panel, a scenario) then
     reads the same string, and "1.0M" is the form every other figure
     already had. The scenario's Gestures steps drive a refused write
-    and the write after it. The network part is left.
+    and the write after it.
   - Acceptance: the bar scenario's network, settings and agents steps
     are green.
+  - Done (network): the providers are one list, `dnsProviders` in
+    `plugins/canvas.network/nmcli.js`. Applying one (`dnsRequest`), reading
+    a connection back (`classifyDns`) and the pills all read it, and the
+    typed one is the entry flagged `typed`.
 - [ ] The UI kit covers what the plugins rebuild by hand
   - Add `PanelButton`, a trailing slot on `PanelRow`, `PanelSwitchRow`,
     `PanelMeter`, `PanelPill` and `UiTheme.radius` (PanelRow.qml:32, 39;
@@ -2039,7 +2043,7 @@ Tests:
     the old Host made two) and opens the first panel of a plugin whose
     second panel cannot be made (nothing opens; the old Host opened it).
     Both checks fail on the old Host and pass on the new.
-- [ ] The network plugin: a service and four views
+- [x] The network plugin: a service and four views
   - `NetworkService.qml` takes the twelve processes (NetworkPanel.qml:
     235-695) and their parsing (359-490, 643-667). It sits in the
     plugin's state singleton from phase 7, so the bar widget can show the
@@ -2047,6 +2051,13 @@ Tests:
   - The views become `BandSection`, `DnsSection`, `ShareView` and
     `SpeedView`, with a qmldir. The formatters (697-800) go in a JS file.
   - Acceptance: the bar scenario's network steps are green.
+  - Done: `NetworkService.qml` holds the twelve processes, their parsing
+    and the figures, and `NetworkState` holds the service; the panel sets
+    its `live` while open, as it ran its reads before. `nmcli.js` and
+    `format.js` hold the readings and the formatters, with no process or
+    item in them. The panel keeps the head, the rows and the join; the
+    band, DNS, share and speed views are their own files. The unread
+    `networks` of Network.qml was already gone with phase 7.
 - [x] The settings window: a model and one file per tab
   - `SettingsModel.qml` holds the IPC client, the model and
     `set(params, faultKey)`.
@@ -2137,7 +2148,7 @@ Tests:
   - `have_scale` in main, which only repeats `scale > 0`.
   - Acceptance: grep finds none of these names, `-Wunused` is clean, and
     the unit suite and the scenarios that cover the files changed pass.
-- [ ] Dead code goes: the shell and plugins
+- [x] Dead code goes: the shell and plugins
   - `CanvasApi.surfaceName` (CanvasApi.qml:17-19).
   - `registry.barWidgets` (Host.qml:615).
   - Compositor.qml's `available` (14).
@@ -2145,8 +2156,8 @@ Tests:
   - Network.qml's unread `networks` (20-21).
   - Acceptance: grep finds none of these names, and the bar and notes
     scenarios pass.
-  - Done (ShellHost's part; Network.qml's `networks` goes with the network
-    split): `CanvasApi.surfaceName` and Compositor.qml's `available` are
+  - Done: Network.qml's `networks` went with phase 7's panel state.
+    `CanvasApi.surfaceName` and Compositor.qml's `available` are
     deleted. `registry.barWidgets` was dead, which left `registry` holding
     only the toolbar's buttons, so `ShellApi.toolbarButtons` offers them as
     `barWidgets` is offered and `registry` is gone from the host, EdgeStrip,
