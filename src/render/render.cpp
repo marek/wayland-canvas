@@ -309,7 +309,7 @@ void send_surface_feedback(const RenderCtx &ctx) {
 		}
 		if (!entered) {
 			wlr_surface_send_enter(surface, wlr_output);
-			// Like view_update_outputs: the sharpest output the surface is on wins.
+			// Like View::update_outputs: the sharpest output the surface is on wins.
 			double scale = 0;
 			wl_list_for_each(so, &surface->current_outputs, link) {
 				scale = Output::sharper_scale(scale, *so->output);

@@ -104,6 +104,7 @@ foreach xml : [
 	wl_protocol_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
 	wl_protocol_dir / 'staging/ext-image-capture-source/ext-image-capture-source-v1.xml',
 	wl_protocol_dir / 'staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml',
+	'protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
 	'protocols/wlr-gamma-control-unstable-v1.xml',
 	'protocols/wlr-layer-shell-unstable-v1.xml',
 ]
@@ -268,7 +269,9 @@ core_lib = static_library(
 		'src/render/render.cpp',
 		'src/render/text_cache.cpp',
 		'src/windows/decoration.cpp',
+		'src/windows/foreign_toplevel.cpp',
 		'src/windows/launches.cpp',
+		'src/windows/placement.cpp',
 		'src/windows/popup.cpp',
 		'src/windows/view.cpp',
 		'src/windows/view_x11.cpp',
@@ -582,6 +585,17 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [wayland_client],
 	)
 	scenario_env.set('CANVAS_CAST_CLIENT', cast_client.full_path())
+	# A taskbar of the scenarios' own: it lists the windows through
+	# wlr-foreign-toplevel-management and asks for changes to them, and what
+	# the compositor publishes is asserted from its own stdout.
+	foreign_client = executable(
+		'foreign-client',
+		'tests/clients/foreign-client.c',
+		client_protocols,
+		c_args: ['-Wno-unused-parameter'],
+		dependencies: [wayland_client],
+	)
+	scenario_env.set('CANVAS_FOREIGN_CLIENT', foreign_client.full_path())
 	# A touch, pointer and tablet-tool client of the scenarios' own:
 	# what the compositor forwards of a touchscreen or pen is asserted
 	# from its own stdout.
@@ -620,6 +634,7 @@ if foot_prog.found() and grim_prog.found()
 	# The sharing scenario adds the capture core, the capture protocols and
 	# the portal; it skips its portal phase itself when the tooling is missing.
 	scenarios += ['sharing']
+	scenarios += ['foreign']
 	# The bar scenario drives the real bar client against stand-in services,
 	# so it also needs qs, a dbus-daemon to build its private buses from,
 	# the dbusmock stand-in environment (provisioned under tmp/ by the

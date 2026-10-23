@@ -75,9 +75,6 @@ public:
 	// server.cpp: switches the palette, repaints, tells the subscribers.
 	void set_theme(ThemeMode mode);
 
-	// canvas.cpp
-	void reveal_view(View &view);
-
 	// A window was unmapped or destroyed: every holder of a pointer to it
 	// drops it, here and nowhere else.
 	void view_gone(View &view);
@@ -86,6 +83,9 @@ public:
 	std::optional<ViewHit> view_at(double cx, double cy, double zoom);
 	View *top_visible_view(Output *output);
 	View *last_minimized_view();
+	// Brings `view` into sight: the camera pans to its desktop or its box, or
+	// an open overview exits onto it; nothing moves when it is already in view.
+	void reveal_view(View &view);
 	// Activates and raises `view`; nullptr clears the focus.
 	void focus_view(View *view);
 	// Keyboard focus follows a move onto `box`: the focused window keeps it

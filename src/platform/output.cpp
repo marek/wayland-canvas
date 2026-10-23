@@ -46,51 +46,6 @@ void update_output_geometry(Output &output) {
 	output.damage();
 }
 
-void view_update_outputs(View &view, uint32_t mask) {
-	uint32_t old = view.output_mask;
-	view.output_mask = mask;
-	// The scale the view's clients render for: the largest scale of the
-	// outputs it is on. A desktop's scale is the compositor's scaling of the
-	// picture and never reaches them, so a zoom never re-renders or resizes
-	// a window.
-	double scale = 0;
-	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		if (mask & output->bit) {
-			scale = Output::sharper_scale(scale, *output->wlr);
-		}
-	}
-	// Like wlr_scene: a view scrolled off every output keeps its last
-	// outputs, so panning away and back never makes clients re-render.
-	if (mask != 0 && mask != old) {
-		view.for_each_surface([&](wlr_surface *surface, int, int) {
-			for (const std::unique_ptr<Output> &output : view.server.outputs) {
-				if (mask & output->bit) {
-					wlr_surface_send_enter(surface, output->wlr);
-				} else {
-					wlr_surface_send_leave(surface, output->wlr);
-				}
-			}
-			Output::tell_scale(surface, scale);
-		});
-		view.told_scale = scale;
-	} else if (mask != 0 && scale != view.told_scale) {
-		// Same outputs, a new scale: one of them changed its scale.
-		view.for_each_surface([&](wlr_surface *surface, int, int) {
-			Output::tell_scale(surface, scale);
-		});
-		view.told_scale = scale;
-	}
-	// The foreign handle, when the view has one, follows the same outputs.
-	for (const std::unique_ptr<Output> &output : view.server.outputs) {
-		bool was = old & output->bit, is = mask & output->bit;
-		if (is && !was) {
-			view.foreign_output_enter(*output);
-		} else if (was && !is) {
-			view.foreign_output_leave(*output);
-		}
-	}
-}
-
 } // namespace
 
 Output::Output(Server &server, wlr_output *wlr)
@@ -326,33 +281,6 @@ void Output::pin_desktop() {
 	server.hint.set(std::format("New Desktop {}", created.number()));
 }
 
-void Server::reveal_view(View &view) {
-	Output *output = output_under_cursor();
-	if (output == nullptr) {
-		return;
-	}
-	wlr_box frame = view.frame_box();
-	Point centre = box_centre(frame);
-	if (!output->overview.active()) {
-		Rect vp = output->viewport();
-		if (frame.x >= vp.x && frame.y >= vp.y
-				&& frame.x + frame.width <= vp.x + vp.w
-				&& frame.y + frame.height <= vp.y + vp.h) {
-			return;
-		}
-	}
-	Desktop *desktop = canvas.desktop_of(view);
-	wlr_box box = desktop != nullptr ? desktop->frame()
-		: centred_box(output->width, output->height, centre.x, centre.y);
-	if (output->overview.active()) {
-		output->overview.set_target(box, id_of(desktop), false);
-		output->overview.exit();
-		return;
-	}
-	output->camera.animate_to(
-		camera_for_box(box, desktop != nullptr ? desktop->scale() : 1.0));
-}
-
 void Server::damage_all() {
 	for (const std::unique_ptr<Output> &output : outputs) {
 		output->damage();
@@ -399,7 +327,7 @@ void Server::update_visibility() {
 				}
 			}
 		}
-		view_update_outputs(*view, mask);
+		view->update_outputs(mask);
 	}
 }
 

@@ -1823,7 +1823,7 @@ Tests:
     (lock.cpp:116-120); that becomes one `Input::abandon_interaction()`.
   - Acceptance: input.cpp holds device setup and dispatch only, and the
     scenarios are green.
-- [ ] `View` holds the window, nothing else
+- [x] `View` holds the window, nothing else
   - Placement (view.cpp:28-246) moves to `windows/placement.cpp` as free
     functions over `View &`: `place`, `place_over_parent`, `centre_in`,
     `cascade`. The cascade's 32 and 64 become `config::` values.
@@ -1835,6 +1835,9 @@ Tests:
     (output.cpp:349-374) move beside the view.
   - Acceptance: view.cpp holds the view's state and its setters, and the
     scenarios are green.
+  - Done: no scenario read the foreign-toplevel handle's events, so
+    `tests/scenarios/foreign.cpp` (a taskbar client) pins them and passes
+    before and after the move.
 - [x] `Ipc` is a transport, with methods registered by their owners
   - Split ipc.cpp's 1986 lines into:
     - `platform/ipc_server.{h,cpp}`: the socket, framing, clients,

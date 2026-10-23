@@ -23,8 +23,8 @@ XdgView::XdgView(Server &server, wlr_xdg_toplevel *wlr)
 		wlr->events.request_minimize, this);
 	request_fullscreen_.connect<&XdgView::handle_xdg_request_fullscreen>(
 		wlr->events.request_fullscreen, this);
-	set_title_.connect<&XdgView::handle_set_title>(wlr->events.set_title, this);
-	set_app_id_.connect<&XdgView::handle_set_app_id>(wlr->events.set_app_id, this);
+	set_title_.connect<&XdgView::handle_set_names>(wlr->events.set_title, this);
+	set_app_id_.connect<&XdgView::handle_set_names>(wlr->events.set_app_id, this);
 }
 
 // ---- what the shared code asks ----

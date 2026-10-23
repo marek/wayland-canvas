@@ -13,7 +13,7 @@ struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request;
 // (wlroots' own, fed by the output's committed frames — the renderer already
 // answers wlroots' needs_frame) and one capture source per window, backed by
 // the offscreen window renderer (render/capture.h). Also owns
-// ext-foreign-toplevel-list-v1, whose handles the views carry (view.cpp) so
+// ext-foreign-toplevel-list-v1, whose handles the views carry (foreign_toplevel.h) so
 // capture clients can name a window to capture.
 class ImageCapture {
 public:

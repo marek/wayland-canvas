@@ -322,6 +322,22 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   bridge, and the scenario answers its picker by clicking the source the
   client asked for.
 
+- **`foreign.cpp`** — what a window tells a taskbar, and what a taskbar
+  may ask of it. `tests/clients/foreign-client.c` binds
+  `zwlr_foreign_toplevel_manager_v1`, prints each handle's title, app id,
+  state and output enters and leaves as one line each, and sends the
+  requests it reads from a FIFO under the run's scratch. The scenario
+  maps a foot window and finds it listed once with its title, app id and
+  activated state and on the output; the compositor maximizes and
+  unmaximizes it and the taskbar is told each time; the taskbar's
+  maximize, unmaximize, minimize, activate, fullscreen, unfullscreen and
+  close requests each reach the window (its mode, minimized flag and focus
+  read from the compositor, the close from the client's `CLOSED` line) and
+  are reported back, a
+  title already sent never again; the window moved off every output and
+  back is reported leaving and entering; a window whose title changes
+  after it opened is published under its new title.
+
 - **`session.cpp`** — the shell plugins a login needs, in a private world:
   its own `dbus-daemon` system and session buses under
   `tmp/scenarios/session/bus/`, scratch XDG dirs, and a scratch PAM service

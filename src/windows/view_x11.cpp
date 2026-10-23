@@ -68,8 +68,8 @@ X11View::X11View(Server &server, wlr_xwayland_surface *wlr)
 		wlr->events.request_minimize, this);
 	request_fullscreen_.connect<&X11View::handle_x11_request_fullscreen>(
 		wlr->events.request_fullscreen, this);
-	set_title_.connect<&X11View::handle_set_title>(wlr->events.set_title, this);
-	set_app_id_.connect<&X11View::handle_set_app_id>(wlr->events.set_class, this);
+	set_title_.connect<&X11View::handle_set_names>(wlr->events.set_title, this);
+	set_app_id_.connect<&X11View::handle_set_names>(wlr->events.set_class, this);
 	set_parent_.connect<&X11View::handle_x11_set_parent>(wlr->events.set_parent, this);
 	map_request_.connect<&X11View::handle_x11_map_request>(wlr->events.map_request, this);
 }

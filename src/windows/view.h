@@ -5,6 +5,7 @@
 #include <optional>
 #include "canvas/desktop.h"
 #include "windows/decoration.h"
+#include "windows/foreign_toplevel.h"
 #include "windows/launches.h"
 #include "windows/view_kind.h"
 #include "core/geometry.h"
@@ -20,7 +21,7 @@ struct SizeLimit {
 };
 
 // What a window is showing as; one at a time. `normal` is the window's own
-// box, any other fills an area the compositor picks (windows/view.cpp).
+// box, any other fills an area the compositor picks (windows/placement.cpp).
 enum class WindowMode {
 	normal,
 	maximized, // the output's usable area, the title bar kept
@@ -70,9 +71,10 @@ public:
 	// What the view shows, or where, changed: repaints it and has every
 	// window's outputs worked out again before the next frame.
 	void visibility_changed();
-	// Foreign toplevel handle: the view entered or left `output`'s viewport.
-	void foreign_output_enter(Output &output);
-	void foreign_output_leave(Output &output);
+	// The outputs the view is visible on are now `mask`: its surfaces are told
+	// they entered or left and at what scale, and the foreign toplevel handle
+	// follows.
+	void update_outputs(uint32_t mask);
 	// The ext-foreign-toplevel-list handle's identifier, or null before the
 	// window maps (or without the capture protocols). Window capture clients
 	// (grim -T, the portal's window sharing) name windows by it.
@@ -193,32 +195,16 @@ protected:
 	void handle_destroy();
 	void handle_request_move();
 	void handle_request_resize(uint32_t edges);
-	void handle_set_title();
-	void handle_set_app_id();
+	void handle_set_names(); // the title or the app id changed
 
 private:
-	void create_foreign();
-	void destroy_foreign();
-
 	// Changes the mode and tells the client and the foreign toplevel handle:
 	// the old mode off, the new one on.
 	void switch_mode(WindowMode want);
 	void announce_mode(WindowMode of, bool on);
 
-	void handle_foreign_activate();
-	void handle_foreign_maximize(const wlr_foreign_toplevel_handle_v1_maximized_event *event);
-	void handle_foreign_minimize(const wlr_foreign_toplevel_handle_v1_minimized_event *event);
-	void handle_foreign_fullscreen(const wlr_foreign_toplevel_handle_v1_fullscreen_event *event);
-	void handle_foreign_close();
-
-	// Foreign toplevel handle, created on map.
-	Handle<wlr_foreign_toplevel_handle_v1, wlr_foreign_toplevel_handle_v1_destroy> foreign_{};
-	Listener foreign_activate_, foreign_maximize_, foreign_minimize_, foreign_fullscreen_,
-		foreign_close_;
-	// The ext-foreign-toplevel-list handle: created on map, closed on unmap,
-	// its title and app id kept current (view.cpp).
-	Handle<wlr_ext_foreign_toplevel_handle_v1,
-		wlr_ext_foreign_toplevel_handle_v1_destroy> ext_foreign_{};
+	// Created on map, closed on unmap.
+	ForeignToplevel foreign_;
 	// The kind the window was last laid out as: the map's, then each change.
 	ViewKind laid_out_kind_ = ViewKind::normal;
 
