@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-# A stand-in `ffmpeg` for the capture scenario: an encoder that never reads
-# its input. It waits for the compositor to close the pipe on its stdin
-# (the end of the recording), reports in $CANVAS_RECORDER_REPORT what it was
-# given and how full the pipe was left, and exits without writing a video.
-#
-#   started args=<its arguments>
-#   unread=<bytes the pipe still held> capacity=<the pipe's size>
-#
-# Waiting is poll() for the hang-up alone: nothing here ever calls read().
+# A stand-in `ffmpeg` for the capture scenario: an encoder that never reads its
+# input. It waits for the compositor to close the pipe on its stdin (the end of
+# the recording), writes to $CANVAS_RECORDER_REPORT "started args=<arguments>"
+# and "unread=<bytes the pipe still held> capacity=<the pipe's size>", and
+# exits without writing a video. It polls for the hang-up alone: nothing here
+# ever calls read().
 import fcntl
 import os
 import select

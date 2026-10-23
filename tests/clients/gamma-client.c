@@ -1,14 +1,9 @@
-// A gamma-control client for the scenarios: takes every output's gamma
-// table through zwlr_gamma_control_v1 and sets a ramp of its own, so the
-// compositor's own night light can be proven to step aside while it holds
-// one and to come back when it lets go. Prints a line at a time:
-//
-//   SIZE <n>     an output's ramp is n entries long (0: it has none)
-//   SET <n>      n outputs have been given a table
-//   FAILED       the compositor refused one
-//
-// SIGUSR1 lets every table go and exits. --blue dims red instead of blue,
-// so the frame's change is unmistakable.
+// A gamma-control client for the scenarios: takes every output's gamma table
+// through zwlr_gamma_control_v1 and sets a ramp of its own, so the night
+// light can be proven to step aside while it holds one. Prints SIZE <n> (an
+// output's ramp length, 0: none), SET <n> (outputs given a table) and FAILED
+// (the compositor refused one). SIGUSR1 lets every table go and exits;
+// --blue dims red instead of blue, so the frame's change is unmistakable.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>

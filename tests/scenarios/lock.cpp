@@ -1,11 +1,9 @@
 // End-to-end lock scenario: ext-session-lock-v1 against the scenarios' own
 // locker (tests/clients/lock-client.c). Locking hides the windows on screen
-// and in a capture, keys, clicks and gestures reach only the locker, a
-// killed locker leaves the session locked, the next locker takes it over
-// and unlocks it, and the triggers - the `lock` action and the idle
-// timeout, with an idle inhibitor holding it off - ask the shell to lock.
-// Writes only under $CANVAS_TMP; never touches the machine's logind
-// session, and the run's canvas.conf lives in its own scratch config dir.
+// and in a capture, input reaches only the locker, a killed locker leaves the
+// session locked, the next one takes it over, and the `lock` action and the
+// idle timeout (held off by an idle inhibitor) ask the shell to lock. Writes
+// only under $CANVAS_TMP; never touches the machine's logind session.
 #include <csignal>
 #include <cstdlib>
 #include <format>

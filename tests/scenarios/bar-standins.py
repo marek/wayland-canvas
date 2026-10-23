@@ -96,7 +96,6 @@ class TrayItem(dbus.service.Object):
         self.children = {0: [1, 2, 3, 4, 5]}
         super().__init__(bus, TRAY_PATH)
 
-    # ---- org.freedesktop.DBus.Properties ----
     @dbus.service.method("org.freedesktop.DBus.Properties", in_signature="ss", out_signature="v")
     def Get(self, interface, name):
         return self.GetAll(interface)[name]
@@ -120,8 +119,6 @@ class TrayItem(dbus.service.Object):
             return {"Version": dbus.UInt32(2)}
         return {}
 
-    # ---- org.kde.StatusNotifierItem ----
-
     @dbus.service.method("org.kde.StatusNotifierItem", in_signature="ii", out_signature="")
     def Activate(self, _x, _y):
         pass
@@ -133,8 +130,6 @@ class TrayItem(dbus.service.Object):
     @dbus.service.method("org.kde.StatusNotifierItem", in_signature="is", out_signature="")
     def Scroll(self, _delta, _orientation):
         pass
-
-    # ---- com.canonical.dbusmenu ----
 
     def layout(self, item):
         props = dbus.Dictionary(

@@ -1,17 +1,9 @@
-// End-to-end capture scenario: the key chords (whole screen, region picker,
-// window picking with Space, Esc, the Print family, Ctrl for the
-// clipboard), the after-shot thumbnail (shown, opened by a click through an
-// xdg-open stub, dismissed by a swipe), the capture toolbar (modes and
-// options, the timer), the `capture.pick` IPC with its deferred answers,
-// the `wayland-canvas msg capture.pick` chooser bridge, and recordings
-// (the compositor's own offscreen frames piped into ffmpeg; started,
-// stopped by Alt+Print and by `capture.stop`, left as playable files,
-// proven by ffprobe, with a command started beside one holding none of
-// the compositor's descriptors; and one whose encoder never reads, which
-// leaves input and drawing at their pace until the stop ends it). Shots
-// are compared against grim pixel for pixel.
-// Writes only under $CANVAS_TMP: the XDG pictures and videos dirs point
-// into it, and xdg-open is a stub.
+// End-to-end capture scenario: the key chords, the after-shot thumbnail, the
+// capture toolbar, the `capture.pick` IPC and its chooser bridge, and
+// recordings (the compositor's offscreen frames piped into ffmpeg; started and
+// stopped, left as playable files, proven by ffprobe; one with an encoder that
+// never reads). Shots are compared against grim pixel for pixel. Writes only
+// under $CANVAS_TMP: the XDG pictures and videos dirs point into it.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -147,8 +139,6 @@ int run_sync(const std::string &cmd, const char *out) {
 	return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-// ------------------------------------------------------------- pictures
-
 std::string newest_shot_path() {
 	std::vector<std::string> files = files_with(pictures_dir + "/Screenshots", "Screenshot");
 	return files.empty() ? std::string{} : files.front();
@@ -255,8 +245,6 @@ void run_bridge(const char *list, std::string_view name) {
 		scratch(), list), name);
 }
 
-// ------------------------------------------------------ window helpers
-
 // The view's frame where the output shows it, output-local logical px.
 wlr_box view_on_screen(View &view) {
 	Camera cam = output().camera.drawn();
@@ -312,8 +300,6 @@ void swipe_thumbnail_away() {
 	drag(box.x + box.width / 2.0, box.y + box.height / 2.0,
 		box.x + box.width / 2.0 - 160, box.y + box.height / 2.0);
 }
-
-// ---------------------------------------------------------------- steps
 
 // The fake input devices, and one foot window to frame; the events
 // subscriber runs for the whole run.

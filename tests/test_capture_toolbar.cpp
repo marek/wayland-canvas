@@ -33,8 +33,6 @@ double centre_y(const wlr_box &box) {
 	return box.y + box.height / 2.0;
 }
 
-// ---- toolbar_layout ----
-
 void test_wide_output() {
 	const int width = 1280, height = 720;
 	ToolbarLayout layout = toolbar_layout(width, height);
@@ -105,8 +103,6 @@ void test_tiny_output() {
 	}
 	check(layout.box.width > 200);
 }
-
-// ---- toolbar_hit ----
 
 void test_hit() {
 	ToolbarLayout layout = toolbar_layout(1280, 720);

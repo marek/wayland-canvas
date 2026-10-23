@@ -1,22 +1,10 @@
 // A pointer-gestures client for the scenarios: a small solid square on the
-// overlay layer in the output's top-left corner, so a pointer put there
-// hands it the focus without a window changing any desktop. It binds
-// zwp_pointer_gestures_v1 and reports on stdout, a line at a time, every
-// swipe and pinch the compositor forwards to it, so a scenario can assert
-// what reached a client:
-//
-//   MAPPED               a buffer is attached
-//   POINTER ENTER
-//   POINTER LEAVE
-//   SWIPE BEGIN <fingers>
-//   SWIPE UPDATE <dx> <dy>
-//   SWIPE END <cancelled>
-//   PINCH BEGIN <fingers>
-//   PINCH UPDATE <dx> <dy> <scale> <rotation>
-//   PINCH END <cancelled>
-//
-// Deltas and rotation carry one decimal, a scale two. --size=<px> sets the
-// square's side (8). SIGTERM ends it.
+// overlay layer in the output's top-left corner, so a pointer put there hands
+// it the focus without a window changing any desktop. Prints MAPPED, POINTER
+// ENTER, POINTER LEAVE and every swipe and pinch the compositor forwards
+// (SWIPE|PINCH BEGIN <fingers>, UPDATE <dx> <dy> [<scale> <rotation>], END
+// <cancelled>); deltas and rotation carry one decimal, a scale two.
+// --size=<px> sets the side (8). SIGTERM ends it.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>

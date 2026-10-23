@@ -11,8 +11,6 @@ namespace {
 using unit::check;
 using unit::check_near;
 
-// ---- nav_pick_direction ----
-
 void test_nav_pick_direction() {
 	// Origin at (0,0), swiping east. Candidates (10x10 rects, centres in
 	// parentheses):
@@ -48,8 +46,6 @@ void test_nav_pick_direction() {
 	check(nav_pick_direction(0, 0, 0, 1, up_cands, std::nullopt, 60.0) == 1);
 	check(nav_pick_direction(0, 0, 0, 1, up_cands, 1, 60.0) == std::nullopt);
 }
-
-// ---- nav_quantize_direction ----
 
 void test_nav_quantize_direction() {
 	// The 8 compass directions, including the 4 exact 45 deg diagonals
@@ -88,8 +84,6 @@ void test_nav_quantize_direction() {
 	c = nav_quantize_direction(0, 0);
 	check(c.x == 0 && c.y == 0);
 }
-
-// ---- slices ----
 
 void test_step_slice() {
 	const Slice whole{0, 0, 1, 1};
@@ -262,8 +256,6 @@ void test_slice_box() {
 	check_near(quarter.h, 28, 1e-9);
 }
 
-// ---- camera_zoom_path ----
-
 void test_camera_zoom_path() {
 	const Camera near_cam = {.cx = 100, .cy = 200, .zoom = 1};
 	const Camera far_cam = {.cx = 500, .cy = 300, .zoom = 0.25};
@@ -294,8 +286,6 @@ void test_camera_zoom_path() {
 	check(mid.cx > near_cam.cx && mid.cx < far_cam.cx);
 	check(mid.cy > near_cam.cy && mid.cy < far_cam.cy);
 }
-
-// ---- camera_viewport / fit_zoom ----
 
 void test_camera_viewport() {
 	Rect vp = Camera{100, 200, 2}.viewport(800, 600);
@@ -335,8 +325,6 @@ void test_fit_zoom() {
 	// A margin larger than the viewport clamps to a 1px area.
 	check(fit_zoom(Rect{0, 0, 100, 100}, 100, 100, 80, 1) < 0.02);
 }
-
-// ---- small helpers used by the above ----
 
 void test_basics() {
 	check(clampd(5, 0, 3) == 3);

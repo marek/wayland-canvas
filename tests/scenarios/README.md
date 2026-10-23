@@ -1,12 +1,13 @@
 # Scenario tests
 
 Each scenario runs the **real compositor in-process** on the wlroots headless
-backend (`Server::init`/`Server::start`), spawns real `foot` clients, drives
-input, and takes `grim` screenshots. Every check prints a PASS/FAIL line; the
-scenario exits non-zero if any check failed, or if the compositor stopped
-before the run reached its last step (a lost backend, its own shutdown).
-Scenarios run serially (`is_parallel: false`, 180 s timeout) because they each
-own the machine's Wayland display namespace and GPU.
+backend (`harness::run` calls `Server::init` and `Server::start`), spawns real
+`foot` clients, drives input, and takes `grim` screenshots. Every check prints
+a PASS/FAIL line; the scenario exits non-zero if any check failed, or if the
+compositor stopped before the run reached its last step (a lost backend, its
+own shutdown). Scenarios run serially (`is_parallel: false`, 180 s timeout,
+600 s for `bar`) because they each own the machine's Wayland display
+namespace and GPU.
 
 ## The harness
 
@@ -339,8 +340,8 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   after it opened is published under its new title.
 
 - **`session.cpp`** — the shell plugins a login needs, in a private world:
-  its own `dbus-daemon` system and session buses under
-  `tmp/scenarios/session/bus/`, scratch XDG dirs, and a scratch PAM service
+  its own `dbus-daemon` system and session buses on sockets in
+  `<tmp>/sb/` (see `bus.h`), scratch XDG dirs, and a scratch PAM service
   that accepts one known password through `pam_exec`, so the machine's
   notification server, polkit agent, logind session and login stack are
   never reached. The notification server keeps its bus name against a
@@ -353,7 +354,7 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
 
 - **`bar.cpp`** — the top bar's panels, on a private world: before the
   compositor starts, the scenario brings up its own `dbus-daemon` system and
-  session buses on sockets under `tmp/scenarios/bar/bus/` (a bar process must
+  session buses on sockets in `<tmp>/bb/` (a bar process must
   never touch the machine's buses) and launches
   `tests/scenarios/bar-standins.py` on them, which provides deterministic
   stand-ins — NetworkManager with one Wi-Fi device and five networks
@@ -683,8 +684,9 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   while `terminal` is still `Super+Return` in `canvas.conf`.
   One earlier step, the adopt phase's hand edit of `shell.json`, is saved
   the way an editor does, renamed over the file: the shell must still
-  reload on it, though it no longer watches the config directory (the
-  compositor rewrites `canvas.conf` there on every settings change).
+  reload on it, because it watches `shell.json` itself and not the config
+  directory (the compositor rewrites `canvas.conf` there on every settings
+  change).
   Screenshots of the panel, its four tabs and both file-writing steps land
   in `tmp/scenarios/bar/` as `settings-*.png`.
 
@@ -706,7 +708,9 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   GLES2); CI containers without `/dev/dri` cannot run them.
 - Nothing else: they write only under `$CANVAS_TMP` (default: the repo's
   git-ignored `tmp/`, passed by meson) — screenshots and scratch state go to
-  `tmp/scenarios/<scenario>/`.
+  `tmp/scenarios/<scenario>/`, the private buses' sockets to `<tmp>/sb/` and
+  `<tmp>/bb/`, short paths because a unix socket's path is capped near 108
+  bytes.
 
 Run with `meson test -C build --suite scenarios`, or `tools/check.sh` which
 runs the `unit` suite first and then this one.

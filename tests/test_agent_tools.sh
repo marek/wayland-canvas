@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 # Agent tooling suite: the plan tools, the autopilot hook and agent-setup.sh
-# against scratch copies. Every check prints a PASS/FAIL line; the script
-# exits non-zero if any check failed.
-#
-# Covers: tools/plan-items.sh tells a box that waits for a person (it ends in
-# (the user) or (the user to decide)) from work, whatever its words or file
-# name say, and finds the marker at the end of a wrapped title; check-plans.sh
-# fails every other wording; the Stop hook lists the boxes that are work and
-# only those; the hooks are wired once, in .claude/settings.json, and
-# agent-setup.sh takes the wiring an older version wrote out of an existing
-# .claude/settings.local.json without touching what else is in it.
-#
-# Scratch copies live under $CANVAS_TMP (default: the repo's git-ignored tmp/).
+# against scratch copies under $CANVAS_TMP (default: the repo's git-ignored
+# tmp/). Every check prints a PASS/FAIL line; the script exits non-zero if any
+# check failed. A box ending in (the user) or (the user to decide) waits for a
+# person, whatever its words; the Stop hook lists the boxes that are work; the
+# hooks are wired once, in .claude/settings.json, and agent-setup.sh takes the
+# wiring out of settings.local.json without touching what else is in it.
 set -uo pipefail
 
 T=$(cd "$(dirname "$0")" && pwd -P)

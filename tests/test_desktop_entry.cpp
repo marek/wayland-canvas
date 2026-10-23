@@ -20,8 +20,6 @@ void check_str(std::string_view got, std::string_view want,
 	}
 }
 
-/* ---- basic parse ---- */
-
 void test_parse_basic() {
 	constexpr std::string_view contents =
 		"[Desktop Entry]\n"
@@ -52,8 +50,6 @@ void test_parse_basic() {
 	check(app->id.empty());
 	check_str(app->name, "Firefox");
 }
-
-/* ---- localization ---- */
 
 void test_localized() {
 	constexpr std::string_view contents =
@@ -100,8 +96,6 @@ void test_localized() {
 	check_str(app->name, "Files");
 }
 
-/* ---- entries that must not be listed ---- */
-
 void test_rejected() {
 	constexpr std::string_view nodisplay =
 		"[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n";
@@ -137,8 +131,6 @@ void test_rejected() {
 	check(!App::parse(type_space, "x.desktop", ""));
 }
 
-/* ---- [Desktop Action] groups are ignored ---- */
-
 void test_actions_ignored() {
 	constexpr std::string_view contents =
 		"[Desktop Entry]\n"
@@ -169,8 +161,6 @@ void test_actions_ignored() {
 	check(!App::parse(action_only, "app.desktop", ""));
 }
 
-/* ---- value escapes ---- */
-
 void test_escapes() {
 	constexpr std::string_view contents =
 		"[Desktop Entry]\n"
@@ -190,8 +180,6 @@ void test_escapes() {
 	check_str(app->icon, "icon\tname");
 }
 
-/* ---- Exec cleaning ---- */
-
 void test_exec_clean() {
 	check_str(clean_exec("firefox %u"), "firefox");
 	check_str(clean_exec("app \"%u\""), "app");
@@ -205,8 +193,6 @@ void test_exec_clean() {
 	check_str(clean_exec("plain command"), "plain command");
 	check_str(clean_exec("keep \"a%fb\" arg"), "keep \"ab\" arg");
 }
-
-/* ---- match ranking ---- */
 
 void test_match() {
 	const App app{

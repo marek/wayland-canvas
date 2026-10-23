@@ -1,25 +1,10 @@
-// An X11 client for the scenarios: maps one window of a known size, colour
-// and title through xcb (and with --dialog, on its first key, a modal dialog
-// transient for it, its hints sent in the one flush that maps it, as toolkits
-// send them; with --dialog-late, the same dialog mapped bare on the first key
-// and given its hints on the second; with --moveresize, on its first button,
-// a _NET_WM_MOVERESIZE request to size from the top left corner), and says on
-// stdout what reaches it —
-//
-//   MAPPED <w>x<h>         the window is up
-//   KEY <keycode> <state>  a key press arrived, with X's modifier mask
-//   BUTTON <n> <x>,<y>     a pointer button arrived at that point of the window
-//   MOVERESIZE             the resize request went to the window manager
-//   CONFIGURED <w>x<h>     the window manager resized it
-//   POPUP <x>,<y>          an override-redirect window was mapped there
-//   DIALOG <w>x<h>         the modal dialog is up, titled <title>-dialog
-//   HINTED                 the late dialog now names its window and is modal
-//   OFFERED                the client owns the X11 clipboard
-//   PASTED <text>          what the X11 clipboard holds, read back
-//   CLOSING                WM_DELETE_WINDOW arrived; the client exits
-//
-// so the compositor's X11 half can be proven without installing an X11
-// application.
+// An X11 client for the scenarios: maps one window of a known size, colour and
+// title through xcb and prints what reaches it (MAPPED <w>x<h>, KEY <keycode>
+// <state>, BUTTON <n> <x>,<y>, CONFIGURED <w>x<h>, POPUP <x>,<y>, PASTED
+// <text>, CLOSING, ...). --dialog maps a modal dialog on the first key, its
+// hints sent in the same flush as toolkits send them; --dialog-late maps it
+// bare and hints it on the second key; --moveresize asks, on the first button,
+// to be sized from the top left corner.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <stdio.h>

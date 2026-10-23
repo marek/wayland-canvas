@@ -1,14 +1,10 @@
-// The README's media (docs/media/): the compositor on the headless backend
-// at a laptop panel's size and scale, real apps arranged the way the README
-// says people work — code and writing on tiled desktops, design and review
-// spread over a desktop at 50 % like papers on a table — its stills taken
-// and its walkthrough recorded, a caption per step. tools/media.py builds
-// the world it runs in (the downloaded assets, the apps' configs) and turns
-// what it writes into docs/media/. Every app runs with a scratch HOME and
-// scratch XDG dirs, and the shell on private buses with the bar's stand-in
-// services: nothing of the user's own profiles, accounts or buses is read.
-// The tour runs on the scenarios' harness (tests/harness/): its steps, fake
-// devices, children and buses are theirs.
+// The README's media (docs/media/): the compositor on the headless backend at
+// a laptop panel's size and scale, real apps arranged the way the README says
+// people work — code and writing on tiled desktops, design and review spread
+// over a desktop at 50 % like papers on a table — its stills taken and its
+// walkthrough recorded, a caption per step. tools/media.py builds the world it
+// runs in and turns what it writes into docs/media/; nothing of the user's own
+// profiles, accounts or buses is read. Runs on the scenarios' harness.
 #include <algorithm>
 #include <cairo.h>
 #include <cerrno>
@@ -50,8 +46,6 @@
 using namespace harness;
 
 namespace {
-
-// ------------------------------------------------------------- the scenes
 
 // A laptop panel: 3200x2000 pixels at scale 2.
 constexpr int panel_w = 1600, panel_h = 1000;
@@ -133,8 +127,6 @@ constexpr int app_wait_ms = 60000;
 constexpr int poll_ms = 100;
 constexpr Wait app_wait{.poll_ms = poll_ms, .budget_ms = app_wait_ms};
 
-// ------------------------------------------------------------- the world
-
 bool stills_only = false;
 bool walkthrough_taken = false;
 std::string assets, source, out_dir, tools_dir;
@@ -165,8 +157,6 @@ Result abandon(std::string_view what) {
 	check(false, what);
 	return finish();
 }
-
-// ------------------------------------------------------------ processes
 
 // An app on the canvas: its own process group, so the whole of it — a
 // browser's helpers included — goes when the tour ends.
@@ -237,7 +227,6 @@ std::string note_file(const Note &note) {
 		note.x, note.y, note.w, note.h, note.color, note.html);
 }
 
-// The editors open copies of the repo's own files, so typing changes no source.
 void copy_into_checkout(const char *file) {
 	std::optional<std::string> text = read_file(source + "/" + file);
 	bool copied = text.has_value();
@@ -331,8 +320,6 @@ std::string chrome(std::string_view url) {
 		" --disable-features=PrivacySandboxSettings4,ChromeWhatsNewUI{}"
 		" --new-window {}", shell_word(scratch() + "/chrome"), flags, shell_word(url));
 }
-
-// ------------------------------------------------------------------ input
 
 // A hand on the touchpad, the pointer or the keys over time: one at a
 // time, eased, through the devices' own events.
@@ -444,8 +431,6 @@ void type_over(std::string_view text, double ms_per_key = 70) {
 		.ms = ms_per_key * static_cast<double>(text.size())});
 }
 
-// ------------------------------------------------------------------ views
-
 std::vector<View *> claimed;
 // The table's windows and their spots: placed again once their clients
 // have settled on a size of their own.
@@ -496,8 +481,6 @@ Desktop *desktop_numbered(int number) {
 Point on_screen(wlr_box box) {
 	return output().canvas_to_local(box.x + box.width / 2.0, box.y + box.height / 2.0);
 }
-
-// ---------------------------------------------------------------- capture
 
 std::string still_file(std::string_view name) {
 	return std::format("{}.png", name);
@@ -720,8 +703,6 @@ void release() {
 		wl_event_source_remove(motion_timer);
 	}
 }
-
-// ----------------------------------------------------------------- script
 
 std::vector<Step> steps;
 

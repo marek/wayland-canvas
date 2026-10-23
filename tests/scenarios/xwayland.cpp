@@ -1,21 +1,10 @@
 // End-to-end X11 scenario: X11 clients of the scenarios' own
-// (tests/clients/x11-client.c) through Xwayland, which starts with them and
-// not before. The window is a view like any other — a title bar, a place
-// on the canvas, a click and a key reaching the client, maximize from the
-// title bar, and the × closing it through WM_DELETE_WINDOW. X's own picture
-// follows the canvas: a window opened over another takes its clicks, the
-// one under it takes clicks where it shows and once raised, a minimized one
-// takes none, and windows past X's screen or larger than it at 25 % take
-// clicks at their own points; a click after a jump, and a press in the same
-// instant as one, land where they were aimed. The window resizes (by
-// Super+right-drag, by its frame's left edge, by its own
-// _NET_WM_MOVERESIZE request), the session locks and unlocks over it, and
-// Super+Shift+4 shoots it, the compositor answering `msg state` after each.
-// A modal dialog whose map request finds Xwayland stopped leaves the
-// compositor answering `msg state` within 100 ms, and is laid out as a modal
-// one once X answers.
-// Writes only under $CANVAS_TMP, with canvas.conf in its own scratch config
-// dir.
+// (tests/clients/x11-client.c) through Xwayland, which starts with them and not
+// before. The window is a view like any other (title bar, place on the canvas,
+// clicks and keys, maximize, close through WM_DELETE_WINDOW); X's own picture
+// follows the canvas (stacking, clicks past X's screen or at 25 %, clicks after
+// a jump); the window resizes, the session locks over it and it is shot; and a
+// stopped Xwayland leaves the compositor answering `msg state` within 100 ms.
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -163,8 +152,6 @@ long state_round_trip_ms(long limit_ms) {
 	close(fd);
 	return answer.contains("\"windows\"") ? elapsed_ms(start) : -1;
 }
-
-// ---- Xwayland stopped at a window's map request ----
 
 // A stall: Xwayland stopped, by this process, at the map request of the next
 // X11 window the compositor is told of, and a child that times the
@@ -399,8 +386,6 @@ std::pair<View *, View *> menu_and_window() {
 	return {menu, window};
 }
 
-// ---- the window is a view like any other ----
-
 Result client_starts() { // no X11 client yet: Xwayland has nothing to show
 	attach_pointer();
 	attach_keyboard();
@@ -521,8 +506,6 @@ Result popup_is_placed() {
 	return after(800);
 }
 
-// ---- the clipboard: X11 to wayland ----
-
 Result clipboard_owner_starts() {
 	check(start_x11(client, {"--offer=from-x11"}), "an X11 client owning the clipboard started");
 	return after(1500);
@@ -564,8 +547,6 @@ Result x11_clipboard_pastes() {
 	return after(500);
 }
 
-// ---- and wayland to X11 ----
-
 Result wayland_copies() {
 	spawn("wl-copy from-wayland");
 	return after(1000);
@@ -593,8 +574,6 @@ Result wayland_clipboard_pastes() {
 	return after(300);
 }
 
-// ---- a machine whose Xwayland is missing ----
-
 // No X11, and the compositor runs all the same: a compositor of its own,
 // headless and on its own display, so this run's X server is untouched.
 Result compositor_without_xwayland_starts() {
@@ -620,8 +599,6 @@ Result compositor_without_xwayland_ends() {
 		"it served its own display while it ran");
 	return after(300);
 }
-
-// ---- X's picture follows the canvas: a window opened over another ----
 
 Result main_window_starts() {
 	client.kill();
@@ -710,8 +687,6 @@ Result minimized_takes_no_click() {
 		"an X11 window started past X's screen");
 	return after(1500);
 }
-
-// ---- past X's screen ----
 
 Result far_window_maps() {
 	if (auto wait = wait_for(titled("x11-far") != nullptr, {.budget_ms = 20'000})) {
@@ -830,8 +805,6 @@ Result jump_and_press_landed() {
 	return after(300);
 }
 
-// ---- a modal dialog floats over its window on a tiled desktop ----
-
 Result tiled_client_starts() {
 	chord(KEY_T, mods::super);
 	check(start_x11(client, {"--size=600x400", "--title=x11-tiled", "--dialog"}),
@@ -918,8 +891,6 @@ Result desktop_two_keeps_its_window() {
 	other.kill();
 	return after(300);
 }
-
-// ---- fullscreen over another window: a desktop of its own ----
 
 Result covered_window_starts() {
 	check(start_x11(other, {"--size=400x300", "--title=x11-beside"}),
@@ -1008,9 +979,9 @@ Result fullscreen_client_ends() {
 	return after(300);
 }
 
-// ---- an interactive resize, an unlock and a window shot of an X11 window:
-// each asks the window's shell for something and each is followed by a
-// `msg state` round trip, which only a live compositor answers ----
+// An interactive resize, an unlock and a window shot of an X11 window: each
+// asks the window's shell for something and each is followed by a `msg state`
+// round trip, which only a live compositor answers.
 
 Result act_window_starts() {
 	other.kill();
@@ -1187,8 +1158,7 @@ Result window_shot_is_saved() {
 	return after(300);
 }
 
-// ---- by the frame's left edge: the window grows leftwards, the right edge
-// holds ----
+// By the frame's left edge: the window grows leftwards, the right edge holds.
 
 Result pointer_comes_to_the_left_edge() {
 	View *view = titled("x11-act");
@@ -1253,8 +1223,6 @@ Result left_edge_edges_held_after_commit() {
 		"and after the client's next commit");
 	return after(100);
 }
-
-// ---- a window that asks for a resize of its own ----
 
 Result moveresize_client_starts() {
 	client.kill();
@@ -1331,8 +1299,8 @@ Result asked_resize_edges_held_after_commit() {
 	return after(300);
 }
 
-// ---- a modal dialog whose hints reach the window manager after it maps: the
-// kind they decide is laid out when they arrive, as at the map ----
+// A modal dialog whose hints reach the window manager after it maps: the
+// kind they decide is laid out when they arrive, as at the map.
 
 Result camera_goes_home() {
 	output().camera.jump(home);
@@ -1417,9 +1385,9 @@ Result late_tiling_leaves_the_dialog_floating() {
 	return after(300);
 }
 
-// ---- a modal dialog whose map request finds Xwayland stopped: the
-// compositor goes on answering, and lays the dialog out as a modal one when
-// X answers at last ----
+// A modal dialog whose map request finds Xwayland stopped: the compositor
+// goes on answering, and lays the dialog out as a modal one when X answers
+// at last.
 
 Result stall_client_starts() {
 	Desktop *shown = output().desktop_showing();

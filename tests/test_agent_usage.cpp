@@ -1,11 +1,8 @@
 // Unit tests for the AI usage collector (src/shell/agent_usage.cpp) over
-// fixture files the test itself writes under $CANVAS_TMP: the counting
-// rules for Claude transcripts, Codex session files, pi/omp session logs
-// and the opencode database; the family rule; day buckets at local
-// midnight; model display names; number formatting; limits payloads; and
-// the incremental cache (a file whose bytes change behind an unchanged
-// stat keeps its counted contribution — proof a refresh reparses only
-// what changed).
+// fixture files the test writes under $CANVAS_TMP: the counting rules per
+// provider, the family rule, day buckets at local midnight, display names,
+// number formatting, limits payloads, and the incremental cache (a file whose
+// bytes change behind an unchanged stat keeps its counted contribution).
 #include "check.h"
 #include "shell/agent_usage.h"
 
@@ -76,8 +73,6 @@ void restore_mtime(const std::string &path, const struct stat &st) {
 	timespec times[2] = {st.st_atim, st.st_mtim};
 	utimensat(AT_FDCWD, path.c_str(), times, 0);
 }
-
-// ---------------------------------------------------------------- fixture
 
 struct Fixture {
 	std::string claude_dir;
@@ -274,8 +269,6 @@ long long day_tokens(const ProviderRecord &provider, int offset) {
 	}
 	return provider.days[static_cast<std::size_t>(6 - offset)].tokens;
 }
-
-// ------------------------------------------------------------- the checks
 
 void test_display_names() {
 	check(format_tokens(0) == "0", "0 formats as 0");

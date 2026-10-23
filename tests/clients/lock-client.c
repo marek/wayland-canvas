@@ -1,14 +1,9 @@
 // A locker for the scenarios: takes ext-session-lock-v1, fills every output
-// with one colour and reports what it is told on stdout, a line at a time:
-//
-//   LOCKED            the compositor confirmed the session is locked
-//   DRAWN <n>         n lock surfaces have been drawn
-//   KEY <keycode>     a key arrived on a lock surface
-//   BUTTON <button>   a pointer button arrived on one
-//   FINISHED          the compositor refused or ended this lock
-//
-// SIGUSR1 unlocks and exits; --inhibit-idle also holds an idle inhibitor,
-// so the idle lock can be proven to stand down while one is alive.
+// with one colour and prints LOCKED, DRAWN <n> (lock surfaces drawn), KEY
+// <keycode> and BUTTON <button> (arrived on a lock surface) and FINISHED (the
+// compositor refused or ended this lock). SIGUSR1 unlocks and exits;
+// --inhibit-idle also holds an idle inhibitor, so the idle lock can be
+// proven to stand down while one is alive.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>

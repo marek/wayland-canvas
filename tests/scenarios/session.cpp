@@ -1,13 +1,9 @@
 // End-to-end session scenario: the shell plugins a login needs — the
-// notification server, the locker's PAM check and the password dialog —
-// driven in a private world. Before the compositor starts, the scenario
-// brings up a dbus-daemon system bus and session bus of its own and points
-// every child at them (see harness/bus.h), so the machine's own
-// notification server, polkit agent and logind session are never reached.
-// XDG config, data and state are scratch directories, and the PAM service
-// the locker checks against is a scratch one that accepts one known
-// password through pam_exec — never the real login stack and never a real
-// password.
+// notification server, the locker's PAM check and the password dialog — in a
+// private world. Before the compositor starts it brings up a dbus-daemon
+// system bus and session bus of its own and points every child at them (see
+// harness/bus.h); XDG dirs are scratch and the locker's PAM service is a
+// scratch one accepting one known password, so nothing of the machine's is reached.
 #include <cstdlib>
 #include <ctime>
 #include <format>

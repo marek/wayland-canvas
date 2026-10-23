@@ -1,14 +1,8 @@
-// A layer-shell client for the scenarios: one surface on the top layer in
-// the namespace given as argv[1], drawn as a solid colour at the size the
-// compositor configures it (200x100 until it names one), so a plugin's
-// surface on the canvas can be mapped, placed and pressed without the
-// shell. Prints a line at a time:
-//
-//   CONFIGURED <w> <h>   the compositor sized it
-//   MAPPED               a buffer of that size is attached
-//   CLOSED               the compositor closed it
-//
-// SIGTERM ends it.
+// A layer-shell client for the scenarios: one surface on the top layer in the
+// namespace argv[1], a solid colour at the size the compositor configures
+// (200x100 until it names one), so a plugin's surface on the canvas can be
+// mapped, placed and pressed without the shell. Prints CONFIGURED <w> <h>,
+// MAPPED and CLOSED. SIGTERM ends it.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>

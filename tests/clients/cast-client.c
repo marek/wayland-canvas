@@ -1,15 +1,9 @@
 // A window-cast client for the scenarios: names the window titled argv[1]
 // through ext-foreign-toplevel-list, makes an ext-image-capture source of it
-// and copies its frames one after another, as fast as the compositor
-// answers, until the session stops. Given a colour as argv[2] (rrggbb) it
-// also looks into its first frames. Prints a line at a time:
-//
-//   CAST READY <w> <h>        the first frame arrived
-//   CAST SHARE <n> <h> <t>    frame n (1 to 3): h of its t pixels are the colour
-//   CAST STOPPED <n>          the compositor ended the session after n frames
-//   CAST FAILED <reason>      a frame failed
-//
-// SIGTERM ends it.
+// and copies its frames as fast as the compositor answers, until the session
+// stops. A colour as argv[2] (rrggbb) is looked for in the first frames.
+// Prints CAST READY <w> <h>, CAST SHARE <n> <h> <t> (h of frame n's t pixels
+// are the colour), CAST STOPPED <n> and CAST FAILED <reason>. SIGTERM ends it.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>

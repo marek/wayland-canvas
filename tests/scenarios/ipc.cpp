@@ -1,14 +1,9 @@
 // End-to-end control-IPC scenario: the JSON-lines protocol on the socket the
-// compositor exports — every method, every error case (a malformed line
-// answered with the connection kept, unknown methods, bad params, a line
-// over 64 KiB answered then dropped, a slow subscriber dropped), each event
-// type triggered for real, the canvas-surface role's answers (a place
-// with no area refused, one ahead of its surface remembered, a drag with
-// no button held refused, an edge that is not one, an unplace), the calls a
-// client leaves pending (a `surface.move` drag, a `capture.pick`, a
-// `shortcut.capture`) outliving it, and the `wayland-canvas msg` client
-// with its exit codes. Writes only under $CANVAS_TMP (meson passes the
-// repo's tmp/); meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
+// compositor exports - every method, every error case (a malformed line, a
+// line over 64 KiB, a slow subscriber), each event type triggered for real,
+// the canvas-surface role's answers, the calls a client leaves pending
+// outliving it, and the `wayland-canvas msg` client with its exit codes.
+// Writes only under $CANVAS_TMP; meson passes $WAYLAND_CANVAS_BIN.
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -91,8 +86,6 @@ bool surface_drag_running() {
 	return std::holds_alternative<PointerGrab::SurfaceDrag>(server->input.grab.state());
 }
 
-// ---------------------------------------------------------- raw clients
-
 // A client that sends one request line, lingers `linger_ms` without reading
 // the answer, and hangs up: a call left pending when its client goes.
 pid_t fork_hangup(const std::string &request, int linger_ms) {
@@ -145,8 +138,6 @@ pid_t fork_slow_subscriber(const std::string &ready, const std::string &result) 
 		write_file(result, std::format("{} {}\n", eof ? "dropped" : "alive", bytes));
 	});
 }
-
-// ------------------------------------------------------ state checking
 
 // The first failed expectation about a `msg state` result, or empty when the
 // result is well-formed: `want_theme`, at least `want_outputs` outputs (the
@@ -340,8 +331,6 @@ void commit_scale(float scale) {
 	wlr_output_commit_state(output->wlr, &state);
 	wlr_output_state_finish(&state);
 }
-
-// ---------------------------------------------------------------- steps
 
 Result socket_exported() {
 	const char *env_socket = std::getenv("WAYLAND_CANVAS_SOCKET");

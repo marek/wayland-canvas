@@ -1,18 +1,9 @@
 // A taskbar for the scenarios: lists every window through
-// zwlr_foreign_toplevel_manager_v1 and asks for changes to them, so what the
-// compositor publishes of a window, and how it answers a taskbar's requests,
-// is read from what a client received. Prints a line at a time:
-//
-//   TITLE <title>              a title event
-//   STATE <title> <app_id> <s> a window's state after a done event; <s> is
-//                              the set of maximized, minimized, activated and
-//                              fullscreen, comma-separated, or "-"
-//   OUTPUT <enter|leave> <title>
-//   CLOSED <title>
-//
-// Requests arrive as lines "<action> <title>" on the FIFO named by argv[1]:
-// maximize, unmaximize, minimize, unminimize, fullscreen, unfullscreen,
-// activate and close. Titles hold no spaces.
+// zwlr_foreign_toplevel_manager_v1 and asks for changes to them. Prints TITLE
+// <title>, STATE <title> <app_id> <s> (<s>: maximized, minimized, activated,
+// fullscreen, comma-separated, or "-"), OUTPUT <enter|leave> <title> and
+// CLOSED <title>. Requests are lines "<action> <title>" on the FIFO argv[1];
+// titles hold no spaces.
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <poll.h>

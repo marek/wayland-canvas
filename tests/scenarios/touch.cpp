@@ -1,18 +1,10 @@
-// End-to-end touch and pen scenario (docs/intents/input/touch-and-pen.md):
-// a fake touchscreen and a fake pen tablet announced on the backend, the
-// tests' own client reporting what reaches it (tests/clients/touch-client.c),
-// and, where this machine has Xwayland, the tests' X11 client. A tap and a
-// drag reach a window as touch; one finger drags a window by its title bar;
-// a finger held still on the overview's empty canvas makes a desktop there,
-// as a right click does; two fingers on the canvas look away and pinch a
-// desktop's scale; three fingers hop, and not while the capture picker is
-// open. A finger on a window as the session
-// locks is cancelled for it, and locked, touch reaches the locker only - as
-// a click, the locker taking no touch. A client without touch support gets
-// a tap as a click. The pen reaches a tablet client with pressure and tilt,
-// a client without tablet support as the pointer, and drags a title bar;
-// a tap and the pen's tip reach an X11 window as its press. Writes only
-// under $CANVAS_TMP; canvas.conf lives in its own scratch config dir.
+// End-to-end touch and pen scenario (docs/intents/input/touch-and-pen.md): a
+// fake touchscreen and pen tablet on the backend, the tests' own client
+// (tests/clients/touch-client.c) reporting what reaches it and, where this
+// machine has Xwayland, the tests' X11 client. Taps and drags, the overview's
+// held finger, two-finger look and pinch, three-finger hops, a finger on a
+// window as the session locks, clients without touch or tablet support, and
+// the pen's pressure, tilt and title-bar drag.
 #include <cmath>
 #include <csignal>
 #include <cstdio>

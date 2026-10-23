@@ -1307,8 +1307,8 @@ Result board_kept_to_200_percent() {
 	std::string changed = changed_boxes();
 	check(std::fabs(desk(d1)->scale() - 2.0) < 1e-9 && changed.empty(), std::format(
 		"from 50 % to 200 % the board kept every box{}", changed));
-	// At 200 % the frame no longer covers every boarded window's centre:
-	// the board, not the centre, keeps them the desktop's.
+	// At 200 % the frame does not cover every boarded window's centre: the
+	// board, not the centre, keeps them the desktop's.
 	int outside = 0;
 	for (const auto &[view, box] : kept) {
 		outside += !desk(d1)->contains(box.cx(), box.cy());

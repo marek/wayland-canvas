@@ -1,11 +1,9 @@
-// Linked into the allocation steps of the gestures scenario: its malloc
-// family stands in for glibc's, and counts the allocations the compositor's
-// own code makes - those asked for by C++ (operator new, in libstdc++) and
-// by the text and JSON libraries it draws and answers with (glib, pango,
-// cairo, pixman, json-glib, harfbuzz, fontconfig, freetype). What wlroots,
-// libwayland and the GL driver allocate for their own frame bookkeeping is
-// the renderer's, not counted. canvas_allocations() reads the calling
-// thread's count. Not built into sanitizer runs, which own malloc.
+// Linked into the allocation steps of the gestures scenario: its malloc family
+// stands in for glibc's and counts the allocations the compositor's own code
+// makes - C++'s operator new and the text and JSON libraries it draws and
+// answers with. What wlroots, libwayland and the GL driver allocate is not
+// counted. canvas_allocations() reads the calling thread's count. Not built
+// into sanitizer runs, which own malloc.
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>

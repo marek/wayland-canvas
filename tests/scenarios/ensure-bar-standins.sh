@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 # Provisions and verifies the stand-in Python environment of the bar and
-# session scenarios, and prints that environment's interpreter path as the
-# last stdout line when everything is present. Any failure exits non-zero,
-# in which case meson registers both scenarios as skipped and names the
-# last line this script wrote to stderr.
-#
-# The stand-ins run on python-dbusmock, which needs dbus-python and
-# PyGObject from the system Python's distro packages and dbusmock itself
-# from pip: a git-ignored venv on the system interpreter with
-# --system-site-packages, under the repo's tmp/. The repo's own .venv
-# (tools/venv.sh) has no site packages of the system's, so the stand-ins get
-# their own.
+# session scenarios, and prints its interpreter path as the last stdout line
+# when everything is present. Any failure exits non-zero, and meson registers
+# both scenarios as skipped, naming the last line written to stderr.
+# python-dbusmock needs dbus-python and PyGObject from the distro's system
+# Python and dbusmock from pip: a git-ignored venv under tmp/ on the system
+# interpreter with --system-site-packages, apart from the repo's own .venv.
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)

@@ -1,34 +1,11 @@
-// A touch, pointer and tablet-tool client for the scenarios: maps one
-// window of one solid colour and reports on stdout, a line at a time,
-// every touch, pointer and tablet-tool event that reaches it, so a
-// scenario can assert what the compositor forwarded:
-//
-//   MAPPED <w>x<h>   the first configured buffer was committed
-//   TOUCH DOWN <id> <x>,<y>
-//   TOUCH MOTION <id> <x>,<y>
-//   TOUCH UP <id>
-//   TOUCH CANCEL
-//   POINTER ENTER <x>,<y>
-//   POINTER LEAVE
-//   POINTER BUTTON <button> <pressed|released> <x>,<y>   at the last position
-//   TABLET IN
-//   TABLET MOTION <x>,<y>
-//   TABLET PRESSURE <0..65535>     only when it changes
-//   TABLET TILT <x>,<y>            degrees, only when it changes
-//   TABLET DOWN
-//   TABLET UP
-//   TABLET BUTTON <button> <pressed|released>
-//   TABLET OUT
-//
-// Coordinates are surface-local, rounded to the nearest integer.
-// --size=WxH (400x300), --colour=0xRRGGBB (0x2060a0), --title=<text>;
-// --no-tablet leaves the tablet manager unbound, so the pen must arrive
-// as pointer events instead; --no-touch never takes a wl_touch, so a
-// finger must arrive as the pointer. The window asks for the compositor's
-// title bar (xdg-decoration, server side), so a scenario can drag it by
-// that. The touch capability can appear after startup (a touchscreen
-// connected later), so the wl_touch is taken when the capability shows up
-// and released when it goes.
+// A touch, pointer and tablet-tool client for the scenarios: maps one window
+// of one solid colour and prints every touch, pointer and tablet-tool event
+// that reaches it, one line each (TOUCH DOWN <id> <x>,<y>, TABLET PRESSURE
+// <n>, ...), surface-local and rounded. --size=WxH, --colour=0xRRGGBB,
+// --title=<text>; --no-tablet leaves the tablet manager unbound and --no-touch
+// takes no wl_touch, so the pen or the finger arrives as pointer events. The
+// window asks for the server-side title bar; the wl_touch follows the touch
+// capability, which can appear after startup.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>

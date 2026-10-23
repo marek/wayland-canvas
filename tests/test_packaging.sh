@@ -1,24 +1,12 @@
 #!/usr/bin/env bash
 # Packaging suite: the default-session tool against fake roots, one per
-# supported display manager. Every check prints a PASS/FAIL line; the script
-# exits non-zero if any check failed.
-#
-# Covers: set-default then restore leaves every file byte-identical; restore
-# with nothing recorded is a no-op; repeated set-default is idempotent; a
-# missing previous session is restored as it was; greetd changes the session
-# flag's value, the whole command of a session with no login screen, or
-# nothing for a login screen that lists sessions; an unknown display manager
-# changes nothing. Then the install flow against stub sudo, package managers
-# and package.sh: the step reaches the root copy, the root copy builds
-# nothing, the artifact matches the distro's format, and a root package.sh
-# without --here refuses. Last, tools/version.sh on scratch repositories: a
-# tagged commit, two tags on one, commits past a tag, no tag, a tarball's
-# VERSION, a tree with neither, and a tag pacman cannot take.
-#
-# No check here installs anything, builds anything or runs a real sudo.
-#
-# Fake roots and stubs live under $CANVAS_TMP (default: the repo's
-# git-ignored tmp/).
+# supported display manager; the install flow against stub sudo and package
+# managers; package.sh against stub builds; every tool's --help;
+# tools/version.sh on scratch repositories; check-lock-pam.sh on scratch
+# package roots. Every check prints a PASS/FAIL line; the script exits
+# non-zero if any check failed. No check installs anything, builds anything
+# or runs a real sudo. Fake roots and stubs live under $CANVAS_TMP (default:
+# the repo's git-ignored tmp/).
 set -uo pipefail
 
 T=$(cd "$(dirname "$0")" && pwd -P)
@@ -41,8 +29,7 @@ check() { # check <name> <cmd...> — passes when the command succeeds
 	fi
 }
 
-# run <name> <cmd...>: like check, but captures the tool's output for greps
-run_check() { # run_check <name> <regex> <cmd...>
+run_check() { # run_check <name> <regex> <cmd...> — passes when the command succeeds and its output matches
 	local name=$1 want=$2
 	shift 2
 	if "$@" >"$S/out" 2>&1 && grep -q "$want" "$S/out"; then
@@ -82,8 +69,6 @@ root() { # root <name> — a fresh fake root, echoed
 rm -rf "$S"
 mkdir -p "$S"
 
-# --- sddm: autologin + remembered session ------------------------------------
-
 r=$(root sddm)
 mkdir -p "$r/etc/sddm.conf.d" "$r/var/lib/sddm"
 printf '[Autologin]\nUser=marek\nSession=hyprland.desktop\n' >"$r/etc/sddm.conf.d/autologin.conf"
@@ -114,8 +99,6 @@ cp -a "$r" "$S/sddm.once"
 check "sddm repeated set-default is idempotent" same_tree "$r" "$S/sddm.once"
 check "sddm idempotent run keeps the switched session" has_line "$r/etc/sddm.conf.d/autologin.conf" '^Session=wayland-canvas\.desktop$'
 
-# --- sddm: autologin only, sessions not remembered ---------------------------
-
 r=$(root sddm-autologin-only)
 mkdir -p "$r/etc/sddm.conf.d"
 printf '[Autologin]\nUser=marek\n' >"$r/etc/sddm.conf.d/autologin.conf"
@@ -127,8 +110,6 @@ check "sddm autologin-only Session line added" has_line "$r/etc/sddm.conf.d/auto
 check "sddm autologin-only remembered session untouched" test ! -e "$r/var/lib/sddm/state.conf"
 check "sddm autologin-only restore is byte-identical" restore_and_diff "$r" "$S/sddm-autologin-only.pristine"
 
-# --- sddm: previous session missing, state file missing ----------------------
-
 r=$(root sddm-missing-previous)
 mkdir -p "$r/etc/sddm.conf.d"
 printf '[Autologin]\nUser=marek\n' >"$r/etc/sddm.conf.d/autologin.conf"
@@ -138,8 +119,6 @@ check "sddm missing-previous set-default exits 0" "$TOOL" --root "$r" set-defaul
 check "sddm missing-previous state file created" has_line "$r/var/lib/sddm/state.conf" '^Session=wayland-canvas\.desktop$'
 check "sddm missing-previous restore is byte-identical" restore_and_diff "$r" "$S/sddm-missing-previous.pristine"
 check "sddm missing-previous created dirs are gone" test ! -e "$r/var/lib/sddm"
-
-# --- gdm: AccountsService -----------------------------------------------------
 
 r=$(root gdm)
 mkdir -p "$r/var/lib/AccountsService/users"
@@ -175,8 +154,6 @@ check "gdm missing user file created then restored" env TOOL="$TOOL" ROOT="$r" b
 	"$TOOL" --root "$ROOT" --user marek restore &&
 	diff -r "$ROOT" "$(dirname "$ROOT")/gdm-missing.pristine"'
 
-# --- lightdm: autologin + greeter state ---------------------------------------
-
 r=$(root lightdm)
 mkdir -p "$r/etc/lightdm" "$r/var/lib/lightdm/.cache"
 printf '[Seat:*]\nautologin-user=marek\n' >"$r/etc/lightdm/lightdm.conf"
@@ -189,8 +166,6 @@ check "lightdm set-default exits 0" "$TOOL" --root "$r" set-default
 check "lightdm autologin session switched" has_line "$r/etc/lightdm/lightdm.conf" '^autologin-session=wayland-canvas$'
 check "lightdm remembered session switched" has_line "$r/var/lib/lightdm/.cache/lightdm-gtk-greeter-state" '^last-session=wayland-canvas$'
 check "lightdm restore is byte-identical" restore_and_diff "$r" "$S/lightdm.pristine"
-
-# --- greetd: default_session command -------------------------------------------
 
 r=$(root greetd)
 mkdir -p "$r/etc/greetd"
@@ -465,17 +440,12 @@ run_check "greetd-unreadable: set-default exits 1 and rewrites nothing it cannot
 	env bash -c '"$1" --root "$2" set-default; test $? -eq 1' shell "$TOOL" "$r"
 check "greetd-unreadable: nothing changed" same_tree "$r" "$S/greetd-unreadable.pristine"
 
-# --- unknown display manager: nothing changed ----------------------------------
-
 r=$(root unknown)
 cp -a "$r" "$S/unknown.pristine"
 run_check "unknown display manager set-default fails and explains" 'start wayland-canvas from a TTY' \
 	env bash -c '"$1" --root "$2" set-default; test $? -eq 1' shell "$TOOL" "$r"
 check "unknown display manager changed nothing" same_tree "$r" "$S/unknown.pristine"
 check "unknown display manager created no state" test ! -e "$r/var/lib"
-
-
-# --- install.sh: the user builds, root installs --------------------------------
 
 I=$S/install
 export CANVAS_IT=$I
@@ -594,8 +564,6 @@ run_check "a package.sh that reports no package fails the install" 'reported no 
 	fails_with env PATH="$I/bin:$PATH" OS_RELEASE="$I/arch-release" "$I/repo/tools/install.sh"
 check "and nothing reaches the root copy" test ! -s "$I/sudo"
 
-# --- package.sh refuses to build as root ---------------------------------------
-
 P=$S/package
 mkdir -p "$P/repo/tools"
 cp "$REPO/tools/package.sh" "$REPO/tools/lib.sh" "$P/repo/tools/"
@@ -643,8 +611,6 @@ run_check "a failed build fails package.sh and names no package" '^arch build ch
 	fails_with env PATH="$B/bin:$PATH" CANVAS_TMP="$B/tmp" "$B/repo/tools/package.sh" --arch "$B/out"
 check "package.sh reported nothing built after the failure" bash -c '! grep -q "built" "$1"' shell "$S/out"
 
-# --- every tool's --help is its header and nothing else ------------------------
-
 header_of() { # header_of <script> — the leading comment block, without its #
 	sed -n '2,${/^#/!q;s/^# \{0,1\}//;p}' "$1"
 }
@@ -653,8 +619,6 @@ for tool in "$REPO"/tools/*.sh "$TOOL"; do
 	check "$(basename "$tool") --help prints its header" bash -c '
 		out=$("$1" --help) && [ "$out" = "$2" ] && ! grep -q "pipefail" <<<"$out"' shell "$tool" "$(header_of "$tool")"
 done
-
-# --- version.sh: the version is the git tag ------------------------------------
 
 V=$S/version
 mkdir -p "$V/repo/tools" "$V/tarball/tools"
@@ -731,8 +695,6 @@ lacks() { # lacks <regex> <file>
 	! grep -q "$1" "$2"
 }
 check "check-lock-pam.sh: the unreadable-manifest message has no traceback" lacks Traceback "$S/out"
-
-# ------------------------------------------------------------------------------
 
 echo "$passes passed, $fails failed"
 rm -rf "$S"

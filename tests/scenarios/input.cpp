@@ -117,8 +117,6 @@ View *x11_view() {
 	return nullptr;
 }
 
-// --------------------------------------------------- canvas.conf helpers
-
 // Saves `text` over canvas.conf the way an editor does: written beside,
 // renamed over, so the inotify reload sees one whole file.
 bool save_conf(const std::string &text) {
@@ -151,8 +149,6 @@ bool holds_chord(std::string_view action, const settings::Chord &chord) {
 void ask_socket(std::string_view request, std::string_view out, int quiet_polls) {
 	fork_control_client(request, out, {.quiet_polls = quiet_polls});
 }
-
-// ------------------------------------------------------------- the steps
 
 Result devices_and_window_a() {
 	attach_pointer();

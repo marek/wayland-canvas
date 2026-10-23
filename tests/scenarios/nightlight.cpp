@@ -1,13 +1,9 @@
-// End-to-end night-light scenario: the settings that hold the filter
-// (`settings.set`, the toggle action and canvas.conf), the temperature's
-// own multipliers, and the wlr gamma-control protocol answered by a client
-// of the scenarios' own (tests/clients/gamma-client.c). A headless output
-// holds no gamma ramp, so first nothing here warms a frame; then the output
-// is given a ramp and a record of the colour transforms committed with its
-// frames, as the DRM backend would take them, and the filter's life on it is
-// followed: the built-in filter, a client's table, the client letting go.
-// Writes only under $CANVAS_TMP, with canvas.conf in its own scratch config
-// dir.
+// End-to-end night-light scenario: the settings that hold the filter, the
+// temperature's multipliers, and the wlr gamma-control protocol answered by
+// the scenarios' own client (tests/clients/gamma-client.c). A headless output
+// has no gamma ramp, so first nothing warms a frame; then the output is given
+// a ramp and a record of the colour transforms committed with its frames, and
+// the built-in filter, a client's table and the client letting go are followed.
 #include <array>
 #include <csignal>
 #include <cstdlib>
@@ -109,8 +105,6 @@ void give_a_ramp(wlr_output *output) {
 	ramp_impl.destroy = ramp_destroy;
 	output->impl = &ramp_impl;
 }
-
-// ------------------------------------------------ the built-in filter
 
 Result window_on_the_output() {
 	attach_keyboard();
@@ -231,8 +225,6 @@ Result client_gone() {
 		"the built-in setting is untouched by a client coming and going");
 	return after(300);
 }
-
-// ------------------------------------------------ an output with a ramp
 
 // The headless output gains a ramp: the built-in filter reaches it.
 Result output_gains_a_ramp() {

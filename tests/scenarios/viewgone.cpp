@@ -1,11 +1,9 @@
 // End-to-end scenario for a window that goes while something holds it: a
-// title-bar move under way, the capture picker hovering it, a window cast
-// copying its frames, and the fullscreen desktop made for it. Each hold is
-// made for real (fake pointer and keyboard devices, foot windows, the
-// cast-client), the window is closed under it, and the run goes on: the
-// hold must end and nothing may touch the window afterwards. Built to run
-// clean under the sanitizer build (tools/check.sh --sanitize). Writes only
-// under $CANVAS_TMP (meson passes the repo's tmp/).
+// title-bar move, the capture picker hovering it, a window cast copying its
+// frames, and the fullscreen desktop made for it. Each hold is made for real,
+// the window is closed under it, and the hold must end with nothing touching
+// the window afterwards. Built to run clean under the sanitizer build
+// (tools/check.sh --sanitize).
 #include <format>
 #include <linux/input-event-codes.h>
 #include <optional>

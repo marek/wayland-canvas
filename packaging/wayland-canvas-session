@@ -88,8 +88,6 @@ done
 [ -n "$cmd" ] || die "missing command: status, set-default or restore (try --help)"
 root=${root%/}
 
-# --- paths and the change journal ------------------------------------------
-
 # Every path inside this script is root-relative (starts with /) and is
 # prefixed with $root at the last moment, so a --root run and a real run
 # share all logic.
@@ -146,8 +144,6 @@ ensure_dir() { # $1 root-relative dir — create it, recording what was created
 ' "$d" >>"$journal"
 	done
 }
-
-# --- ini and toml line editing ----------------------------------------------
 
 ini_get() { # $1 path $2 section $3 key → value, "" when absent
 	local file=$root$1 section=$2 key=$3
@@ -353,8 +349,6 @@ login_account() { # $1 name — status 0 when it has a uid people log in with
 	' "$root/etc/passwd" 2>/dev/null
 }
 
-# --- display manager detection ----------------------------------------------
-
 dm=none
 dm_source=
 
@@ -422,8 +416,6 @@ login_user() {
 	fi
 	id -un
 }
-
-# --- per display manager: status and set-default -----------------------------
 
 sddm_conf_list() { # main config then drop-ins, sorted
 	local f
@@ -623,8 +615,6 @@ manual_start() {
 	echo "  start wayland-canvas from a TTY (log out, then on a spare VT: wayland-canvas)"
 	echo "  or pick it at the login screen when your display manager lists it"
 }
-
-# --- commands ----------------------------------------------------------------
 
 cmd_status() {
 	detect_dm
