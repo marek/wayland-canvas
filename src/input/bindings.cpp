@@ -175,7 +175,7 @@ void act_move_dir(Server &server, Output *output, KeyArg arg) {
 	} else {
 		view->move(static_cast<int>(std::round(view->x + dir.dx * output->width)),
 			static_cast<int>(std::round(view->y + dir.dy * output->height)));
-		server.reveal_view(*view);
+		view->reveal();
 	}
 	// The move may have taken the view in or out of a grid.
 	server.canvas.settle(*view);

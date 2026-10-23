@@ -235,11 +235,11 @@ void PointerRouter::forget(const View &view) {
 // it is over, and to nothing else.
 bool PointerRouter::locked_pointer_focus(uint32_t time) {
 	Server &server = server_;
-	if (!server.lock.locked()) {
+	if (!server.input.gate().locked()) {
 		return false;
 	}
-	Output *output = server.output_at(server.cursor->x, server.cursor->y);
-	wlr_surface *surface = output != nullptr ? server.lock.surface_for(*output)
+	Output *output = server.outputs.at(server.cursor->x, server.cursor->y);
+	wlr_surface *surface = output != nullptr ? server.input.gate().surface_for(*output)
 		: nullptr;
 	if (surface == nullptr) {
 		wlr_seat_pointer_notify_clear_focus(server.seat);
@@ -267,7 +267,7 @@ void PointerRouter::motion(uint32_t time) {
 		return;
 	}
 
-	Output *output = server.output_at(server.cursor->x, server.cursor->y);
+	Output *output = server.outputs.at(server.cursor->x, server.cursor->y);
 	if (output == nullptr) {
 		wlr_seat_pointer_notify_clear_focus(server.seat);
 		input_.set_cursor_image("default");
@@ -400,7 +400,7 @@ bool PointerRouter::button_held_on(const wlr_surface *surface) const {
 void PointerRouter::button_press(uint32_t time, uint32_t button) {
 	Server &server = server_;
 	input_.super_tap.other_input();
-	if (server.lock.locked()) {
+	if (server.input.gate().locked()) {
 		if (server.seat->pointer_state.focused_surface != nullptr) {
 			pressed_buttons_ |= button_bit(button);
 			wlr_seat_pointer_notify_button(server.seat, time, button,
@@ -418,7 +418,7 @@ void PointerRouter::button_press(uint32_t time, uint32_t button) {
 			WL_POINTER_BUTTON_STATE_PRESSED);
 		return;
 	}
-	Output *output = server.output_at(server.cursor->x, server.cursor->y);
+	Output *output = server.outputs.at(server.cursor->x, server.cursor->y);
 	if (output == nullptr) {
 		return;
 	}
@@ -512,7 +512,7 @@ void PointerRouter::button_press(uint32_t time, uint32_t button) {
 }
 
 void PointerRouter::button_release(uint32_t time, uint32_t button) {
-	if (server_.lock.locked()) {
+	if (server_.input.gate().locked()) {
 		uint32_t bit = button_bit(button);
 		if (pressed_buttons_ & bit) {
 			pressed_buttons_ &= ~bit;
@@ -544,7 +544,7 @@ void PointerRouter::button_release(uint32_t time, uint32_t button) {
 		}
 		return;
 	}
-	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);
+	Output *output = server_.outputs.at(server_.cursor->x, server_.cursor->y);
 	if (output == nullptr) {
 		return;
 	}
@@ -558,7 +558,7 @@ void PointerRouter::button_release(uint32_t time, uint32_t button) {
 
 void PointerRouter::axis(const wlr_pointer_axis_event &event) {
 	Server &server = server_;
-	if (server.lock.locked()) {
+	if (server.input.gate().locked()) {
 		if (server.seat->pointer_state.focused_surface != nullptr) {
 			wlr_seat_pointer_notify_axis(server.seat, event.time_msec,
 				event.orientation, event.delta, event.delta_discrete,
@@ -569,7 +569,7 @@ void PointerRouter::axis(const wlr_pointer_axis_event &event) {
 	if (input_.grab.active()) {
 		return;
 	}
-	Output *output = server.output_at(server.cursor->x, server.cursor->y);
+	Output *output = server.outputs.at(server.cursor->x, server.cursor->y);
 	if (output == nullptr) {
 		return;
 	}
@@ -627,13 +627,13 @@ void PointerRouter::look_away(Output &output, double dx, double dy) {
 
 std::optional<PointerRouter::ContactHit> PointerRouter::client_at(double lx, double ly) {
 	Server &server = server_;
-	Output *output = server.output_at(lx, ly);
+	Output *output = server.outputs.at(lx, ly);
 	if (output == nullptr) {
 		return std::nullopt;
 	}
 	double ox = lx - output->lx, oy = ly - output->ly;
-	if (server.lock.locked()) {
-		wlr_surface *surface = server.lock.surface_for(*output);
+	if (server.input.gate().locked()) {
+		wlr_surface *surface = server.input.gate().surface_for(*output);
 		if (surface == nullptr) {
 			return std::nullopt;
 		}
@@ -663,8 +663,8 @@ std::optional<PointerRouter::ContactHit> PointerRouter::client_at(double lx, dou
 
 bool PointerRouter::canvas_at(double lx, double ly) {
 	Server &server = server_;
-	Output *output = server.output_at(lx, ly);
-	if (output == nullptr || server.lock.locked()) {
+	Output *output = server.outputs.at(lx, ly);
+	if (output == nullptr || server.input.gate().locked()) {
 		return false;
 	}
 	double ox = lx - output->lx, oy = ly - output->ly;

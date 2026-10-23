@@ -142,12 +142,13 @@ IpcServer::Reply surface_drag(IpcServer &ipc, Server &server, JsonObject *params
 	if (!held->canvas_box.has_value()) {
 		return std::unexpected(std::string{"that surface is not on the plane"});
 	}
-	Output *output = server.output_at(server.cursor->x, server.cursor->y);
+	Output *output = server.outputs.at(server.cursor->x, server.cursor->y);
 	if (server.input.grab.active() || ipc.waiting(drag_wait) || output == nullptr) {
 		return std::unexpected(std::string{"the pointer is already in a drag"});
 	}
 	server.input.grab.begin_surface_drag(*held, *output, server.input.router.press_lx(),
-		server.input.router.press_ly(), edges, min_w, min_h);
+		server.input.router.press_ly(), edges, min_w, min_h,
+		[&ipc](std::optional<wlr_box> box) { ipc.answer(drag_wait, drag_answer(box)); });
 	return IpcServer::Wait{drag_wait};
 }
 
@@ -164,8 +165,4 @@ void register_surface_methods(IpcServer &ipc, Server &server) {
 	ipc.register_method("surface.resize", [&ipc, &server](JsonObject *params) {
 		return surface_drag(ipc, server, params, true);
 	});
-}
-
-void answer_surface_drag(IpcServer &ipc, std::optional<wlr_box> box) {
-	ipc.answer(drag_wait, drag_answer(box));
 }

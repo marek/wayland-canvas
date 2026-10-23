@@ -569,7 +569,7 @@ Result a_tap_on_the_second_output() {
 	// mapped to it, not to the first or to the whole layout.
 	finger_down(50, screen_w / 4.0, screen_h / 2.0);
 	finger_up(50);
-	Output *under = server->output_at(server->cursor->x, server->cursor->y);
+	Output *under = server->outputs.at(server->cursor->x, server->cursor->y);
 	check(under != nullptr && std::string_view{under->wlr->name} == "HEADLESS-2",
 		std::format("a touchscreen naming the second output acts on it (the tap "
 			"put the pointer on {})", under != nullptr ? under->wlr->name : "nothing"));
@@ -591,7 +591,7 @@ Result the_second_output_unplugged_under_two_fingers() {
 		finger_move(60, x - 60 - 20 * i, y, false);
 		finger_move(61, x + 60 + 20 * i, y);
 	}
-	Output *under = server->output_at(server->cursor->x, server->cursor->y);
+	Output *under = server->outputs.at(server->cursor->x, server->cursor->y);
 	check(under == second, "two fingers are down on the second output");
 	wlr_output_destroy(second->wlr);
 	check(server->outputs.size() == 1, "the second output is gone");
@@ -608,7 +608,7 @@ Result the_second_output_unplugged_under_two_fingers() {
 Result a_tap_after_the_unplug() {
 	finger_down(62, screen_w / 4.0, screen_h / 2.0);
 	finger_up(62);
-	Output *under = server->output_at(server->cursor->x, server->cursor->y);
+	Output *under = server->outputs.at(server->cursor->x, server->cursor->y);
 	check(under == &output(), std::format("a tap after the unplug acts on the output left "
 		"(the pointer is on {})", under != nullptr ? under->wlr->name : "nothing"));
 	return after(300);

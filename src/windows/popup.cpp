@@ -49,9 +49,9 @@ bool popup_unconstrain(Popup &popup) {
 		// The output whose viewport shows the frame centre, else the one
 		// under the cursor.
 		Rect frame = view->frame_rect();
-		Output *picked = server.output_showing(frame.cx(), frame.cy());
+		Output *picked = server.outputs.showing(frame.cx(), frame.cy());
 		if (picked == nullptr) {
-			picked = server.output_under_cursor();
+			picked = server.outputs.under_cursor();
 		}
 		if (picked != nullptr) {
 			Rect viewport = picked->viewport();

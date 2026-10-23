@@ -43,8 +43,8 @@ void FullscreenDesktops::enter(View &view, wlr_box covers) {
 		return;
 	}
 	Rect frame = view.frame_rect();
-	Output *showing = server_.output_showing(frame.cx(), frame.cy());
-	const Output *sized = showing != nullptr ? showing : server_.output_under_cursor();
+	Output *showing = server_.outputs.showing(frame.cx(), frame.cy());
+	const Output *sized = showing != nullptr ? showing : server_.outputs.under_cursor();
 	if (sized == nullptr) {
 		return;
 	}

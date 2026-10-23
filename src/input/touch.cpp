@@ -118,7 +118,7 @@ void Touch::handle_down(wlr_touch_down_event *event) {
 	contact.ly = contact.ly0;
 	std::size_t fingers = contacts_.size() + 1;
 	// Locked, the locker takes every finger: no gesture, no compositor UI.
-	if (!server_.lock.locked() && join_gesture(contact, fingers, time)) {
+	if (!server_.input.gate().locked() && join_gesture(contact, fingers, time)) {
 		return;
 	}
 
@@ -383,7 +383,7 @@ void Touch::update_two(TwoFinger &two, uint32_t time) {
 			break;
 		}
 	}
-	Output *output = server_.output_at(two.cx0, two.cy0);
+	Output *output = server_.outputs.at(two.cx0, two.cy0);
 	if (a == nullptr || b == nullptr || output == nullptr) {
 		return;
 	}

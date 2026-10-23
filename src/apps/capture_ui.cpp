@@ -48,7 +48,7 @@ CaptureUi::~CaptureUi() {
 
 bool CaptureUi::open_picker(Output *output, PickWhat what, PickGoal goal) {
 	if (output == nullptr) {
-		output = server_.output_under_cursor();
+		output = server_.outputs.under_cursor();
 	}
 	if (output == nullptr || picker_.active()) {
 		return false;
@@ -154,7 +154,7 @@ void CaptureUi::key_sym(xkb_keysym_t sym, uint32_t mods) {
 	// The chords that reach everywhere (the capture actions') still work
 	// with the capture UI up, so the same key that opened something closes
 	// it again.
-	server_.bindings.handle_everywhere(sym, mods, server_.output_under_cursor());
+	server_.bindings.handle_everywhere(sym, mods, server_.outputs.under_cursor());
 }
 
 bool CaptureUi::pointer_motion(Output &output, double ox, double oy) {
@@ -192,7 +192,7 @@ bool CaptureUi::pointer_axis(Output &output, double ox, double oy, wl_pointer_ax
 void CaptureUi::open_toolbar(Output *output, bool recording_focus,
 		const CaptureOptions &preset) {
 	if (output == nullptr) {
-		output = server_.output_under_cursor();
+		output = server_.outputs.under_cursor();
 	}
 	if (output == nullptr) {
 		return;

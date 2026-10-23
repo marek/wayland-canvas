@@ -333,7 +333,7 @@ std::vector<Refusal> refusals() {
 
 // Commits a new output scale; the layout follows, and the outputs event.
 void commit_scale(float scale) {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	wlr_output_state state;
 	wlr_output_state_init(&state);
 	wlr_output_state_set_scale(&state, scale);
@@ -543,7 +543,7 @@ Result overview_toggled() {
 }
 
 Result overview_entered() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	if (auto wait = wait_for(command_done("overview-enter")
 			&& output != nullptr && output->overview.active())) {
 		return *wait;
@@ -562,7 +562,7 @@ Result overview_toggled_by_output() {
 }
 
 Result overview_left() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	if (auto wait = wait_for(command_done("overview-exit")
 			&& output != nullptr && !output->overview.active())) {
 		return *wait;
@@ -600,7 +600,7 @@ Result light_overview_toggled() {
 }
 
 Result light_overview_entered() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	if (auto wait = wait_for(command_done("overview-light-enter")
 			&& output != nullptr && output->overview.active())) {
 		return *wait;
@@ -625,7 +625,7 @@ Result light_overview_state() {
 }
 
 Result light_overview_left() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	if (auto wait = wait_for(command_done("overview-light-exit")
 			&& output != nullptr && !output->overview.active())) {
 		return *wait;
@@ -926,7 +926,7 @@ Result layer_client_started() {
 
 // It maps, and `surface.place` puts it where the pointer reaches it.
 Result layer_placed() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	LayerSurface *layer = plugin_surface();
 	if (auto wait = wait_for(layer != nullptr && output != nullptr)) {
 		return *wait;
@@ -944,7 +944,7 @@ Result layer_placed() {
 
 // The press the plugin answers, then a `surface.move` whose client leaves.
 Result surface_pressed() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	LayerSurface *layer = plugin_surface();
 	if (auto wait = wait_for(command_done("layer-place") && layer != nullptr
 			&& layer->canvas_box.has_value())) {
@@ -981,7 +981,7 @@ Result drag_outlives_client() {
 
 // The drag ends at the release with nobody left to answer.
 Result drag_released() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	LayerSurface *layer = plugin_surface();
 	if (layer != nullptr && output != nullptr && layer->canvas_box.has_value()) {
 		int before = layer->canvas_box->x;
@@ -1117,7 +1117,7 @@ Result window_listed() {
 		std::format("the state lists the open foot window (app id '{}')",
 			entry.has_value() ? entry->app_id : "none"));
 	// Away from the window, then back to it through window.focus.
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	if (output != nullptr && view != nullptr) {
 		Camera cam = output->camera.current();
 		cam.cx += 4 * output->width;
@@ -1132,7 +1132,7 @@ Result window_listed() {
 
 // The camera came back to the window; the unknown id errored.
 Result window_focused() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	View *view = first_mapped_view();
 	if (auto wait = wait_for(command_done("window-focus") && command_done("window-focus-bad")
 			&& output != nullptr && !output->camera.panning() && !output->camera.zooming())) {
@@ -1164,7 +1164,7 @@ Result window_focused() {
 
 // The view centred on the window, no desktop involved.
 Result free_window_focused() {
-	Output *output = server->output_under_cursor();
+	Output *output = server->outputs.under_cursor();
 	View *view = first_mapped_view();
 	if (auto wait = wait_for(command_done("window-free") && output != nullptr
 			&& !output->camera.panning() && !output->camera.zooming())) {

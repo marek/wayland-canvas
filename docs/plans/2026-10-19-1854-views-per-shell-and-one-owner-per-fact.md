@@ -1820,7 +1820,7 @@ Tests:
 
 ### 9. Single responsibility: the compositor
 
-- [ ] `Server` holds the wlroots globals, the object lists and the
+- [x] `Server` holds the wlroots globals, the object lists and the
   subsystems, nothing else
   - `Xwm` (`src/windows/xwm.{h,cpp}`) takes the X window manager, and is
     the one caller of `View::as_x11()`:
@@ -1862,9 +1862,26 @@ Tests:
     - cpp-standards.md's "One per compositor" row names the new
       subsystems.
     - The scenarios are green.
-  - Left: server.h still declares Server members defined in output.cpp,
-    view.cpp, view_xdg.cpp and layer.cpp (the output list, the xdg-shell
-    and layer-shell globals' handlers), under location comments.
+  - Done: the members `server.h` declared for output.cpp, view.cpp,
+    view_xdg.cpp and layer.cpp each have an owner, and its location
+    comments are gone. Every `Server::` member `server.h` declares is
+    defined in server.cpp:
+    - `Outputs` (`platform/outputs.{h,cpp}`), held by value as
+      `Server::outputs`, takes the output list, `at`, `under_cursor`,
+      `showing`, `damage_all`, `visibility_changed`, `update_visibility`
+      and the new-output and layout handlers: a list with listeners and a
+      lifetime of its own, which every other subsystem asks (166 uses).
+    - `output_gone` and `outputs_changed` stay in server.cpp beside
+      `view_gone`: each fans out to the holders in every subsystem, which
+      only the owner of all of them reaches.
+    - `View::reveal` replaces `Server::reveal_view`: it moves one window's
+      camera and uses nothing but that window's state.
+    - `XdgShell` (`windows/xdg_shell.{h,cpp}`) and `LayerShell`
+      (`platform/layer_shell.{h,cpp}`), held by value, take their globals
+      and new-toplevel, new-popup and new-surface handlers. `LayerShell`
+      keeps its global behind `wlr()`, which the bar scenario reads.
+    - cpp-standards.md's "One per compositor" row and the folder table
+      name them.
   - Done: `ConfStore`, `SessionEnvironment`, and the options and process
     files:
     - `core/conf_store.{h,cpp}` holds canvas.conf as `Server::conf`: `path()`,
@@ -2052,13 +2069,30 @@ Tests:
     `{sym, ctrl, action}` table.
   - Acceptance: the layer, title-bar and launcher checks in the scenarios
     are green.
-- [ ] No include cycles between subsystems
+- [x] No include cycles between subsystems
   - Input⇄Lock (input.cpp:28, 447; lock.cpp:116-120) and Input⇄Ipc
     (grab.cpp:411; ipc.cpp:863, 1222) call each other.
   - One-way facts are passed by constructor, or read through phase 9's
     Ipc change flags.
   - Acceptance: an include-graph check (a short script under tools/,
     run by check.sh) finds no cycle among the subsystem headers.
+  - Done: `Input` is called by the session lock and the control socket and
+    names neither:
+    - `input/input_gate.h`: `InputGate`, which `SessionLock` implements
+      (`locked`, `surface_for`, `notice_activity`) and `Server` hands to
+      `Input::set_gate`, as it hands over the UI layers. The pointer
+      router, touch, the Super tap and `Input` read the lock through
+      `input.gate()`.
+    - `PointerGrab::begin_surface_drag` takes the callback that tells the
+      client how the drag ended, which `surface.move` and `surface.resize`
+      build over the control socket's answer; `answer_surface_drag` goes.
+    - `tools/check-includes.py`, run first by `tools/check.sh`, fails on a
+      cycle among the headers under `src/`, and on `Input` (bindings and
+      gestures, the command layer above it, apart) including the lock's or
+      the socket's headers or naming `server.lock`, `server.ipc` or
+      `server.ipc_events`. Run on a scratch copy it fails on a header
+      cycle added between `input_gate.h` and `lock.h`, on one between
+      `desktop.h` and `view.h`, and on an `Input` call to `server.lock`.
 
 ### 10. Single responsibility: the shell, plugins and scenarios
 

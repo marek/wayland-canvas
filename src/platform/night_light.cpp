@@ -162,5 +162,5 @@ bool NightLight::holds_a_ramp(const Output &output) {
 }
 
 void NightLight::settings_changed() {
-	server_.damage_all();
+	server_.outputs.damage_all();
 }

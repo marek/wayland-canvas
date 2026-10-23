@@ -10,44 +10,6 @@
 #include "core/process.h"
 #include "windows/view.h"
 
-namespace {
-
-double pick_scale(const Server &server, wlr_output *wlr, wlr_output_mode *mode) {
-	if (server.options.scale > 0) {
-		return server.options.scale;
-	}
-	int width = mode != nullptr ? mode->width : wlr->width;
-	int height = mode != nullptr ? mode->height : wlr->height;
-	if (wlr->phys_width <= 0 || wlr->phys_height <= 0) {
-		return 1;
-	}
-	double dpi_x = width / (wlr->phys_width / 25.4);
-	double dpi_y = height / (wlr->phys_height / 25.4);
-	// GNOME's heuristic: 2x only for dense panels that stay large enough.
-	return std::fmin(dpi_x, dpi_y) >= 192 && height >= 1200 ? 2 : 1;
-}
-
-void update_output_geometry(Output &output) {
-	wlr_box box{};
-	wlr_output_layout_get_box(output.server.output_layout, output.wlr, &box);
-	if (wlr_box_empty(&box)) {
-		return;
-	}
-	bool resized = box.width != output.width || box.height != output.height;
-	output.lx = box.x;
-	output.ly = box.y;
-	output.width = box.width;
-	output.height = box.height;
-	if (resized) {
-		output.usable = wlr_box{0, 0, box.width, box.height};
-		output.arrange_layers();
-		output.server.lock.output_changed(output);
-	}
-	output.damage();
-}
-
-} // namespace
-
 Output::Output(Server &server, wlr_output *wlr, uint32_t bit)
 	: server(server), wlr(wlr), bit(bit), camera(*this), overview(*this) {
 	wlr->data = this;
@@ -75,7 +37,7 @@ void Output::damage() {
 
 void Output::visibility_changed() {
 	damage();
-	server.visibility_changed();
+	server.outputs.visibility_changed();
 }
 
 Rect Output::viewport() const {
@@ -273,81 +235,6 @@ void Output::pin_desktop() {
 	server.hint.set(std::format("New Desktop {}", created.number()));
 }
 
-void Server::damage_all() {
-	for (const std::unique_ptr<Output> &output : outputs) {
-		output->damage();
-	}
-}
-
-Output *Server::output_at(double lx, double ly) {
-	wlr_output *wlr = wlr_output_layout_output_at(output_layout, lx, ly);
-	return wlr != nullptr ? static_cast<Output *>(wlr->data) : nullptr;
-}
-
-Output *Server::output_under_cursor() {
-	Output *output = output_at(cursor->x, cursor->y);
-	if (output == nullptr && !outputs.empty()) {
-		output = outputs.front().get();
-	}
-	return output;
-}
-
-Output *Server::output_showing(double cx, double cy, Showing which) {
-	for (const std::unique_ptr<Output> &output : outputs) {
-		if (which == Showing::normal_view && output->overview.active()) {
-			continue;
-		}
-		if (output->viewport().contains(cx, cy)) {
-			return output.get();
-		}
-	}
-	return nullptr;
-}
-
-void Server::update_visibility() {
-	if (!visibility_dirty_) {
-		return;
-	}
-	visibility_dirty_ = false;
-	for (View *view : views) {
-		uint32_t mask = 0;
-		if (view->mapped && !view->minimized) {
-			Rect frame = view->frame_rect();
-			for (const std::unique_ptr<Output> &output : outputs) {
-				if (frame.intersects(output->viewport())) {
-					mask |= output->bit;
-				}
-			}
-		}
-		view->update_outputs(mask);
-	}
-}
-
-uint32_t Server::free_output_bit() const {
-	uint32_t used = 0;
-	for (const std::unique_ptr<Output> &output : outputs) {
-		used |= output->bit;
-	}
-	// The lowest clear bit of `used` is the lowest set bit of `used + 1`,
-	// which wraps to 0 once all 32 are taken.
-	return ~used & (used + 1);
-}
-
-void Server::output_gone(Output &output) {
-	input.output_gone(output);
-	gestures.output_gone(output);
-	for (View *view : views) {
-		view->output_gone(output);
-	}
-	output.release_layers();
-	visibility_changed();
-}
-
-void Server::outputs_changed() {
-	changed(Change::outputs);
-	input.outputs_changed();
-}
-
 void Output::handle_frame() {
 	bool animating = tick(now_ms());
 	server.flush_pending();
@@ -376,73 +263,6 @@ void Output::handle_request_state(wlr_output_event_request_state *event) {
 void Output::handle_destroy() {
 	Server &server = this->server;
 	server.output_gone(*this);
-	destroy_owned(server.outputs, this);
+	server.outputs.erase(*this);
 	server.outputs_changed();
-}
-
-void Server::handle_new_output(wlr_output *wlr) {
-	if (wlr->non_desktop) {
-		return;
-	}
-	uint32_t bit = free_output_bit();
-	if (bit == 0) {
-		wlr_log(WLR_ERROR, "too many outputs, ignoring %s", wlr->name);
-		return;
-	}
-	wlr_output_init_render(wlr, allocator, renderer);
-
-	wlr_output_state state;
-	wlr_output_state_init(&state);
-	wlr_output_state_set_enabled(&state, true);
-	wlr_output_mode *mode = wlr_output_preferred_mode(wlr);
-	if (mode != nullptr) {
-		wlr_output_state_set_mode(&state, mode);
-	}
-	wlr_output_state_set_scale(&state, pick_scale(*this, wlr, mode));
-	if (!wlr_output_commit_state(wlr, &state)) {
-		wlr_log(WLR_ERROR, "failed to enable %s with its preferred mode", wlr->name);
-		wlr_output_state_finish(&state);
-		wlr_output_state_init(&state);
-		wlr_output_state_set_enabled(&state, true);
-		wlr_output_commit_state(wlr, &state);
-	}
-	wlr_output_state_finish(&state);
-
-	outputs.push_back(std::make_unique<Output>(*this, wlr, bit));
-	Output &output = *outputs.back();
-
-	wlr_output_layout_add_auto(output_layout, wlr);
-	update_output_geometry(output);
-	outputs_changed();
-	// The canvas starts out aligned with the output layout.
-	output.camera.jump(Camera{
-		.cx = output.lx + output.width / 2.0,
-		.cy = output.ly + output.height / 2.0,
-		.zoom = 1,
-	});
-	if (canvas.desktops.empty()) {
-		canvas.desktops.create(
-			wlr_box{output.lx, output.ly, output.width, output.height});
-	}
-	wlr_log(WLR_INFO, "output %s: %dx%d logical at scale %.2f", wlr->name,
-		output.width, output.height, wlr->scale);
-	output.visibility_changed();
-}
-
-void Server::handle_layout_change() {
-	for (const std::unique_ptr<Output> &output : outputs) {
-		update_output_geometry(*output);
-	}
-	visibility_changed();
-	changed(Change::outputs); // a moved or resized output changes the state
-}
-
-void Server::init_outputs() {
-	new_output_.connect<&Server::handle_new_output>(backend->events.new_output, this);
-	layout_change_.connect<&Server::handle_layout_change>(output_layout->events.change, this);
-}
-
-void Server::finish_outputs() {
-	new_output_.disconnect();
-	layout_change_.disconnect();
 }

@@ -6,11 +6,11 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include "core/config.h"
 #include "input/grab.h"
-#include "platform/ipc_methods.h"
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -35,6 +35,14 @@ Output *grab_output(const PointerGrab::State &state) {
 		[](const PointerGrab::None &) -> Output * { return nullptr; },
 		[](const auto &s) -> Output * { return s.output; },
 	}, state);
+}
+
+// Tells the client that asked for a surface drag how it ended; once, however
+// many ways the grab ends.
+void finish_surface_drag(PointerGrab::SurfaceDrag &drag, std::optional<wlr_box> box) {
+	if (PointerGrab::SurfaceDragDone done = std::exchange(drag.done, nullptr)) {
+		done(box);
+	}
 }
 
 // Target the desktop a view belongs to, or a screen-sized free spot
@@ -135,7 +143,7 @@ void PointerGrab::begin_overview_press(Output &output, PressTarget target) {
 }
 
 void PointerGrab::begin_surface_drag(LayerSurface &layer, Output &output,
-		double lx, double ly, uint32_t edges, int min_w, int min_h) {
+		double lx, double ly, uint32_t edges, int min_w, int min_h, SurfaceDragDone done) {
 	SurfaceDrag drag{
 		.layer = &layer,
 		.output = &output,
@@ -144,8 +152,9 @@ void PointerGrab::begin_surface_drag(LayerSurface &layer, Output &output,
 		.edges = edges,
 		.min_w = std::max(min_w, 1),
 		.min_h = std::max(min_h, 1),
+		.done = std::move(done),
 	};
-	state_ = drag;
+	state_ = std::move(drag);
 	if (edges != 0) {
 		server_.input.set_cursor_image(
 			wlr_xcursor_get_resize_name(static_cast<wlr_edges>(edges)));
@@ -377,7 +386,7 @@ void PointerGrab::release() {
 		// board when dropped outside. A resize ends back on its slice.
 	[this](Move &s) { server_.canvas.drop(*s.view); },
 	[this](Resize &s) { server_.canvas.settle(*s.view); },
-		[this](SurfaceDrag &s) { answer_surface_drag(server_.ipc, s.layer->canvas_box); },
+		[](SurfaceDrag &s) { finish_surface_drag(s, s.layer->canvas_box); },
 		[](auto &) {},
 	}, state_);
 	cancel();
@@ -473,13 +482,13 @@ void PointerGrab::cancel() {
 		end_view_grab(*resize->view);
 	} else if (const auto *button = std::get_if<TitleButton>(&state_)) {
 		end_view_grab(*button->view);
-	} else if (std::holds_alternative<SurfaceDrag>(state_)) {
+	} else if (auto *drag = std::get_if<SurfaceDrag>(&state_)) {
 		// Not ended by its release (the surface or the output went): the
-		// client still waiting is told, a release already answered it.
-		answer_surface_drag(server_.ipc, std::nullopt);
+		// client still waiting is told; a release already told it.
+		finish_surface_drag(*drag, std::nullopt);
 	}
 	state_ = None{};
-	server_.damage_all();
+	server_.outputs.damage_all();
 	server_.input.set_cursor_image("default");
 }
 

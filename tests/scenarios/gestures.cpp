@@ -2982,7 +2982,7 @@ Result second_output_unplugged_mid_gesture() {
 	Camera before = o->camera.current();
 	wlr_cursor_warp(server->cursor, nullptr, second->lx + second->width / 2.0,
 		second->ly + second->height / 2.0);
-	check(server->output_under_cursor() == second, "the pointer is on the second output");
+	check(server->outputs.under_cursor() == second, "the pointer is on the second output");
 	touchpad_swipe_begin(4);
 	for (int i = 0; i < 5; i++) {
 		touchpad_swipe_update(4, 0, -40);
@@ -3011,7 +3011,7 @@ Result second_output_unplugged_mid_gesture() {
 Result the_output_left_takes_a_swipe() {
 	Output *o = &output();
 	wlr_cursor_warp(server->cursor, nullptr, o->lx + o->width / 2.0, o->ly + o->height / 2.0);
-	check(server->output_under_cursor() == o, "the pointer is on the output left");
+	check(server->outputs.under_cursor() == o, "the pointer is on the output left");
 	swipe(4, 0, -300, 20);
 	return after(900);
 }

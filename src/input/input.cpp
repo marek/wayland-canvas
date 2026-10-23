@@ -24,7 +24,7 @@ constexpr uint32_t binding_mods = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
 
 void notify_activity(Server &server) {
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
-	server.lock.notice_activity();
+	server.input.gate().notice_activity();
 }
 
 bool is_logo_key(std::span<const xkb_keysym_t> syms) {
@@ -232,13 +232,13 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	int nsyms = xkb_state_key_get_syms(wlr->xkb_state, keycode, &syms);
 	std::span<const xkb_keysym_t> produced(syms, static_cast<std::size_t>(nsyms));
 	uint32_t mods = wlr_keyboard_get_modifiers(wlr) & binding_mods;
-	if (server.lock.locked()) {
+	if (server.input.gate().locked()) {
 		// Only the locker and VT switching; no canvas shortcut, no tap.
 		super_tap.disarm();
 		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 			for (xkb_keysym_t sym : produced) {
 				if (server.bindings.handle_locked(sym, mods,
-						server.output_under_cursor())) {
+						server.outputs.under_cursor())) {
 					return;
 				}
 			}
@@ -261,7 +261,7 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	if (!handled && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		// A logo key pressed on its own may become a tap (see release).
 		super_tap.key_pressed(logo, wlr->num_keycodes == 1);
-		Output *output = server.output_under_cursor();
+		Output *output = server.outputs.under_cursor();
 		KeySyms keys(produced, base_syms(wlr, keycode));
 		if (UiLayer *layer = layer_for_keys()) {
 			// A layer owns the keyboard: every key is consumed, and nothing
@@ -329,7 +329,7 @@ void Input::set_cursor_image(const char *name) {
 }
 
 std::optional<CanvasPos> Input::cursor_canvas_pos() const {
-	Output *output = server_.output_under_cursor();
+	Output *output = server_.outputs.under_cursor();
 	if (output == nullptr) {
 		return std::nullopt;
 	}
@@ -494,7 +494,7 @@ void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	}
 	notify_activity(server_);
 	super_tap.other_input();
-	if (gestures_blocked() || server_.lock.locked()) {
+	if (gestures_blocked() || gate().locked()) {
 		return; // a layer or the lock owns the pointer
 	}
 	server_.gestures.swipe_begin(event->time_msec, event->fingers);
@@ -522,7 +522,7 @@ void Input::handle_pinch_begin(wlr_pointer_pinch_begin_event *event) {
 	}
 	notify_activity(server_);
 	super_tap.other_input();
-	if (gestures_blocked() || server_.lock.locked()) {
+	if (gestures_blocked() || gate().locked()) {
 		return; // a layer or the lock owns the pointer
 	}
 	server_.gestures.pinch_begin(event->time_msec, event->fingers);

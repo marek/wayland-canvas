@@ -70,7 +70,7 @@ public:
 
 	Server &server;
 	wlr_output *const wlr;
-	const uint32_t bit; // View::output_mask's bit for this output; Server::free_output_bit
+	const uint32_t bit; // View::output_mask's bit for this output; Outputs picks it
 	int lx = 0, ly = 0, width = 0, height = 0; // layout position and logical size
 
 	CameraMotion camera;

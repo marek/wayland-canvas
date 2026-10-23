@@ -171,7 +171,7 @@ void Gestures::decide(Pending &pending) {
 }
 
 void Gestures::swipe_begin(uint32_t time, uint32_t fingers) {
-	Output *out = server_.output_under_cursor();
+	Output *out = server_.outputs.under_cursor();
 	state_ = Idle{};
 	begun_ = options_;
 	if (out == nullptr) {
@@ -334,7 +334,7 @@ void Gestures::pinch_begin(uint32_t time, uint32_t fingers) {
 }
 
 void Gestures::pinch_begin(uint32_t time, uint32_t fingers, bool super) {
-	Output *out = server_.output_under_cursor();
+	Output *out = server_.outputs.under_cursor();
 	state_ = Idle{};
 	begun_ = options_;
 	if (out == nullptr) {
@@ -575,7 +575,7 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 
 void Gestures::hold_begin(uint32_t time, uint32_t fingers) {
 	hold_forwarded_ = false;
-	Output *out = server_.output_under_cursor();
+	Output *out = server_.outputs.under_cursor();
 	if (out == nullptr) {
 		return;
 	}

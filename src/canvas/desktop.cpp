@@ -215,14 +215,14 @@ Desktop &Desktops::insert(int number, wlr_box frame, double scale) {
 	DesktopId id = next_id_;
 	next_id_ = DesktopId{static_cast<int>(next_id_) + 1};
 	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame, scale));
-	server_.damage_all();
+	server_.outputs.damage_all();
 	server_.changed(Change::desktops);
 	return *stack_.front();
 }
 
 void Desktops::remove(DesktopId id) {
 	destroy_owned(stack_, find(id));
-	server_.damage_all();
+	server_.outputs.damage_all();
 	server_.changed(Change::desktops);
 }
 
@@ -248,7 +248,7 @@ void Desktops::move(DesktopId id, int x, int y) {
 	desktop->frame_.y = y;
 	desktop->centre_.x += dx;
 	desktop->centre_.y += dy;
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void Desktops::set_scale(DesktopId id, double scale) {
@@ -257,7 +257,7 @@ void Desktops::set_scale(DesktopId id, double scale) {
 		return;
 	}
 	desktop->set_scale(scale);
-	server_.damage_all();
+	server_.outputs.damage_all();
 	server_.changed(Change::desktops);
 }
 
@@ -267,7 +267,7 @@ void Desktops::set_tiling(DesktopId id, bool on) {
 		return;
 	}
 	desktop->tiling_ = on;
-	server_.damage_all(); // the tab's Tile switch lights up
+	server_.outputs.damage_all(); // the tab's Tile switch lights up
 }
 
 Desktop *Desktops::find(DesktopId id) {

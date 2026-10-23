@@ -32,7 +32,7 @@ void SuperTap::other_input() {
 }
 
 void SuperTap::lone_tap() {
-	Output *output = server_.output_under_cursor();
+	Output *output = server_.outputs.under_cursor();
 	if (!server_.bindings.has_double_tap(output)) {
 		server_.bindings.handle_tap(output, false);
 		return;
@@ -51,10 +51,10 @@ void SuperTap::run_pending() {
 		return;
 	}
 	cancel_pending();
-	if (server_.lock.locked()) {
+	if (server_.input.gate().locked()) {
 		return;
 	}
-	server_.bindings.handle_tap(server_.output_under_cursor(), false);
+	server_.bindings.handle_tap(server_.outputs.under_cursor(), false);
 }
 
 void SuperTap::cancel_pending() {

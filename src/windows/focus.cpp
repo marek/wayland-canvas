@@ -97,7 +97,7 @@ void Focus::focus_in(wlr_box box) {
 }
 
 void Focus::focus_topmost() {
-	focus_view(top_visible_view(server_.output_under_cursor()));
+	focus_view(top_visible_view(server_.outputs.under_cursor()));
 }
 
 void Focus::view_minimized(View &view) {

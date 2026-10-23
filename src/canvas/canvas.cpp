@@ -96,9 +96,9 @@ std::vector<Slice> Canvas::held_slices(const Desktop &desktop) {
 
 Rect Canvas::tiling_area(const Desktop &desktop) {
 	Point centre = desktop.centre();
-	const Output *picked = server_.output_showing(centre.x, centre.y);
+	const Output *picked = server_.outputs.showing(centre.x, centre.y);
 	if (picked == nullptr) {
-		picked = server_.output_under_cursor();
+		picked = server_.outputs.under_cursor();
 	}
 	if (picked == nullptr) {
 		return desktop.rect();
@@ -384,7 +384,7 @@ void Canvas::move_desktop(DesktopId id, int x, int y) {
 	}
 	desktops.move(id, x, y);
 	// A moved frame takes windows in with it: their desktop may change.
-	server_.visibility_changed();
+	server_.outputs.visibility_changed();
 }
 
 void Canvas::abandon(std::optional<DesktopId> desktop) {

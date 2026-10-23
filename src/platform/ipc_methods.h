@@ -1,8 +1,5 @@
 #pragma once
 
-#include <optional>
-#include "core/wlr.h"
-
 class IpcServer;
 class Server;
 
@@ -22,8 +19,3 @@ void register_surface_methods(IpcServer &ipc, Server &server);
 void register_action_methods(IpcServer &ipc, Server &server); // action.run
 
 void register_ipc_methods(IpcServer &ipc, Server &server);
-
-// A `surface.move` or `surface.resize` drag ended: answers its client with
-// the rectangle the surface ended at, or an error without one. No request
-// waiting: a no-op.
-void answer_surface_drag(IpcServer &ipc, std::optional<wlr_box> box);

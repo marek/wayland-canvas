@@ -16,6 +16,7 @@
 #include "input/x_input_gate.h"
 #include "core/util.h"
 
+class InputGate;
 class Output;
 class Server;
 class UiLayer;
@@ -101,6 +102,10 @@ public:
 	// a layer input, a frame or a change of palette goes through this list.
 	void set_layers(std::vector<UiLayer *> layers) { layers_ = std::move(layers); }
 	std::span<UiLayer *const> layers() const { return layers_; }
+	// Set once by Server: the session lock, which says whether the session
+	// is locked and which surface of the locker takes input then.
+	void set_gate(InputGate &gate) { gate_ = &gate; }
+	InputGate &gate() const { return *gate_; }
 	// The topmost layer that owns the keyboard: it gets every key press.
 	UiLayer *layer_for_keys() const;
 	// The topmost layer that takes the pointer, a touch or the pen at
@@ -158,6 +163,7 @@ public:
 private:
 	Server &server_;
 	std::vector<UiLayer *> layers_; // topmost first
+	InputGate *gate_ = nullptr;
 	// The name of the cursor image set, or null while a client owns it.
 	const char *cursor_image_ = nullptr;
 

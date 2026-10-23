@@ -1,10 +1,8 @@
 // The xdg-shell half of View: everything a wayland window answers that an
-// X11 one answers differently, and the xdg-shell globals that bring the
-// windows. Its twin is view_x11.cpp; the canvas logic they share is view.cpp,
-// which names none of these protocols.
+// X11 one answers differently. Its twin is view_x11.cpp; the canvas logic
+// they share is view.cpp, which names none of these protocols.
 #include "core/server.h"
 #include "platform/output.h"
-#include "windows/popup.h"
 #include "windows/view_xdg.h"
 
 XdgView::XdgView(Server &server, wlr_xdg_toplevel *wlr)
@@ -234,27 +232,4 @@ void XdgView::handle_xdg_request_fullscreen() {
 	}
 	set_fullscreen(wlr->requested.fullscreen);
 	wlr_xdg_surface_schedule_configure(wlr->base);
-}
-
-// ---- the xdg-shell globals ----
-
-void Server::init_xdg_shell() {
-	xdg_shell = wlr_xdg_shell_create(display, 6);
-	new_xdg_toplevel_.connect<&Server::handle_new_xdg_toplevel>(
-		xdg_shell->events.new_toplevel, this);
-	new_xdg_popup_.connect<&Server::handle_new_xdg_popup>(
-		xdg_shell->events.new_popup, this);
-}
-
-void Server::finish_xdg_shell() {
-	new_xdg_toplevel_.disconnect();
-	new_xdg_popup_.disconnect();
-}
-
-void Server::handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel) {
-	toplevels.push_back(std::make_unique<XdgView>(*this, toplevel));
-}
-
-void Server::handle_new_xdg_popup(wlr_xdg_popup *popup) {
-	popups.push_back(std::make_unique<Popup>(*this, popup));
 }

@@ -20,7 +20,7 @@ IpcServer::Reply state(Server &server) {
 		// read for the moment of the answer — no event carries it, so a
 		// client that needs it asks.
 		json_builder_set_member_name(builder, "cursor");
-		if (Output *under = server.output_under_cursor()) {
+		if (Output *under = server.outputs.under_cursor()) {
 			Point at = under->local_to_canvas(server.cursor->x - under->lx,
 				server.cursor->y - under->ly);
 			json_builder_begin_object(builder);

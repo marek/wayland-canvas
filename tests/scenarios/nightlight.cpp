@@ -159,7 +159,7 @@ Result night_light_in_conf() {
 	float warmer[3];
 	night_light_multipliers(2000, warmer);
 	check(warmer[2] < want[2], "2000 K is warmer than 4000 K");
-	server->damage_all();
+	server->outputs.damage_all();
 	return after(800);
 }
 
@@ -239,7 +239,7 @@ Result output_gains_a_ramp() {
 	give_a_ramp(output().wlr);
 	check(NightLight::holds_a_ramp(output()), "the output now holds a gamma ramp");
 	ramp_commits.clear();
-	server->damage_all();
+	server->outputs.damage_all();
 	return after(600);
 }
 
@@ -248,7 +248,7 @@ Result built_in_filter_committed() {
 	check(ramp_commits.size() == 1 && ramp_commits.back() != nullptr,
 		std::format("the built-in filter is committed once with the ramp ({} commits)",
 			ramp_commits.size()));
-	server->damage_all();
+	server->outputs.damage_all();
 	return after(400);
 }
 
@@ -267,7 +267,7 @@ Result client_table_taken() {
 			&& said.find("SET 1") != std::string_view::npos
 			&& said.find("FAILED") == std::string_view::npos,
 		std::format("the client was given the ramp's size and its table taken ({})", said));
-	server->damage_all();
+	server->outputs.damage_all();
 	return after(600);
 }
 
@@ -291,7 +291,7 @@ Result client_keeps_the_output() {
 }
 
 Result client_lets_go() {
-	server->damage_all();
+	server->outputs.damage_all();
 	return after(600);
 }
 
@@ -312,7 +312,7 @@ Result refused_table() {
 	check(said.find("FAILED") != std::string_view::npos,
 		std::format("a table the output cannot hold is refused ({})", said));
 	refuse_tables = false;
-	server->damage_all();
+	server->outputs.damage_all();
 	return after(600);
 }
 

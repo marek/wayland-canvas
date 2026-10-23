@@ -17,7 +17,7 @@ skills and roles beside it.
 | `shell/` | The Quickshell shell: the plugin host and the `WaylandCanvas.Ui` kit its plugins draw with |
 | `plugins/` | The built-in plugins (`canvas.bar`, the indicators with their panels, the `canvas.theme` light/dark switch, …) the host loads beside the shell |
 | `tests/` | Unit tests and headless scenario sources (`tests/scenarios/`) |
-| `tools/` | `build.sh` (build), `check.sh` (build + test), `package.sh` (both packages), `install.sh`, `check-plans.sh` and `plan-items.sh` (the plans), `media.py` (the README's pictures), `readme-preview.py` (the README as GitHub shows it), `hooks/` (wired in `.claude/settings.json`) |
+| `tools/` | `build.sh` (build), `check.sh` (include check + build + test), `check-includes.py` (the compositor's include graph), `package.sh` (both packages), `install.sh`, `check-plans.sh` and `plan-items.sh` (the plans), `media.py` (the README's pictures), `readme-preview.py` (the README as GitHub shows it), `hooks/` (wired in `.claude/settings.json`) |
 | `scripts/` | `agent-setup.sh` (links skills and roles into `.claude/`) |
 | `protocols/` | Protocol XML used beyond wlroots' set |
 | `docs/intents/` | Normative design specs (the intent corpus) |

@@ -11257,7 +11257,7 @@ int main() {
 			bar_surfaces_made++;
 		}
 	};
-	wl_list_insert(&server->layer_shell->events.new_surface.listener_list,
+	wl_list_insert(&server->layer_shell.wlr()->events.new_surface.listener_list,
 		&bar_surface_counter.link);
 	timer = wl_event_loop_add_timer(server->loop, [](void *data) { return handle_timer(); },
 		nullptr);

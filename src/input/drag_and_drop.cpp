@@ -48,18 +48,18 @@ void DragAndDrop::handle_start_drag(wlr_drag *drag) {
 		drag->icon->surface->events.commit, this);
 	icon_destroy_.connect<&DragAndDrop::handle_icon_destroy>(
 		drag->icon->events.destroy, this);
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void DragAndDrop::handle_icon_commit(wlr_surface *surface) {
 	dx_ += surface->current.dx;
 	dy_ += surface->current.dy;
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void DragAndDrop::handle_icon_destroy() {
 	forget_icon();
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void DragAndDrop::forget_icon() {

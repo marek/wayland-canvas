@@ -26,18 +26,18 @@ wlr_box inset_usable(const Output *output, wlr_box area, double zoom) {
 // else its desktop box, else a screen-sized box centred on the frame.
 wlr_box maximize_area(View &view) {
 	Rect frame = view.frame_rect();
-	Output *picked = view.server.output_showing(frame.cx(), frame.cy(),
-		Server::Showing::normal_view);
+	Output *picked = view.server.outputs.showing(frame.cx(), frame.cy(),
+		Outputs::Showing::normal_view);
 	if (picked != nullptr) {
 		return inset_usable(picked, box_of_viewport(picked->viewport()),
 			picked->camera.drawn().zoom);
 	}
 	Desktop *desktop = view.server.canvas.desktop_of(view);
 	if (desktop != nullptr) {
-		return inset_usable(view.server.output_under_cursor(), desktop->frame(),
+		return inset_usable(view.server.outputs.under_cursor(), desktop->frame(),
 			desktop->scale());
 	}
-	Output *any = view.server.output_under_cursor();
+	Output *any = view.server.outputs.under_cursor();
 	int w = any != nullptr ? any->width : 1280;
 	int h = any != nullptr ? any->height : 720;
 	wlr_box area{
@@ -156,9 +156,9 @@ wlr_box fullscreen_area(View &view) {
 		return *own;
 	}
 	Rect frame = view.frame_rect();
-	Output *picked = view.server.output_showing(frame.cx(), frame.cy());
+	Output *picked = view.server.outputs.showing(frame.cx(), frame.cy());
 	if (picked == nullptr) {
-		picked = view.server.output_under_cursor();
+		picked = view.server.outputs.under_cursor();
 	}
 	if (picked == nullptr) {
 		return wlr_box{
@@ -182,7 +182,7 @@ std::optional<wlr_box> area_for(View &view, WindowMode mode) {
 
 bool shown_anywhere(const View &view) {
 	Rect frame = view.frame_rect();
-	return view.server.output_showing(frame.cx(), frame.cy()) != nullptr
+	return view.server.outputs.showing(frame.cx(), frame.cy()) != nullptr
 		|| std::ranges::any_of(view.server.outputs,
 			[](const std::unique_ptr<Output> &output) { return output->overview.active(); });
 }
@@ -196,7 +196,7 @@ std::string opened_where(View &view) {
 }
 
 void place(View &view) {
-	Output *output = view.server.output_under_cursor();
+	Output *output = view.server.outputs.under_cursor();
 	if (output == nullptr) {
 		view.x = 0;
 		view.y = 0;

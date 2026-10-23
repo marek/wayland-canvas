@@ -12,7 +12,7 @@ Hint::~Hint() = default;
 void Hint::set(std::string_view text) {
 	if (text.empty()) {
 		clear();
-		server_.damage_all();
+		server_.outputs.damage_all();
 		return;
 	}
 	if (text == text_) {
@@ -21,7 +21,7 @@ void Hint::set(std::string_view text) {
 	}
 	text_.assign(text);
 	restart_timer();
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void Hint::keep() {
@@ -38,7 +38,7 @@ void Hint::restart_timer() {
 				// set({}) may have cleared it already; the timer just no-ops.
 				if (!hint->text_.empty()) {
 					hint->clear();
-					hint->server_.damage_all();
+					hint->server_.outputs.damage_all();
 				}
 				return 0;
 			}, this));

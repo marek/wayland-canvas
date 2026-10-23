@@ -102,7 +102,7 @@ void SessionLock::handle_client_destroy() {
 		wlr_log(WLR_INFO, "the locker is gone; the session stays locked");
 		arm_idle_timer();
 		server_.focus.focus_keyboard(nullptr);
-		server_.damage_all();
+		server_.outputs.damage_all();
 	}
 }
 
@@ -116,7 +116,7 @@ void SessionLock::lock_session() {
 	server_.input.abandon_interaction();
 	server_.launcher.close();
 	server_.focus.focus_keyboard(nullptr);
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void SessionLock::unlock_session() {
@@ -135,20 +135,20 @@ void SessionLock::unlock_session() {
 	if (focused != nullptr && server_.focus.focused_layer() == nullptr) {
 		server_.focus.focus_keyboard(focused->surface());
 	}
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void SessionLock::surface_mapped() {
 	refocus();
 	send_locked_when_covered();
-	server_.damage_all();
+	server_.outputs.damage_all();
 }
 
 void SessionLock::surface_gone(LockSurface *surface) {
 	std::erase_if(surfaces_, [surface](const std::unique_ptr<LockSurface> &held) {
 		return held.get() == surface;
 	});
-	server_.damage_all();
+	server_.outputs.damage_all();
 	refocus();
 }
 
@@ -182,7 +182,7 @@ void SessionLock::refocus() {
 	if (!locked_) {
 		return;
 	}
-	Output *under = server_.output_under_cursor();
+	Output *under = server_.outputs.under_cursor();
 	if (under != nullptr) {
 		if (wlr_surface *surface = surface_for(*under)) {
 			server_.focus.focus_keyboard(surface);

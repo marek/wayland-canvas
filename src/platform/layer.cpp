@@ -266,7 +266,7 @@ void LayerSurface::place(wlr_box box) {
 		server.canvas_surfaces.add(*this);
 	}
 	// Where it was and where it is now: both may be on any output.
-	server.damage_all();
+	server.outputs.damage_all();
 }
 
 void LayerSurface::unplace() {
@@ -276,7 +276,7 @@ void LayerSurface::unplace() {
 		server.canvas_surfaces.remove(*this); // back on its screen
 	}
 	output->arrange_layers();
-	server.damage_all();
+	server.outputs.damage_all();
 }
 
 void LayerSurface::damage() {
@@ -435,34 +435,4 @@ LayerSurface *exclusive_keyboard_holder(const Server &server) {
 		}
 	}
 	return nullptr;
-}
-
-void Server::init_layers() {
-	layer_shell = wlr_layer_shell_v1_create(display, 4);
-	if (layer_shell == nullptr) {
-		wlr_log(WLR_ERROR, "failed to create the layer shell");
-		return;
-	}
-	new_layer_surface_.connect<&Server::handle_new_layer_surface>(
-		layer_shell->events.new_surface, this);
-}
-
-void Server::finish_layers() {
-	new_layer_surface_.disconnect();
-}
-
-void Server::handle_new_layer_surface(wlr_layer_surface_v1 *ls) {
-	Output *output = ls->output != nullptr
-		? static_cast<Output *>(ls->output->data)
-		: output_under_cursor();
-	if (output == nullptr) {
-		wlr_log(WLR_ERROR, "layer surface with no output to place it on");
-		wlr_layer_surface_v1_destroy(ls);
-		return;
-	}
-	ls->output = output->wlr;
-
-	// Head of a layer vector is the topmost (newest) surface.
-	auto &vec = output->layers[ls->pending.layer];
-	vec.insert(vec.begin(), std::make_unique<LayerSurface>(*this, *output, ls));
 }

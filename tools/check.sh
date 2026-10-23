@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # usage: tools/check.sh [--unit] [--sanitize]   (--unit: stop after the unit suites)
 #
-# Build (tools/build.sh) and run the test strands in order:
+# Check the include graph (tools/check-includes.py), build (tools/build.sh)
+# and run the test strands in order:
 # `meson test --suite unit`, then `meson test --suite packaging`, then
 # `meson test --suite scenarios`. Exits non-zero on the first failure.
 #
@@ -48,6 +49,9 @@ if [[ "$sanitize" -eq 1 ]]; then
 	export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 	export LSAN_OPTIONS=suppressions=$repo/tests/lsan.supp
 fi
+
+echo "check.sh: tools/check-includes.py"
+python3 tools/check-includes.py
 
 echo "check.sh: tools/build.sh ${build_args[*]}"
 tools/build.sh "${build_args[@]}"

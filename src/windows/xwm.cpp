@@ -207,7 +207,7 @@ void Xwm::sync() {
 }
 
 void Xwm::follow_pointer() {
-	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);
+	Output *output = server_.outputs.at(server_.cursor->x, server_.cursor->y);
 	if (wlr_ == nullptr || output == nullptr || !output->interactive()
 			|| std::ranges::none_of(server_.views, [](const View *view) {
 				return view->as_x11() != nullptr;
@@ -263,7 +263,7 @@ void Xwm::follow_pointer() {
 // took first. Over anything but an X11 window, X's pointer is in no window.
 void Xwm::put_pointer() {
 	xcb_connection_t *conn = connection();
-	Output *output = server_.output_at(server_.cursor->x, server_.cursor->y);
+	Output *output = server_.outputs.at(server_.cursor->x, server_.cursor->y);
 	if (conn == nullptr || output == nullptr) {
 		return;
 	}

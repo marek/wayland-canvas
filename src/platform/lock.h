@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "core/util.h"
+#include "input/input_gate.h"
 
 class Output;
 class Server;
@@ -37,7 +38,7 @@ private:
 // output shows what the screen shows: the locker, or an opaque fill where
 // it has no surface yet. A locker that dies leaves the session locked; the
 // next locker takes it over.
-class SessionLock {
+class SessionLock final : public InputGate {
 public:
 	explicit SessionLock(Server &server);
 	~SessionLock();
@@ -47,12 +48,12 @@ public:
 	void init();
 	void finish();
 
-	bool locked() const { return locked_; }
+	bool locked() const override { return locked_; }
 	// True while the session is locked with no client to draw it: a locker
 	// that died, or one that has not drawn this output yet.
 	bool abandoned() const { return locked_ && client_ == nullptr; }
 	// The locker's mapped surface for `output`, nullptr when it has none.
-	wlr_surface *surface_for(const Output &output) const;
+	wlr_surface *surface_for(const Output &output) const override;
 	// Gives the keyboard to the locker's surface under the cursor, else to
 	// any of its surfaces; clears the focus when it has none.
 	void refocus();
@@ -69,7 +70,7 @@ public:
 	bool requested() const { return requested_; }
 
 	// Input of any kind: the idle countdown starts again.
-	void notice_activity();
+	void notice_activity() override;
 	// The countdown ran out: locks unless something holds it off.
 	void idle_elapsed();
 	// Whether the idle countdown is running at all.

@@ -138,7 +138,7 @@ struct Server::SurfaceTracker {
 			view->damage();
 			return;
 		}
-		server_.damage_all(); // drag icons and other unowned surfaces
+		server_.outputs.damage_all(); // drag icons and other unowned surfaces
 	}
 
 	void handle_destroy() {
@@ -168,14 +168,16 @@ struct Server::Inhibitor {
 };
 
 Server::Server()
-	: text_cache(*this), input(*this), bindings(*this), gestures(*this), hint(*this),
+	: text_cache(*this), outputs(*this), input(*this), bindings(*this), gestures(*this),
+	hint(*this),
 	launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), ipc(), ipc_events(*this, ipc),
 	image_capture(*this),
 	capture_ui(*this), lock(*this), night_light(*this), logind(*this), focus(*this),
-	canvas_surfaces(*this), conf(*this), xwm(*this) {
+	canvas_surfaces(*this), conf(*this), xwm(*this), xdg_shell(*this), layer_shell(*this) {
 	register_ipc_methods(ipc, *this);
 	input.set_layers({&capture_ui, &launcher});
+	input.set_gate(lock);
 }
 
 Server::~Server() {
@@ -207,10 +209,12 @@ Server::~Server() {
 	// wlroots asserts that destroyed objects have no listeners left.
 	input.finish();
 	decorations.finish();
-	finish_layers();
-	finish_xdg_shell();
-	finish_views();
-	finish_outputs();
+	layer_shell.finish();
+	xdg_shell.finish();
+	// Release textures and foreign toplevel handles before the renderer and display go.
+	views.clear();
+	toplevels.clear();
+	outputs.finish();
 	new_surface_.disconnect();
 	request_activate_.disconnect();
 	new_inhibitor_.disconnect();
@@ -310,9 +314,9 @@ bool Server::init(const Options &options) {
 		: config::cursor_size;
 	xcursor_mgr = wlr_xcursor_manager_create(getenv("XCURSOR_THEME"), cursor_size);
 
-	init_outputs();
-	init_xdg_shell();
-	init_layers();
+	outputs.init();
+	xdg_shell.init();
+	layer_shell.init();
 	decorations.init();
 	input.init();
 	image_capture.init();
@@ -399,7 +403,7 @@ void Server::set_theme(ThemeMode mode) {
 	theme.set_mode(mode);
 	// Every cached texture was drawn with the old palette.
 	text_cache.clear();
-	damage_all();
+	outputs.damage_all();
 	changed(Change::theme);
 }
 
@@ -416,13 +420,35 @@ void Server::flush_pending() {
 	// A window that left fullscreen, by any path, comes back from its own
 	// desktop before the frame shows where it is.
 	canvas.fullscreen_desktops.reconcile();
-	update_visibility();
+	outputs.update_visibility();
 	ipc_events.flush();
 	if (pointer_focus_stale) {
 		pointer_focus_stale = false;
 		input.rebase_cursor();
 	}
 	xwm.sync();
+}
+
+void Server::view_gone(View &view) {
+	focus.forget(view);
+	input.forget(view);
+	capture_ui.forget(view);
+	image_capture.forget(view);
+}
+
+void Server::output_gone(Output &output) {
+	input.output_gone(output);
+	gestures.output_gone(output);
+	for (View *view : views) {
+		view->output_gone(output);
+	}
+	output.release_layers();
+	outputs.visibility_changed();
+}
+
+void Server::outputs_changed() {
+	changed(Change::outputs);
+	input.outputs_changed();
 }
 
 void Server::handle_new_surface(wlr_surface *surface) {

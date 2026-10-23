@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <variant>
@@ -50,9 +51,13 @@ public:
 	struct TitleButton { View *view; Output *output; DecoPart part; };
 	struct OverviewPress { Output *output; GrabAnchor anchor; PressTarget target; };
 	struct DesktopDrag { Output *output; DesktopId desktop; GrabAnchor anchor; wlr_box start; std::optional<DesktopId> drop; };
+	// How a surface drag ended: the rectangle the surface ended at, or
+	// nothing when the drag did not end with a release.
+	using SurfaceDragDone = std::function<void(std::optional<wlr_box>)>;
 	// A plugin's surface on the plane, moved (no edges) or sized by its
-	// edges for the client that asked (docs/intents/platform/ipc.md).
-	struct SurfaceDrag { LayerSurface *layer; Output *output; GrabAnchor anchor; wlr_box start; uint32_t edges; int min_w, min_h; };
+	// edges for the client that asked (docs/intents/platform/ipc.md); `done`
+	// tells that client, once, how it ended.
+	struct SurfaceDrag { LayerSurface *layer; Output *output; GrabAnchor anchor; wlr_box start; uint32_t edges; int min_w, min_h; SurfaceDragDone done; };
 	using State = std::variant<None, Move, Resize, Pan, TitleButton, OverviewPress,
 		DesktopDrag, SurfaceDrag>;
 
@@ -70,7 +75,7 @@ public:
 	// From the press at layout (lx, ly), which the surface's client was
 	// sent and answered by asking for this drag.
 	void begin_surface_drag(LayerSurface &layer, Output &output, double lx, double ly,
-		uint32_t edges, int min_w, int min_h);
+		uint32_t edges, int min_w, int min_h, SurfaceDragDone done);
 	void motion();
 	void release(); // a button release: acts (title button, overview click, combine or raise) and ends
 	void cancel();

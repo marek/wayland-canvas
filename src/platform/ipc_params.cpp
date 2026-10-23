@@ -67,7 +67,7 @@ std::expected<Output *, std::string> opt_output(Server &server, JsonObject *para
 		return std::unexpected(name.error());
 	}
 	if (!name->has_value()) {
-		return server.output_under_cursor();
+		return server.outputs.under_cursor();
 	}
 	for (const std::unique_ptr<Output> &output : server.outputs) {
 		if (*(*name) == output->wlr->name) {

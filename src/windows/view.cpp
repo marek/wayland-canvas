@@ -76,7 +76,7 @@ void View::damage() {
 
 void View::visibility_changed() {
 	damage();
-	server.visibility_changed();
+	server.outputs.visibility_changed();
 }
 
 void View::update_outputs(uint32_t mask) {
@@ -156,7 +156,34 @@ void View::activate() {
 		set_minimized(false);
 	}
 	server.focus.focus_view(this);
-	server.reveal_view(*this);
+	reveal();
+}
+
+void View::reveal() {
+	Output *output = server.outputs.under_cursor();
+	if (output == nullptr) {
+		return;
+	}
+	wlr_box frame = frame_box();
+	Point centre = box_centre(frame);
+	if (!output->overview.active()) {
+		Rect vp = output->viewport();
+		if (frame.x >= vp.x && frame.y >= vp.y
+				&& frame.x + frame.width <= vp.x + vp.w
+				&& frame.y + frame.height <= vp.y + vp.h) {
+			return;
+		}
+	}
+	Desktop *desktop = server.canvas.desktop_of(*this);
+	wlr_box box = desktop != nullptr ? desktop->frame()
+		: centred_box(output->width, output->height, centre.x, centre.y);
+	if (output->overview.active()) {
+		output->overview.set_target(box, id_of(desktop), false);
+		output->overview.exit();
+		return;
+	}
+	output->camera.animate_to(
+		camera_for_box(box, desktop != nullptr ? desktop->scale() : 1.0));
 }
 
 void View::focus_changed(bool focused) {
@@ -346,13 +373,6 @@ void View::handle_map() {
 	server.changed(Change::windows);
 }
 
-void Server::view_gone(View &view) {
-	focus.forget(view);
-	input.forget(view);
-	capture_ui.forget(view);
-	image_capture.forget(view);
-}
-
 void View::handle_unmap() {
 	bool held_focus = server.focus.focused_view() == this;
 	server.view_gone(*this);
@@ -438,7 +458,7 @@ void View::handle_request_move() {
 	if (!grab_allowed(server, *this)) {
 		return;
 	}
-	Output *output = server.output_under_cursor();
+	Output *output = server.outputs.under_cursor();
 	if (output != nullptr) {
 		server.input.grab.begin_move(*this, *output);
 	}
@@ -448,7 +468,7 @@ void View::handle_request_resize(uint32_t edges) {
 	if (!grab_allowed(server, *this)) {
 		return;
 	}
-	Output *output = server.output_under_cursor();
+	Output *output = server.outputs.under_cursor();
 	if (output != nullptr) {
 		server.input.grab.begin_resize(*this, *output, edges);
 	}
@@ -458,39 +478,4 @@ void View::handle_set_names() {
 	foreign_.publish();
 	server.changed(Change::windows);
 	damage();
-}
-
-// ---- Server: views ----
-
-void Server::finish_views() {
-	// Release textures and foreign toplevel handles before the renderer and display go.
-	views.clear();
-	toplevels.clear();
-}
-
-void Server::reveal_view(View &view) {
-	Output *output = output_under_cursor();
-	if (output == nullptr) {
-		return;
-	}
-	wlr_box frame = view.frame_box();
-	Point centre = box_centre(frame);
-	if (!output->overview.active()) {
-		Rect vp = output->viewport();
-		if (frame.x >= vp.x && frame.y >= vp.y
-				&& frame.x + frame.width <= vp.x + vp.w
-				&& frame.y + frame.height <= vp.y + vp.h) {
-			return;
-		}
-	}
-	Desktop *desktop = canvas.desktop_of(view);
-	wlr_box box = desktop != nullptr ? desktop->frame()
-		: centred_box(output->width, output->height, centre.x, centre.y);
-	if (output->overview.active()) {
-		output->overview.set_target(box, id_of(desktop), false);
-		output->overview.exit();
-		return;
-	}
-	output->camera.animate_to(
-		camera_for_box(box, desktop != nullptr ? desktop->scale() : 1.0));
 }

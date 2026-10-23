@@ -172,7 +172,7 @@ Result first_run_and_open() {
 }
 
 Result panel_renders_and_filters() {
-	Output *o = server->output_under_cursor();
+	Output *o = server->outputs.under_cursor();
 	std::optional<Launcher::Panel> panel = server->launcher.panel(*o);
 	int pw = panel ? panel->box.width : 0, ph = panel ? panel->box.height : 0;
 	check(panel && pw > 0, std::format("launcher panel rendered ({}x{})", pw, ph));
@@ -233,7 +233,7 @@ Result outside_click_closes() {
 
 // Click the first result row: launches it.
 Result result_click_launches() {
-	Output *o = server->output_under_cursor();
+	Output *o = server->outputs.under_cursor();
 	PanelLayout layout = panel_layout(o->width, o->height);
 	wlr_box first = layout.row(0);
 	views_before = mapped();

@@ -67,6 +67,10 @@ public:
 	// Moves the window and the box it restores to by the same offset.
 	void translate(int dx, int dy);
 	void activate();
+	// Brings the window into sight on the output under the pointer: the camera
+	// pans to its desktop or its box, or an open overview exits onto it;
+	// nothing moves when it is already in view.
+	void reveal();
 	// The window gained or lost the focus (Focus::focus_view): its client, its
 	// foreign toplevel handle and its title bar follow.
 	void focus_changed(bool focused);
