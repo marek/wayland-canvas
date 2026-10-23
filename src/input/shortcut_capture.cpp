@@ -39,7 +39,6 @@ void ShortcutCapture::finish() {
 }
 
 void ShortcutCapture::begin(Done done) {
-	// A second capture cancels the first (it answers nullopt).
 	cancel();
 	capture_ = Capture{.done = std::move(done)};
 	// What is held when the capture begins counts into the chord.
@@ -135,8 +134,6 @@ void ShortcutCapture::key(const wlr_keyboard_key_event &event,
 	if (!pressed) {
 		return;
 	}
-	// The first non-modifier key ends it as the chord held now. A bare
-	// Escape cancels.
 	if (xkb_keysym_to_lower(syms[0]) == XKB_KEY_Escape && capture.mods == 0) {
 		end(std::nullopt);
 		return;

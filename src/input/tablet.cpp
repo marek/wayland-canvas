@@ -121,8 +121,6 @@ Tablets::Tool *Tablets::tool_for(wlr_tablet_tool *wlr) {
 	return tools_.back().get();
 }
 
-// ---- the tool ----
-
 void Tablets::move(Tool &tool, Device &device, uint32_t time) {
 	double lx = server_.cursor->x, ly = server_.cursor->y;
 	wlr_tablet_v2_tablet_tool *v2 = tool.v2;
@@ -188,8 +186,6 @@ void Tablets::send_axes(Tool &tool, const wlr_tablet_tool_axis_event &event) {
 		wlr_tablet_v2_tablet_tool_notify_wheel(v2, event.wheel_delta, 0);
 	}
 }
-
-// ---- the cursor's tablet events ----
 
 void Tablets::handle_proximity(wlr_tablet_tool_proximity_event *event) {
 	if (input_.x_gate.waits<&Tablets::handle_proximity>(this, event, false)) {

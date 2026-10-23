@@ -76,18 +76,14 @@ void draw_tabs(const RenderCtx &ctx) {
 				layout->tab.y + (layout->tab.height - label.h) / 2,
 				label.w, label.h, 1.0);
 		}
-		// The tab's glyphs follow the same rule as the label: on the target
-		// tab they sit on the accent fill, so they take the accent-text
-		// colour — a contrast in both modes — including the lit Tile
-		// switch's wash and glyph. Non-target tabs keep the panel-text
-		// glyphs and the accent-lit switch.
+		// Glyphs follow the label's rule: accent text on the target's accent
+		// fill, panel text elsewhere; a lit Tile switch is accent except on it.
 		uint32_t ink = target ? server.theme.colors().accent_text
 			: server.theme.colors().panel_text;
 		uint32_t lit = target ? server.theme.colors().accent_text
 			: server.theme.colors().accent;
 		wlr_render_color fg = color_rgba(ink);
 		if (d.tiling()) {
-			// The Tile switch, lit while tiling is on.
 			draw_logical_rect(ctx, layout->tile_button.x, layout->tile_button.y,
 				layout->tile_button.width, layout->tile_button.height,
 				color_rgba(lit, 0.25f));
@@ -182,8 +178,6 @@ void draw_help_line(const RenderCtx &ctx, const OverviewBottom &bottom) {
 
 } // namespace
 
-// The overview's help line, one variant per swipe preset: the preset's
-// gestures and the pointer and key hints, or only those under `off`.
 const char *overview_help_text(const GestureOptions &options) {
 	switch (options.swipes) {
 	case settings::SwipePreset::three_finger_hops:
@@ -216,8 +210,8 @@ std::optional<TabLayout> overview_tab_layout(const Output &o, const Desktop &des
 	double frame_left = (desktop.frame().x - left) * cam.zoom + offset;
 	double frame_top = (desktop.frame().y - top) * cam.zoom;
 
-	// The text's width once the first frame has drawn it, a guess of nine
-	// pixels a character before.
+	// The label's width once the text cache has drawn it; until then a guess
+	// of config::tab_label_guess per character.
 	LabelBuffer buf;
 	std::string_view text = desktop_label_text(desktop, buf);
 	std::optional<CachedText> label = server.text_cache.find_size(

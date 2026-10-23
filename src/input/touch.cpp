@@ -98,8 +98,6 @@ bool Touch::centroid(double &cx, double &cy) const {
 	return true;
 }
 
-// ---- the events ----
-
 void Touch::handle_down(wlr_touch_down_event *event) {
 	// A finger on an X11 window waits until X has taken in its window moves.
 	double lx = 0, ly = 0;
@@ -268,7 +266,6 @@ void Touch::handle_up(wlr_touch_up_event *event) {
 		bool tap = press != nullptr && press->phase == Press::Phase::waiting;
 		end_press(time);
 		if (tap) {
-			// A tap: a click where the finger landed.
 			input_.router.contact_button(time, BTN_LEFT, true);
 			input_.router.contact_button(time, BTN_LEFT, false);
 		}
@@ -337,8 +334,6 @@ void Touch::apply_moves() {
 		update_two(*two, moved_time_);
 	}
 }
-
-// ---- gestures ----
 
 void Touch::begin_swipe(uint32_t time, uint32_t fingers) {
 	// Three or four fingers are the compositor's: what had reached a client
@@ -438,8 +433,6 @@ void Touch::end_two(uint32_t time, bool cancelled) {
 	state_ = Idle{};
 }
 
-// ---- endings ----
-
 void Touch::cancel_clients() {
 	for (Contact &contact : contacts_) {
 		if (contact.role != Role::client) {
@@ -474,8 +467,6 @@ void Touch::end_all(uint32_t time) {
 	end_two(time, true);
 	contacts_.clear();
 }
-
-// ---- press and hold ----
 
 void Touch::arm_hold() {
 	if (!hold_timer_) {

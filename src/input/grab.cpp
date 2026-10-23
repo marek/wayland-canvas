@@ -45,8 +45,8 @@ void finish_surface_drag(PointerGrab::SurfaceDrag &drag, std::optional<wlr_box> 
 	}
 }
 
-// Target the desktop a view belongs to, or a screen-sized free spot
-// centred on the view, and leave the overview onto it.
+// Targets the desktop a view belongs to, or a screen-sized free spot centred
+// on the view.
 void overview_target_view(Server &server, Output &output, View &view) {
 	Desktop *desktop = server.canvas.desktop_of(view);
 	if (desktop != nullptr) {
@@ -93,8 +93,8 @@ void PointerGrab::begin_move(View &view, Output &output) {
 		.moved = false,
 	};
 	if (view.mode == WindowMode::maximized) {
-		// Remember where on the title bar the grab started so the
-		// drag-restore below can keep the cursor at the same spot.
+		// Where on the title bar the grab started: move_motion's drag-restore
+		// keeps the cursor at that spot.
 		wlr_box frame = view.frame_box();
 		move.rel_x = frame.width > 0
 			? clampd((p.x - frame.x) / frame.width, 0.0, 1.0) : 0.5;
@@ -381,9 +381,7 @@ void PointerGrab::release() {
 		[this](TitleButton &s) { release_title_button(s); },
 		[this](OverviewPress &s) { overview_click(s); },
 		[this](DesktopDrag &s) { drop_desktop_drag(s); },
-		// A user move ends on the board: swap slices with the window under
-		// the drop, take the largest free slice under it, or leave the
-		// board when dropped outside. A resize ends back on its slice.
+		// A move ends on the board (Canvas::drop); a resize ends back on its slice.
 	[this](Move &s) { server_.canvas.drop(*s.view); },
 	[this](Resize &s) { server_.canvas.settle(*s.view); },
 		[](SurfaceDrag &s) { finish_surface_drag(s, s.layer->canvas_box); },

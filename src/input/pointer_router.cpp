@@ -13,6 +13,8 @@
 namespace {
 
 // The bit `button` holds in the buttons pressed and forwarded to a client.
+// A pointer's buttons are BTN_LEFT..BTN_TASK (0x110-0x117), distinct in their
+// low five bits; the mask keeps the shift under 32.
 uint32_t button_bit(uint32_t button) {
 	return 1u << (button & 31);
 }

@@ -9,12 +9,10 @@
 class Server;
 class View;
 
-// A window going fullscreen over other windows goes to a desktop of its own
-// beside the one it was on, so that desktop keeps the rest as it was; when it
-// leaves fullscreen, by whatever path, it comes back and the desktop goes
-// (docs/intents/windows/window-management.md). The window's own state is the
-// truth: what it left is reconciled from it once a frame, so no path out of
-// fullscreen has to remember this.
+// A window fullscreen over other windows gets a desktop of its own beside the
+// one it was on, so that desktop keeps the rest as it was; it comes back when
+// it leaves fullscreen, by whatever path, because reconcile() works from the
+// window's own state (docs/intents/windows/window-management.md).
 class FullscreenDesktops {
 public:
 	explicit FullscreenDesktops(Server &server);
@@ -26,9 +24,9 @@ public:
 	void enter(View &view, wlr_box covers);
 	// The frame of the desktop `view` holds for itself while fullscreen.
 	std::optional<wlr_box> area(const View &view) const;
-	// A window no longer fullscreen, or gone, comes back with its dialogs,
-	// its desktop goes, and a screen still on it returns to the desktop it
-	// came from. Run once a frame.
+	// A window out of fullscreen, or gone, comes back with its dialogs, its
+	// desktop goes, and a screen still on it returns to the desktop it came
+	// from. Run once a frame.
 	void reconcile();
 
 private:

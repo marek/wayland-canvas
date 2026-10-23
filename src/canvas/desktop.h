@@ -15,8 +15,9 @@ class Server;
 // A desktop's unique identity; handed out once and never reused.
 enum class DesktopId : int {};
 
-// A screen-sized rectangle on the canvas. Windows belong to the desktop their centre
-// lies in, or whose board holds them; moving the frame never moves windows.
+// A screen-sized rectangle on the canvas. A window belongs to the desktop
+// whose board holds it, else the one its centre lies in; the frame carries
+// its windows only on a tiled desktop (Canvas::move_desktop).
 class Desktop {
 public:
 	// `frame` fills the screen at `scale`: the base size is the frame times it.

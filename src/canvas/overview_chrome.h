@@ -40,8 +40,7 @@ using Shelf = std::inplace_vector<ShelfItem, shelf_max>;
 
 // The overview's bottom stack on an output, from its bottom edge (or the top of
 // the highest strip anchored to it) up: the help line, the row a hint takes
-// above it, and the shelf's bottom above both. Output-local logical px. What is
-// drawn and what takes the pointer read this one layout.
+// above it, and the shelf's bottom above both.
 struct OverviewBottom {
 	wlr_box help{}; // the help line, shrunk to fit a narrow output; empty without text
 	wlr_box hint{}; // the hint's row, as wide as the output
@@ -56,7 +55,8 @@ OverviewBottom overview_bottom_layout(const Output &output, float scale);
 Shelf overview_shelf_layout(const Output &output);
 
 // The overview's help line for the gesture options in force: the swipe
-// preset's gestures, or only the keys when no preset binds any.
+// preset's gestures with the pointer and key hints, or only the hints when no
+// preset binds any.
 const char *overview_help_text(const GestureOptions &options);
 
 // A desktop tab's label at `scale`, from the text cache; `on_accent` is the

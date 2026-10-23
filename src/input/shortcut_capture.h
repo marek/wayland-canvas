@@ -47,9 +47,6 @@ private:
 		std::vector<uint32_t> draining; // their keycodes
 	};
 
-	// Every key of a capture under way: modifiers are tracked, the first
-	// non-modifier key ends it as the chord, a lone Super release is the
-	// tap, and a bare Escape cancels.
 	void key(const wlr_keyboard_key_event &event, std::span<const xkb_keysym_t> syms);
 	// Answers the capture — the chord pressed, or nothing on a cancel —
 	// after which the keys held at the end drain before it is gone.

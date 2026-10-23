@@ -90,13 +90,10 @@ public:
 	// The binding modifiers (Shift, Ctrl, Alt, Super) held on the seat's
 	// keyboard, as WLR_MODIFIER_* bits.
 	uint32_t held_modifiers() const;
-	// Super is held on the seat's keyboard.
 	bool super_held() const;
 	void set_cursor_image(const char *name);
 	// A view was unmapped or destroyed: drop what referred to it.
 	void forget(const View &view);
-
-	// ---- the compositor's own UIs (input/ui_layer.h) ----
 
 	// Set once by Server: the layers, topmost first. Every path that gives
 	// a layer input, a frame or a change of palette goes through this list.
@@ -120,10 +117,10 @@ public:
 	// (input/gestures.md).
 	void settings_changed();
 
-	// Every interaction under way ends without running what it was for: a
-	// pointer grab, the press held on a client, every touch contact and pen
-	// in range, a shortcut capture, a Super tap waiting out its interval.
-	// The session locking.
+	// The session locking: every interaction under way ends without running
+	// what it was for — a pointer grab, the press held on a client, every
+	// touch contact and pen in range, a shortcut capture, a Super tap waiting
+	// out its interval.
 	void abandon_interaction();
 	// Every touch contact and every pen in range ends as if lifted: the
 	// session locking or an output going, so none goes on reaching what it
@@ -140,8 +137,6 @@ public:
 	std::vector<std::unique_ptr<Keyboard>> keyboards;
 
 	std::vector<std::unique_ptr<PointerDevice>> pointers;
-
-	// ---- touch and the pen (input/touch.cpp, input/tablet.cpp) ----
 
 	// Touch and pen input are activity: the idle countdown restarts and a
 	// Super tap is off.

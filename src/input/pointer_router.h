@@ -37,13 +37,12 @@ public:
 	bool button_held_on(const wlr_surface *surface) const;
 	double press_lx() const { return held_.lx; }
 	double press_ly() const { return held_.ly; }
-	// The pointer is no longer kept on the held surface; the next motion
+	// The pointer stops being kept on the held surface; the next motion
 	// finds what is under it. The buttons stay as they are.
 	void end_hold();
 
 	// A view was unmapped or destroyed: drop what referred to it.
 	void forget(const View &view);
-	// Title double-click state: the view of the last click.
 	View *last_title_view = nullptr;
 
 	// What a touch or the pen at layout (lx, ly) reaches of the clients'

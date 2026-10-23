@@ -83,8 +83,7 @@ void Overview::reset_target() {
 Camera Overview::prepare() {
 	output_.camera.stop();
 	Camera home = output_.camera.current();
-	// Home is where the camera came from: resting at the shown desktop's
-	// scale, or 1 in a free view.
+	// Home is where the camera came from, at the zoom it rests at.
 	home.zoom = output_.resting_zoom();
 	home_ = home;
 	reset_target();

@@ -16,34 +16,36 @@ class Canvas {
 public:
 	explicit Canvas(Server &server);
 
-	// Mapped, unminimized views whose centre lies in `box`, topmost first; at most 64.
+	// Mapped, unminimized views whose centre lies in `box`, topmost first,
+	// up to `box_views_max` (canvas.cpp).
 	std::vector<View *> views_in(wlr_box box) const;
-	// The desktop the view's centre lies in.
+	// The desktop whose board holds the view, else the one its centre lies in.
 	Desktop *desktop_of(const View &view);
 	// The views in `area` whose kind tiles, as slices on a one-shot board,
 	// once: a free spot has no tiling switch. They keep no board membership.
 	void tile(wlr_box area, const Output &output);
 	// Flips a desktop's tiling switch: on lays its standing windows onto the
 	// board by the new-window rule; off leaves them where the board left
-	// them, told they are no longer tiled.
+	// them, marked not tiled.
 	void toggle_tiling(DesktopId id);
 	// Super+Left/Right/Up/Down: steps the focused view's slice and pushes the
-	// windows it covers. A step that leaves a covered window nowhere to go is
-	// not taken.
+	// windows it covers. `axis` is 0 for x, 1 for y; `dir` -1 toward the
+	// first (left, up) half, +1 toward the second. A step that leaves a
+	// covered window nowhere to go is not taken.
 	void step(View &view, int axis, int dir);
 	// A view's board membership may have changed (opened, closed, a state
 	// toggled, a move ended): it returns to its slice when it is still free,
 	// joins the board where it stands, or leaves the board behind.
 	void settle(View &view);
-	// Drops the view from its board: told it is no longer tiled, slice and
-	// membership dropped with it.
+	// Drops the view from its board: marked not tiled, slice and membership
+	// dropped with it.
 	void leave_board(View &view);
 	// A tiled view's drag ended: inside its desktop it swaps slices with the
 	// window under the drop or takes the largest free slice under it; outside
 	// the desktop it leaves the board.
 	void drop(View &view);
 	// Takes a desktop away; its windows stay where they stand. A tiled
-	// desktop's are told they are no longer tiled and drop their slices.
+	// desktop's are marked not tiled and drop their slices.
 	void remove_desktop(DesktopId id);
 	// Moves a desktop's frame. A tiled desktop carries its windows with it; the
 	// windows of any other stay on the canvas and may belong to another

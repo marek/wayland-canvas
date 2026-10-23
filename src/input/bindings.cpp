@@ -49,11 +49,9 @@ void act_launcher(Server &server, Output *output, KeyArg) {
 	server.launcher.toggle(output);
 }
 
-// Super+C and Super+V: the surface with the keyboard is sent the clipboard
-// chord — Ctrl+Insert to copy, Shift+Insert to paste, the keys GTK, Qt,
-// Chrome and Electron apps take natively and terminals are set to take —
-// with only that modifier held (not the Super of the shortcut), then the
-// keyboard's real modifiers again.
+// Super+C and Super+V: the focused surface gets Ctrl+Insert (copy) or
+// Shift+Insert (paste), the keys GTK, Qt, Chrome, Electron and terminals take
+// natively, with only that modifier held rather than the shortcut's Super.
 void act_clipboard_chord(Server &server, Output *, KeyArg arg) {
 	wlr_seat *seat = server.seat;
 	wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
@@ -184,8 +182,7 @@ void act_move_dir(Server &server, Output *output, KeyArg arg) {
 void act_pan(Server &, Output *output, KeyArg arg) {
 	Dir dir = std::get<Dir>(arg);
 	if (output != nullptr) {
-		// A third of the screen at the camera's zoom: the canvas moves a
-		// third of what it shows.
+		// A third of what the screen shows at the camera's zoom.
 		double zoom = output->camera.current().zoom;
 		output->pan(dir.dx * output->width / (3.0 * zoom),
 			dir.dy * output->height / (3.0 * zoom));
@@ -315,8 +312,6 @@ void act_record_stop(Server &server, Output *output, KeyArg arg) {
 		{.clipboard = std::get<int>(arg) != 0});
 }
 
-// ------------------------------------------------------- overview actions
-
 void act_ov_hop(Server &, Output *output, KeyArg arg) {
 	Dir dir = std::get<Dir>(arg);
 	if (output != nullptr) {
@@ -405,8 +400,6 @@ void act_ov_leave(Server &, Output *output, KeyArg) {
 		output->overview.exit();
 	}
 }
-
-// ------------------------------------------------------------ the runners
 
 // What each registry action runs, by scope and name — the same names
 // canvas.conf writes (core/settings.cpp's registry()). Bindings::apply joins
@@ -558,9 +551,7 @@ void Bindings::apply(const settings::Resolved &resolved) {
 	commands_.clear();
 	command_lines_.clear();
 
-	// Super+Shift+3 is '#' on a US layout, so the digits are matched
-	// through their unshifted level too (input.cpp), and Shift+Print is
-	// Sys_Req on most layouts, so both keysyms are bound.
+	// Shift+Print is Sys_Req on most layouts, so both keysyms are bound.
 	auto add = [](std::vector<Bind> &table, const settings::Chord &chord,
 			Bind bind) {
 		bind.mods = chord.mods;

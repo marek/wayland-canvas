@@ -9,14 +9,12 @@
 class Output;
 class Server;
 
-// The keyboard shortcuts, as the resolved settings (core/settings.h) hold
-// them: the global table everywhere but in the overview, the overview
-// table in it, the [commands] chords, and the lone Super tap. An action's
-// `reach` decides where its chords apply: the chords of an `everywhere`
-// action (the capture group) are tried before all else, so they work in
-// the overview and while the capture UI holds the keyboard. Each action is
-// joined to what it runs once, in `apply`. VT switching is in no file and
-// no chord can take it.
+// The keyboard shortcuts as the resolved settings (core/settings.h) hold
+// them: the global table, the overview table, the [commands] chords and the
+// lone Super tap. An action's `reach` decides where its chords apply; those
+// of an `everywhere` action (the capture group) are tried before all else, so
+// they work in the overview and while the capture UI holds the keyboard. VT
+// switching is in no file and no chord can take it.
 class Bindings {
 public:
 	explicit Bindings(Server &server);

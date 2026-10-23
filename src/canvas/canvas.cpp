@@ -16,7 +16,7 @@
 
 namespace {
 
-// Cap on views collected for tiling / combining; the rest stay untouched.
+// Cap on the views a tile, combine or board pass collects; the rest stay untouched.
 constexpr std::size_t box_views_max = 64;
 
 // The board's slices as canvas boxes.
@@ -164,9 +164,9 @@ void Canvas::toggle_tiling(DesktopId id) {
 			desktop->number()));
 		return;
 	}
-	// Windows stay where the board left them, told they are no longer tiled;
-	// the board and every remembered slice, minimized windows' included, is
-	// dropped with it.
+	// Windows stay where the board left them, marked not tiled; the board
+	// and every remembered slice, minimized windows' included, is dropped
+	// with it.
 	for (View *view : server_.views) {
 		if (view->seated_on(id)) {
 			leave_board(*view);
@@ -307,9 +307,6 @@ void Canvas::leave_board(View &view) {
 }
 
 void Canvas::settle(View &view) {
-	// Opened, moved, minimized or a state toggled: the window returns to its
-	// slice when it is still free, joins the board where it stands, or
-	// leaves the board behind.
 	if (view.board_seat.has_value()) {
 		Desktop *home = desktops.find(view.board_seat->desktop);
 		if (home == nullptr || !home->tiling()) {
@@ -430,7 +427,7 @@ void Canvas::combine(DesktopId into, DesktopId from, wlr_box from_area) {
 		}
 	} else if (from_tiled) {
 		// A tiled desktop combined into an untiled one leaves its windows
-		// where the translation put them, no longer tiled.
+		// where the translation put them, marked not tiled.
 		for (View *view : incoming) {
 			view->set_tiled(false);
 		}
@@ -471,8 +468,6 @@ void Canvas::settle_scale(DesktopId id, double scale) {
 			output->overview.set_target(desktop->frame(), id, false);
 		}
 	}
-	// A settled scale is a completed action, named. It re-lays out nothing:
-	// the windows keep their size and layout, a tiled grid its boxes.
 	server_.hint.set(std::format("Desktop {} · {} %", desktop->number(),
 		static_cast<int>(std::round(scale * 100))));
 }

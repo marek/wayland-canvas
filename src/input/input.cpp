@@ -20,8 +20,6 @@ namespace {
 constexpr uint32_t binding_mods = WLR_MODIFIER_SHIFT | WLR_MODIFIER_CTRL |
 	WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO;
 
-// ---- small helpers ----
-
 void notify_activity(Server &server) {
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier, server.seat);
 	server.input.gate().notice_activity();
@@ -50,8 +48,6 @@ std::span<const xkb_keysym_t> base_syms(wlr_keyboard *wlr, uint32_t keycode) {
 
 
 } // namespace
-
-// ---- keyboard devices ----
 
 Keyboard::Keyboard(Server &server, wlr_keyboard *wlr, bool has_keymap)
 	: wlr(wlr), server_(server) {
@@ -194,8 +190,6 @@ void Input::handle_new_virtual_keyboard(wlr_virtual_keyboard_v1 *keyboard) {
 	new_keyboard(&keyboard->keyboard.base, keyboard->has_keymap);
 }
 
-// ---- the compositor's own UIs ----
-
 UiLayer *Input::layer_for_keys() const {
 	for (UiLayer *layer : layers_) {
 		if (layer->owns_keyboard()) {
@@ -218,8 +212,6 @@ bool Input::gestures_blocked() const {
 	return std::ranges::any_of(layers_,
 		[](const UiLayer *layer) { return layer->blocks_gestures(); });
 }
-
-// ---- key events ----
 
 void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	Server &server = server_;
@@ -315,8 +307,6 @@ void Input::process_key(Keyboard &keyboard, wlr_keyboard_key_event *event) {
 	}
 }
 
-// ---- cursor image and position ----
-
 void Input::set_cursor_image(const char *name) {
 	if (name != nullptr && cursor_image_ != nullptr &&
 			std::strcmp(cursor_image_, name) == 0) {
@@ -368,8 +358,6 @@ void Input::rebase_cursor() {
 		router.motion(static_cast<uint32_t>(now_ms()));
 	}
 }
-
-// ---- touch and the pen ----
 
 void Input::contact_activity() {
 	notify_activity(server_);
@@ -431,8 +419,6 @@ void Input::output_gone(Output &output) {
 	}
 }
 
-// ---- cursor event handlers ----
-
 void Input::handle_cursor_motion(wlr_pointer_motion_event *event) {
 	if (x_gate.waits<&Input::handle_cursor_motion>(this, event, false)) {
 		return;
@@ -485,8 +471,6 @@ void Input::handle_cursor_frame() {
 	}
 	wlr_seat_pointer_notify_frame(server_.seat);
 }
-
-// ---- touchpad gestures (recognition is delegated to gesture.cpp) ----
 
 void Input::handle_swipe_begin(wlr_pointer_swipe_begin_event *event) {
 	if (x_gate.waits<&Input::handle_swipe_begin>(this, event, false)) {
@@ -561,8 +545,6 @@ void Input::handle_hold_end(wlr_pointer_hold_end_event *event) {
 	server_.gestures.hold_end(event->time_msec, event->cancelled);
 }
 
-// ---- seat requests ----
-
 void Input::handle_request_cursor(
 		wlr_seat_pointer_request_set_cursor_event *event) {
 	wlr_seat_client *focused = server_.seat->pointer_state.focused_client;
@@ -593,8 +575,6 @@ void Input::handle_request_set_primary_selection(
 		wlr_seat_request_set_primary_selection_event *event) {
 	wlr_seat_set_primary_selection(server_.seat, event->source, event->serial);
 }
-
-// ---- module lifecycle ----
 
 void Input::init() {
 	Server &server = server_;

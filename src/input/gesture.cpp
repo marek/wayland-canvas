@@ -319,8 +319,6 @@ void Gestures::swipe_end(uint32_t time, bool cancelled) {
 			}
 			o.damage();
 		},
-		// Hop, pending and overview-zoom gestures have no release action of
-		// their own; the output is still damaged.
 		[&](Hop &hop) { hop.output->damage(); },
 		[&](Pending &pending) { pending.output->damage(); },
 		[&](OverviewZoom &z) { z.output->damage(); },
@@ -560,7 +558,6 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 			}
 			server_.canvas.settle_scale(z->desktop, settled);
 			if (!z->overview) {
-				// The camera comes to rest on the desktop, at its scale.
 				o.camera.animate_to(camera_for_box(desktop->frame(), settled));
 			}
 		}
@@ -568,8 +565,7 @@ void Gestures::pinch_end(uint32_t time, bool cancelled) {
 		state_ = Idle{};
 		return;
 	}
-	// Everything else (pending, pan, zoom, hop, abandon) releases like a
-	// swipe; swipe_end resets the gesture state.
+	// Everything else releases like a swipe, which resets the state.
 	swipe_end(time, cancelled);
 }
 

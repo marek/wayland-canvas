@@ -28,13 +28,14 @@ public:
 	const Camera &home() const; // the camera before entering
 	double zoom() const;
 	// The camera that leaves into the target: centred on its box at the
-	// target desktop's scale, else 1 (a free spot).
+	// target desktop's scale, else at the zoom that fills the screen with
+	// the box (a free spot).
 	Camera target_camera() const;
 	// The zoomed-out camera that shows the home viewport and every desktop
 	// and window around it.
 	Camera camera_for(const Camera &home) const;
-	// Records home (the current zoom-1 camera) and the initial target;
-	// returns the camera to zoom out to. Does not activate.
+	// Records home (the current camera at its resting zoom) and the initial
+	// target; returns the camera to zoom out to. Does not activate.
 	Camera prepare();
 	void enter();
 	// Gesture release: activate and animate path parameter t -> 1.
