@@ -16,7 +16,6 @@ PanelWindow {
 	id: root
 
 	property var api: null
-	property var registry: null
 	property var modelData: null // the output this bar is on
 
 	screen: modelData

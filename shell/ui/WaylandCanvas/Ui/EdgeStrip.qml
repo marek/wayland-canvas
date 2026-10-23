@@ -32,7 +32,6 @@ Item {
 
 	required property var api
 	required property var modelData // the output this strip is on
-	property var registry: null // handed to every surface by the host
 
 	// The edge, from api.shell, and the layer namespace of the strip; the
 	// chrome's is the same with "-chrome".

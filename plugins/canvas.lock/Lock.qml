@@ -13,8 +13,6 @@ Item {
 	id: root
 
 	property var api: null
-	property var registry: null
-	property var modelData: null
 
 	readonly property string pamService: api !== null
 		? api.plugin.settings.pamService : "wayland-canvas"

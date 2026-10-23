@@ -13,8 +13,6 @@ PanelWindow {
 	id: root
 
 	property var api: null
-	property var registry: null
-	property var modelData: null
 
 	// The seam a scenario drives: without a polkitd on the bus there is no
 	// flow to show, so the plugin's stand-in flow stands in for the
@@ -58,7 +56,6 @@ PanelWindow {
 	visible: open
 	color: "transparent"
 	exclusionMode: ExclusionMode.Ignore
-	screen: modelData
 
 	WlrLayershell.namespace: "wayland-canvas-polkit"
 	WlrLayershell.layer: WlrLayer.Overlay

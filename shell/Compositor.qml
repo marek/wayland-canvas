@@ -11,7 +11,6 @@ Item {
 	id: root
 
 	readonly property string path: Quickshell.env("WAYLAND_CANVAS_SOCKET") || ""
-	readonly property bool available: path !== "" && socket.connected
 
 	// The compositor's state as `state` reported it and the events have
 	// updated it: outputs (with the overview flag), desktops, windows, the

@@ -142,21 +142,24 @@ its first bindings and its `Component.onCompleted` already have it:
 | `api.theme` | `mode` (`light` or `dark`), `colors` for that mode, `setMode(mode)` ([theme.md](theme.md)) |
 | `api.canvas` | A surface of the plugin's own on the plane: `place(<surface>, {x, y, width, height})` and `unplace(<surface>)`, in canvas coordinates, and for a drag the plugin hands to the compositor on a press, `move(<surface>, callback)` and `resize(<surface>, {edges, minWidth, minHeight}, callback)`, each answered with the rectangle at the release ([../platform/ipc.md](../platform/ipc.md)). What a plugin draws there is its own — the compositor places it and nothing more |
 | `api.compositor` | The compositor's state (outputs and whether each shows the overview, desktops, windows, the theme mode and the recording), kept current by its events; `call(method, params, callback)`, answered once with `(result, error)`: `error` is null, or text, the compositor's own or `disconnected` when the socket went before the answer; and the events themselves ([../platform/ipc.md](../platform/ipc.md)) |
-| `api.shell` | The shell config, live: `config`, `configPath`; every bar widget, hidden ones flagged (`barWidgets`: name, plugin name, section, order, description, hidden), `barHidden(name)`, `setBarHidden(name, hidden)`; the edge of the overview toolbar (`toolbarPosition`, `setToolbarPosition(edge)`) and of the app bar with its switch (`appBarPosition`, `appBarEnabled`, `setAppBarPosition(edge)`, `setAppBarEnabled(on)`), each with its default when the config names none; `pluginSettingsPages` and `setPluginSetting(plugin id, key, value)`, the declared settings the settings window renders. The host writes `shell.json` and applies the change at once, without a reload ([settings.md](settings.md)). These members are all a plugin sees of the host |
+| `api.shell` | The shell config, live: `config`, `configPath`; every bar widget, hidden ones flagged (`barWidgets`: name, plugin name, section, order, description, hidden, and the `component` and `api` the bar makes it from), `barHidden(name)`, `setBarHidden(name, hidden)`; the overview toolbar's valid buttons in order (`toolbarButtons`: name, icon, label, and its `action`, `panel` or `menu`); the edge of the overview toolbar (`toolbarPosition`, `setToolbarPosition(edge)`) and of the app bar with its switch (`appBarPosition`, `appBarEnabled`, `setAppBarPosition(edge)`, `setAppBarEnabled(on)`), each with its default when the config names none; `pluginSettingsPages` and `setPluginSetting(plugin id, key, value)`, the declared settings the settings window renders. The host writes `shell.json` and applies the change at once, without a reload ([settings.md](settings.md)). These members are all a plugin sees of the host |
 
-A surface component is also handed the registry of everything loaded — the
-ordered bar widgets and toolbar buttons with their components — because a
-surface (the bar, the toolbar) hosts other plugins' contributions; the bar
-follows `api.shell.barWidgets`, so a widget hidden or shown applies at once.
+A surface (the bar, the toolbar) hosts other plugins' contributions: the bar
+follows `api.shell.barWidgets` and the toolbar `api.shell.toolbarButtons`,
+so a widget hidden or shown applies at once. A per-output surface is also
+given `modelData`, the output it is on; any other surface gets the api alone.
+An output that comes or goes makes or drops that output's per-output surfaces
+and no other's: the bars of the outputs that stay keep their widgets and what
+the widgets hold.
 
 Plugins draw with the shell's UI kit, a QML module they import as
 `WaylandCanvas.Ui`: the bar button, the panel card and its rows, sliders,
 switches, tabs, choice rows, key chips, text and fields, all coloured from
 `api.theme`, and the edge strip of the overview - its window, slide,
 label chip and the placement of a card beside it - which the toolbar and
-the app bar are both written on. The host passes a surface only valid
-toolbar buttons: one naming none or more than one of `action`, `panel` and
-`menu` is dropped when the plugins load.
+the app bar are both written on. The host offers only valid toolbar
+buttons: one naming none or more than one of `action`, `panel` and `menu`
+is dropped when the plugins load.
 
 ### Built-in plugins
 
@@ -178,6 +181,10 @@ toolbar buttons: one naming none or more than one of `action`, `panel` and
 
 - An invalid manifest, a too-new `apiVersion` or a QML error while loading:
   that plugin is skipped, with a log line naming it and the reason.
+- A plugin loads whole or not at all: one contribution that fails (a file
+  that does not compile, a bar widget without a valid section, a panel that
+  does not instantiate) skips the plugin, and none of its other panels,
+  actions, widgets or surfaces stays registered.
 - A config that is not valid JSON: the shell runs on the defaults and logs
   the reason, and nothing writes the file while it fails to parse; a
   change the host would have written (a setting, the mode) holds for the

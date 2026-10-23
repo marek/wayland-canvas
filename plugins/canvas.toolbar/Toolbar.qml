@@ -7,8 +7,8 @@ import "."
 // toolbar.position names (right by default) and slides out as the screen
 // leaves (docs/intents/shell/toolbar.md). The strip, its slide, its edge and
 // its chrome are the UI kit's EdgeStrip; this file is what is the
-// toolbar's own: the buttons, the menu flyout and what a click does. The
-// host hands the surface the ordered, valid buttons (the config's
+// toolbar's own: the buttons, the menu flyout and what a click does.
+// api.shell.toolbarButtons are the ordered, valid buttons (the config's
 // toolbar.order, then plugin id and manifest order), and no buttons at all
 // means no toolbar.
 EdgeStrip {
@@ -25,7 +25,7 @@ EdgeStrip {
 
 	readonly property int flyoutWidth: 200
 
-	readonly property var buttons: registry != null ? registry.toolbarButtons : []
+	readonly property var buttons: api.shell.toolbarButtons
 
 	Repeater {
 		model: root.buttons

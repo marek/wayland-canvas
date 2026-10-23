@@ -3735,6 +3735,10 @@ int weather_fetch_count() {
 
 int weather_fetches = 0; // weather_fetch_count() before a host write
 
+// bar_surfaces_made before the second output joins: a bar made again for the
+// first output would show as a second new one.
+int bars_before_hotplug = 0;
+
 // What a host write that changes no widget leaves as it was: the clock's
 // panel open, the shell not reloaded, and no widget made again.
 void check_widgets_kept(std::string_view write) {
@@ -10511,6 +10515,7 @@ int run_step() {
 	// still on the plane, drawn by the output that is left.
 	case 551: {
 		weather_fetches = weather_fetch_count();
+		bars_before_hotplug = bar_surfaces_made;
 		wlr_backend *headless = nullptr;
 		wlr_multi_for_each_backend(server->backend,
 			[](wlr_backend *backend, void *data) {
@@ -10541,6 +10546,11 @@ int run_step() {
 		}
 		retries = 0;
 		check(bar_layer_count() == 2, "the second output got a bar of its own");
+		// Adding an output makes that output's bar and nothing else: the
+		// first bar, its widgets and what they hold, is the same surface.
+		check(bar_surfaces_made == bars_before_hotplug + 1, std::format("adding an "
+			"output made one bar, the first output's kept ({} bar surfaces made, "
+			"{} before)", bar_surfaces_made, bars_before_hotplug));
 		return 1500; // its widgets are made and have asked for what they show
 	}
 	case 571:
@@ -10582,6 +10592,17 @@ int run_step() {
 			"was {} %)", backlight_percent(), handover_percent));
 		shared_panel = 0;
 		shared_stage = SharedStage::widget_click;
+		step = 579; // the plugin that failed half way, then on to the panels
+		return 100;
+	}
+	case 580: // the first panel of the plugin whose second panel failed, asked for
+		run_msg("action.run", R"({"name":"canvas.scratch/open","args":{"panel":"canvas.halfway/one"}})",
+			"open-halfway");
+		return 900;
+	case 581: {
+		check(panel_layer("one") == nullptr, "a plugin whose second panel failed is "
+			"skipped whole: its first panel is not there to open");
+		step = 574;
 		return 100;
 	}
 	case 575: { // each panel, opened by a click on its widget and by an action
@@ -10983,6 +11004,25 @@ int main() {
 		"\tfunction run(args) {\n"
 		"\t\tapi.panels.open(args.panel, null)\n"
 		"\t}\n}\n");
+	// A plugin whose second panel cannot be made (a required property
+	// nobody gives): the host skips it whole, so its first panel, which
+	// made fine, is not there to open.
+	std::string halfway_plugin = plugins_dir + "/canvas.halfway";
+	mkdir_p(halfway_plugin);
+	write_file(halfway_plugin + "/plugin.json",
+		"{\n\t\"id\": \"canvas.halfway\",\n\t\"name\": \"Halfway\",\n"
+		"\t\"version\": \"1.0.0\",\n\t\"apiVersion\": 1,\n"
+		"\t\"contributes\": {\n\t\t\"panels\": [\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"one\",\n\t\t\t\t\"entry\": \"One.qml\"\n\t\t\t},\n"
+		"\t\t\t{\n\t\t\t\t\"id\": \"two\",\n\t\t\t\t\"entry\": \"Two.qml\"\n\t\t\t}\n"
+		"\t\t]\n\t}\n}\n");
+	write_file(halfway_plugin + "/One.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\n"
+		"PanelCard {\n\tpanelWidth: 200\n"
+		"\tPanelRow { glyph: \"1\"; label: \"Halfway one\"; clickable: false }\n}\n");
+	write_file(halfway_plugin + "/Two.qml",
+		"import QtQuick\nimport WaylandCanvas.Ui\n"
+		"PanelCard {\n\trequired property string nobodyGivesThis\n}\n");
 
 	setenv("XDG_CONFIG_HOME", (xdg + "/config").c_str(), 1);
 	setenv("XDG_DATA_HOME", (xdg + "/data").c_str(), 1);

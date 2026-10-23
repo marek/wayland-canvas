@@ -1537,7 +1537,7 @@ Tests:
     A nested run with three windows open showed both strips on nine edge
     pairs (each edge shared, and right/left, left/right, top/bottom,
     bottom/top, right/top) and none after Escape.
-- [ ] Each manifest fact is stated once
+- [x] Each manifest fact is stated once
   - The host passes each panel its name when creating it. Today 11
     panels restate it as `panelName` (e.g. AgentsPanel.qml:15-16), while
     Host.qml:561 already has it.
@@ -1553,12 +1553,15 @@ Tests:
   - Acceptance: `git grep -nE 'canvas\.[a-z]+/' -- plugins shell` finds
     only a plugin's own names inside its own folder, and the bar and
     notes scenarios are green.
-  - Left open: the panel box below is done, so the panel manager passes no
-    anchor and TrayState is the one owner of the menu's item, as is. The
-    tray widget's `panel` property is how Bar hands every widget its
-    manifest panel name (BarButton declares the same), and the right click
-    toggles by it, so it stays unless `api.panels` learns a plugin's local
-    ids. The rest is done and green.
+  - Done: the host gives each panel its name when it creates it, and no
+    panel restates it. A widget's `description` is the manifest's, so the
+    settings window names no plugin. The tray toggles its panel by the
+    manifest's panel name, which the bar hands every widget (BarButton
+    takes the same `panel`), so its property is that name and not a copy;
+    TrayState is the one owner of the menu's item. The note colours are
+    declared once, as the plugin's `colors` setting, and the toolbar menu
+    and the note's dots both read it. The grep finds only a plugin's own
+    names in its own folder (comments, and the notes' own surface names).
 - [x] Every panel reads its state from its plugin, wherever it was opened
   from
   - The problem: the panel manager hands a panel the item that opened it
@@ -1984,7 +1987,7 @@ Tests:
 
 ### 10. Single responsibility: the shell, plugins and scenarios
 
-- [ ] Host.qml composes six parts
+- [x] Host.qml composes six parts
   - The parts:
     - `ShellConfig`: paths, read, the only writer `set(path, value)` with
       phase 5's guard, and the watch.
@@ -2007,6 +2010,25 @@ Tests:
     - The bar and notes scenarios are green.
     - Adding a headless output keeps the first output's bar widgets
       (their state survives).
+  - Done: `shell/` holds the six parts. `ShellConfig.qml`: the paths, the
+    read, `set(keys, value)` as the only writer (with the guard for a
+    file that does not parse) and the watch. `PluginDiscovery.qml` with
+    `Manifest.js` (`problem`, `candidates`, `globalName`, `skip`).
+    `Contributions.qml`: a kinds table `{key, file, validate, stage}`; a
+    plugin's pieces are staged and registered all or nothing (the panels
+    made for a skipped plugin are destroyed), one `globalName` and one
+    `orderByConfig`, and the dead `toolbarButtons` branch is gone.
+    `ShellApi.qml` now owns api.shell's derived values and writes.
+    `SurfaceHost.qml`: an `Instantiator` over the entries, a `Variants`
+    per entry, so an output that joins makes only its own surfaces.
+    `ReloadWatcher.qml`. `Host.qml` is the api bundle and the wiring.
+    Every command is an argument list (`find -printf`, `mkdir -p --`);
+    `shellQuote` and `/bin/sh` are gone from the host, and ThemeApi
+    writes through `ShellConfig.set`.
+  - The bar scenario counts the bar surfaces a second output makes (one;
+    the old Host made two) and opens the first panel of a plugin whose
+    second panel cannot be made (nothing opens; the old Host opened it).
+    Both checks fail on the old Host and pass on the new.
 - [ ] The network plugin: a service and four views
   - `NetworkService.qml` takes the twelve processes (NetworkPanel.qml:
     235-695) and their parsing (359-490, 643-667). It sits in the
@@ -2107,6 +2129,16 @@ Tests:
   - Network.qml's unread `networks` (20-21).
   - Acceptance: grep finds none of these names, and the bar and notes
     scenarios pass.
+  - Done (ShellHost's part; Network.qml's `networks` goes with the network
+    split): `CanvasApi.surfaceName` and Compositor.qml's `available` are
+    deleted. `registry.barWidgets` was dead, which left `registry` holding
+    only the toolbar's buttons, so `ShellApi.toolbarButtons` offers them as
+    `barWidgets` is offered and `registry` is gone from the host, EdgeStrip,
+    Bar, Notes, Lock, Popups and Dialog. The host hands `modelData` to
+    per-output surfaces only, so Notes, Lock and Dialog lose it; Dialog's
+    `screen` stays unset, as it was with a null `modelData`. plugins.md
+    names `toolbarButtons`. A note surface's own `surfaceName` property
+    stays: it is the layer namespace of that note, not the API's function.
 - [x] Every build has Xwayland; configure fails without it
   - The compile-time variant without Xwayland, its second build tree and the build script's option for it are gone: X11 apps are always supported, the packages bundle wlroots with Xwayland, and a missing Xwayland program is the runtime case.
 

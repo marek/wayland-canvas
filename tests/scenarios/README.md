@@ -439,9 +439,14 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
   labelled one and pushes the bar's left edge further right, and
   disabling it in the scratch `shell.json` removes it again — every one
   through the shell's own reload, with the skip reasons visible as
-  `[plugins]` lines in the test log. Last, an idle watch: the shell is
-  sampled about every 10 ms for 10 s and must have spawned no process at
-  all, because the reloads ride on change notifications, not on a poll.
+  `[plugins]` lines in the test log. A plugin whose first panel is fine
+  and whose second cannot be made is skipped whole: the action that opens
+  the first panel by its name opens nothing. The second output the run
+  adds near its end makes exactly one new bar surface — the first
+  output's bar, with its widgets, is the surface it was, not rebuilt.
+  Last, an idle watch: the shell is sampled about every 10 ms for 10 s
+  and must have spawned no process at all, because the reloads ride on
+  change notifications, not on a poll.
   Then the theme: a foot window is mapped for its title bar and the
   overview is opened for its tabs, and both are sampled against the
   palettes in `src/core/config.h`; the theme switch (the right-most bar
