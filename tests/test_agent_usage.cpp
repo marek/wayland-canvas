@@ -281,6 +281,8 @@ void test_display_names() {
 	check(format_tokens(0) == "0", "0 formats as 0");
 	check(format_tokens(999) == "999", "999 formats as 999");
 	check(format_tokens(1500) == "1.5K", "1500 formats as 1.5K");
+	check(format_tokens(1000) == "1.0K", "1000 formats as 1.0K");
+	check(format_tokens(1000000) == "1.0M", "a round million keeps its decimal");
 	check(format_tokens(811500) == "811.5K", "811500 formats as 811.5K");
 	check(format_tokens(246100000) == "246.1M", "246100000 formats as 246.1M");
 	check(format_tokens(1200000000) == "1.2B", "1200000000 formats as 1.2B");
@@ -456,6 +458,9 @@ void test_collection() {
 		check(claude->days.size() == 7 && claude->days.back().today
 			&& claude->days.back().tokens_text == "1.0K",
 			"seven days ending in a flagged Today");
+		check(claude->week_text == "46.2M"
+			&& claude->week_text == format_tokens(msg1 + sonnet + m1),
+			"the week's text is its days' sum, formatted as every figure is");
 	}
 
 	// GPT: the Codex file, the openai* omp entries, the pi codex entry

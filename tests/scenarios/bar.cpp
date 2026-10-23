@@ -174,6 +174,7 @@ int terminals_before = 0; // the foot windows among them
 int settings_terminal_y = 0; // the Terminal row's label line, on the Shortcuts tab
 int settings_chip_before = 0; // its chord chip's width before the recording
 int settings_first_top = 0; // the Gestures tab's first preset row
+std::string settings_conf_before; // canvas.conf before a write its directory refuses
 bool settings_esc_sent = false; // the Escape that closes the panel went out
 std::string keys_marker;    // what a plain key typed into the keys terminal lands in
 std::string command_marker; // the file the Commands row's command touches
@@ -3706,6 +3707,15 @@ int settings_chip_width(cairo_surface_t *s, int y) {
 		n++;
 	}
 	return n == 0 ? 0 : n + 4;
+}
+
+// The Gestures tab's direction row `index`, centred: under the three
+// presets and the pinch row with their headers.
+double settings_direction_y(int index) {
+	double pinch_y = settings_first_top + 3 * (settings_choice + settings_gap)
+		+ settings_header + settings_gap + settings_choice / 2.0;
+	return pinch_y + settings_choice + settings_header + 2 * settings_gap
+		+ index * (settings_choice + settings_gap);
 }
 
 // True while the bar surface remembered last is still the bar: a reload
@@ -7860,6 +7870,8 @@ int run_step() {
 				&& json_string(thu, "tokensText") == "324.6M",
 				"yesterday is 324.6M");
 		}
+		check(json_string(providers[0], "weekText") == "574.0M",
+			"the week's tokens are 574.0M, one decimal like every figure");
 		JsonArray *models = json_object_get_array_member(providers[0],
 			"models");
 		check(models != nullptr && json_array_get_length(models) == 2
@@ -9133,7 +9145,82 @@ int run_step() {
 			"choosing Four-finger hops wrote swipes = four-finger-hops "
 			"into canvas.conf");
 		shot("settings-gestures-set");
+		retries = 0;
+		step = 450; // a write that fails, then one that clears it: their own steps
+		return -700; // without the advance
+	}
+	case 450: { // canvas.conf's directory refuses the write: a direction switch is clicked
+		std::string dir = canvas_conf.substr(0, canvas_conf.rfind('/'));
+		settings_conf_before = read_file(canvas_conf);
+		chmod(dir.c_str(), 0555);
+		click(settings_card_x + settings_pad + settings_panel - 2 * settings_pad
+			- 8 - settings_switch_w / 2.0, settings_direction_y(4));
+		return 500;
+	}
+	case 451:
+		shot("settings-gestures-refused");
 		return 700;
+	case 452: { // the refusal is on the row that asked: its label turns attention
+		cairo_surface_t *s = load_png("settings-gestures-refused");
+		double y = settings_direction_y(4);
+		int marked = s != nullptr ? colour_count(s, {settings_card_x + 8,
+			int(y) - 18, settings_label_w, 36}, attention_dark) : 0;
+		cairo_surface_destroy(s);
+		if (marked < 10 && retries++ < 10) {
+			shot("settings-gestures-refused");
+			return -700;
+		}
+		retries = 0;
+		check(marked >= 10, std::format("a write canvas.conf's directory "
+			"refused shows on its own row, the hop row's label in the "
+			"attention colour ({} px)", marked));
+		check(read_file(canvas_conf) == settings_conf_before, "the refused "
+			"write left canvas.conf as it was");
+		std::string dir = canvas_conf.substr(0, canvas_conf.rfind('/'));
+		chmod(dir.c_str(), 0755);
+		click(settings_card_x + settings_pad + settings_panel - 2 * settings_pad
+			- 8 - settings_switch_w / 2.0, y);
+		return 400;
+	}
+	case 453: { // the same click, the directory writable again, went through
+		std::string hop = conf_value("hop-swipe");
+		if (hop != "away" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(hop == "away", "the next click wrote hop-swipe = away into "
+			"canvas.conf");
+		shot("settings-gestures-written");
+		return 700;
+	}
+	case 454: { // that write cleared the row's fault, and its switch is on
+		cairo_surface_t *s = load_png("settings-gestures-written");
+		double y = settings_direction_y(4);
+		int marked = s != nullptr ? colour_count(s, {settings_card_x + 8,
+			int(y) - 18, settings_label_w, 36}, attention_dark) : 0;
+		bool on = s != nullptr && settings_switch_is(s, y, true);
+		cairo_surface_destroy(s);
+		if ((marked >= 10 || !on) && retries++ < 10) {
+			shot("settings-gestures-written");
+			return -700;
+		}
+		retries = 0;
+		check(marked < 10 && on, std::format("the write that went through "
+			"cleared the row's fault and its switch shows on ({} attention "
+			"px)", marked));
+		click(settings_card_x + settings_pad + settings_panel - 2 * settings_pad
+			- 8 - settings_switch_w / 2.0, y);
+		return 400;
+	}
+	case 455: { // the switch put back where it was; the Gestures visit goes on
+		std::string hop = conf_value("hop-swipe");
+		if (hop != "toward" && retries++ < 30) {
+			return -300;
+		}
+		retries = 0;
+		check(hop == "toward", "the second click wrote hop-swipe = toward");
+		step = 428;
+		return -700; // without the advance
 	}
 	case 428: { // the choice drawn, the panel up; Escape closes it; the recorded chord runs
 		if (!settings_esc_sent) {

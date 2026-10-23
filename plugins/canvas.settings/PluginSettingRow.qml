@@ -10,7 +10,7 @@ Column {
 
 	property var entry: null // {key, type, label, description, choices, ...}
 	property string pluginId: ""
-	property var panel: null // the settings panel, which writes the setting
+	property var shell: null // api.shell, which writes the setting
 
 	spacing: UiTheme.panelSpacing
 
@@ -19,8 +19,8 @@ Column {
 		? entry.max - entry.min : 0
 
 	function write(value) {
-		if (panel != null && entry != null) {
-			panel.setPluginSetting(pluginId, entry.key, value)
+		if (shell != null && entry != null) {
+			shell.setPluginSetting(pluginId, entry.key, value)
 		}
 	}
 

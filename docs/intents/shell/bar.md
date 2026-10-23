@@ -143,6 +143,10 @@ CLIs' own saved sign-ins — Anthropic's usage endpoint through curl, the
 Codex app-server's JSON-RPC — reusing a fresh answer for a short window
 so an opened-and-shut panel is never a probe per flick.
 
+Every token figure the panel shows — a day, a model, the week in the
+hero — is text the helper wrote, one decimal above a thousand (`574.0M`,
+`1.0K`): the panel formats no count itself.
+
 The panel keeps the provider it shows by its id, never by its position:
 the collector orders the families after Claude and GPT by the week's
 tokens, so a refresh can move a family to another tab, and the selection

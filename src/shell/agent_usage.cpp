@@ -1368,9 +1368,11 @@ ProviderRecord make_provider(const std::string &family,
 	provider.tier = limits.tier;
 	provider.status = limits.status;
 	provider.help = limits.help;
+	long long week_tokens = 0;
 	for (const std::string &date : week.dates) {
 		auto day = stats.day_tokens.find(date);
 		long long tokens = day != stats.day_tokens.end() ? day->second : 0;
+		week_tokens += tokens;
 		provider.days.push_back(DayTokens{
 			.date = date,
 			.label = date == week.today ? "Today" : weekday_label(date),
@@ -1379,6 +1381,7 @@ ProviderRecord make_provider(const std::string &family,
 			.tokens_text = format_tokens(tokens),
 		});
 	}
+	provider.week_text = format_tokens(week_tokens);
 	for (const auto &[model, usage] : stats.model_usage) {
 		provider.models.push_back(ModelUsage{
 			.id = model,
@@ -1470,6 +1473,8 @@ std::string record_json(const Record &record) {
 			json_builder_end_object(builder);
 		}
 		json_builder_end_array(builder);
+		json_builder_set_member_name(builder, "weekText");
+		json_builder_add_string_value(builder, provider.week_text.c_str());
 		json_builder_set_member_name(builder, "models");
 		json_builder_begin_array(builder);
 		for (const ModelUsage &model : provider.models) {

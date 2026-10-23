@@ -445,29 +445,11 @@ PanelCard {
 		if (provider.usageStatusText !== "") {
 			return provider.usageStatusText
 		}
-		var week = 0
-		for (var i = 0; i < provider.days.length; i++) {
-			week += provider.days[i].tokens
-		}
-		var label = "7 Days " + formatTokens(week)
+		var label = "7 Days " + provider.weekText
 		if (provider.tierLabel !== "") {
 			return provider.tierLabel + " · " + label
 		}
 		return label
-	}
-
-	function formatTokens(tokens) {
-		if (tokens < 1000) {
-			return String(tokens)
-		}
-		var units = ["K", "M", "B"]
-		var value = tokens
-		var unit = -1
-		while (value >= 1000 && unit < units.length - 1) {
-			value /= 1000
-			unit++
-		}
-		return Math.round(value * 10) / 10 + units[unit]
 	}
 
 	// "Resets in 4h 12m" from the window's own reset time; a window with

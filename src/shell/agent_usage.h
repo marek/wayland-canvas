@@ -33,7 +33,9 @@ inline constexpr std::string_view family_gpt = "gpt";
 
 // ---------------------------------------------------------- display names
 
-// `246.1M`, `811.5K`, `0` — one decimal above a thousand, plain below.
+// `246.1M`, `811.5K`, `1.0K`, `0` — one decimal above a thousand, plain
+// below. The one place a token count is formatted: the record carries every
+// figure as text.
 [[nodiscard]] std::string format_tokens(long long tokens);
 
 // `claude-opus-5-5` → `Opus 5.5`, `gpt-6-astra` → `GPT 6 Astra`: the last
@@ -156,6 +158,7 @@ struct ProviderRecord {
 	std::string status;
 	std::string help;
 	std::vector<DayTokens> days;   // the last 7, oldest first, today last
+	std::string week_text;         // the seven days' tokens, formatted
 	std::vector<ModelUsage> models; // heaviest first
 	long long total_prompts = 0;
 	long long total_sessions = 0;

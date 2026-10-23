@@ -1624,6 +1624,16 @@ Tests:
       three-part error checks, become one function.
   - Token counts are formatted in one place. agent_usage.cpp:912-922
     gives "1.0M" where AgentsPanel.qml:452-464 gives "1M".
+  - Done: the settings and agents parts. SettingsPanel's tabs are one
+    `{id, label, component}` table, and `set(params, faultKey)` is the
+    one write, with one `errorText` for every reply's error. Token
+    counts are formatted in one place, the helper (`format_tokens` in
+    agent_usage.cpp): the record carries `weekText` beside each day's
+    and model's text, and AgentsPanel formats none. The helper wins
+    because every consumer (the widget, the panel, a scenario) then
+    reads the same string, and "1.0M" is the form every other figure
+    already had. The scenario's Gestures steps drive a refused write
+    and the write after it. The network part is left.
   - Acceptance: the bar scenario's network, settings and agents steps
     are green.
 - [ ] The UI kit covers what the plugins rebuild by hand
@@ -2037,10 +2047,16 @@ Tests:
   - The views become `BandSection`, `DnsSection`, `ShareView` and
     `SpeedView`, with a qmldir. The formatters (697-800) go in a JS file.
   - Acceptance: the bar scenario's network steps are green.
-- [ ] The settings window: a model and one file per tab
+- [x] The settings window: a model and one file per tab
   - `SettingsModel.qml` holds the IPC client, the model and
     `set(params, faultKey)`.
   - Each tab is a file, listed in phase 7's tab table.
+  - Done: `SettingsModel.qml` holds the socket, the settings, the chord
+    recording, the commands' draft and `set`. `ShortcutsTab`,
+    `GesturesTab`, `SessionTab`, `ToolbarTab`, `BarTab` and `PluginsTab`
+    are a file each, in the panel's table; the panel keeps the tab row,
+    the card's geometry and the footer. PluginSettingRow writes through
+    `api.shell`, not through the panel.
   - Acceptance: the bar scenario's settings steps are green.
 - [x] Notes: editing, the file format and placement each in their own
   file

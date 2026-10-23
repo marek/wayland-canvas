@@ -5,3 +5,10 @@
 ShortcutRow ShortcutRow.qml
 CommandRow CommandRow.qml
 PluginSettingRow PluginSettingRow.qml
+SettingsModel SettingsModel.qml
+ShortcutsTab ShortcutsTab.qml
+GesturesTab GesturesTab.qml
+SessionTab SessionTab.qml
+ToolbarTab ToolbarTab.qml
+BarTab BarTab.qml
+PluginsTab PluginsTab.qml
