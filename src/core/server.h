@@ -28,6 +28,7 @@
 #include "windows/launches.h"
 #include "windows/popup.h"
 #include "windows/view.h"
+#include "windows/xwm.h"
 
 class LayerSurface;
 class Output;
@@ -98,32 +99,6 @@ public:
 	// takes it (docs/intents/windows/window-management.md).
 	void focus_in(wlr_box box);
 	void focus_keyboard(wlr_surface *surface);
-	// view_x11.cpp: X's own picture of its windows follows the canvas
-	// (docs/intents/windows/x11.md). Once per frame X is told the canvas's
-	// stacking and the windows' places; at every pointer move the offset
-	// moves if X's pointer would leave X's screen.
-	void sync_x11();
-	void x11_follow_pointer();
-	// A move, a resize or a restack went to X: input for an X11 window waits
-	// until X has taken it in.
-	void x11_changed();
-	// Whether X has taken in every change sent to it; asks X to say so when
-	// changes went out since the last ask.
-	bool x11_settled();
-	// X did not answer within config::x11_input_wait_ms: input goes on
-	// without the answer, and the ask is dropped.
-	void x11_give_up();
-	// A window's _NET_WM_STATE, as the client set it, asked of X at the map
-	// request without waiting: the ask's sequence, nullopt when X is not
-	// there. X answers before it sends the window's MapNotify, so the answer
-	// is taken there (X11View::handle_x11_map_notify) and costs no wait.
-	std::optional<unsigned int> x11_ask_state(xcb_window_t window);
-	// Whether the answer to `ask` holds _NET_WM_STATE_MODAL; takes the answer.
-	bool x11_state_modal(unsigned int ask);
-	// Gives up an answer that will not be taken.
-	void x11_drop_ask(unsigned int ask);
-	// Whether `surface` belongs to an X11 window: input to one waits for X.
-	static bool on_x11_window(wlr_surface *surface);
 
 	// layer.cpp
 	void refocus_layers();
@@ -141,7 +116,6 @@ public:
 	wlr_compositor *compositor = nullptr;
 	wlr_output_layout *output_layout = nullptr;
 	wlr_xdg_shell *xdg_shell = nullptr;
-	wlr_xwayland *xwayland = nullptr;
 	wlr_layer_shell_v1 *layer_shell = nullptr;
 	wlr_foreign_toplevel_manager_v1 *foreign_mgr = nullptr;
 	wlr_pointer_gestures_v1 *pointer_gestures = nullptr;
@@ -170,9 +144,6 @@ public:
 	void changed(Change what);
 	Changes changes;
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame
-	// X positions are canvas positions less this offset, one for every X11
-	// window, so they keep their places relative to each other.
-	int x11_offset_x = 0, x11_offset_y = 0;
 
 	Input input;
 	Bindings bindings;
@@ -192,6 +163,7 @@ public:
 	NightLight night_light;
 	Logind logind;
 	ConfStore conf;
+	Xwm xwm;
 
 	// Where a plugin asked for its surfaces to be on the plane, by name
 	// (docs/intents/platform/ipc.md). Kept here, not on the surface, so a
@@ -223,28 +195,6 @@ private:
 	void handle_new_xdg_toplevel(wlr_xdg_toplevel *toplevel);
 	void handle_new_xdg_popup(wlr_xdg_popup *popup);
 	Listener new_xdg_toplevel_, new_xdg_popup_;
-	// view_x11.cpp: Xwayland and the X11 windows it brings
-	void init_xwayland();
-	void finish_xwayland();
-	void handle_xwayland_ready();
-	void handle_new_xwayland_surface(wlr_xwayland_surface *surface);
-	// Sees every X event before wlroots handles it; wlroots still handles it.
-	void handle_x11_event(xcb_generic_event_t &event);
-	Listener new_xwayland_surface_, xwayland_ready_;
-	// X's stacking as last sent, bottom first, by view session id.
-	std::vector<uint64_t> x11_stack_;
-	// After X's windows move, X's pointer is put where the cursor is over
-	// them, on the window manager's own connection, so X applies it after
-	// the moves.
-	void x11_put_pointer();
-	// Asks X, on the window manager's connection, to answer once it has
-	// taken in everything sent before: that request's sequence, and whether
-	// changes went out since it was sent.
-	void x11_ask_settled();
-	std::optional<unsigned int> x11_settle_ask_;
-	bool x11_unasked_ = false;
-	// The atoms of _NET_WM_STATE and _NET_WM_STATE_MODAL on the running X server.
-	uint32_t x11_atom_state_ = 0, x11_atom_modal_ = 0;
 
 	// layer.cpp
 	void init_layers();

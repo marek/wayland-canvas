@@ -290,6 +290,7 @@ core_lib = static_library(
 		'src/windows/view.cpp',
 		'src/windows/view_x11.cpp',
 		'src/windows/view_xdg.cpp',
+		'src/windows/xwm.cpp',
 	),
 	protocol_headers,
 	include_directories: src_inc,

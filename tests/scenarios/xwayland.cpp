@@ -94,7 +94,7 @@ void check_alive(std::string_view after) {
 // display. wlroots starts it through a double fork and keeps the pid of the
 // parent that exits.
 pid_t xwayland_pid() {
-	std::string_view display = server->xwayland->display_name;
+	std::string_view display = server->xwm.wlr()->display_name;
 	std::error_code ec;
 	for (const auto &entry : std::filesystem::directory_iterator("/proc", ec)) {
 		std::string name = entry.path().filename().string();
@@ -233,7 +233,7 @@ bool arm_stall() {
 		return false;
 	}
 	stall.new_surface.notify = stall_new_surface;
-	wl_signal_add(&server->xwayland->events.new_surface, &stall.new_surface);
+	wl_signal_add(&server->xwm.wlr()->events.new_surface, &stall.new_surface);
 	return true;
 }
 
@@ -512,7 +512,7 @@ Result popup_is_placed() {
 	check(window != nullptr, "beside the window it belongs to");
 	if (menu != nullptr) {
 		check(menu->deco.titlebar() == 0, "an override-redirect window wears no title bar");
-		check(menu->x == 120 + server->x11_offset_x && menu->y == 140 + server->x11_offset_y,
+		check(menu->x == server->xwm.canvas_x(120) && menu->y == server->xwm.canvas_y(140),
 			std::format("it sits where its client put it, through X's offset ({},{})",
 				menu->x, menu->y));
 		check(server->focused_view != menu, "and it took no focus from the window");
@@ -598,7 +598,7 @@ Result wayland_clipboard_pastes() {
 // No X11, and the compositor runs all the same: a compositor of its own,
 // headless and on its own display, so this run's X server is untouched.
 Result compositor_without_xwayland_starts() {
-	check(server->xwayland != nullptr, "this run has an X server, its binary being there");
+	check(server->xwm.wlr() != nullptr, "this run has an X server, its binary being there");
 	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
 	run_command(std::format("env WLR_BACKENDS=headless WLR_RENDERER=gles2 "
 			"WLR_XWAYLAND='{0}/not-an-xwayland' WAYLAND_DISPLAY= "

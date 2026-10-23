@@ -457,7 +457,7 @@ void Input::handle_cursor_motion_absolute(
 void Input::handle_cursor_button(wlr_pointer_button_event *event) {
 	if (x_gate.waits<&Input::handle_cursor_button>(this, event,
 			event->state == WL_POINTER_BUTTON_STATE_PRESSED
-			&& Server::on_x11_window(server_.seat->pointer_state.focused_surface))) {
+			&& Xwm::is_x11_window(server_.seat->pointer_state.focused_surface))) {
 		return;
 	}
 	notify_activity(server_);
@@ -471,7 +471,7 @@ void Input::handle_cursor_button(wlr_pointer_button_event *event) {
 void Input::handle_cursor_axis(wlr_pointer_axis_event *event) {
 	// X turns a scroll into button presses, so it waits as a press does.
 	if (x_gate.waits<&Input::handle_cursor_axis>(this, event,
-			Server::on_x11_window(server_.seat->pointer_state.focused_surface))) {
+			Xwm::is_x11_window(server_.seat->pointer_state.focused_surface))) {
 		return;
 	}
 	notify_activity(server_);

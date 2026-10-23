@@ -106,7 +106,7 @@ void Touch::handle_down(wlr_touch_down_event *event) {
 	place(event->touch, event->x, event->y, lx, ly);
 	std::optional<PointerRouter::ContactHit> landed = input_.router.client_at(lx, ly);
 	if (input_.x_gate.waits<&Touch::handle_down>(this, event,
-			landed.has_value() && Server::on_x11_window(landed->surface))) {
+			landed.has_value() && Xwm::is_x11_window(landed->surface))) {
 		return;
 	}
 	input_.contact_activity();

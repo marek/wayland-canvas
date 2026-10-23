@@ -264,7 +264,7 @@ void PointerRouter::motion(uint32_t time) {
 		return;
 	}
 	// X's picture of its windows keeps up with the pointer wherever it is.
-	server.x11_follow_pointer();
+	server.xwm.follow_pointer();
 	if (input_.grab.active()) {
 		input_.grab.motion();
 		return;

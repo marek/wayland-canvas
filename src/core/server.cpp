@@ -172,7 +172,8 @@ Server::Server()
 	launcher(*this),
 	painter(*this), decorations(*this), canvas(*this), ipc(), ipc_events(*this, ipc),
 	image_capture(*this),
-	capture_ui(*this), lock(*this), night_light(*this), logind(*this), conf(*this) {
+	capture_ui(*this), lock(*this), night_light(*this), logind(*this), conf(*this),
+	xwm(*this) {
 	register_ipc_methods(ipc, *this);
 	input.set_layers({&capture_ui, &launcher});
 }
@@ -194,7 +195,7 @@ Server::~Server() {
 		wl_display_destroy_clients(display);
 	}
 	ipc.finish();
-	finish_xwayland();
+	xwm.finish();
 	night_light.finish();
 	lock.finish();
 	for (UiLayer *layer : input.layers()) {
@@ -334,8 +335,8 @@ bool Server::start() {
 	unsetenv("DISPLAY");
 	// Xwayland after the unset, so $DISPLAY names this session's X server
 	// and not the one the compositor was started from. It is created now
-	// and started by the first X11 client (view_x11.cpp).
-	init_xwayland();
+	// and started by the first X11 client (windows/xwm.cpp).
+	xwm.init();
 	// A nested run inherits the host compositor's control sockets; unset them
 	// so no client of ours reaches the host.
 	unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
@@ -421,7 +422,7 @@ void Server::flush_pending() {
 		pointer_focus_stale = false;
 		input.rebase_cursor();
 	}
-	sync_x11();
+	xwm.sync();
 }
 
 void Server::handle_new_surface(wlr_surface *surface) {

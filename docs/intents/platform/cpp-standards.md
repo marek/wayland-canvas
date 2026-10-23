@@ -64,11 +64,11 @@ sits on the object it acts on.
 |---|---|
 | A value (`Rect`, `Camera`, `Point`) | `struct`, public fields with default member initialisers, `constexpr` members, defaulted `==` |
 | An object with a lifetime (`Server`, `Output`, `View`, `LayerSurface`, `Keyboard`) | `class`, neither copyable nor movable. Listeners, wlroots handles and caches are private; state other classes read or legitimately set is public, changed through the member function that keeps an invariant where one exists (`move`, `set_minimized`) |
-| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations, ipc, ipc_events, conf, the session environment) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
+| One per compositor (canvas, input, gestures, bindings, hint, launcher, painter, decorations, ipc, ipc_events, conf, the session environment, the X window manager) | A class held by value in `Server`; nothing is global, so a test builds a whole `Server` in one process |
 | Fallible setup | `bool init()` after construction; a constructor never fails |
 | Teardown order | `~Server` releases wlroots resources explicitly, in reverse order of creation; each subsystem's `finish()` releases its own before the display goes |
 | Inheritance | Only where something is polymorphic; not for sharing code |
-| A kind fixed at creation whose behaviour differs (a window's shell) | An abstract base with one `final` subclass per kind: `View`, and `XdgView` and `X11View`. The kind's wlroots object is private to its subclass, so code holding the base cannot reach one kind's object on the other kind. RTTI is off and there is no `dynamic_cast`; the one subsystem that exists for a single kind (the X window manager) reaches its windows through a virtual on the base (`View::as_x11()`) |
+| A kind fixed at creation whose behaviour differs (a window's shell) | An abstract base with one `final` subclass per kind: `View`, and `XdgView` and `X11View`. The kind's wlroots object is private to its subclass, so code holding the base cannot reach one kind's object on the other kind. RTTI is off and there is no `dynamic_cast`; the one subsystem that exists for a single kind (the X window manager, `Xwm`) reaches its windows through a virtual on the base (`View::as_x11()`), and no other code does |
 
 A class is one concept of the compositor: the canvas and its desktops, a
 screen's camera and its overview, gestures, pointer grabs, bindings. Other
@@ -85,7 +85,7 @@ stays at the root.
 |---|---|
 | `src/core/` | `Server`, canvas.conf's store (`ConfStore`), the startup `Options` and the process helpers (`spawn`, `now_ms`), the wlroots wrapper, ownership helpers, tunables, canvas geometry |
 | `src/canvas/` | The canvas and its desktops; a screen's camera and overview, and the overview's chrome (the tabs, the shelf, the help line: their layout, labels and drawing) |
-| `src/windows/` | Views, popups and their title bars |
+| `src/windows/` | Views, popups and their title bars; the X window manager and the Xwayland server it runs |
 | `src/input/` | Devices and the seat; the pointer's routing, the Super tap, shortcut capture, drag and drop and the X wait queue, one class each; gestures, touch, the pen, pointer grabs, key bindings |
 | `src/render/` | The painter, the drawing primitives of a render pass, the hint and text drawing |
 | `src/platform/` | Outputs, layer surfaces, the control socket, the session environment (the bus hand-over and the services a login starts and stops) |

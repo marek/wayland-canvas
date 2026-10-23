@@ -21,7 +21,7 @@ bool XInputGate::must_wait(bool for_x) {
 	if (!releasing_ && !waiting_.empty()) {
 		return true;
 	}
-	return for_x && !server_.x11_settled();
+	return for_x && !server_.xwm.settled();
 }
 
 void XInputGate::queue(std::function<void()> run) {
@@ -45,12 +45,12 @@ void XInputGate::queue(std::function<void()> run) {
 int XInputGate::handle_timer(void *data) {
 	XInputGate &gate = *static_cast<XInputGate *>(data);
 	bool late = now_ms() - gate.since_ >= config::x11_input_wait_ms;
-	if (!late && !gate.server_.x11_settled()) {
+	if (!late && !gate.server_.xwm.settled()) {
 		wl_event_source_timer_update(gate.timer_.get(), 1);
 		return 0;
 	}
 	if (late) {
-		gate.server_.x11_give_up();
+		gate.server_.xwm.give_up();
 	}
 	gate.release_waiting(late);
 	return 0;

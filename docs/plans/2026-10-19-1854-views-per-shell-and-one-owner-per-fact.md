@@ -1847,7 +1847,7 @@ Tests:
       subsystems.
     - The scenarios are green.
   - Done: `ConfStore`, `SessionEnvironment`, and the options and process
-    files; `Xwm`, `CanvasSurfaces` and `Focus` are still to do:
+    files; `CanvasSurfaces` and `Focus` are still to do:
     - `core/conf_store.{h,cpp}` holds canvas.conf as `Server::conf`: `path()`,
       `text()`, `errors()`, `resolved`, `load`, `write`, the watch, and
       `init`, which makes the file and watches it with one read of
@@ -1859,6 +1859,20 @@ Tests:
       `now_ms`, `spawn` and `ignore_sigpipe`, which keeps the SIGPIPE
       disposition `spawn` hands back. apps.cpp and launches.cpp include
       only process.h.
+  - Done: `Xwm`:
+    - `windows/xwm.{h,cpp}` holds the X window manager as `Server::xwm`:
+      the Xwayland server (`init` at `start()`, `finish` in `~Server`,
+      `wlr()`), the new-surface and ready handlers, the map-notify event
+      hook, the shared offset (`x_position`, `y_position`, `canvas_x`,
+      `canvas_y`), the stack, the settle ask (`changed`, `settled`,
+      `give_up`), `sync`, `follow_pointer`, the pointer warp, and the
+      modal-state ask (`ask_state`, `state_modal`, `drop_ask`).
+    - `X11View`, the X wait queue, the pointer router, touch, the pen and
+      `Server::flush_pending` call it; `Xwm::is_x11_window` replaces
+      `Server::on_x11_window`. xwm.cpp is the only file outside the two
+      views that calls `View::as_x11()`; view_x11.cpp holds the view alone.
+    - tests/scenarios/xwayland.cpp reads the X server and the offset
+      through `server->xwm`.
 - [x] `Input` is the seat and the dispatch, nothing else
   - Like `Touch` and `Tablets`, these become classes of their own in
     `src/input/`:

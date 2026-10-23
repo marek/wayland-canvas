@@ -5,7 +5,7 @@
 // An X11 window through Xwayland: the other half of View, its twin being
 // XdgView (docs/intents/windows/x11.md). It holds the xwayland surface, which
 // only the files of src/windows/ reach, and the members the X window manager
-// (view_x11.cpp's Server functions) calls.
+// (Xwm) calls.
 class X11View final : public View {
 public:
 	X11View(Server &server, wlr_xwayland_surface *wlr);
@@ -89,7 +89,7 @@ private:
 	Listener set_title_, set_app_id_, set_parent_, map_request_;
 
 	// The ask for the window's _NET_WM_STATE sent at its map request, until
-	// its answer is taken or given up (Server::x11_ask_state).
+	// its answer is taken or given up (Xwm::ask_state).
 	std::optional<unsigned int> state_ask_;
 	void drop_state_ask();
 };
