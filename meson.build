@@ -80,6 +80,12 @@ if wlroots.get_variable(
 endif
 xcb = dependency('xcb', include_type: 'system')
 
+# What the compositor's core builds with, for it and everything linked to it.
+core_deps = declare_dependency(
+	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
+		librsvg, glib, gio, json_glib, libinput, libdrm, libsystemd, xcb],
+)
+
 protocol_headers = []
 foreach xml : ['protocols/wlr-layer-shell-unstable-v1.xml']
 	protocol_headers += custom_target(
@@ -163,7 +169,7 @@ capture_toolbar_layout_lib = static_library(
 	'canvas-capture-toolbar-layout',
 	'src/apps/capture_toolbar_layout.cpp',
 	include_directories: src_inc,
-	dependencies: [wlroots, wayland_server, xkbcommon, pixman, libinput],
+	dependencies: core_deps,
 )
 
 session_bus_lib = static_library(
@@ -282,8 +288,7 @@ core_lib = static_library(
 	link_with: [geometry_lib, desktop_entry_lib, theme_prefs_lib, session_bus_lib,
 		settings_lib, capture_toolbar_layout_lib, night_light_ramp_lib, fs_lib,
 		text_lib],
-	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, librsvg,
-		glib, gio, json_glib, libinput, libdrm, libsystemd, xcb],
+	dependencies: core_deps,
 )
 
 wayland_canvas = executable(
@@ -292,7 +297,7 @@ wayland_canvas = executable(
 	protocol_headers,
 	include_directories: src_inc,
 	link_with: core_lib,
-	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, libinput, libdrm, json_glib],
+	dependencies: core_deps,
 	install: true,
 )
 
@@ -365,145 +370,89 @@ run_target(
 	command: [find_program('tools/package.sh'), meson.project_source_root() / 'dist'],
 )
 
-test(
-	'geometry',
-	executable(
-		'test-geometry',
-		'tests/test_geometry.cpp',
-		include_directories: src_inc,
-		link_with: geometry_lib,
+# Unit tests: tests/test_<name>.cpp against the library it covers. The
+# bindings test links the compositor's core: the runners are the code it
+# joins to the registry, so it builds with what the scenarios build with.
+test_env_vars = {'CANVAS_TMP': meson.project_source_root() / 'tmp'}
+test_env = environment(test_env_vars)
+unit_tests = {
+	'geometry': {'link_with': geometry_lib},
+	'capture-toolbar': {
+		'link_with': capture_toolbar_layout_lib,
+		'dependencies': core_deps,
+	},
+	'desktop-entry': {'link_with': desktop_entry_lib},
+	'fs-text': {
+		'link_with': [fs_lib, text_lib],
+		'dependencies': [glib, json_glib],
+	},
+	'theme-prefs': {
+		'link_with': theme_prefs_lib,
+		'dependencies': [glib, gio],
+	},
+	'agent-usage': {
+		'link_with': agent_usage_lib,
+		'dependencies': [glib, json_glib, sqlite3],
+	},
+	'settings': {
+		'link_with': settings_lib,
+		'dependencies': [xkbcommon],
+	},
+	'bindings': {
+		'sources': protocol_headers,
+		'link_with': core_lib,
+		'dependencies': core_deps,
+	},
+	'night-light-ramp': {'link_with': night_light_ramp_lib},
+	'session-services': {'link_with': session_bus_lib},
+	'session-bus': {'link_with': session_bus_lib},
+}
+foreach name, unit : unit_tests
+	test(
+		name,
+		executable(
+			'test-' + name,
+			'tests/test_' + name.underscorify() + '.cpp',
+			unit.get('sources', []),
+			include_directories: src_inc,
+			link_with: unit['link_with'],
+			dependencies: unit.get('dependencies', []),
+		),
+		env: test_env,
+		suite: 'unit',
+	)
+endforeach
+
+# What every scenario and the media tour share (tests/harness/): the step
+# driver, checks, scratch space, shots, fake devices, the control-socket
+# client, child processes, the private buses and layout helpers.
+harness_inc = include_directories('tests')
+harness_lib = static_library(
+	'canvas-harness',
+	files(
+		'tests/harness/bus.cpp',
+		'tests/harness/check.cpp',
+		'tests/harness/child.cpp',
+		'tests/harness/control.cpp',
+		'tests/harness/devices.cpp',
+		'tests/harness/files.cpp',
+		'tests/harness/image.cpp',
+		'tests/harness/layout.cpp',
+		'tests/harness/run.cpp',
+		'tests/harness/steps.cpp',
 	),
-	suite: 'unit',
+	protocol_headers,
+	include_directories: [src_inc, harness_inc],
+	link_with: core_lib,
+	dependencies: core_deps,
 )
 
-test(
-	'capture-toolbar',
-	executable(
-		'test-capture-toolbar',
-		'tests/test_capture_toolbar.cpp',
-		include_directories: src_inc,
-		link_with: capture_toolbar_layout_lib,
-		dependencies: [wlroots, wayland_server, xkbcommon, pixman, libinput],
-	),
-	suite: 'unit',
-)
-
-test(
-	'desktop-entry',
-	executable(
-		'test-desktop-entry',
-		'tests/test_desktop_entry.cpp',
-		include_directories: src_inc,
-		link_with: desktop_entry_lib,
-	),
-	suite: 'unit',
-)
-
-fs_text_env = environment()
-fs_text_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
-test(
-	'fs-text',
-	executable(
-		'test-fs-text',
-		'tests/test_fs_text.cpp',
-		include_directories: src_inc,
-		link_with: [fs_lib, text_lib],
-		dependencies: [glib, json_glib],
-	),
-	env: fs_text_env,
-	suite: 'unit',
-)
-
-theme_prefs_env = environment()
-theme_prefs_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
-test(
-	'theme-prefs',
-	executable(
-		'test-theme-prefs',
-		'tests/test_theme_prefs.cpp',
-		include_directories: src_inc,
-		link_with: theme_prefs_lib,
-		dependencies: [glib, gio],
-	),
-	env: theme_prefs_env,
-	suite: 'unit',
-)
-
-test(
-	'agent-usage',
-	executable(
-		'test-agent-usage',
-		'tests/test_agent_usage.cpp',
-		include_directories: src_inc,
-		link_with: agent_usage_lib,
-		dependencies: [glib, json_glib, sqlite3],
-	),
-	suite: 'unit',
-)
-
-test(
-	'settings',
-	executable(
-		'test-settings',
-		'tests/test_settings.cpp',
-		include_directories: src_inc,
-		link_with: settings_lib,
-		dependencies: [xkbcommon],
-	),
-	suite: 'unit',
-)
-
-# Links the compositor's core: the runners are the code it joins to the
-# registry, so the test builds with what the scenarios build with.
-test(
-	'bindings',
-	executable(
-		'test-bindings',
-		'tests/test_bindings.cpp',
-		protocol_headers,
-		include_directories: src_inc,
-		link_with: core_lib,
-		dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
-			json_glib, libinput, libdrm],
-	),
-	suite: 'unit',
-)
-
-test(
-	'night-light-ramp',
-	executable(
-		'test-night-light-ramp',
-		'tests/test_night_light_ramp.cpp',
-		include_directories: src_inc,
-		link_with: night_light_ramp_lib,
-	),
-	suite: 'unit',
-)
-
-test(
-	'session-services',
-	executable(
-		'test-session-services',
-		'tests/test_session_services.cpp',
-		include_directories: src_inc,
-		link_with: session_bus_lib,
-	),
-	suite: 'unit',
-)
-
-test(
-	'session-bus',
-	executable(
-		'test-session-bus',
-		'tests/test_session_bus.cpp',
-		include_directories: src_inc,
-		link_with: session_bus_lib,
-	),
-	suite: 'unit',
-)
+# A test that cannot run here goes in `skipped`, with what it lacks; the end
+# of this file registers it, so no run counts it as passed.
+skipped = {}
 
 # The notes' file format on a real TextEdit, under Qt 6's qmltestrunner (the
-# plain `qmltestrunner` is often Qt 5's). Registered only where it is installed.
+# plain `qmltestrunner` is often Qt 5's).
 qml_test_runner = find_program(
 	'qmltestrunner6',
 	'qmltestrunner-qt6',
@@ -521,20 +470,76 @@ if qml_test_runner.found()
 		env: qml_test_env,
 		suite: 'unit',
 	)
+else
+	skipped += {'note-file': {'suite': 'unit', 'lack': 'qmltestrunner for Qt 6 is not installed'}}
 endif
 
 # End-to-end scenarios: the real compositor on the headless backend, real
-# foot clients, fake input devices, grim screenshots. Registered only when
-# foot and grim are on PATH; the bar scenario additionally needs qs (the
-# bar's own client), dbus-daemon, the dbusmock stand-in environment and
-# PipeWire's daemon and tools (its audio stand-in).
-# They still need a GPU render node at run time (headless GLES2 rendering).
-# Serial: each owns the display namespace.
-foot_prog = find_program('foot', required: false)
-grim_prog = find_program('grim', required: false)
-if foot_prog.found() and grim_prog.found()
-	scenario_env = environment()
-	scenario_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
+# foot clients, fake input devices, grim screenshots. They still need a GPU
+# render node at run time (headless GLES2 rendering). Serial: each owns the
+# display namespace.
+# Every scenario needs foot and grim on PATH. The bar and session scenarios
+# drive the shell against stand-in services, so they also need qs (the bar's
+# own client), a dbus-daemon to build private buses from, PipeWire's daemon
+# and tools (the audio widget's sink) and the dbusmock stand-in environment,
+# which the ensure script provisions under tmp/ at configure time. The
+# session scenario also needs notify-send, and may only ever run the shell's
+# notification server, locker and polkit agent on buses of the run's own.
+scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
+	'nightlight', 'touch', 'viewgone', 'xwayland',
+	# adds the capture core, the capture protocols and the portal; skips its
+	# portal phase itself when the tooling is missing
+	'sharing', 'foreign', 'bar', 'session']
+shell_tools = ['qs', 'dbus-daemon', 'pipewire', 'pw-dump', 'pw-cli', 'pw-metadata']
+shell_scenarios = {'bar': [], 'session': ['notify-send']}
+tools_found = {}
+standins_checked = false
+standins_py = ''
+standins_error = ''
+runnable = []
+foreach scenario : scenarios
+	needs = ['foot', 'grim']
+	if shell_scenarios.has_key(scenario)
+		needs += shell_tools + shell_scenarios[scenario]
+	endif
+	missing = []
+	foreach tool : needs
+		if not tools_found.has_key(tool)
+			tools_found += {tool: find_program(tool, required: false).found()}
+		endif
+		if not tools_found[tool]
+			missing += tool
+		endif
+	endforeach
+	lacks = []
+	if missing.length() > 0
+		lacks += 'not on PATH: ' + ', '.join(missing)
+	endif
+	if lacks.length() == 0 and shell_scenarios.has_key(scenario)
+		if not standins_checked
+			standins_checked = true
+			standins = run_command('tests/scenarios/ensure-bar-standins.sh', check: false)
+			if standins.returncode() == 0
+				standins_py = standins.stdout().strip().split('\n')[-1]
+			else
+				standins_error = standins.stderr().strip().split('\n')[-1]
+				if standins_error == ''
+					standins_error = 'tests/scenarios/ensure-bar-standins.sh exited ' + standins.returncode().to_string()
+				endif
+			endif
+		endif
+		if standins_py == ''
+			lacks += standins_error
+		endif
+	endif
+	if lacks.length() > 0
+		skipped += {scenario: {'suite': 'scenarios', 'lack': '; '.join(lacks)}}
+	else
+		runnable += scenario
+	endif
+endforeach
+if runnable.length() > 0
+	scenario_env = environment(test_env_vars)
 	scenario_env.set('WAYLAND_CANVAS_BIN', wayland_canvas.full_path())
 	# The source tree, for scenarios that install a shipped file as-is.
 	scenario_env.set('CANVAS_SOURCE', meson.project_source_root())
@@ -619,8 +624,6 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [wayland_client],
 	)
 	scenario_env.set('CANVAS_GESTURE_CLIENT', gesture_client.full_path())
-	scenarios = ['gestures', 'input', 'launcher', 'ipc', 'capture', 'lock',
-		'nightlight', 'touch', 'viewgone']
 	# An X11 client of the scenarios' own: this machine has no xterm or
 	# xeyes, and the X11 half must be proven by a real X client.
 	x11_client = executable(
@@ -630,35 +633,8 @@ if foot_prog.found() and grim_prog.found()
 		dependencies: [xcb],
 	)
 	scenario_env.set('CANVAS_X11_CLIENT', x11_client.full_path())
-	scenarios += ['xwayland']
-	# The sharing scenario adds the capture core, the capture protocols and
-	# the portal; it skips its portal phase itself when the tooling is missing.
-	scenarios += ['sharing']
-	scenarios += ['foreign']
-	# The bar scenario drives the real bar client against stand-in services,
-	# so it also needs qs, a dbus-daemon to build its private buses from,
-	# the dbusmock stand-in environment (provisioned under tmp/ by the
-	# ensure script at configure time) and a PipeWire of its own to run as
-	# the audio widget's sink.
-	qs_prog = find_program('qs', required: false)
-	dbus_daemon_prog = find_program('dbus-daemon', required: false)
-	pipewire_found = true
-	foreach tool : ['pipewire', 'pw-dump', 'pw-cli', 'pw-metadata']
-		pipewire_found = pipewire_found and find_program(tool, required: false).found()
-	endforeach
-	bar_standins = run_command(
-		'tests/scenarios/ensure-bar-standins.sh',
-		check: false,
-	)
-	if qs_prog.found() and dbus_daemon_prog.found() and pipewire_found and bar_standins.returncode() == 0
-		scenarios += ['bar']
-		# The session scenario needs the same private world: the shell's
-		# notification server, locker and polkit agent may only ever run on
-		# buses of the run's own.
-		if find_program('notify-send', required: false).found()
-			scenarios += ['session']
-		endif
-		scenario_env.set('CANVAS_BAR_STANDIN_PY', bar_standins.stdout().strip().split('\n')[-1])
+	if standins_py != ''
+		scenario_env.set('CANVAS_BAR_STANDIN_PY', standins_py)
 		scenario_env.set(
 			'CANVAS_BAR_STANDINS',
 			meson.project_source_root() / 'tests/scenarios/bar-standins.py',
@@ -667,31 +643,7 @@ if foot_prog.found() and grim_prog.found()
 		# scenario points its PATH at the build tree's copy.
 		scenario_env.set('WAYLAND_CANVAS_AGENT_USAGE', agent_usage.full_path())
 	endif
-	# What every scenario shares (tests/harness/): the step driver, checks,
-	# scratch space, shots, fake devices, the control-socket client, child
-	# processes, the private buses and layout helpers.
-	harness_inc = include_directories('tests')
-	harness_lib = static_library(
-		'canvas-harness',
-		files(
-			'tests/harness/bus.cpp',
-			'tests/harness/check.cpp',
-			'tests/harness/child.cpp',
-			'tests/harness/control.cpp',
-			'tests/harness/devices.cpp',
-			'tests/harness/files.cpp',
-			'tests/harness/image.cpp',
-			'tests/harness/layout.cpp',
-			'tests/harness/run.cpp',
-			'tests/harness/steps.cpp',
-		),
-		protocol_headers,
-		include_directories: [src_inc, harness_inc],
-		link_with: core_lib,
-		dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo, json_glib,
-			libinput, libdrm],
-	)
-	foreach scenario : scenarios
+	foreach scenario : runnable
 		scenario_sources = ['tests/scenarios/' + scenario + '.cpp']
 		# The gestures scenario counts the allocations of its drag and pinch
 		# frames. A sanitizer owns malloc, so its builds leave the counter
@@ -707,8 +659,7 @@ if foot_prog.found() and grim_prog.found()
 				protocol_headers,
 				include_directories: [src_inc, harness_inc],
 				link_with: [harness_lib, core_lib],
-				dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
-					json_glib, libinput, libdrm],
+				dependencies: core_deps,
 			),
 			suite: 'scenarios',
 			is_parallel: false,
@@ -735,20 +686,17 @@ executable(
 	protocol_headers,
 	include_directories: src_inc,
 	link_with: core_lib,
-	dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, pangocairo,
-		json_glib, libinput, libdrm],
+	dependencies: core_deps,
 )
 
 # The default-session tool against fake roots, one per display manager.
-packaging_env = environment()
-packaging_env.set('CANVAS_TMP', meson.project_source_root() / 'tmp')
 test(
 	'packaging',
 	find_program('tests/test_packaging.sh'),
 	suite: 'packaging',
 	is_parallel: false,
 	timeout: 120,
-	env: packaging_env,
+	env: test_env,
 )
 
 # The plan tools, the autopilot hook and agent-setup.sh against scratch copies.
@@ -758,5 +706,13 @@ test(
 	suite: 'packaging',
 	is_parallel: false,
 	timeout: 120,
-	env: packaging_env,
+	env: test_env,
 )
+
+# A test that cannot run here is registered all the same, as one that exits
+# 77 (meson's SKIP) and names what it lacks.
+skip_test = find_program('tests/skip.sh')
+foreach name, skip : skipped
+	test(name, skip_test, args: [name, skip['lack']], suite: skip['suite'])
+	summary(name, skip['lack'], section: 'Skipped tests')
+endforeach

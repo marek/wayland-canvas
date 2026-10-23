@@ -685,12 +685,16 @@ budgets of `wait_for` and `act_when` - and `run.h` the life of a run.
 
 ## What they need
 
-- `foot` and `grim` on `$PATH` at configure time (the tests are only
-  registered when both are found; `bar` also needs `qs`).
-- `bar` also needs `dbus-daemon` and Python with `dbus`/`gi` bindings: at
-  configure time `tests/scenarios/ensure-bar-standins.sh` provisions a
-  python-dbusmock venv under the git-ignored `tmp/bar-standins/` (or finds
-  one already there); without them the bar scenario is skipped, not failed.
+- `foot` and `grim` on `$PATH` at configure time. A scenario that cannot
+  run is still registered, as a test that exits 77 and names what is
+  missing: `meson test` reports it as SKIP and `meson setup` lists it under
+  "Skipped tests".
+- `bar` and `session` also need `qs`, `dbus-daemon`, PipeWire's daemon and
+  tools, `notify-send` (`session` only) and Python with `dbus`/`gi`
+  bindings: at configure time `tests/scenarios/ensure-bar-standins.sh`
+  provisions a python-dbusmock venv under the git-ignored
+  `tmp/bar-standins/` (or finds one already there); without them the two
+  are skipped, not failed.
   Its panel-action proofs additionally need `busctl` on `$PATH` to read
   what the stand-ins recorded.
 - A GPU render node at run time (the headless backend still renders with

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Provisions and verifies the bar scenario's stand-in Python environment,
-# and prints that environment's interpreter path as the last stdout line
-# when everything is present. Any failure exits non-zero, in which case
-# meson does not register the bar scenario at all.
+# Provisions and verifies the stand-in Python environment of the bar and
+# session scenarios, and prints that environment's interpreter path as the
+# last stdout line when everything is present. Any failure exits non-zero,
+# in which case meson registers both scenarios as skipped and names the
+# last line this script wrote to stderr.
 #
 # The stand-ins run on python-dbusmock, which needs dbus-python and
 # PyGObject from the system Python's distro packages and dbusmock itself

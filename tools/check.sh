@@ -6,8 +6,10 @@
 # `meson test --suite scenarios`. Exits non-zero on the first failure.
 #
 # The scenarios need `foot` and `grim` on PATH and a GPU render node at run
-# time; when those programs are missing, meson registers no scenario tests
-# and the scenarios step is a no-op.
+# time. A test that cannot run (those programs, or the bar scenario's `qs`
+# and stand-ins, are missing) is still registered, as a skipped test; each
+# suite's "passed" line lists what it skipped, with the reason, so a skipped
+# scenario is never reported as passed.
 #
 # --sanitize builds build-asan/ with AddressSanitizer and
 # UndefinedBehaviorSanitizer and runs its unit and scenarios suites there:
@@ -53,26 +55,64 @@ tools/build.sh "${build_args[@]}"
 # the suites run through meson, from the build dir build.sh just made
 use_venv
 
+skipped_count=0
+
+# the tests the last meson run skipped, one "SKIP <test>: <reason>" line each
+skipped_tests() {
+	local log=$build/meson-logs/testlog.json
+	[[ -f "$log" ]] || return 0
+	python3 - "$log" <<'PY'
+import json, sys
+for line in open(sys.argv[1]):
+    test = json.loads(line)
+    if test["result"] == "SKIP":
+        said = test["stdout"].strip().splitlines()
+        print(said[-1] if said else "SKIP " + test["name"])
+PY
+}
+
+# suite_passed <suite>: the suite's "passed" line, then what it did not run
+suite_passed() {
+	local skips
+	skips=$(skipped_tests)
+	if [[ -z "$skips" ]]; then
+		echo "check.sh: $1 suite passed"
+		return 0
+	fi
+	echo "check.sh: $1 suite passed, except for what it skipped:"
+	sed 's/^/check.sh:   /' <<<"$skips"
+	skipped_count=$((skipped_count + $(wc -l <<<"$skips")))
+}
+
+# finish <what ran>: the last line, with the skipped count when there is one
+finish() {
+	if [[ "$skipped_count" -gt 0 ]]; then
+		echo "check.sh: done ($1; $skipped_count skipped, not run)"
+	else
+		echo "check.sh: done ($1)"
+	fi
+}
+
 echo "check.sh: meson test -C $build --suite unit ${test_args[*]}"
 meson test -C "$build" --suite unit "${test_args[@]}"
-echo "check.sh: unit suite passed"
+suite_passed unit
 
 if [[ "$unit_only" -eq 1 ]]; then
-	echo "check.sh: done (unit only)"
+	finish "unit only"
 	exit 0
 fi
 
 if [[ "$sanitize" -eq 0 ]]; then
 	echo "check.sh: meson test -C $build --suite packaging ${test_args[*]}"
 	meson test -C "$build" --suite packaging "${test_args[@]}"
-	echo "check.sh: packaging suite passed"
+	suite_passed packaging
 fi
 
 echo "check.sh: meson test -C $build --suite scenarios ${test_args[*]}"
 meson test -C "$build" --suite scenarios "${test_args[@]}"
-echo "check.sh: scenarios suite passed"
+suite_passed scenarios
 if [[ "$sanitize" -eq 1 ]]; then
-	echo "check.sh: done (unit + scenarios, sanitized)"
+	finish "unit + scenarios, sanitized"
 else
-	echo "check.sh: done (unit + packaging + scenarios)"
+	finish "unit + packaging + scenarios"
 fi

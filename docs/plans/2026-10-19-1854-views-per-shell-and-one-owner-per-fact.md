@@ -1692,7 +1692,7 @@ Tests:
   - `say()` (gamma-client.c:40, lock-client.c:48, touch-client.c:78,
     x11-client.c:34) and the memfd shm buffer (lock-client.c:60,
     touch-client.c:95) move into `tests/clients/client-common.h`.
-- [ ] meson.build states each list once, and says what it skipped
+- [x] meson.build states each list once, and says what it skipped
   - The seven unit-test blocks (297-378) differ only in name, library and
     deps; they become a `foreach` over a dict.
   - The core dependency list (214, 224, 478, 504; the copies already
@@ -1707,6 +1707,12 @@ Tests:
       did not run.
   - Acceptance: `meson test -C build --list` shows every scenario, and
     without qs the bar scenario shows SKIP with the reason.
+  - Run here: with `qs` off PATH, `meson test --list` still lists bar and
+    session, and `meson test -v bar` prints `SKIP bar: not on PATH: qs`.
+    The plain SKIP line says only "exit status 77"; the reason is in
+    `-v`, in testlog.txt, in the `meson setup` summary and in
+    `tools/check.sh`'s output. The notes' file test is registered the same
+    way when Qt 6's qmltestrunner is missing.
 - [x] The packages match their binary
   - PKGBUILD:79 and build-deb.sh:56 say wlroots is linked statically.
     That holds only when meson falls back to the subproject. Pass
