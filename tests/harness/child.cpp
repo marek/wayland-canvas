@@ -187,6 +187,7 @@ void Child::signal(int number) {
 }
 
 void Child::close_pipe() {
+	drain();
 	if (out_ >= 0) {
 		close(out_);
 		out_ = -1;

@@ -1705,9 +1705,11 @@ Tests:
   - Literal points become layout helpers: bar.cpp's 21 clicks at y = 13
     beside its `bar_h()` (1346), and `click(60.0, 700.0)` written five
     times.
-  - Done: launcher, session, touch, capture and ipc run on the harness,
-    each green with every check kept. Still to port: sharing, xwayland,
-    viewgone, input and gestures.
+  - Done: every scenario but bar runs on the harness (launcher, session,
+    touch, capture, ipc, viewgone, sharing, xwayland, input, gestures, and
+    foreign, written on it), each green with every check kept; none of
+    them had a return-protocol explanation left. What is left is bar's:
+    its 17 explanations and its literal points go with the bar split.
 - [x] The media tour on the harness
   - Port `tools/media/tour.cpp` (its copies of the startup and bus code
     match session.cpp:171-191 and bar.cpp:363-376).

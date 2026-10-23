@@ -56,6 +56,7 @@ inline constexpr uint32_t super_ctrl[] = {KEY_LEFTMETA, KEY_LEFTCTRL};
 inline constexpr uint32_t ctrl[] = {KEY_LEFTCTRL};
 inline constexpr uint32_t ctrl_shift[] = {KEY_LEFTCTRL, KEY_LEFTSHIFT};
 inline constexpr uint32_t super_ctrl_shift[] = {KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFTSHIFT};
+inline constexpr uint32_t super_alt[] = {KEY_LEFTMETA, KEY_LEFTALT};
 inline constexpr uint32_t alt[] = {KEY_LEFTALT};
 } // namespace mods
 
@@ -66,17 +67,23 @@ void button(uint32_t code, bool pressed);
 void click(double x, double y, uint32_t code = BTN_LEFT);
 // Presses at (x0, y0), moves to (x1, y1) in ten steps and lets go.
 void drag(double x0, double y0, double x1, double y1);
-// A touchpad swipe through the entry points libinput's events reach.
-void swipe(int fingers, double dx, double dy);
+// A touchpad swipe through the entry points libinput's events reach, in
+// `steps` updates; `cancelled` ends it as libinput's cancelled swipe.
+void swipe(int fingers, double dx, double dy, int steps = 10, bool cancelled = false);
+// A pinch in `steps` updates ending on `scale`, the same way.
+void pinch(int fingers, double scale, int steps = 10);
 // The same in pieces, through the pointer device's events as libinput's
 // reach the compositor (with what it does before a gesture starts), for a
 // scenario that paces a gesture itself. A pinch's scale is the whole gesture's.
 void touchpad_swipe_begin(int fingers);
 void touchpad_swipe_update(int fingers, double dx, double dy);
-void touchpad_swipe_end();
+void touchpad_swipe_end(bool cancelled = false);
 void touchpad_pinch_begin(int fingers);
 void touchpad_pinch_update(int fingers, double scale);
-void touchpad_pinch_end();
+void touchpad_pinch_end(bool cancelled = false);
+// A vertical two-finger scroll tick, as a touchpad with natural scrolling
+// sends it.
+void touchpad_scroll(double delta);
 
 // --------------------------------------------------------- touchscreen
 

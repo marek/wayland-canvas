@@ -227,12 +227,20 @@ void drag(double x0, double y0, double x1, double y1) {
 	button(BTN_LEFT, false);
 }
 
-void swipe(int fingers, double dx, double dy) {
+void swipe(int fingers, double dx, double dy, int steps, bool cancelled) {
 	server->gestures.swipe_begin(event_time(), static_cast<uint32_t>(fingers));
-	for (int i = 0; i < 10; i++) {
-		server->gestures.swipe_update(event_time(), dx / 10, dy / 10);
+	for (int i = 0; i < steps; i++) {
+		server->gestures.swipe_update(event_time(), dx / steps, dy / steps);
 	}
-	server->gestures.swipe_end(event_time(), false);
+	server->gestures.swipe_end(event_time(), cancelled);
+}
+
+void pinch(int fingers, double scale, int steps) {
+	server->gestures.pinch_begin(event_time(), static_cast<uint32_t>(fingers));
+	for (int i = 1; i <= steps; i++) {
+		server->gestures.pinch_update(event_time(), 0, 0, 1 + (scale - 1) * i / steps, 0);
+	}
+	server->gestures.pinch_end(event_time(), false);
 }
 
 void touchpad_swipe_begin(int fingers) {
@@ -248,9 +256,9 @@ void touchpad_swipe_update(int fingers, double dx, double dy) {
 	wl_signal_emit_mutable(&pointer_device.events.swipe_update, &event);
 }
 
-void touchpad_swipe_end() {
+void touchpad_swipe_end(bool cancelled) {
 	wlr_pointer_swipe_end_event event = {.pointer = &pointer_device,
-		.time_msec = event_time(), .cancelled = false};
+		.time_msec = event_time(), .cancelled = cancelled};
 	wl_signal_emit_mutable(&pointer_device.events.swipe_end, &event);
 }
 
@@ -267,10 +275,20 @@ void touchpad_pinch_update(int fingers, double scale) {
 	wl_signal_emit_mutable(&pointer_device.events.pinch_update, &event);
 }
 
-void touchpad_pinch_end() {
+void touchpad_pinch_end(bool cancelled) {
 	wlr_pointer_pinch_end_event event = {.pointer = &pointer_device,
-		.time_msec = event_time(), .cancelled = false};
+		.time_msec = event_time(), .cancelled = cancelled};
 	wl_signal_emit_mutable(&pointer_device.events.pinch_end, &event);
+}
+
+void touchpad_scroll(double delta) {
+	wlr_pointer_axis_event event = {.pointer = &pointer_device, .time_msec = event_time(),
+		.source = WL_POINTER_AXIS_SOURCE_FINGER,
+		.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+		.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_INVERTED,
+		.delta = delta, .delta_discrete = 0};
+	wl_signal_emit_mutable(&pointer_device.events.axis, &event);
+	wl_signal_emit_mutable(&pointer_device.events.frame, &pointer_device);
 }
 
 // --------------------------------------------------------- touchscreen
