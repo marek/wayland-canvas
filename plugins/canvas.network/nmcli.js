@@ -1,10 +1,8 @@
 .pragma library
 
-// What NetworkManager's CLI and the optional tools print, and the words the
-// panel asks them in: terse output, bands, DNS providers, the Wi-Fi QR
-// payload and the matrix and speed answers read back. Nothing here touches
-// a process or an item, so the service and the views share one reading of
-// each.
+// What NetworkManager's CLI and the optional tools print and the words the
+// panel asks them in. Nothing here touches a process or an item, so the
+// service and the views share one reading of each.
 
 // nmcli's terse output escapes ":" and "\" with a backslash in every
 // value: a value is read by undoing the escapes, a line by cutting it
@@ -112,9 +110,8 @@ function bandsOf(text, ssid) {
 
 // The DNS providers, in the order the panel lists them. Automatic keeps the
 // connection's own servers; a provider with `servers` sets them for both
-// families, and is told apart by one address of each (`marks`); the typed
-// one takes the servers the user writes, and is what any other setting
-// reads as.
+// families and is told apart by one address of each (`marks`); the typed one
+// takes what the user writes and is what any other setting reads as.
 var dnsProviders = [
 	{name: "DHCP", automatic: true},
 	{
@@ -202,11 +199,10 @@ function wifiPayload(ssid, secret) {
 	return "WIFI:T:WPA;S:" + wifiField(ssid) + ";P:" + wifiField(secret) + ";;"
 }
 
-// qrencode's ASCII type prints two characters a module: "##" dark, "  "
-// light, with its quiet zone. Only the final newline may go: the quiet
-// zone's all-space rows are modules too, and a whole-string trim would eat
-// them and skew the matrix. Rows of "0" and "1", one string a row; empty
-// unless the matrix is square.
+// qrencode's ASCII type prints "##" dark and "  " light per module, with its
+// quiet zone. Only the final newline may go: a whole-string trim would eat the
+// all-space quiet-zone rows and skew the matrix. Rows of "0" and "1", one
+// string a row; empty unless the matrix is square.
 function qrRows(text) {
 	var lines = String(text).replace(/\r/g, "").split("\n")
 	while (lines.length > 0 && lines[lines.length - 1] === "") {

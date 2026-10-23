@@ -1,11 +1,9 @@
 import QtQuick
 
-// The common trigger behind every panel (api.panels): opening a panel is
-// one call by its global name, any widget, button or action can open any
-// plugin's panel, one panel is open at a time, and it closes on a click
-// outside it, on Escape or on a second toggle of the same widget. A toggle
-// for the same panel from a different widget (another tray icon) re-anchors
-// it instead, so a family of items can share one menu.
+// The common trigger behind every panel (api.panels): any widget, button or
+// action opens any plugin's panel by its global name; one is open at a time
+// and closes on an outside click, Escape or a second toggle of the same
+// widget. A toggle from a different widget (another tray icon) re-anchors it.
 Item {
 	id: root
 
@@ -17,7 +15,7 @@ Item {
 	property var panels: ({}) // global name -> the hidden PanelCard instance
 	property var warned: ({}) // names already logged as missing
 
-	// The host registers each manifest panel entry's instance here.
+	// Contributions registers each manifest panel's instance here.
 	function register(name, instance) {
 		panels[name] = instance
 		instance.dismissed.connect(function() { forget(name) })

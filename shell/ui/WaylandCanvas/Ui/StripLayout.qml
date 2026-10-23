@@ -3,11 +3,9 @@ import QtQuick
 import "."
 
 // Where the overview's strips sit and where a card goes beside one
-// (docs/intents/shell/app-bar.md). Every EdgeStrip joins on creation, leaves
-// on destruction and publishes its own `length`: the strips of one output
-// that share an edge centre as a single strip, in `order`, with a gap
-// between them. So the toolbar and the app bar line up without either
-// plugin knowing the other.
+// (docs/intents/shell/app-bar.md). The strips of one output that share an
+// edge, joined here by each EdgeStrip, centre as a single strip in `order`
+// with a gap between them, so the toolbar and the app bar line up.
 QtObject {
 	// The gap between two strips, with the separator line drawn in it.
 	readonly property int separator: 9
@@ -62,11 +60,10 @@ QtObject {
 			Math.min(want, extent - size - UiTheme.edgeMargin)))
 	}
 
-	// The top-left corner of a `width` x `height` card beside `box`, a strip
-	// or one of its squares in output coordinates, on the strip's inner
-	// side — toward the screen's centre — `gap` away from it. Along the
-	// strip the card is centred on the box, or starts where the box does.
-	// It stays inside `bounds`, the output.
+	// The top-left corner of a `width` x `height` card beside `box` (a strip or
+	// one of its squares, in output coordinates), on the strip's inner side
+	// `gap` away, kept inside `bounds`, the output. Along the strip it is
+	// centred on the box, or starts where the box does.
 	function placeBeside(edge, box, width, height, bounds, gap, centred) {
 		var x = centred ? box.x + box.width / 2 - width / 2 : box.x
 		var y = centred ? box.y + box.height / 2 - height / 2 : box.y

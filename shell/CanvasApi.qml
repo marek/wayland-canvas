@@ -1,11 +1,9 @@
 import QtQuick
 
 // api.canvas: a plugin's own surface on the plane
-// (docs/intents/platform/ipc.md). The plugin draws the surface itself —
-// the compositor is told only which surface and which canvas rectangle,
-// and from then on the plane pans, zooms and scales it like everything
-// else on it. A drag of the surface is the compositor's: the plugin hands
-// it the press with move() or resize(), and hears where it ended.
+// (docs/intents/platform/ipc.md). The plugin draws it; the compositor is told
+// only which surface and which canvas rectangle, and pans, zooms and scales
+// it with everything else on the plane.
 QtObject {
 	id: root
 

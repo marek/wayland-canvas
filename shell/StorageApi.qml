@@ -2,12 +2,10 @@ import Quickshell.Io
 import QtQuick
 
 // api.storage: the plugin's own directory under
-// $XDG_STATE_HOME/wayland-canvas/plugins/<id>/, with read(name) and
-// write(name, value) for JSON files by name, readText(name) and
-// writeText(name, text) for any other file, list(callback) with the names
-// of the files in it, and remove(name). read returns undefined when the
-// file is not there or not valid JSON, readText an empty string when it is
-// not there. A name is a file name in the directory, never a path.
+// $XDG_STATE_HOME/wayland-canvas/plugins/<id>/: JSON files by name (read,
+// write), any other file (readText, writeText), list(callback) and remove.
+// read gives undefined for a missing or invalid file, readText "" for a
+// missing one; a name is never a path.
 Item {
 	id: root
 

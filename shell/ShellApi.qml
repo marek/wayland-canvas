@@ -1,9 +1,8 @@
 import QtQuick
 
-// api.shell (docs/intents/shell/plugins.md): the shell config, live, and
-// the writes the host makes of it. It offers exactly these members: the
-// shell's own parts behind it are not the API, so a plugin cannot write the
-// config over the host's head or take another plugin's api.
+// api.shell (docs/intents/shell/plugins.md): the shell config, live, and the
+// writes the host makes of it. `_config` and `_contributions` are the host's
+// own parts, not API.
 QtObject {
 	id: root
 
@@ -31,11 +30,10 @@ QtObject {
 	readonly property bool appBarEnabled:
 		!(config.appbar && config.appbar.enabled === false)
 
-	// One page per plugin that declares settings the user may be asked
-	// about, for the settings window to render
+	// One page per plugin with settings the user may be asked about
 	// (docs/intents/shell/plugins.md): {id, name, groups: [{name, entries}]},
 	// each entry {key, type, label, description, choices, min, max, step,
-	// value}. A key without a type and a label is the plugin's own and
+	// order, value}. A key without a type and a label is the plugin's own and
 	// appears nowhere.
 	readonly property var pluginSettingsPages: {
 		var pages = []
@@ -93,9 +91,8 @@ QtObject {
 		return _contributions.hidden(name)
 	}
 
-	// Adds or removes one widget from bar.hidden. The bar loses or
-	// regains the widget at once — the bar widgets are ordered again,
-	// never the whole shell reloaded.
+	// Adds or removes one widget in bar.hidden; the bar widgets are ordered
+	// again at once, with no reload.
 	function setBarHidden(name, hidden) {
 		var list = []
 		var current = config.bar && config.bar.hidden ? config.bar.hidden : []
@@ -122,8 +119,8 @@ QtObject {
 		return true
 	}
 
-	// Writes appbar.position and appbar.enabled; both bars follow the live
-	// bindings. Anything but an edge is refused.
+	// Writes appbar.position; the app bar follows the live appBarPosition
+	// binding. Anything but an edge is refused.
 	function setAppBarPosition(edge) {
 		if (!isEdge(edge)) {
 			return false

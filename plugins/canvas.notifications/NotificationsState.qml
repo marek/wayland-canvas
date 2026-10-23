@@ -4,11 +4,9 @@ import QtQuick
 import Quickshell.Services.Notifications
 
 // The notification server and what it leaves behind: the popups on screen,
-// the history the bar widget's panel lists, and the silence switch, which
-// is kept in the plugin's storage. Another server already holding
-// org.freedesktop.Notifications leaves this one without the name: the
-// shell runs on, with no popups of its own
-// (docs/intents/shell/notifications.md).
+// the history the bar widget's panel lists and the silence switch, kept in the
+// plugin's storage. If another server holds org.freedesktop.Notifications the
+// shell runs on with no popups of its own (docs/intents/shell/notifications.md).
 Item {
 	id: root
 

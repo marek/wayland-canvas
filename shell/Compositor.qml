@@ -2,20 +2,16 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// One shared client of the compositor's control socket
-// ($WAYLAND_CANVAS_SOCKET): it subscribes as soon as it connects, asks for
-// the whole state once and keeps it current through the events, reconnects
-// when the socket goes, and routes each call's response back to its caller
-// (docs/intents/platform/ipc.md).
+// The shared client of the compositor's control socket
+// ($WAYLAND_CANVAS_SOCKET): state kept current by events, calls answered by
+// callback, reconnecting (docs/intents/platform/ipc.md).
 Item {
 	id: root
 
 	readonly property string path: Quickshell.env("WAYLAND_CANVAS_SOCKET") || ""
 
-	// The compositor's state as `state` reported it and the events have
-	// updated it: outputs (with the overview flag), desktops, windows, the
-	// theme mode, and the recording (null, or an object with the file's
-	// path).
+	// The compositor's state: outputs (with the overview flag), desktops,
+	// windows, the theme mode and the recording (null, or {path}).
 	property var state: ({outputs: [], desktops: [], windows: [], theme: "dark", recording: null})
 
 	// Every event, with its name and params, after the state was updated.
@@ -25,10 +21,9 @@ Item {
 	property var callbacks: ({}) // id -> callback(result, error)
 	property var pending: [] // requests queued while disconnected
 
-	// call("method", params, function(result, error) {}): exactly one
-	// response, in request order, with `error` null or text. While
-	// disconnected the request is queued and goes out with the subscription
-	// once the socket is back.
+	// call("method", params, function(result, error) {}): the callback runs
+	// once, `error` null or text. While disconnected the request is queued
+	// and goes out with the subscription once the socket is back.
 	function call(method, params, callback) {
 		var request = {
 			id: nextId,
@@ -103,9 +98,8 @@ Item {
 			message.error === undefined ? null : String(message.error))
 	}
 
-	// Hands one call its answer, once. `error` is null, or the text of what
-	// went wrong (the compositor's own, or "disconnected"), and `result` is
-	// null then.
+	// Answers one call, once: `error` is null or text (the compositor's, or
+	// "disconnected"), and `result` is null then.
 	function answer(id, result, error) {
 		var callback = callbacks[id]
 		if (callback === undefined) {

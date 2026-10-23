@@ -15,7 +15,7 @@ Column {
 		return provider.typed
 	})
 
-	// The panel's: a closed panel folds the field away.
+	// Set from the panel's `open`: closing the panel folds the field away.
 	property bool open: false
 	property bool editing: false
 	property string servers: ""

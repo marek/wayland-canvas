@@ -42,9 +42,8 @@ Row {
 				onClicked: function(mouse) {
 					if (mouse.button === Qt.RightButton) {
 						if (item.entry.hasMenu) {
-							// The menu panel is opened through the common
-							// trigger, anchored to this icon; the item it
-							// shows lives in TrayState.
+							// The panel reads the item from TrayState, so it is
+							// set before the toggle.
 							TrayState.activeItem = item.entry
 							if (root.api != null) {
 								root.api.panels.toggle(root.panel, item)

@@ -2,23 +2,13 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
-// The plugin host (docs/intents/shell/plugins.md): six parts and what joins
-// them. ShellConfig is shell.json and where the shell's files live;
-// PluginDiscovery finds the plugins in the built-in, user and configured
-// directories — a plugin in a later one replaces one with the same id in an
-// earlier one — reads their manifests and skips what cannot load, with a
-// line saying why; Contributions takes what the plugins contribute, each
-// whole or not at all; ShellApi is api.shell; SurfaceHost makes the
-// surfaces, one per output where a manifest asks; ReloadWatcher reloads the
-// whole shell on an edit to the config or any plugin's files. The host
-// hands every contributed component one api: plugin, storage, panels,
-// canvas, actions, theme, compositor, shell. It draws nothing itself:
-// everything on screen belongs to a plugin.
+// The plugin host (docs/intents/shell/plugins.md): wires the parts below and
+// hands every contributed component one api (plugin, storage, panels, canvas,
+// actions, theme, compositor, shell). It draws nothing itself.
 Item {
 	id: host
 
-	// The plugin API this host offers; a manifest asking for more is not
-	// loaded.
+	// A manifest asking for a higher apiVersion is not loaded.
 	readonly property int apiVersion: 1
 
 	ShellConfig {
@@ -60,9 +50,8 @@ Item {
 	Compositor {
 		id: compositor
 
-		// A script's or keybinding's action.run arrives as an event: the
-		// host runs the named plugin action, exactly as a toolbar button
-		// would.
+		// A script's or keybinding's action.run runs the plugin action as a
+		// toolbar button does.
 		onEvent: function(name, params) {
 			if (name === "action") {
 				actions.run(params.name, params.args)
@@ -114,9 +103,9 @@ Item {
 		shellConfig.set(["plugins", pluginId, "settings", key], value)
 	}
 
-	// Gives each plugin that can load its api, then takes what they
-	// contribute and brings the shell up: the theme first, so the surfaces
-	// are drawn in it from their first frame.
+	// Gives each loadable plugin its api and takes what they contribute; the
+	// theme starts before the surfaces exist, so they draw in it from the
+	// first frame.
 	function load(found) {
 		var loaded = []
 		var storageDirs = []

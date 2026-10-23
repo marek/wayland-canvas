@@ -13,8 +13,6 @@ Item {
 
 	visible: false
 
-	// ---- the settings object: asked once, kept current by the event ----
-
 	property var settings: null // the settings object (docs/intents/platform/ipc.md)
 	property string settingsError: "" // settings.get itself failed
 
@@ -64,8 +62,6 @@ Item {
 		}
 	}
 
-	// ---- recording a chord ----
-
 	property var recording: null // {scope, action} while a capture runs
 
 	function cancelRecording() {
@@ -95,8 +91,6 @@ Item {
 			onKeys(result != null ? result.keys : null, "")
 		})
 	}
-
-	// ---- writing canvas.conf ----
 
 	// The fault line and the moved-chord line: one row each, the latest.
 	property var faultRow: null // {scope, action} or {what} or {scope: "commands"}
@@ -175,8 +169,6 @@ Item {
 				}
 			})
 	}
-
-	// ---- the commands, one section of the Shortcuts tab ----
 
 	// A command being added: the file never holds half of it. The chord
 	// and the command line wait here until both are given; one write

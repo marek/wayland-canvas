@@ -33,11 +33,9 @@ Item {
 				// The screen, for a per-output surface.
 				required property var modelData
 
-				// The surface's api is there from its first binding, and
-				// its screen only if it is per-output: the others have no
-				// output to be on. The surface is the seat's child, and
-				// goes with it; the seat is an Item so a surface that is
-				// an Item has a parent item.
+				// The surface is the seat's child and goes with it; the seat
+				// is an Item so a surface that is an Item has a parent. Only a
+				// per-output surface is given its screen.
 				Component.onCompleted: {
 					var entry = variants.entry
 					var properties = entry.perOutput

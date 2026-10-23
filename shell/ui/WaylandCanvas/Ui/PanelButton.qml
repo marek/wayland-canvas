@@ -1,12 +1,10 @@
 import QtQuick
 import "."
 
-// A button, in four kinds: "fill" (the default), a label on a filled, rounded
-// box; "primary", the same on the accent, the one a form is for; "outline",
-// a hairline box that fills under the pointer; "flat", the label alone, quiet
-// until the pointer is over it (a link-like "Reset" or "‹"), with a hit area
-// wider than the text. `icon` sets the label as a glyph in a fixed square.
-// Width and height are the caller's to override.
+// A button in four kinds: "fill" (the default), a label on a filled box;
+// "primary", the same on the accent; "outline", a hairline box that fills under
+// the pointer; "flat", the label alone until the pointer is over it, with a hit
+// area wider than the text. `icon` sets the label as a glyph in a fixed square.
 Item {
 	id: root
 

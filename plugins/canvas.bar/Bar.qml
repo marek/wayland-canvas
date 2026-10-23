@@ -3,14 +3,10 @@ import Quickshell.Wayland
 import QtQuick
 import WaylandCanvas.Ui
 
-// One bar surface: a top layer-shell panel with an exclusive zone, so
-// maximized windows start below it. The bar reads every loaded widget
-// from the host's live list, by section and order (the config's
-// bar.layout first, then each widget's declared order); a widget the
-// config's bar.hidden names is flagged there and left out here, and
-// because the list is live the settings panel hides or shows a widget
-// without reloading the shell — this bar adds or drops the widgets that
-// changed and keeps the rest. Each widget carries its own plugin's api
+// One bar surface: a top layer-shell panel with an exclusive zone, so maximized
+// windows start below it. It follows the host's live widget list by section
+// and order: a widget bar.hidden names is left out, and a hide or show adds or
+// drops that widget alone, with no reload. Each widget carries its plugin's api
 // and, when its manifest names one, the panel a left click opens.
 PanelWindow {
 	id: root
@@ -62,10 +58,8 @@ PanelWindow {
 		}
 	}
 
-	// The live widget items by name: a change of the list keeps the items
-	// of the widgets that stay, so a hide or show elsewhere on the bar
-	// leaves a clock's format, a weather reading and an open panel's
-	// anchor as they are.
+	// The live widget items by name: a change of the list keeps the items of
+	// the widgets that stay, with their state and an open panel's anchor.
 	property var items: ({})
 
 	function buildWidgets() {

@@ -1,14 +1,10 @@
 import QtQuick
 
-// api.plugin: the manifest, the settings (the manifest's defaults merged
-// with the config's overrides), and setSetting, which applies a value at
-// once and hands it to the host to write back to the config.
-//
-// A manifest entry is the default value on its own, or an object carrying
-// that default and what the settings window needs to render the setting —
-// type, label, description, group, choices, range
-// (docs/intents/shell/plugins.md). Either way `settings` holds values alone;
-// the metadata is `schema`'s.
+// api.plugin: the manifest, the settings (its defaults merged with the
+// config's overrides) and setSetting, which applies a value at once and hands
+// it to the host to write back. A manifest entry is a default alone or an
+// object with the metadata the settings window renders
+// (docs/intents/shell/plugins.md); `settings` holds values, `schema` the metadata.
 Item {
 	id: root
 

@@ -9,8 +9,6 @@ import "Manifest.js" as Manifest
 Item {
 	id: root
 
-	// The plugin API version this shell offers; a manifest asking for more
-	// is not loaded.
 	required property int apiVersion
 	// The config as it stands, for `plugins.<id>.enabled`.
 	required property var config

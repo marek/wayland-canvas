@@ -1,13 +1,10 @@
 import QtQuick
 import WaylandCanvas.Ui
 
-// A menu button's flyout: rows of a glyph or a colour swatch and a
-// label, on the toolbar's inner side toward the screen's centre, level
-// with its button along the strip, kept inside the output. It draws on
-// the chrome surface, whose window spans the output, so its coordinates
-// are the output's. Choosing a row runs that entry's action and folds
-// the flyout; a second click of the button or a click outside (the
-// surface catches those) folds it too.
+// A menu button's flyout: rows of a glyph or swatch and a label, beside the
+// strip level with its button. It draws on the chrome surface, which spans the
+// output, so its coordinates are the output's. Choosing a row runs its action
+// and folds it; so does a second click of the button or a click outside.
 Rectangle {
 	id: root
 

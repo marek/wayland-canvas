@@ -3,30 +3,12 @@ import Quickshell.Wayland
 import QtQuick
 import "."
 
-// One strip of squares on an edge of the overview: the toolbar's buttons,
-// the app bar's apps (docs/intents/shell/toolbar.md, app-bar.md). While its
-// screen shows the overview — the compositor's state, matched to the screen
-// by output name — the strip slides in on `edge`: a column on the left and
-// right, a row on the top and bottom, 8 px from the edge, the top row below
-// the bar. It slides out as the screen leaves, and a new edge applies at
-// once. The plugin gives the edge (from api.shell), the number of squares
-// and the squares themselves, as the strip's children, each `squareSize`
-// wide and high; the strip lays them out in order.
-//
-// Two surfaces: the strip is its own layer surface, anchored to its edge and
-// sized the strip plus a pocket that overhangs the screen edge — the strip
-// slides into the pocket as the screen leaves the overview, so the window's
-// geometry never changes, and the compositor's placed box still names the
-// strip (a bottom-anchored window's top is the strip's top: what the
-// overview's shelf and help line keep clear of). The chrome is a companion
-// surface spanning the output, where the hovered square's label and the
-// plugin's flyouts draw, so both can expand past the strip toward the
-// screen's centre. Its input is the open flyout's alone (`catching`).
-// Neither surface ever takes the keyboard: the overview's keys, Escape
-// above all, keep working while a strip shows.
-//
-// A strip publishes its `length`, and StripLayout places the strips that
-// share an edge as one.
+// One strip of squares on an edge of the overview, for the toolbar and the app
+// bar (docs/intents/shell/toolbar.md, app-bar.md): it slides in on `edge` while
+// its screen shows the overview and out as the screen leaves, and StripLayout
+// places the strips that share an edge as one. The strip is a layer surface of
+// its own; the chrome, a second one spanning the output, draws the hover label
+// and the plugin's flyouts. Neither takes the keyboard.
 Item {
 	id: root
 
@@ -76,14 +58,10 @@ Item {
 		return false
 	}
 
-	// How far the strip sits from its settled place: none in the overview;
-	// a whole pocket otherwise, so it leaves the screen entirely — past the
-	// screen edge on the left, right and bottom, past the screen's top on
-	// the top edge (the row sits below the bar). The strip's window never
-	// moves: its geometry is fixed from the anchors and margins below, and
-	// the slide moves only the content inside it, so the surface is never
-	// asked to reconfigure mid-animation (a fully off-screen surface stops
-	// getting frames, and a slide it carried would strand it there).
+	// How far the strip sits from its settled place: none in the overview, a
+	// whole pocket (off the screen) otherwise. Only the content slides: a
+	// surface moved fully off-screen stops getting frames and could not
+	// slide back, so the window stays put.
 	readonly property int nearEdge: edge === "top"
 		? UiTheme.barHeight + edgeMargin : edgeMargin
 	// The pocket the strip slides into: its own square plus the distance
@@ -163,16 +141,12 @@ Item {
 		WlrLayershell.layer: WlrLayer.Top // above the canvas, below the panels
 		WlrLayershell.keyboardFocus: WlrKeyboardFocus.None // never the keyboard
 
-		// Anchored to the edge alone (the bottom-edge anchor is what tells
-		// the compositor the shelf must keep clear of it), and to the
-		// leading edge along it, so the margin along the edge places the
-		// strip where StripLayout says. The margin on the edge itself
-		// overhangs by a square: the window is the strip plus the pocket
-		// that holds it off-screen while it slides, so the compositor's
-		// placed box names the strip's edge — a bottom-anchored window's top
-		// is the strip's top. On the top edge the pocket reaches past the
-		// screen's top, over the bar's area: transparent and without input
-		// there, so the bar keeps its clicks.
+		// Anchored to its edge and to the leading edge along it: the margin
+		// along the edge places the strip where StripLayout says, and the
+		// margin on the edge itself overhangs by a square, so the window is
+		// the strip plus its pocket and the compositor's placed box names the
+		// strip's edge (what the shelf keeps clear of). On the top edge the
+		// pocket reaches over the bar, transparent and without input.
 		anchors.right: root.edge === "right"
 		anchors.left: root.edge === "left" || !root.vertical
 		anchors.top: root.edge === "top" || root.vertical
@@ -264,12 +238,10 @@ Item {
 			right: true
 		}
 
-		// Input is the open flyout's alone: nothing while none is (the
-		// pointer reaches the overview and the strip below), everything
-		// under the bar but the strip itself while one is — a click outside
-		// the flyout folds it, and whichever of the two surfaces ended up on
-		// top, the squares keep their clicks. The four regions are the
-		// below-bar area cut around the strip.
+		// Input is the open flyout's alone: nothing while none is, everything
+		// under the bar but the strip while one is, so a click outside the
+		// flyout folds it and the squares keep their clicks. The four regions
+		// are the below-bar area cut around the strip.
 		mask: Region {
 			Region { // the band above the strip
 				x: 0
@@ -314,10 +286,8 @@ Item {
 				anchors.fill: parent
 			}
 
-			// The hovered square's label: on a chip beside it, toward the
-			// screen's centre, so it reads over whatever the overview is
-			// showing — and never past the screen, its text elided to what
-			// is left.
+			// The hovered square's label: a chip beside it toward the screen's
+			// centre, its text elided to what fits on the screen.
 			Rectangle {
 				readonly property var box: root.squareBox(root.hoverIndex)
 				readonly property int gap: 8

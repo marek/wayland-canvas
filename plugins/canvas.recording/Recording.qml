@@ -2,12 +2,10 @@ import Quickshell
 import QtQuick
 import WaylandCanvas.Ui
 
-// The recording dot: while a screen recording runs, a red dot sits in the
-// bar; a click stops it. It reads the compositor's `recording` state - null
-// while nothing runs, else an object with the file's path - which the
-// `capture.recording` events keep, and which a shell that comes up
-// mid-recording already holds. BarButton hides itself when its text is
-// empty, so no recording means no dot.
+// The recording dot: a red dot in the bar while a screen recording runs; a
+// click stops it. It reads the compositor's `recording` state (null, or
+// {path}), which a shell that comes up mid-recording already holds.
+// BarButton hides itself when its text is empty.
 BarButton {
 	id: root
 

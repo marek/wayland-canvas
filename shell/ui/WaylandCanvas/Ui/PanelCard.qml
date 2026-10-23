@@ -3,29 +3,17 @@ import Quickshell.Wayland
 import QtQuick
 import "."
 
-// One indicator panel: a full-output overlay layer surface holding a card
-// centred under its indicator and clamped inside the output. The host's
-// panel manager instantiates one per manifest panel entry, hidden, hands it
-// the api, and on open the anchor item; it owns the one-at-a-time rule and
-// the second-toggle close. What a panel shows it reads from its own
-// plugin's state, never from the item that opened it, so a panel opened by
-// an action looks as it does from its widget. A click outside the card
-// (the overlay below the bar strip) and Escape close the panel here —
-// `dismissed` tells the manager it went; the bar strip is masked out of
-// the surface, so a second click of the icon reaches the bar and closes
-// the panel through the manager's toggle. The card is a layer surface
-// rather than an xdg popup: the Qt platform refuses to attach a popup to a
-// layer-shell parent. It asks for the keyboard on demand, which the
-// compositor gives a surface above the windows as it maps, so a text field
-// in a panel receives typing without a click first and Escape is caught
-// here before any field sees it.
+// One panel: a full-output overlay layer surface holding a card under its
+// anchor. A click outside the card or Escape closes it and `dismissed` tells
+// the PanelsManager. A layer surface, not an xdg popup: the Qt platform
+// refuses a popup on a layer-shell parent.
 PanelWindow {
 	id: root
 
 	property var api: null
-	property var anchorItem: null // the bar widget the panel hangs from
-	// The panel's manifest id, which the host sets: it names the layer
-	// surface `wayland-canvas-panel-<panelName>`.
+	property var anchorItem: null // the bar widget or toolbar button it hangs from
+	// The panel's manifest id; it names the layer surface
+	// `wayland-canvas-panel-<panelName>`.
 	property string panelName: ""
 	property int panelWidth: 240
 
@@ -46,6 +34,8 @@ PanelWindow {
 
 	WlrLayershell.namespace: "wayland-canvas-panel-" + panelName
 	WlrLayershell.layer: WlrLayer.Overlay
+	// On demand, so a text field takes typing without a click first and Escape
+	// is caught here before any field sees it.
 	WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
 	anchors {
@@ -55,12 +45,10 @@ PanelWindow {
 		right: true
 	}
 
-	// Everything but the bar strip is this panel's to catch; the strip
-	// itself stays the bar's, which is what makes a second click of the
-	// indicator toggle the panel closed. A toolbar button's strip lies
-	// below the panel layer, so its card catches the whole output: a
-	// click above or beside the card closes it, never reaching the window
-	// below.
+	// Everything but the bar strip is this panel's to catch, so a second
+	// click of an indicator reaches the bar and toggles the panel closed. A
+	// toolbar button's strip lies below the panel layer, so there the card
+	// catches the whole output.
 	readonly property real maskTop: beside ? 0 : barH
 	mask: Region {
 		y: root.maskTop
@@ -92,15 +80,7 @@ PanelWindow {
 		? anchorWindow.screen.height : UiTheme.screenHeight
 	readonly property real barH: anchorWindow ? anchorWindow.height : UiTheme.barHeight
 
-	// The card: placed by its anchor, kept inside the output. A bar
-	// widget hangs centred under its indicator. An anchor that Qt cannot
-	// place from here — the overview toolbar's button, whose window is
-	// only the strip — names the spot itself, in output coordinates, as
-	// `panelSpot`: the strip's edge and the button's box. The card hangs
-	// beside it on the strip's inner side, toward the screen's centre,
-	// level with the button (StripLayout.placeBeside). The watcher's
-	// transform is the reactive dependency that re-runs the position
-	// when the bar lays its widgets out or moves them — a bare
+	// Re-runs cardPos when the bar lays its widgets out or moves them: a bare
 	// mapToItem binding would only see the first, pre-layout position.
 	TransformWatcher {
 		id: anchorWatcher
@@ -113,6 +93,9 @@ PanelWindow {
 	readonly property bool beside: anchorItem != null
 		&& anchorItem.panelSpot !== undefined
 
+	// The card hangs centred under a bar widget, kept inside the output; an
+	// anchor with a `panelSpot` (a toolbar button, whose window is only the
+	// strip) has it beside the strip, level with the button.
 	readonly property point cardPos: {
 		anchorWatcher.transform
 		if (beside) {

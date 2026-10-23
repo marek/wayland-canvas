@@ -1,13 +1,10 @@
 import QtQuick
 import "."
 
-// The night light's controls: a switch row that names the colour
-// temperature, and a slider for it, warm at the left. The compositor owns
-// the night light (docs/intents/render/night-light.md): the control reads the
-// switch, the temperature and the temperature's bounds from `settings`, the
-// answer of settings.get, and reports what the user chose through `chose`,
-// which the caller hands to settings.set. It knows no bound of its own, so
-// until the answer arrives it is idle.
+// The night light's controls: a switch row naming the colour temperature and
+// a slider for it, warm at the left (docs/intents/render/night-light.md). The
+// values and the temperature's bounds come from `settings`, the answer of
+// settings.get; it is idle until that arrives and reports choices by `chose`.
 Column {
 	id: root
 

@@ -3,8 +3,8 @@ import WaylandCanvas.Ui
 import "."
 
 // The Shortcuts tab: the file's complaints, every action's row grouped as
-// the registry orders them, and the commands. The list scrolls; the
-// registry's every action is taller than an output.
+// settings.get lists them, and the commands. The list scrolls: the rows
+// together are taller than an output.
 Flickable {
 	id: root
 
@@ -18,7 +18,8 @@ Flickable {
 	contentHeight: column.implicitHeight
 	clip: true
 
-	// The groups in registry order, overview last, each with its rows.
+	// The groups in the order settings.get lists them (overview last), each
+	// with its rows.
 	function groups() {
 		var out = []
 		var byName = ({})
@@ -53,9 +54,6 @@ Flickable {
 		width: root.width
 		spacing: UiTheme.panelSpacing
 
-		// The file's own complaints first: every parse error the
-		// reload found, and the socket's own fault when
-		// settings.get failed. Nothing to say: no line at all.
 		Repeater {
 			model: root.errorLines()
 

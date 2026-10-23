@@ -1,15 +1,11 @@
 import QtQuick
 import WaylandCanvas.Ui
 
-// api.theme: the desktop's one light/dark mode. The mode is read from the
-// config at start and applied to the UI kit's palette (which every plugin
-// colours itself from); setMode flips it, persists it as theme.mode in
-// shell.json and tells the compositor at start and on every change, so the
-// shell and the compositor never disagree for longer than a message
-// (docs/intents/shell/theme.md). A mode the compositor reports in its
-// theme event — an outside client's theme.set — is adopted the same way,
-// kept in the config but never told back; at start the config's choice
-// still wins, so it is pushed over whatever the compositor had.
+// api.theme: the desktop's one light/dark mode (docs/intents/shell/theme.md),
+// applied to the UI kit's palette, kept as theme.mode in shell.json and told
+// to the compositor at start and on every change. A mode the compositor
+// reports is adopted the same way but never told back; at start the config's
+// choice wins.
 Item {
 	id: root
 
@@ -42,10 +38,8 @@ Item {
 		}
 	}
 
-	// A mode the compositor reported: adopted as if the switch had been
-	// clicked — palette flipped, kept in the config — but never told back:
-	// the event came from the compositor, and an event matching the
-	// shell's own mode changes nothing.
+	// A mode the compositor reported: adopted as a click would be, but never
+	// told back (an event matching the shell's own mode changes nothing).
 	function adopt(mode) {
 		apply(mode)
 	}

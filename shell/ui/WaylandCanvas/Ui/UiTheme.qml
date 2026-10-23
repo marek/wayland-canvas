@@ -2,21 +2,18 @@ pragma Singleton
 
 import QtQuick
 
-// The shell's palette and metrics, in both modes: the dark theme the bar
-// was born with and its light match (docs/intents/shell/theme.md). The host
-// owns the mode — api.theme sets it — and every UI-kit piece and plugin
-// that draws reads its colours from here, so the whole shell follows one
-// switch. Icons are glyphs of the monospace font, not images.
+// The shell's palette and metrics in both modes (docs/intents/shell/theme.md).
+// api.theme sets the mode, and every UI-kit piece and plugin reads its
+// colours from here. Icons are glyphs of the monospace font, not images.
 QtObject {
 	// "light" or "dark"; set by the host at start and on every change.
 	property string mode: "dark"
 
 	readonly property bool light: mode === "light"
 
-	// The five named colours of each mode. Text and detail greys stay
-	// readable on both backgrounds; the accent is the one saturated fill,
-	// and onAccent is the text that sits on it (light text on the light
-	// mode's dark blue, near-black on the dark mode's light blue).
+	// The named colours of each mode: the greys stay readable on both
+	// backgrounds, the accent is the one saturated fill and onAccent the text
+	// on it.
 	readonly property color background: light ? "#e1e2e7" : "#1a1b26"
 	readonly property color text: light ? "#3760bf" : "#a9b1d6"
 	readonly property color attention: light ? "#f52a65" : "#f7768e"
@@ -24,11 +21,9 @@ QtObject {
 	readonly property color accent: light ? "#2e7de9" : "#7aa2f7"
 	readonly property color onAccent: light ? "#ffffff" : "#1a1b26"
 
-	// Panel surfaces: the card a panel floats above whatever is under it —
-	// the background's own colour in dark, one step lighter in light so a
-	// card reads as raised over the bar and the windows. The border is the
-	// hairline that keeps a light card off a light window and a dark card
-	// off a dark wallpaper.
+	// Panel surfaces: the card floats above what is under it, the background
+	// colour in dark and a step lighter in light; the border keeps it off a
+	// window of its own colour.
 	readonly property color panel: light ? "#f4f5f8" : "#1a1b26"
 	readonly property color border: light ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(1, 1, 1, 0.10)
 
@@ -55,8 +50,8 @@ QtObject {
 	readonly property int iconSize: 16
 	readonly property int edgeMargin: 8
 
-	// Panels: fixed row and section metrics, so a panel's layout (and the
-	// geometry its scenario tests rely on) does not drift with the font.
+	// Fixed row and section metrics, so a panel's layout does not drift with
+	// the font.
 	readonly property int panelPadding: 10
 	readonly property int panelSpacing: 6
 	readonly property int rowHeight: 32

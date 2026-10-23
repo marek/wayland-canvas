@@ -2,11 +2,9 @@ import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// The agents widget: the robot glyph while any AI provider has usage to
-// show, none while the machine is quiet. AgentsState runs the collector
-// helper — the manifest's refresh interval, plus every panel open; the
-// widget carries the attention colour the moment any limits window is
-// nearly spent, so a burning session is visible without opening the panel.
+// The agents widget: the robot glyph while any AI provider has usage to show,
+// none while the machine is quiet, in the attention colour once any limits
+// window is nearly spent. AgentsState runs the collector helper.
 BarButton {
 	id: root
 

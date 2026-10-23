@@ -5,19 +5,11 @@ import WaylandCanvas.Ui
 import "format.js" as Format
 import "."
 
-// The network panel: the connection in use in the head — its name, state
-// and band, share-as-QR and speed-test buttons where the system has the
-// tools (a button whose tool is missing is hidden), and the Wi-Fi switch;
-// the live figures, sampled only while the panel is open; the Wi-Fi band
-// with an Automatic switch (off, a lock to 2.4, 5 or 6 GHz for the
-// connection); the DNS provider applied to the active connection; and the
-// networks — known ones first, the connected one on top, then what the
-// scan finds while the panel is open, never in the background. A row click
-// joins: an open or known network connects at once, a secured unknown one
-// asks for a password — an enterprise one for an identity and passphrase
-// too — and is never tried without them; the connected row disconnects.
-// What nmcli and the tools tell is NetworkState.service's; the band, DNS,
-// share and speed-test views are their own files.
+// The network panel: the connection in use in the head with its tool buttons
+// (hidden where the tool is missing), the live figures, the Wi-Fi band, the DNS
+// provider and the networks to join. Figures and scan run only while the panel
+// is open, and a secured unknown network is never tried without credentials.
+// NetworkState.service reads nmcli and the tools; the views are their own files.
 PanelCard {
 	id: root
 
@@ -140,9 +132,8 @@ PanelCard {
 		if (value === "") {
 			return
 		}
-		// Detached, like the reference shell: a managed child's forked
-		// wl-copy daemon would stay in the shell's own process tree and
-		// never come to serve its selection.
+		// Detached: a managed child's forked wl-copy daemon would stay in
+		// the shell's process tree and never come to serve its selection.
 		Quickshell.execDetached(["sh", "-c",
 			'printf %s "$1" | wl-copy', "copy", value])
 	}
@@ -358,8 +349,6 @@ PanelCard {
 						detail: root.stateName(network)
 						selected: network.connected
 
-						// The right edge: a lock while credentials are
-						// needed, Forget for known networks not in use.
 						Text {
 							visible: root.secured(entry.network)
 							text: "󰌾"
@@ -396,10 +385,8 @@ PanelCard {
 						}
 					}
 
-					// The credentials prompt, inline under its row: a
-					// password, or an identity and passphrase on an
-					// enterprise network — Enter submits, nothing connects
-					// before it is filled.
+					// The credentials prompt, inline under its row: Enter
+					// submits, and nothing connects before it is filled.
 					Column {
 						visible: entry.promptMine
 						width: parent.width
@@ -479,9 +466,8 @@ PanelCard {
 		property string label: ""
 		property string value: ""
 		property bool copyable: false
-		// the row's halves are equal, except where a pair needs more room
-		// than its share: the last row's IP and its label together are
-		// wider than half, so that figure takes a little more of the row
+		// the row's halves are equal, except for the last row's IP, which
+		// with its label is wider than half and takes more of the row
 		property real share: 0.5
 		width: (parent.width - UiTheme.panelSpacing) * share
 		height: 16

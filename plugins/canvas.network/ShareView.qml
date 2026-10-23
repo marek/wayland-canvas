@@ -2,11 +2,9 @@ import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// The share view: the QR of the network in use, the payload fetched
-// through NetworkManager's secrets and drawn module by module on a
-// light card — dark on light with its quiet zone, the way scanners
-// read it, and never as text: fonts put their own spacing between
-// block characters and the code stops scanning.
+// The share view: the QR of the network in use, the payload fetched through
+// NetworkManager's secrets and drawn module by module on a light card, never
+// as text: fonts space block characters and the code stops scanning.
 Column {
 	id: root
 

@@ -2,15 +2,10 @@ import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// One overview toolbar: while its screen shows the overview, the strip of
-// every loaded plugin's toolbar buttons slides in on the edge the config's
-// toolbar.position names (right by default) and slides out as the screen
-// leaves (docs/intents/shell/toolbar.md). The strip, its slide, its edge and
-// its chrome are the UI kit's EdgeStrip; this file is what is the
-// toolbar's own: the buttons, the menu flyout and what a click does.
-// api.shell.toolbarButtons are the ordered, valid buttons (the config's
-// toolbar.order, then plugin id and manifest order), and no buttons at all
-// means no toolbar.
+// One overview toolbar: the strip of every loaded plugin's toolbar buttons,
+// api.shell.toolbarButtons, on the edge toolbar.position names
+// (docs/intents/shell/toolbar.md). No buttons means no toolbar. EdgeStrip
+// draws the strip; this file is the buttons, the flyout and what a click does.
 EdgeStrip {
 	id: root
 
@@ -42,17 +37,14 @@ EdgeStrip {
 		visible: root.flyoutButton != null
 	}
 
-	// ---- what a click does ----
-
 	// The button whose flyout is open, null when none is; the button whose
 	// label is shown on hover.
 	property var flyoutButton: null
 	property var hoverButton: null
 
-	// Every button routes its click here: a menu button toggles its flyout
-	// (a second click folds it), any other click folds whatever flyout is
-	// open — it is outside one — and then runs its action or toggles its
-	// panel through the common trigger.
+	// Every button routes its click here: a menu button toggles its flyout,
+	// any other click folds the open flyout (it is outside one) and runs the
+	// action or toggles the panel.
 	function buttonActivated(button) {
 		var spec = button.spec
 		if (spec.menu.length > 0) {

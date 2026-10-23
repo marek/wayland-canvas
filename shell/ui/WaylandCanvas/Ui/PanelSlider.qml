@@ -2,12 +2,10 @@ import QtQuick
 import "."
 
 // A slider: a track, an accent fill and a knob. Press-drag and wheel steps
-// emit `moved` with the new value (0..1). The caller owns the value: bind it
-// to the real state and apply what `moved` delivers — the knob follows
-// `live`, the in-hand position, so a slow service never yanks it back
-// mid-drag. A caller that must apply a value once per gesture, not once per
-// motion, uses `committed` instead: the last value, as the press ends (a
-// wheel step is a gesture of its own).
+// emit `moved` with the new value (0..1); the caller owns the value, and the
+// knob follows `live` so a slow service never yanks it back mid-drag.
+// `committed` delivers the last value once as the press ends (a wheel step is
+// a gesture of its own).
 Item {
 	id: root
 

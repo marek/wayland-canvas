@@ -2,14 +2,11 @@ import Quickshell.Io
 import QtQuick
 import "nmcli.js" as Nm
 
-// What the Quickshell backend does not know about the connection in use,
-// read and written through NetworkManager's CLI and the optional tools:
-// the address, gateway and profile, the Wi-Fi band and the DNS provider
-// with their changes, the live figures, the share QR, the speed test and
-// the enterprise join. The device, its Wi-Fi side and the network in use
-// come in from NetworkState, which holds this service for every reader.
-// The reads, the samples and the scan run only while `live` is set, and
-// the share and speed answers are dropped when it falls.
+// What the Quickshell backend does not know about the connection in use, read
+// and written through NetworkManager's CLI and the optional tools: address,
+// gateway and profile, the Wi-Fi band, the DNS provider, the live figures, the
+// share QR, the speed test and the enterprise join. Reads, samples and the
+// scan run only while `live` is set; the share and speed answers drop with it.
 Item {
 	id: root
 

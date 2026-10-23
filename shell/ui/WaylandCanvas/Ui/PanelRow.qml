@@ -2,11 +2,9 @@ import QtQuick
 import "."
 
 // One panel row: an optional leading glyph or colour swatch, a label, an
-// optional smaller detail under it, selection, hover, a click. What the
-// caller declares inside the row (a switch, a right-edge label) goes into the
-// trailing slot: laid out right to left from the row's inset, above the
-// row's own mouse area so it keeps its clicks, with the label elided before
-// it. Plain text parked there does not take clicks at all.
+// optional detail under it, selection, hover, a click. What the caller
+// declares inside goes into the trailing slot, laid out right to left above
+// the row's mouse area so it keeps its clicks; plain text there takes none.
 Item {
 	id: root
 

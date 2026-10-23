@@ -22,10 +22,9 @@ Item {
 	// a binding on it runs on the host's own writes just as on a load.
 	property var data: ({})
 
-	// False while shell.json holds text that is not a JSON object: the
-	// user's file, mid-edit or mistyped, which a write would replace with
-	// the few keys the host knows. A missing or blank file has nothing to
-	// lose.
+	// False while shell.json holds text that is not a JSON object (mid-edit
+	// or mistyped): a write would replace the user's file. A missing or
+	// blank file has nothing to lose.
 	property bool valid: true
 	property bool skipLogged: false
 
@@ -83,11 +82,10 @@ Item {
 		}
 	}
 
-	// Sets the value at `path` (a list of keys: a plugin id has dots in
-	// it), making the objects on the way, applies it in memory and
-	// persists it. A file that did not parse is left as the user wrote it:
-	// the change lives in this run only, until an edit that parses
-	// reloads the shell.
+	// Sets the value at the `keys` path (a list: a plugin id has dots in it),
+	// making the objects on the way, in memory and in the file. A file that
+	// did not parse is left as written: the change lives in this run until an
+	// edit that parses reloads the shell.
 	function set(keys, value) {
 		var node = data
 		for (var i = 0; i < keys.length - 1; i++) {

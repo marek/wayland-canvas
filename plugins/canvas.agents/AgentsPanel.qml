@@ -2,14 +2,10 @@ import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// The agents panel: one tab per AI provider family. Claude and GPT carry
-// their limits windows beside the token figures; every other family with
-// usage shows tokens only. The hero's mark is the provider's own — the
-// Claude starburst, the GPT hexagon — with the plan (or a fault) as the
-// meta line; a fault also brings the sign-in card with the CLI command
-// that restores authoritative usage. The day and model figures are a
-// read-out; the only controls are the provider switch's equal chips under
-// the hero — any number of families fits the card.
+// The agents panel: one tab per AI provider family. Claude and GPT carry their
+// limits windows beside the token figures, every other family tokens only.
+// The provider switch under the hero is the only control; the rest is a
+// read-out.
 PanelCard {
 	id: root
 
@@ -152,7 +148,7 @@ PanelCard {
 		model: root.provider ? root.provider.limits : []
 
 		// One window: its name and share, the meter, and the moment it
-		// resets — the fixed 39 px the scenario reads band by band.
+		// resets, in a fixed 39 px band.
 		Item {
 			id: window
 			required property var modelData
@@ -203,10 +199,8 @@ PanelCard {
 		Repeater {
 			model: root.provider ? root.provider.days : []
 
-			// One day: the weekday on the left, a bar scaled to the
-			// busiest day of the seven, the tokens on the right; today's
-			// row is the one drawn bold, its fill the brighter text
-			// colour where the rest carry the muted one.
+			// One day: the weekday, a bar scaled to the busiest day of the
+			// seven, the tokens; today's row is bold and in the brighter text.
 			Item {
 				id: day
 				required property var modelData

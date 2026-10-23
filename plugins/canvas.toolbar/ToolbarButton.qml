@@ -1,20 +1,15 @@
 import QtQuick
 import WaylandCanvas.Ui
 
-// One toolbar button: its glyph in a square, a click routed to the
-// surface, which runs the action, opens the panel through the common
-// trigger or unfolds the flyout. The strip lays the button out, so a live
-// edge change moves it with the strip; the button reports its hover, so the
-// strip can show its label beside it.
-//
-// A panel-opening button also names where its panel belongs: beside the
-// strip, level with this button, in output coordinates (`panelSpot`: the
-// edge and the button's box). A card places itself from it
-// (shell/ui/WaylandCanvas/Ui/PanelCard.qml); a bar widget has none.
+// One toolbar button: its glyph in a square. A click goes to the surface,
+// which runs the action, toggles the panel or unfolds the flyout; the hover is
+// reported so the strip can show the label. A panel-opening button names where
+// its panel belongs in `panelSpot` (the edge and the button's box), which the
+// PanelCard places itself from.
 Item {
 	id: root
 
-	required property var modelData // the registry entry this button shows
+	required property var modelData // the manifest entry this button shows
 	required property int index // its place in the strip
 	property var surface: null // the toolbar surface, which acts on clicks
 
@@ -28,7 +23,6 @@ Item {
 	readonly property var panelSpot: surface != null
 		? {edge: surface.edge, box: surface.squareBox(index)} : undefined
 
-	// The square: a hover wash and the glyph.
 	Rectangle {
 		anchors.fill: parent
 		visible: mouse.containsMouse

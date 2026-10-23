@@ -1,12 +1,10 @@
 import QtQuick
 import "."
 
-// One bar button: a text label, or an icon glyph in a fixed slot. Buttons
-// have no hover chrome — the bar paints glyphs only, colour telling state.
-// A widget whose manifest names a panel opens it on click without code of
-// its own: the bar sets `panel` to the panel's global name and `api` to the
-// plugin's, and a left click toggles it. A wheel turn reaches the widget as
-// whole notches (`wheeled`), the small deltas of a smooth wheel adding up.
+// One bar button: a text label, or an icon glyph in a fixed slot, with no
+// hover chrome (colour tells state). A widget whose manifest names a panel
+// has `panel` and `api` set by the bar, and a left click toggles it. A wheel
+// turn reaches the widget as whole notches (`wheeled`), small deltas adding up.
 Item {
 	id: root
 

@@ -1,14 +1,11 @@
 import QtQuick
 import WaylandCanvas.Ui
 
-// One action's row in the Shortcuts tab: the label with a Reset button
-// while the keys differ from the defaults and a Clear button while it
-// has keys, its chords as chips on the line under the label (or a
-// muted "None"), and a third line only while it records ("Press the
-// new keys — Esc cancels") or has something to say — a chord moved from
-// someone else, or a failed set's error. A click on the row records;
-// the row's own mouse area comes first, so the buttons keep their
-// clicks. Fixed line metrics, so a scenario can find each line.
+// One action's row in the Shortcuts tab: the label with a Reset button while
+// the keys differ from the defaults and a Clear button while it has keys, its
+// chords as chips below, and a third line only while it records or has a
+// moved-chord note or a fault. A click on the row records; its mouse area
+// comes first, so the buttons keep their clicks.
 Item {
 	id: root
 

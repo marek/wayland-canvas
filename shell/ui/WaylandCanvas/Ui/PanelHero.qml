@@ -1,12 +1,10 @@
 import QtQuick
 import "."
 
-// The head of a panel: a large glyph, or an item of the caller's in its
-// place (`iconComponent`, a mark drawn as an image), the title in bold and a
-// meta line in muted spaced capitals ("CONNECTED · 6 GHZ", "WAITING FOR
-// AUTH"), the attention colour when the meta names a fault. The panel's
-// header controls — a switch, small buttons — are the children, laid in a
-// row on the right.
+// The head of a panel: a large glyph (or the caller's `iconComponent`), the
+// title in bold and a meta line in muted spaced capitals, in the attention
+// colour when it names a fault. The children are the header controls, laid in
+// a row on the right.
 Item {
 	id: root
 

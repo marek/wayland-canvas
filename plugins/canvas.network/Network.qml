@@ -4,9 +4,7 @@ import WaylandCanvas.Ui
 import "."
 
 // Network: connection type and Wi-Fi strength. A left click opens the panel
-// (the manifest names it): the connection in use with its live figures, the
-// band, the DNS provider, and the networks to join. What the glyph shows
-// is NetworkState's, the panel's too.
+// (the manifest names it); NetworkState holds what the glyph and the panel show.
 BarButton {
 	id: root
 

@@ -130,7 +130,8 @@ Item {
 				}
 			}
 
-			// A key anywhere on the lock surface types into the field.
+			// Focus the field as the lock engages, so a key anywhere types
+			// into it.
 			Connections {
 				target: lock
 				function onLockedChanged() {
@@ -142,8 +143,8 @@ Item {
 		}
 	}
 
-	// Quickshell's own clock, as the bar's: a QML Timer here never fired
-	// while the session was locked, and the time stood still.
+	// A QML Timer does not fire while the session is locked, so the time
+	// would stand still: SystemClock, as the bar's clock.
 	SystemClock {
 		id: clock
 		precision: SystemClock.Minutes

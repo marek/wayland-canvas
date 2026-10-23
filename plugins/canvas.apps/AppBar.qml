@@ -3,17 +3,11 @@ import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// One app bar: while its screen shows the overview, a strip of every open
-// app slides in on the edge the shell config's appbar.position names — the
-// left by default — and slides out as the screen leaves
-// (docs/intents/shell/app-bar.md). It launches nothing: a click goes to that
-// app's window, which the compositor focuses and moves the view to
-// (window.focus, docs/intents/platform/ipc.md).
-//
-// The strip, its slide, its edge and its chrome are the UI kit's EdgeStrip.
-// On the toolbar's own edge the two read as one strip, the toolbar's buttons
-// first, the separator in the gap, the apps last: each publishes its length
-// and StripLayout places them, so neither surface knows the other.
+// One app bar: while its screen shows the overview, a strip of every open app
+// slides in on the edge appbar.position names (docs/intents/shell/app-bar.md).
+// A click goes to that app's window, which the compositor focuses and moves
+// the view to (window.focus, docs/intents/platform/ipc.md). On the toolbar's
+// own edge the two read as one strip: StripLayout places them by length.
 EdgeStrip {
 	id: root
 
@@ -30,12 +24,9 @@ EdgeStrip {
 	catching: flyoutKey !== ""
 	onDismissed: foldFlyout()
 
-	// ---- the apps ----
-
-	// One entry per app, in the order the apps' first windows opened: the
-	// window list is in that order already. Each entry keeps a stable key
-	// (the app id), its windows newest-first, and what its desktop entry
-	// says — the icon and the name a user knows the app by.
+	// One entry per app in the order its first window opened, with a stable
+	// key (the app id), its windows as the compositor lists them and the icon
+	// and name its desktop entry gives.
 	readonly property var apps: groupWindows()
 
 	function groupWindows() {
@@ -96,8 +87,7 @@ EdgeStrip {
 		return Quickshell.iconPath(entry.icon, true)
 	}
 
-	// The entry with `key`, as the list reads now: the list is rebuilt on
-	// every state change, so nothing may hold on to an entry object.
+	// The entry with `key`, as the list reads now.
 	function appFor(key) {
 		var index = indexOfKey(key)
 		return index >= 0 ? apps[index] : null
@@ -122,8 +112,6 @@ EdgeStrip {
 			surface: root
 		}
 	}
-
-	// ---- the window flyout ----
 
 	// An app's windows, listed beside its entry: one row per window, the
 	// focused one marked. A click goes to that window.
@@ -170,11 +158,9 @@ EdgeStrip {
 		}
 	}
 
-	// ---- what a click does ----
-
 	// The entry the pointer is over, and the one whose window list is open,
-	// both by key: the grouped list is rebuilt on every state change, so an
-	// entry object held across one would no longer be in it.
+	// both by key: the list is rebuilt on every state change, so no entry
+	// object is held across one.
 	property string hoveredKey: ""
 	property string flyoutKey: ""
 

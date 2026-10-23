@@ -1,11 +1,10 @@
 import QtQuick
 import WaylandCanvas.Ui
 
-// One app of the app bar: its desktop entry's icon in a square — the app
-// id's first letter where the entry names no icon — with a dot per window up
-// to two, dimmed while all its windows are minimized and accented while it
-// holds the focus. Hovering names the app on the chrome surface; a click
-// goes to its window, or unfolds its windows when it has several
+// One app of the app bar: its desktop entry's icon (the app id's first letter
+// when it names none) with a dot per window up to two, dimmed while all its
+// windows are minimized and accented while it holds the focus. A click goes to
+// its window, or unfolds the list of them when it has several
 // (docs/intents/shell/app-bar.md).
 Item {
 	id: root

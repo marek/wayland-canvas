@@ -5,14 +5,10 @@ import QtQuick.Controls
 import WaylandCanvas.Ui
 import "."
 
-// One note on the plane: a card of its colour with a darker strip on top
-// holding its controls — the colour dots, bold, italic and underline, the
-// font, the text size between − and +, and the × — the text written
-// straight into it, and a grip in the bottom-right corner. The compositor
-// places the surface at the note's canvas rectangle and draws nothing of
-// it; panning, zooming and a desktop's scale move and size it because
-// they move everything on the plane, and a drag of the strip or the grip
-// is the compositor's too
+// One note on the plane: a card of its colour with a darker strip of controls
+// on top, the text written straight into it and a grip bottom-right. The
+// compositor places the surface at the note's canvas rectangle and draws
+// nothing of it; a drag of the strip or the grip is the compositor's too
 // (docs/intents/shell/notes.md).
 PanelWindow {
 	id: root
@@ -23,10 +19,9 @@ PanelWindow {
 	// The note itself: one object, changed in place, whose properties tell
 	// this surface what changed.
 	readonly property var note: Notes.notes[modelData]
-	// The name the compositor places this surface by. It is built here,
-	// from the id alone: a layer surface carries the namespace it was
-	// created with, so a name that arrives later would never reach the
-	// compositor.
+	// The name the compositor places this surface by, built from the id
+	// alone: a layer surface carries the namespace it was created with, so a
+	// name that arrives later would never reach the compositor.
 	readonly property string surfaceName: "wayland-canvas-canvas-canvas.notes/"
 		+ modelData
 
@@ -384,7 +379,8 @@ PanelWindow {
 					id: closeArea
 					anchors.fill: parent
 					hoverEnabled: true
-					// later: the surface goes with the note, and this handler with it
+					// Deferred: removing the note destroys this surface and
+					// this handler with it.
 					onClicked: {
 						var note = root.note
 						Qt.callLater(function() { Notes.remove(note) })

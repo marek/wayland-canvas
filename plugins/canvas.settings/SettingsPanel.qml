@@ -2,13 +2,10 @@ import QtQuick
 import WaylandCanvas.Ui
 import "."
 
-// The settings panel: canvas.conf's shortcuts, commands and gestures
-// through the compositor's socket, the shell's own bar and toolbar
-// through api.shell — one card of tabs. The model owns the socket and
-// the one write (SettingsModel.qml); each tab is a file that reads it.
-// The panel is the tab row, the card's geometry and the two paths the
-// card edits. The Shortcuts list scrolls: the registry's every action is
-// taller than an output.
+// The settings panel: canvas.conf's shortcuts, commands and gestures through
+// the compositor's socket, the shell's own bar and toolbar through api.shell,
+// as one card of tabs. SettingsModel owns the socket and the one write; each
+// tab reads it.
 PanelCard {
 	id: root
 
@@ -22,15 +19,12 @@ PanelCard {
 		open: root.open
 	}
 
-	// Both files the panel edits, by path: the compositor's and the
-	// shell's own. Two fixed-height lines, like every metric the card's
-	// geometry is computed from.
+	// Two fixed-height lines: the paths of the two files the panel edits.
 	readonly property int footerHeight: 2 * UiTheme.detailHeight + 2
 
-	// The most a scrollable list may take: the tall card is clamped to
-	// the output's top, so what is left beside the tabs, the separator
-	// and the footer is every pixel the list has. Fixed metrics only —
-	// the card's geometry must not drift with the font.
+	// The most a scrollable list may take: the card is clamped to the output's
+	// top, so what the tabs, separator and footer leave is every pixel the
+	// list has.
 	readonly property real listMaxHeight: screenH - 2 * UiTheme.edgeMargin
 		- 2 * UiTheme.panelPadding - UiTheme.rowHeight - 3 * UiTheme.panelSpacing
 		- footerHeight - 1

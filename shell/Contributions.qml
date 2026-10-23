@@ -1,12 +1,9 @@
 import QtQuick
 import "Manifest.js" as Manifest
 
-// What the loaded plugins contribute (docs/intents/shell/plugins.md): the
-// bar widgets, the toolbar buttons, the surfaces, the panels and the
-// actions their manifests name. A plugin is taken all or nothing: every
-// piece is compiled and staged first, and only a plugin whose pieces all
-// worked is registered, so one broken plugin is skipped whole and the rest
-// keep working.
+// What the loaded plugins contribute (docs/intents/shell/plugins.md): bar
+// widgets, toolbar buttons, surfaces, panels and actions. A plugin is taken
+// whole or not at all: all its pieces are compiled and staged first.
 Item {
 	id: root
 
@@ -19,11 +16,10 @@ Item {
 	// The plugins that loaded: [{id, dir, manifest, api}].
 	property var plugins: []
 
-	// Every bar widget in bar order, hidden ones included and flagged:
-	// {name, pluginName, section, order, panel, description, component,
-	// api, hidden}. `panel` is the global name of the panel a left click
-	// opens, "" for none, and `description` the manifest's optional line
-	// about the widget, "" for none.
+	// Every bar widget in bar order, hidden ones flagged: {name, pluginName,
+	// section, order, panel, description, component, api, hidden}; `panel` is
+	// the global name a left click opens and `description` the manifest's
+	// optional line, each "" for none.
 	property var barWidgets: []
 
 	// The valid toolbar buttons in toolbar order: {name, icon, label,
@@ -34,21 +30,15 @@ Item {
 	// The surfaces to make: {component, api, perOutput}.
 	property var surfaces: []
 
-	// Every widget and button that loaded, before the config orders and
-	// filters them: barWidgets and toolbarButtons are derived from these,
-	// so they can be derived again when the config changes without
-	// compiling or registering anything again.
+	// What loaded, before the config orders and filters it: barWidgets and
+	// toolbarButtons are derived from these again when the config changes.
 	property var allWidgets: []
 	property var allButtons: []
 
-	// One row per kind of contribution a manifest lists:
-	//   key       the manifest's list;
-	//   file      its entries name a QML file, compiled before anything is
-	//             staged;
-	//   validate  what is wrong with an entry as the manifest states it,
-	//             "" for nothing;
-	//   stage     makes the entry's piece into `staged`, taken only with
-	//             the rest of its plugin; "" or what went wrong.
+	// One row per manifest list: `file` entries name a QML file, compiled
+	// before anything is staged; `validate` returns what is wrong with an
+	// entry, "" for nothing; `stage` makes the entry's piece into `staged`,
+	// returning "" or what went wrong.
 	readonly property var kinds: [
 		{key: "surfaces", file: true, validate: nothingWrong, stage: stageSurface},
 		{key: "barWidgets", file: true, validate: widgetProblem, stage: stageWidget},
@@ -108,10 +98,9 @@ Item {
 		return ""
 	}
 
-	// A toolbar button is manifest data — icon, label, an action, a panel
-	// or a menu — and names no file. One naming none or more than one of
-	// action, panel and menu is dropped, with a line saying why, so the
-	// toolbar only ever sees valid ones; the plugin loads without it.
+	// A toolbar button is manifest data and names no file. One naming none or
+	// more than one of action, panel and menu is dropped with a logged line,
+	// so the toolbar only sees valid ones.
 	function stageButton(plugin, entry, component, staged) {
 		var button = {
 			name: ownName(plugin, entry),
@@ -136,11 +125,10 @@ Item {
 		return ""
 	}
 
-	// A button's submenu: the entries it declares, or the entries of the
-	// plugin setting its `menu` names ({setting, action}), each of which
-	// runs that action with the entry itself as its args. Action names
-	// become global. A list read from a manifest is not a real array
-	// (Array.isArray says no), so lists are told by their `map`.
+	// A button's submenu: the entries it declares, or one per item of the
+	// plugin setting its `menu` names ({setting, action}), each running that
+	// action with the item as args; action names become global. Manifest
+	// lists are not real arrays (Array.isArray says no): told by their `map`.
 	function buttonMenu(plugin, menu) {
 		var entries = menu || []
 		if (typeof entries.map !== "function") {
@@ -247,11 +235,10 @@ Item {
 		reorder()
 	}
 
-	// Orders the bar widgets and the toolbar buttons from the contributions
-	// and the config as it stands. Only bar.layout, bar.hidden and
-	// toolbar.order feed it: a load ends here, and the host's one write of
-	// those, bar.hidden, calls it. Every other write leaves the live
-	// widgets alone, so what they hold survives it.
+	// Orders the bar widgets and toolbar buttons from the contributions and
+	// the config's bar.layout, bar.hidden and toolbar.order. A load and
+	// setBarHidden call it; every other config write leaves the live widgets
+	// alone.
 	function reorder() {
 		barWidgets = orderedWidgets()
 		toolbarButtons = orderByConfig(allButtons,

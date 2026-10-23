@@ -1,9 +1,8 @@
 import QtQuick
 
-// api.actions: run("<plugin id>/<action id>", args) — a manifest's action
-// entry is a component whose run(args) performs it; it is instantiated with
-// its plugin's api and destroyed once run has returned, so an action is a
-// synchronous burst of calls (processes it wants to leave running go
+// api.actions: run("<plugin id>/<action id>", args) instantiates the action
+// component with its plugin's api, calls run(args) and destroys it, so an
+// action is a synchronous burst of calls (a process to leave running goes
 // through Quickshell.execDetached).
 Item {
 	id: root
@@ -11,7 +10,7 @@ Item {
 	property var actions: ({}) // global name -> {component, api}
 	property var warned: ({}) // names already logged as missing
 
-	// The host registers each manifest action entry here.
+	// Contributions registers each manifest action entry here.
 	function register(name, component, api) {
 		actions[name] = {component: component, api: api}
 	}
