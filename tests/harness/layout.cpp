@@ -1,5 +1,6 @@
 #include "harness/layout.h"
 
+#include <cmath>
 #include <cstring>
 #include "harness/run.h"
 #include "platform/layer.h"
@@ -36,6 +37,18 @@ View *titled(std::string_view title) {
 
 Point on_screen(const View &view, double sx, double sy) {
 	return output().canvas_to_local(view.x + sx, view.y + sy);
+}
+
+wlr_box frame_on_screen(const View &view) {
+	wlr_box frame = view.frame_box();
+	Point corner = output().canvas_to_local(frame.x, frame.y);
+	double zoom = output().camera.drawn().zoom;
+	return wlr_box{
+		.x = static_cast<int>(std::lround(corner.x)),
+		.y = static_cast<int>(std::lround(corner.y)),
+		.width = static_cast<int>(std::lround(frame.width * zoom)),
+		.height = static_cast<int>(std::lround(frame.height * zoom)),
+	};
 }
 
 LayerSurface *layer_named(const char *ns) {

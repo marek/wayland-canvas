@@ -5,329 +5,114 @@
 // wlr on a private D-Bus session, and a window cast of an X11 window that
 // closes while it is copied. Writes only under $CANVAS_TMP (meson passes
 // the repo's tmp/); meson passes the compositor binary as $WAYLAND_CANVAS_BIN.
-#include <cairo.h>
-#include <cerrno>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <signal.h>
-#include <sys/prctl.h>
 #include <format>
+#include <linux/input-event-codes.h>
 #include <optional>
 #include <print>
-#include <source_location>
-#include <span>
+#include <ranges>
 #include <string>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <linux/input-event-codes.h>
+#include <string_view>
+#include <vector>
+#include "core/process.h"
+#include "core/server.h"
+#include "harness/check.h"
+#include "harness/child.h"
+#include "harness/control.h"
+#include "harness/devices.h"
+#include "harness/files.h"
+#include "harness/image.h"
+#include "harness/layout.h"
+#include "harness/run.h"
 #include "platform/output.h"
 #include "render/capture.h"
-#include "core/server.h"
-#include "core/process.h"
-#include "core/wlr.h"
 #include "windows/view.h"
+
+using namespace harness;
 
 namespace {
 
-std::optional<Server> server;
-wl_event_source *timer = nullptr;
-int step = 0, failures = 0, retries = 0;
-bool finished = false; // the run reached its end; see main()
-uint32_t t = 90000;
-pid_t grim_pid = -1;
-std::string shot_dir;
-wlr_pointer ptr{};
-const wlr_pointer_impl ptr_impl = {.name = "fake-pointer"};
-wlr_box over_apart{}; // where "over" sat when the reference captures were taken
-bool portal_skip = false; // the portal pieces are not on this machine
-pid_t portal_pid = -1; // the portal session's shell, its process group's leader
-std::string portal_runtime; // the session's short-lived runtime dir in /tmp
-pid_t portal_bus_pid = -1; // the dbus-daemon this run owns, killed by pid
-std::string portal_dir; // its scratch world, under the shot directory
-pid_t x11_pid = -1; // the X11 client whose window the cast phase copies
-pid_t cast_pid = -1; // the cast client of that window
+// A pixel differs when a colour channel is further off than this.
+constexpr int tolerance = 2;
+// The area of the region captures, in the output's logical pixels.
+constexpr wlr_box region{180, 140, 420, 260};
+// How near the screen's edge a title-bar drag may go.
+constexpr int edge_allowance = 10;
 constexpr uint32_t x11_colour = 0xc04040; // x11-client's default window colour
 
-// Prints PASS/FAIL with the note; a failure counts and names its source line.
-void check(bool cond, std::string_view note,
-	std::source_location where = std::source_location::current()) {
-	std::println("{}: {}", cond ? "PASS" : "FAIL", note);
-	std::fflush(stdout);
-	if (!cond) {
-		failures++;
-		std::println(stderr, "  at {}:{} in {}", where.file_name(), where.line(),
-			where.function_name());
-	}
-}
+wlr_box over_apart{}; // where "over" sat when the reference captures were taken
+
+std::string portal_dir; // the portal's scratch world, under the scratch directory
+std::string portal_runtime; // the session's short-lived runtime dir in /tmp
+Child portal_bus; // the dbus-daemon this run owns
+Child portal_session; // the session's shell: the portal's backend and the ScreenCast client
+Child x11; // the X11 client whose window the cast phase copies
+Child x11_cast; // the cast client of that window
+bool x11_cast_started = false;
 
 // Ends the portal phase: the session's group, then the bus's (SIGKILL: test
 // processes with nothing to save, and a TERM may leave the bus waiting on a
 // client), the document portal's FUSE mount (its own unmount runs detached
 // after the kill), and the runtime dir. From the phase's last step, and from
-// main() when the run ends early: a timeout's SIGTERM only ends the loop.
+// the run's teardown: a timeout's SIGTERM only ends the loop.
 void stop_portal() {
-	int status = 0;
-	if (portal_pid > 0) {
-		kill(-portal_pid, SIGTERM); // ask first: the script's trap reaps
-		usleep(100000);
-		kill(-portal_pid, SIGKILL); // then the group, whatever is left
-		waitpid(portal_pid, &status, 0);
-		portal_pid = -1;
-	}
-	if (portal_bus_pid > 0) {
-		kill(-portal_bus_pid, SIGKILL);
-		waitpid(portal_bus_pid, &status, 0);
-		portal_bus_pid = -1;
-	}
-	if (!portal_runtime.empty()) {
-		if (std::system(std::format("fusermount3 -uz {0}/doc 2>/dev/null"
-				" || fusermount -uz {0}/doc 2>/dev/null; rm -rf {0}", portal_runtime).c_str())
-				!= 0) {
-			std::println("note: the scratch portal runtime {} was not removed", portal_runtime);
-		}
-		portal_runtime.clear();
-	}
-}
-
-void mkdir_p(const std::string &path) {
-	for (std::size_t i = 1; i < path.size(); i++) {
-		if (path[i] == '/') {
-			mkdir(path.substr(0, i).c_str(), 0755);
-		}
-	}
-	if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) {
-		std::fprintf(stderr, "mkdir %s: %s\n", path.c_str(), std::strerror(errno));
-	}
-}
-
-void write_file(const std::string &path, std::string_view text) {
-	FILE *f = std::fopen(path.c_str(), "w");
-	if (f == nullptr) {
-		std::fprintf(stderr, "fopen %s: %s\n", path.c_str(), std::strerror(errno));
+	portal_session.stop();
+	portal_bus.kill();
+	if (portal_runtime.empty()) {
 		return;
 	}
-	std::fwrite(text.data(), 1, text.size(), f);
-	std::fclose(f);
-}
-
-std::string read_file(const std::string &path) {
-	FILE *f = std::fopen(path.c_str(), "r");
-	if (f == nullptr) {
-		return "";
+	if (std::system(std::format("fusermount3 -uz {0}/doc 2>/dev/null"
+			" || fusermount -uz {0}/doc 2>/dev/null; rm -rf {0}", portal_runtime).c_str())
+			!= 0) {
+		std::println("note: the scratch portal runtime {} was not removed", portal_runtime);
 	}
-	std::string out;
-	char buf[256];
-	std::size_t n;
-	while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
-		out.append(buf, n);
-	}
-	std::fclose(f);
-	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
-		out.pop_back();
-	}
-	return out;
-}
-
-
-// Runs the real client through /bin/sh with stdout, stderr and the exit code
-// captured under `name` (.out, .err, .code). Params, when given, are
-// single-quoted for the shell.
-void run_client(std::string_view method, std::string_view params, const char *name) {
-	const char *bin = std::getenv("WAYLAND_CANVAS_BIN");
-	std::string cmd = std::format("\"{}\" msg {}", bin, method);
-	if (!params.empty()) {
-		cmd += std::format(" '{}'", params);
-	}
-	cmd += std::format(" > {}/{}.out 2> {}/{}.err; echo $? > {}/{}.code",
-		shot_dir, name, shot_dir, name, shot_dir, name);
-	spawn(cmd.c_str());
-}
-
-
-
-// ------------------------------------------------------ screenshots
-
-void shot(const char *name) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	grim_pid = fork();
-	if (grim_pid == 0) {
-		execlp("grim", "grim", path.c_str(), static_cast<char *>(nullptr));
-		_exit(127);
-	}
-}
-
-// A grim crop of a region, in grim's own "x,y WxH" geometry format.
-void shot_region(const char *name, const char *geometry) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	grim_pid = fork();
-	if (grim_pid == 0) {
-		execlp("grim", "grim", "-g", geometry, path.c_str(), static_cast<char *>(nullptr));
-		_exit(127);
-	}
-}
-
-bool grim_running() {
-	if (grim_pid <= 0) {
-		return false;
-	}
-	if (waitpid(grim_pid, nullptr, WNOHANG) == 0) {
-		return true;
-	}
-	grim_pid = -1;
-	return false;
-}
-
-// Loads a grim PNG as ARGB32 (grim may write RGB24); null on failure.
-cairo_surface_t *load_png(const char *name) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	cairo_surface_t *raw = cairo_image_surface_create_from_png(path.c_str());
-	if (cairo_surface_status(raw) != CAIRO_STATUS_SUCCESS) {
-		std::fprintf(stderr, "cannot read %s\n", path.c_str());
-		cairo_surface_destroy(raw);
-		return nullptr;
-	}
-	if (cairo_image_surface_get_format(raw) == CAIRO_FORMAT_ARGB32) {
-		return raw;
-	}
-	cairo_surface_t *argb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-		cairo_image_surface_get_width(raw), cairo_image_surface_get_height(raw));
-	cairo_t *cr = cairo_create(argb);
-	cairo_set_source_surface(cr, raw, 0, 0);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	cairo_surface_destroy(raw);
-	return argb;
-}
-
-void save_png(const CairoSurfacePtr &surface, const char *name) {
-	std::string path = std::format("{}/{}.png", shot_dir, name);
-	cairo_surface_write_to_png(surface.get(), path.c_str());
-}
-
-// How many pixels in `region` (whole image when empty) of two same-sized
-// ARGB32 images differ by more than `tol` in any RGB channel. Pixels inside
-// any of `skip` are not counted.
-long pixels_differing(cairo_surface_t *a, cairo_surface_t *b, wlr_box region,
-		std::span<const wlr_box> skip = {}, int tol = 2) {
-	if (a == nullptr || b == nullptr) {
-		return -1;
-	}
-	int w = cairo_image_surface_get_width(a), h = cairo_image_surface_get_height(a);
-	if (w != cairo_image_surface_get_width(b) || h != cairo_image_surface_get_height(b)) {
-		return -1;
-	}
-	if (wlr_box_empty(&region)) {
-		region = {0, 0, w, h};
-	}
-	region.x = std::clamp(region.x, 0, w);
-	region.y = std::clamp(region.y, 0, h);
-	region.width = std::clamp(region.width, 0, w - region.x);
-	region.height = std::clamp(region.height, 0, h - region.y);
-	cairo_surface_flush(a);
-	cairo_surface_flush(b);
-	const unsigned char *da = cairo_image_surface_get_data(a);
-	const unsigned char *db = cairo_image_surface_get_data(b);
-	int sa = cairo_image_surface_get_stride(a), sb = cairo_image_surface_get_stride(b);
-	long bad = 0;
-	for (int y = region.y; y < region.y + region.height; y++) {
-		for (int x = region.x; x < region.x + region.width; x++) {
-			bool skipped = false;
-			for (const wlr_box &s : skip) {
-				if (x >= s.x && y >= s.y && x < s.x + s.width && y < s.y + s.height) {
-					skipped = true;
-					break;
-				}
-			}
-			if (skipped) {
-				continue;
-			}
-			// Both layouts little-endian: B, G, R at bytes 0..2.
-			const unsigned char *pa = da + y * sa + static_cast<std::size_t>(x) * 4;
-			const unsigned char *pb = db + y * sb + static_cast<std::size_t>(x) * 4;
-			if (std::abs(pa[0] - pb[0]) > tol || std::abs(pa[1] - pb[1]) > tol
-					|| std::abs(pa[2] - pb[2]) > tol) {
-				bad++;
-			}
-		}
-	}
-	return bad;
-}
-
-// ------------------------------------------------------ fake pointer
-
-// Pointer at output-local logical (x, y) on the single 1280x720 output.
-void move_to(double x, double y) {
-	t += 8;
-	wlr_pointer_motion_absolute_event ev = {
-		.pointer = &ptr, .time_msec = t, .x = x / 1280.0, .y = y / 720.0};
-	wl_signal_emit_mutable(&ptr.events.motion_absolute, &ev);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-}
-
-void button(uint32_t code, bool pressed) {
-	t += 8;
-	wlr_pointer_button_event ev = {.pointer = &ptr, .time_msec = t, .button = code,
-		.state = pressed ? WL_POINTER_BUTTON_STATE_PRESSED
-			: WL_POINTER_BUTTON_STATE_RELEASED};
-	wl_signal_emit_mutable(&ptr.events.button, &ev);
-	wl_signal_emit_mutable(&ptr.events.frame, &ptr);
-}
-
-// A plain click at output-local (x, y).
-void click(double x, double y) {
-	move_to(x, y);
-	button(BTN_LEFT, true);
-	button(BTN_LEFT, false);
+	portal_runtime.clear();
 }
 
 // A title-bar drag of `view` by logical (dx, dy), ten moves like a hand per
 // grab. The pointer cannot leave the output, so a move longer than the edge
 // allowance is several grabs, re-aimed at the title bar each time.
-void drag_view(View &view, double dx, double dy) {
+void drag_view(const View &view, double dx, double dy) {
 	for (int grab = 0; (std::fabs(dx) > 1.0 || std::fabs(dy) > 1.0) && grab < 6; grab++) {
-		Output *output = server->outputs.front().get();
-		Camera cam = output->camera.drawn();
-		wlr_box frame = view.frame_box();
-		Point tl = output->canvas_to_local(frame.x, frame.y);
 		// Grabbed 60 px into the title bar, so a window pushed toward an edge
 		// keeps a reachable grab point as long as possible.
-		double x = tl.x + 60.0;
-		double y = tl.y + view.deco.titlebar() * cam.zoom / 2.0;
-		double step_x = clampd(dx, 10.0 - x, 1270.0 - x);
-		double step_y = clampd(dy, 10.0 - y, 710.0 - y);
+		Point grip = title_point(view, 60);
+		double step_x = clampd(dx, edge_allowance - grip.x, screen_w - edge_allowance - grip.x);
+		double step_y = clampd(dy, edge_allowance - grip.y, screen_h - edge_allowance - grip.y);
 		if (step_x == 0.0 && step_y == 0.0) {
 			return; // the title bar is pinned against an edge already
 		}
-		move_to(x, y);
-		button(BTN_LEFT, true);
-		for (int i = 1; i <= 10; i++) {
-			move_to(x + step_x * i / 10.0, y + step_y * i / 10.0);
-		}
-		button(BTN_LEFT, false);
+		drag(grip.x, grip.y, grip.x + step_x, grip.y + step_y);
 		dx -= step_x;
 		dy -= step_y;
 	}
 }
 
-// ------------------------------------------------------ views
-
-View *view_titled(std::string_view title) {
-	for (View *v : server->views) {
-		if (v->mapped && v->shell_title() != nullptr && title == v->shell_title()) {
-			return v;
-		}
-	}
-	return nullptr;
+// How many pixels of `image` differ from the shot `name`; -1 when the shot is
+// missing or their sizes differ.
+long differing_from_shot(const Image &image, std::string_view name,
+		const ImageCompare &how = {.tolerance = tolerance}) {
+	std::optional<Image> reference = read_shot(name);
+	return reference.has_value() ? image.differing(*reference, how) : -1;
 }
+
+long output_pixels() {
+	return output().width * static_cast<long>(output().height);
+}
+
+int mapped_views() {
+	return static_cast<int>(std::ranges::count_if(server->views,
+		[](const View *view) { return view->mapped; }));
+}
+
 // The ScreenCast client the portal phase runs: CreateSession, SelectSources
 // (a monitor, then a window), Start, and OpenPipeWireRemote, on the private
 // session bus. It prints one "portal-<kind> node=<id>" line per source.
-constexpr std::string_view PORTAL_CLIENT = R"(import os
+constexpr std::string_view portal_client_script = R"(import os
 import sys
 
 import gi
@@ -426,593 +211,486 @@ except Exception:
     sys.exit(1)
 )";
 
-// The view's frame where the output shows it, output-local logical px.
-wlr_box view_on_screen(View &view) {
-	Output *output = server->outputs.front().get();
-	Camera cam = output->camera.drawn();
-	wlr_box frame = view.frame_box();
-	Point tl = output->canvas_to_local(frame.x, frame.y);
-	return wlr_box{
-		.x = static_cast<int>(std::lround(tl.x)),
-		.y = static_cast<int>(std::lround(tl.y)),
-		.width = static_cast<int>(std::lround(frame.width * cam.zoom)),
-		.height = static_cast<int>(std::lround(frame.height * cam.zoom)),
+wlr_box overlap_on_screen() {
+	wlr_box under = frame_on_screen(*titled("under"));
+	wlr_box over = frame_on_screen(*titled("over"));
+	wlr_box overlap{};
+	wlr_box_intersection(&overlap, &under, &over);
+	return overlap;
+}
+
+// What a private portal session needs and this machine lacks, one name after
+// another; empty when it has everything.
+std::string portal_pieces_missing() {
+	std::string absent;
+	for (const char *program : {"dbus-run-session", "pipewire"}) {
+		if (std::system(std::format("command -v {} >/dev/null 2>&1", program).c_str()) != 0) {
+			absent += std::format(" {}", program);
+		}
+	}
+	// The portal and its backends install outside $PATH, and the system
+	// python carries gi (a virtualenv's does not).
+	for (std::string_view path : {"/usr/lib/xdg-desktop-portal",
+			"/usr/lib/xdg-desktop-portal-wlr"}) {
+		if (std::system(std::format("[ -x {} ]", path).c_str()) != 0) {
+			absent += std::format(" {}", path.substr(path.rfind('/') + 1));
+		}
+	}
+	if (std::system("/usr/bin/python3 -c 'import gi' >/dev/null 2>&1") != 0) {
+		absent += " python3-gi";
+	}
+	return absent;
+}
+
+// While the portal session runs, its chooser is the compositor's own picker:
+// answer each one by clicking the source the client asked for (the mode file
+// it wrote before its request).
+void answer_the_chooser() {
+	if (!server->capture_ui.picking()) {
+		return;
+	}
+	View *wanted = read_text(portal_dir + "/chooser-mode").contains("window")
+		? titled("under") : nullptr;
+	if (wanted != nullptr) {
+		Point title = title_point(*wanted, 60);
+		click(title.x, title.y);
+		return;
+	}
+	// A click no window covers answers with the output itself.
+	for (Point spot : {Point{40, 40}, Point{80, 650}, Point{640, 700}}) {
+		bool covered = std::ranges::any_of(server->views, [&](const View *view) {
+			if (!view->mapped || view->minimized) {
+				return false;
+			}
+			wlr_box frame = frame_on_screen(*view);
+			return spot.x >= frame.x && spot.x < frame.x + frame.width
+				&& spot.y >= frame.y && spot.y < frame.y + frame.height;
+		});
+		if (!covered) {
+			click(spot.x, spot.y);
+			return;
+		}
+	}
+}
+
+Result foot_windows_open() {
+	attach_pointer();
+	spawn("foot -T under sh -c 'echo window under; exec sleep 600'");
+	spawn("foot -T over sh -c 'echo window over; exec sleep 600'");
+	return after(500);
+}
+
+Result foot_windows_mapped() {
+	if (auto wait = wait_for(titled("under") != nullptr && titled("over") != nullptr
+			&& settled())) {
+		return *wait;
+	}
+	View *under = titled("under"), *over = titled("over");
+	int count = mapped_views();
+	check(under != nullptr && over != nullptr && count == 2,
+		std::format("two foot windows mapped ({})", count));
+	check(under != nullptr && over != nullptr && under->deco.ssd && over->deco.ssd,
+		"both windows negotiated server-side title bars");
+	if (under == nullptr || over == nullptr) {
+		return finish();
+	}
+	return after(400);
+}
+
+// Both map centred, so they start overlapped: "over" is pulled clear.
+Result over_is_pulled_clear() {
+	wlr_box under = frame_on_screen(*titled("under")), over = frame_on_screen(*titled("over"));
+	// Parked just right of "under", a 40 px gap between the frames.
+	drag_view(*titled("over"), (under.x + under.width + 40.0) - over.x, 0);
+	return after(500);
+}
+
+Result windows_are_apart() {
+	if (auto wait = wait_for(settled(), {.budget_ms = 5000})) {
+		return *wait;
+	}
+	wlr_box apart = overlap_on_screen();
+	check(wlr_box_empty(&apart), "the windows are apart on screen");
+	shot("ref-full");
+	return after(400);
+}
+
+// The offscreen whole-output capture against grim's screenshot.
+Result whole_output_matches_grim() {
+	CairoSurfacePtr cap = capture_output(output(), {0, 0, output().width, output().height});
+	check(cap != nullptr, "capture_output returns the whole output");
+	if (cap != nullptr) {
+		Image image = Image::of(cap.get());
+		image.save("cap-full");
+		long bad = differing_from_shot(image, "ref-full");
+		check(bad >= 0 && bad * 1000 <= output_pixels(),
+			std::format("the whole-output capture matches grim pixel for pixel "
+				"({} of {} px differ)", bad, output_pixels()));
+	}
+	shot("ref-region", std::format("{},{} {}x{}", region.x, region.y, region.width,
+		region.height));
+	return after(400);
+}
+
+// A region capture against grim's crop of the same area, and the reference
+// window shot, taken with nothing over the window.
+Result region_matches_grim() {
+	long region_pixels = region.width * static_cast<long>(region.height);
+	CairoSurfacePtr cap = capture_output(output(), region);
+	check(cap != nullptr, "capture_output returns the region");
+	if (cap != nullptr) {
+		Image image = Image::of(cap.get());
+		image.save("cap-region");
+		check(image.width() == region.width && image.height() == region.height,
+			"the region capture is the area at the output's scale");
+		long bad = differing_from_shot(image, "ref-region");
+		check(bad >= 0 && bad * 1000 <= region_pixels,
+			std::format("the region capture matches grim -g pixel for pixel "
+				"({} of {} px differ)", bad, region_pixels));
+	}
+	View *under = titled("under");
+	CairoSurfacePtr window = capture_view(*under, output().wlr->scale);
+	check(window != nullptr, "capture_view returns the window");
+	if (window != nullptr) {
+		Image image = Image::of(window.get());
+		image.save("under-apart");
+		wlr_box frame = under->frame_box();
+		check(image.width() == frame.width && image.height() == frame.height,
+			"the window capture is the frame at the output's scale");
+	}
+	return after(300);
+}
+
+// "Over" is dropped back over most of "under".
+Result over_covers_under() {
+	wlr_box under = frame_on_screen(*titled("under")), over = frame_on_screen(*titled("over"));
+	over_apart = over; // where "over" sat in the reference captures
+	drag_view(*titled("over"), (under.x + under.width * 0.15) - over.x,
+		(under.y + under.height * 0.15) - over.y);
+	return after(500);
+}
+
+Result overlap_leaves_no_trace() {
+	if (auto wait = wait_for(settled(), {.budget_ms = 5000})) {
+		return *wait;
+	}
+	View *under = titled("under");
+	wlr_box under_box = frame_on_screen(*under), over_box = frame_on_screen(*titled("over"));
+	wlr_box overlap = overlap_on_screen();
+	check(!wlr_box_empty(&overlap) && overlap.width > 100 && overlap.height > 100,
+		std::format("the windows overlap on screen ({}x{} px)", overlap.width, overlap.height));
+	// The window alone: whatever overlaps it on screen leaves no trace.
+	CairoSurfacePtr window = capture_view(*under, output().wlr->scale);
+	check(window != nullptr, "capture_view returns the overlapped window");
+	if (window != nullptr) {
+		Image image = Image::of(window.get());
+		image.save("under-overlapped");
+		long bad = differing_from_shot(image, "under-apart");
+		long total = under_box.width * static_cast<long>(under_box.height);
+		check(bad == 0, std::format("the window shot leaves out what overlaps it "
+			"({} of {} px differ)", bad, total));
+	}
+	// And the overlap really is on screen: the whole-output capture now
+	// differs inside it, and outside the moved window nowhere - counting
+	// neither where "over" sits now nor the area it vacated.
+	CairoSurfacePtr full = capture_output(output(), {0, 0, output().width, output().height});
+	if (full != nullptr) {
+		Image image = Image::of(full.get());
+		image.save("cap-overlapped");
+		const wlr_box moved[] = {over_box, over_apart};
+		long inside = differing_from_shot(image, "cap-full",
+			{.within = overlap, .tolerance = tolerance});
+		long outside = differing_from_shot(image, "cap-full",
+			{.skip = moved, .tolerance = tolerance});
+		check(inside > 1000, std::format("the overlapping window shows in the output capture "
+			"({} px changed in the overlap)", inside));
+		check(outside == 0,
+			std::format("nothing changed outside the moved window ({} px)", outside));
+	}
+	return after(300);
+}
+
+// The protocols: grim now travels ext-image-copy-capture.
+Result protocol_shot() {
+	shot("ref-ext-full");
+	return after(400);
+}
+
+// The whole output again, this time through the capture protocols, and one
+// window by its ext-foreign-toplevel identifier.
+Result protocol_screenshot_matches() {
+	CairoSurfacePtr cap = capture_output(output(), {0, 0, output().width, output().height});
+	long bad = cap != nullptr ? differing_from_shot(Image::of(cap.get()), "ref-ext-full") : -1;
+	check(bad >= 0 && bad * 1000 <= output_pixels(),
+		std::format("grim's protocol screenshot matches the offscreen capture "
+			"({} of {} px differ)", bad, output_pixels()));
+	const char *identifier = titled("under")->ext_toplevel_identifier();
+	check(identifier != nullptr && *identifier != '\0',
+		"the window carries an ext-foreign-toplevel identifier");
+	if (identifier != nullptr) {
+		shot_toplevel("ref-ext-window", identifier);
+	}
+	return after(400);
+}
+
+// The window by identifier, against the offscreen window capture - still
+// taken while "over" covers most of it.
+Result window_by_identifier_matches() {
+	CairoSurfacePtr cap = capture_view(*titled("under"), output().wlr->scale);
+	long bad = -1, total = 0;
+	if (cap != nullptr) {
+		Image image = Image::of(cap.get());
+		bad = differing_from_shot(image, "ref-ext-window");
+		total = image.width() * static_cast<long>(image.height());
+	}
+	check(bad == 0, std::format("grim -T <identifier> captures the window alone "
+		"({} of {} px differ)", bad, total));
+	return after(300);
+}
+
+// The portal: sharing through xdg-desktop-portal-wlr. Only with everything a
+// private portal session needs; a run without it skips this phase (the
+// capture proofs above still ran).
+Result portal_starts() {
+	std::string absent = portal_pieces_missing();
+	if (!absent.empty()) {
+		std::println("SKIP: portal phase, not installed:{}", absent);
+		return go_to("x11 client starts", 600);
+	}
+	// The scratch world: a bus and XDG dirs of its own, so the machine's
+	// portal, PipeWire and config are never touched.
+	portal_dir = scratch() + "/portal";
+	scratch_dir("portal/share");
+	scratch_dir("portal/config/xdg-desktop-portal");
+	scratch_dir("portal/config/xdg-desktop-portal-wlr");
+	// PipeWire's socket must fit a unix socket name (107 chars), and the
+	// worktree's tmp is deeper than that: only the runtime dir rides in
+	// /tmp, under a name of this run's own, and is removed afterwards.
+	std::string runtime = "/tmp/canvas-sharing-runtime-XXXXXX";
+	if (mkdtemp(runtime.data()) == nullptr) {
+		check(false, "the portal's runtime directory was made");
+		return go_to("x11 client starts", 600);
+	}
+	portal_runtime = runtime;
+	write_file(portal_dir + "/config/xdg-desktop-portal/portals.conf",
+		"[preferred]\ndefault=gtk\n"
+		"org.freedesktop.impl.portal.ScreenCast=wlr\n"
+		"org.freedesktop.impl.portal.Screenshot=wlr\n");
+	// The chooser xdpw runs is the compositor's own picker, through the msg
+	// client: xdpw offers its monitor and window lines on stdin,
+	// `capture.pick` opens the picker, and the scenario (the next step)
+	// clicks the source the client asked for by the mode file it wrote
+	// first. The config is the one the package ships, byte for byte, under
+	// the name xdpw reads for this desktop; the build's binary is first on
+	// the session's PATH, as an installed one would be.
+	const char *source = std::getenv("CANVAS_SOURCE");
+	std::string shipped = read_text(std::format("{}/packaging/xdg-desktop-portal-wlr.conf",
+		source != nullptr && *source != '\0' ? source : "."));
+	check(shipped.contains("chooser_cmd = wayland-canvas msg capture.pick"),
+		"the shipped xdpw config names the compositor's picker as the chooser");
+	write_file(portal_dir + "/config/xdg-desktop-portal-wlr/wayland-canvas", shipped);
+	std::string bin = std::getenv("WAYLAND_CANVAS_BIN");
+	std::string bin_dir = bin.substr(0, bin.rfind('/'));
+	write_file(portal_dir + "/client.py", portal_client_script);
+	// The compositor's socket as an absolute path, for the session's portal
+	// and backend to find this compositor and nothing else.
+	std::string wayland = std::format("{}/{}", std::getenv("XDG_RUNTIME_DIR"),
+		std::getenv("WAYLAND_DISPLAY"));
+	std::string bus = portal_runtime + "/bus";
+	// What both the bus and the session know, handed over through env(1) so
+	// the compositor's own environment is never changed. gvfs stays off the
+	// bus; the document portal still mounts FUSE under the runtime dir, which
+	// stop_portal() unmounts.
+	std::vector<std::string> world{
+		std::format("XDG_RUNTIME_DIR={}", portal_runtime),
+		std::format("XDG_CONFIG_HOME={}/config", portal_dir),
+		std::format("XDG_DATA_HOME={}/share", portal_dir),
+		"XDG_CURRENT_DESKTOP=wayland-canvas:wlroots",
+		std::format("WAYLAND_DISPLAY={}", wayland),
+		std::format("DBUS_SESSION_BUS_ADDRESS=unix:path={}", bus),
+		"GIO_USE_VFS=local",
+		"GVFS_DISABLE_FUSE=1",
 	};
+	// The bus of its own: started here, killed here, and dead even if this
+	// run itself is killed. The bus and everything it activates die together.
+	std::vector<std::string> bus_argv{"env"};
+	bus_argv.insert(bus_argv.end(), world.begin(), world.end());
+	bus_argv.insert(bus_argv.end(), {"/usr/bin/dbus-daemon", "--session", "--nofork",
+		"--nopidfile", std::format("--address=unix:path={}", bus)});
+	check(portal_bus.start(bus_argv, {.own_group = true, .log = portal_dir + "/bus.log"}),
+		"the portal's own bus started");
+	// A service the session bus starts knows only what the session hands
+	// over: never the control socket's own variable. The shell gets a TERM
+	// when this run dies, so its trap reaps pipewire and xdpw; the session
+	// dies as a group, leaving no one behind.
+	std::vector<std::string> session_argv{"env", "-u", "WAYLAND_CANVAS_SOCKET"};
+	session_argv.insert(session_argv.end(), world.begin(), world.end());
+	session_argv.insert(session_argv.end(), {
+		std::format("PATH={}:{}", bin_dir, std::getenv("PATH")),
+		std::format("CHOOSER_MODE_FILE={}/chooser-mode", portal_dir),
+		std::format("PORTAL_DIR={}", portal_dir),
+		"/bin/sh", "-c",
+		"exec >\"$PORTAL_DIR/session.out\" 2>\"$PORTAL_DIR/session.err\";"
+		"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/bus\" ]; do"
+		" sleep 0.1; i=$((i+1)); done;"
+		"pipewire >\"$PORTAL_DIR/pipewire.out\" 2>&1 & pw=$!;"
+		"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/pipewire-0\" ]; do"
+		" sleep 0.1; i=$((i+1)); done;"
+		"/usr/lib/xdg-desktop-portal-wlr -l DEBUG"
+		" >\"$PORTAL_DIR/xdpw.out\" 2>&1 & xw=$!;"
+		"trap 'kill $pw $xw 2>/dev/null' TERM EXIT;"
+		"sleep 1;"
+		"/usr/bin/python3 \"$PORTAL_DIR/client.py\""
+		" >\"$PORTAL_DIR/client.out\" 2>\"$PORTAL_DIR/client.err\";"
+		"echo $? >\"$PORTAL_DIR/client.code\""});
+	check(portal_session.start(session_argv, {.own_group = true,
+			.log = portal_dir + "/session.log", .death_signal = SIGTERM}),
+		"the portal session started");
+	return after(300);
 }
 
-bool output_settled() {
-	Output *output = server->outputs.front().get();
-	return output != nullptr && !output->camera.panning() && !output->camera.zooming();
+// The whole session gets a minute.
+Result portal_shares_a_monitor_and_a_window() {
+	answer_the_chooser();
+	if (auto wait = wait_for(!portal_session.running(), {.poll_ms = 500, .budget_ms = 60'000})) {
+		return *wait;
+	}
+	stop_portal();
+	// What the ScreenCast client saw, one line per source kind.
+	std::string out = read_text(portal_dir + "/client.out");
+	auto node_of = [&out](std::string_view kind) {
+		std::string needle = std::format("portal-{} node=", kind);
+		std::size_t at = out.find(needle);
+		return at == std::string::npos ? 0 : std::atoi(out.c_str() + at + needle.size());
+	};
+	int monitor_node = node_of("monitor");
+	int window_node = node_of("window");
+	int code = std::atoi(read_text(portal_dir + "/client.code").c_str());
+	check(code == 0 && monitor_node > 0,
+		std::format("the portal shares a monitor: the ScreenCast client "
+			"got a PipeWire stream (node {}, exit {})", monitor_node, code));
+	check(code == 0 && window_node > 0,
+		std::format("the portal shares a window: the ScreenCast client "
+			"got a PipeWire stream (node {}, exit {})", window_node, code));
+	return after(300);
 }
 
-// --------------------------------------------------------------- steps
-
-int run_step() {
-	switch (step) {
-	case 0:
-		spawn("foot -T under sh -c 'echo window under; exec sleep 600'");
-		spawn("foot -T over sh -c 'echo window over; exec sleep 600'");
-		return 500;
-	case 1: {
-		bool mapped = view_titled("under") != nullptr && view_titled("over") != nullptr;
-		if ((!mapped || !output_settled()) && retries++ < 100) {
-			return -100;
-		}
-		int count = 0;
-		for (View *v : server->views) {
-			count += v->mapped ? 1 : 0;
-		}
-		check(mapped && count == 2,
-			std::format("two foot windows mapped ({})", count));
-		check(view_titled("under")->deco.ssd && view_titled("over")->deco.ssd,
-			"both windows negotiated server-side title bars");
-		return 400;
+// A window cast of an X11 window: the cast client copies the frames of the
+// X11 client's window through the toplevel source.
+Result x11_client_starts() {
+	const char *client = std::getenv("CANVAS_X11_CLIENT");
+	if (client == nullptr || *client == '\0') {
+		std::println("SKIP: the X11 window cast, no X11 client built");
+		return go_to("quit", 100);
 	}
-	case 2: { // both map centred, so they start overlapped: pull "over" clear
-		View *under = view_titled("under");
-		View *over = view_titled("over");
-		wlr_box u = view_on_screen(*under), o = view_on_screen(*over);
-		// Park "over" just right of "under", a 40 px gap between the frames.
-		double dx = (u.x + u.width + 40.0) - o.x;
-		drag_view(*over, dx, 0);
-		return 500;
-	}
-	case 3: {
-		if (!output_settled() && retries++ < 50) {
-			return -100;
-		}
-		// Separated: the parking left no overlap.
-		wlr_box u = view_on_screen(*view_titled("under"));
-		wlr_box o = view_on_screen(*view_titled("over"));
-		wlr_box overlap{};
-		wlr_box_intersection(&overlap, &u, &o);
-		check(wlr_box_empty(&overlap), "the windows are apart on screen");
-		shot("ref-full");
-		return 400;
-	}
-	case 4: {
-		if (grim_running()) {
-			return -100;
-		}
-		// The offscreen whole-output capture against grim's screenshot.
-		Output *output = server->outputs.front().get();
-		CairoSurfacePtr cap = capture_output(*output, {0, 0, output->width, output->height});
-		check(cap != nullptr, "capture_output returns the whole output");
-		if (cap != nullptr) {
-			save_png(cap, "cap-full");
-			cairo_surface_t *ref = load_png("ref-full");
-			long bad = pixels_differing(cap.get(), ref, {});
-			long total = output->width * static_cast<long>(output->height);
-			check(bad >= 0 && bad * 1000 <= total,
-				std::format("the whole-output capture matches grim pixel for pixel "
-					"({} of {} px differ)", bad, total));
-			cairo_surface_destroy(ref);
-		}
-		shot_region("ref-region", "180,140 420x260");
-		return 400;
-	}
-	case 5: {
-		if (grim_running()) {
-			return -100;
-		}
-		// A region capture against grim's crop of the same area.
-		Output *output = server->outputs.front().get();
-		wlr_box area{180, 140, 420, 260};
-		CairoSurfacePtr cap = capture_output(*output, area);
-		check(cap != nullptr, "capture_output returns the region");
-		if (cap != nullptr) {
-			save_png(cap, "cap-region");
-			check(cairo_image_surface_get_width(cap.get()) == 420
-					&& cairo_image_surface_get_height(cap.get()) == 260,
-				"the region capture is the area at the output's scale");
-			cairo_surface_t *ref = load_png("ref-region");
-			long bad = pixels_differing(cap.get(), ref, {});
-			check(bad >= 0 && bad * 1000 <= 420L * 260,
-				std::format("the region capture matches grim -g pixel for pixel "
-					"({} of 109200 px differ)", bad));
-			cairo_surface_destroy(ref);
-		}
-		// The reference window shot, taken with nothing over it.
-		CairoSurfacePtr under = capture_view(*view_titled("under"), output->wlr->scale);
-		check(under != nullptr, "capture_view returns the window");
-		if (under != nullptr) {
-			save_png(under, "under-apart");
-			wlr_box frame = view_titled("under")->frame_box();
-			check(cairo_image_surface_get_width(under.get()) == frame.width
-					&& cairo_image_surface_get_height(under.get()) == frame.height,
-				"the window capture is the frame at the output's scale");
-		}
-		return 300;
-	}
-	case 6: { // drop "over" back over most of "under"
-		View *under = view_titled("under");
-		View *over = view_titled("over");
-		wlr_box u = view_on_screen(*under), o = view_on_screen(*over);
-		over_apart = o; // where "over" sat in the reference captures
-		double dx = (u.x + u.width * 0.15) - o.x;
-		double dy = (u.y + u.height * 0.15) - o.y;
-		drag_view(*over, dx, dy);
-		return 500;
-	}
-	case 7: {
-		if (!output_settled() && retries++ < 50) {
-			return -100;
-		}
-		Output *output = server->outputs.front().get();
-		View *under = view_titled("under");
-		View *over = view_titled("over");
-		wlr_box u = view_on_screen(*under), o = view_on_screen(*over);
-		wlr_box overlap{};
-		wlr_box_intersection(&overlap, &u, &o);
-		check(!wlr_box_empty(&overlap) && overlap.width > 100 && overlap.height > 100,
-			std::format("the windows overlap on screen ({}x{} px)",
-				overlap.width, overlap.height));
-		// The window alone: whatever overlaps it on screen leaves no trace.
-		CairoSurfacePtr cap = capture_view(*under, output->wlr->scale);
-		check(cap != nullptr, "capture_view returns the overlapped window");
-		if (cap != nullptr) {
-			save_png(cap, "under-overlapped");
-			cairo_surface_t *ref = load_png("under-apart");
-			long bad = pixels_differing(cap.get(), ref, {});
-			long total = u.width * static_cast<long>(u.height);
-			check(bad == 0,
-				std::format("the window shot leaves out what overlaps it "
-					"({} of {} px differ)", bad, total));
-			cairo_surface_destroy(ref);
-		}
-		// And the overlap really is on screen: the whole-output capture now
-		// differs inside it, and outside the moved window nowhere — counting
-		// neither where "over" sits now nor the area it vacated.
-		CairoSurfacePtr full = capture_output(*output, {0, 0, output->width, output->height});
-		if (full != nullptr) {
-			save_png(full, "cap-overlapped");
-			cairo_surface_t *before = load_png("cap-full");
-			const wlr_box moved[] = {o, over_apart};
-			long inside = pixels_differing(full.get(), before, overlap, {}, 2);
-			long outside = pixels_differing(full.get(), before, {}, moved, 2);
-			check(inside > 1000,
-				std::format("the overlapping window shows in the output capture "
-					"({} px changed in the overlap)", inside));
-			check(outside == 0,
-				std::format("nothing changed outside the moved window ({} px)", outside));
-			cairo_surface_destroy(before);
-		}
-		return 300;
-	}
-	case 8: { // the protocols: grim now travels ext-image-copy-capture
-		shot("ref-ext-full");
-		return 400;
-	}
-	case 9: {
-		if (grim_running()) {
-			return -100;
-		}
-		// The whole output again, this time through the capture protocols.
-		Output *output = server->outputs.front().get();
-		CairoSurfacePtr cap = capture_output(*output, {0, 0, output->width, output->height});
-		cairo_surface_t *ref = load_png("ref-ext-full");
-		long bad = cap != nullptr ? pixels_differing(cap.get(), ref, {}) : -1;
-		long total = output->width * static_cast<long>(output->height);
-		check(bad >= 0 && bad * 1000 <= total,
-			std::format("grim's protocol screenshot matches the offscreen capture "
-				"({} of {} px differ)", bad, total));
-		cairo_surface_destroy(ref);
-		// And one window by its ext-foreign-toplevel identifier.
-		View *under = view_titled("under");
-		const char *identifier = under->ext_toplevel_identifier();
-		check(identifier != nullptr && *identifier != '\0',
-			"the window carries an ext-foreign-toplevel identifier");
-		if (identifier != nullptr) {
-			std::string path = std::format("{}/ref-ext-window.png", shot_dir);
-			std::string err = std::format("{}/ref-ext-window.err", shot_dir);
-		grim_pid = fork();
-		if (grim_pid == 0) {
-			FILE *log = std::fopen(err.c_str(), "w");
-			if (log != nullptr) {
-				dup2(fileno(log), STDERR_FILENO);
-			}
-			execlp("grim", "grim", "-T", identifier, path.c_str(),
-				static_cast<char *>(nullptr));
-			_exit(127);
-		}
-	}
-		return 400;
-	}
-	case 10: {
-		if (grim_running()) {
-			return -100;
-		}
-		// The window by identifier, against the offscreen window capture —
-		// still taken while "over" covers most of it.
-		Output *output = server->outputs.front().get();
-		View *under = view_titled("under");
-		CairoSurfacePtr cap = capture_view(*under, output->wlr->scale);
-		cairo_surface_t *ref = load_png("ref-ext-window");
-		long bad = cap != nullptr ? pixels_differing(cap.get(), ref, {}) : -1;
-		long total = cap != nullptr
-			? cairo_image_surface_get_width(cap.get())
-				* static_cast<long>(cairo_image_surface_get_height(cap.get()))
-			: 0;
-		check(bad == 0,
-			std::format("grim -T <identifier> captures the window alone "
-				"({} of {} px differ)", bad, total));
-		cairo_surface_destroy(ref);
-		return 300;
-	}
-	case 11: { // the portal: sharing through xdg-desktop-portal-wlr
-		// Only with everything a private portal session needs; a run without
-		// them skips this phase (the capture proofs above still ran).
-		const char *const needed[] = {"dbus-run-session", "pipewire"};
-		std::string absent;
-		for (const char *cmd : needed) {
-			if (std::system(std::format("command -v {} >/dev/null 2>&1", cmd).c_str()) != 0) {
-				absent += std::format(" {}", cmd);
-			}
-		}
-		// The portal and its backends install outside $PATH, and the system
-		// python carries gi (a virtualenv's does not).
-		const char *const tucked[] = {"/usr/lib/xdg-desktop-portal",
-			"/usr/lib/xdg-desktop-portal-wlr"};
-		for (const char *path : tucked) {
-			if (std::system(std::format("[ -x {} ]", path).c_str()) != 0) {
-				absent += std::format(" {}", std::strrchr(path, '/') + 1);
-			}
-		}
-		if (std::system("/usr/bin/python3 -c 'import gi' >/dev/null 2>&1") != 0) {
-			absent += " python3-gi";
-		}
-		if (!absent.empty()) {
-			std::println("SKIP: portal phase, not installed:{}", absent);
-			portal_skip = true;
-			return 300;
-		}
-		// The scratch world: a bus and XDG dirs of its own, so the machine's
-		// portal, PipeWire and config are never touched.
-		portal_dir = std::format("{}/portal", shot_dir);
-		mkdir_p(std::format("{}/share", portal_dir));
-		mkdir_p(std::format("{}/config/xdg-desktop-portal", portal_dir));
-		mkdir_p(std::format("{}/config/xdg-desktop-portal-wlr", portal_dir));
-		// PipeWire's socket must fit a unix socket name (107 chars), and the
-		// worktree's tmp is deeper than that: only the runtime dir rides in
-		// /tmp, under a name of this run's own, and is removed afterwards.
-		std::string pattern = "/tmp/canvas-sharing-runtime-XXXXXX";
-		portal_runtime = mkdtemp(pattern.data());
-		write_file(std::format("{}/config/xdg-desktop-portal/portals.conf", portal_dir),
-			"[preferred]\ndefault=gtk\n"
-			"org.freedesktop.impl.portal.ScreenCast=wlr\n"
-			"org.freedesktop.impl.portal.Screenshot=wlr\n");
-		// The chooser xdpw runs is the compositor's own picker, through the
-		// msg client: xdpw offers its monitor and window lines on stdin,
-		// `capture.pick` opens the picker, and the scenario (case 12) clicks
-		// the source the client asked for by the mode file it wrote first.
-		// The config is the one the package ships, byte for byte, under the
-		// name xdpw reads for this desktop; the build's binary is first on
-		// the session's PATH, as an installed one would be.
-		const char *source = std::getenv("CANVAS_SOURCE");
-		std::string shipped = read_file(std::format("{}/packaging/xdg-desktop-portal-wlr.conf",
-			source != nullptr && *source ? source : "."));
-		check(shipped.find("chooser_cmd = wayland-canvas msg capture.pick") != std::string::npos,
-			"the shipped xdpw config names the compositor's picker as the chooser");
-		write_file(std::format("{}/config/xdg-desktop-portal-wlr/wayland-canvas", portal_dir),
-			shipped);
-		const char *canvas_bin = std::getenv("WAYLAND_CANVAS_BIN");
-		std::string bin = canvas_bin != nullptr ? canvas_bin : "";
-		std::string bin_dir = bin.substr(0, bin.rfind('/'));
-		write_file(std::format("{}/client.py", portal_dir), PORTAL_CLIENT);
-		// The compositor's socket as an absolute path, for the session's
-		// portal and backend to find this compositor and nothing else.
-		const char *runtime = std::getenv("XDG_RUNTIME_DIR");
-		const char *display = std::getenv("WAYLAND_DISPLAY");
-		std::string wayland = std::format("{}/{}", runtime, display);
-		// The bus of its own: started here, killed here — and dead even if
-		// this run itself is killed, by PDEATHSIG. Nothing relies on a
-		// wrapper cleaning up after itself. gvfs stays off the bus; the
-		// document portal still mounts FUSE under the runtime dir, which
-		// stop_portal() unmounts.
-		std::string bus = std::format("{}/bus", portal_runtime);
-		portal_bus_pid = fork();
-		if (portal_bus_pid == 0) {
-			prctl(PR_SET_PDEATHSIG, SIGKILL);
-			setpgid(0, 0); // the bus and everything it activates die together
-			// The compositor blocks the signals it watches; the bus and what it
-			// starts must not inherit that mask.
-			sigset_t unblocked;
-			sigemptyset(&unblocked);
-			sigprocmask(SIG_SETMASK, &unblocked, nullptr);
-			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
-			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
-			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
-			setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", 1);
-			setenv("WAYLAND_DISPLAY", wayland.c_str(), 1);
-			setenv("DBUS_SESSION_BUS_ADDRESS", std::format("unix:path={}", bus).c_str(), 1);
-			setenv("GIO_USE_VFS", "local", 1);
-			setenv("GVFS_DISABLE_FUSE", "1", 1);
-			execl("/usr/bin/dbus-daemon", "dbus-daemon", "--session", "--nofork",
-				"--nopidfile", std::format("--address=unix:path={}", bus).c_str(),
-				static_cast<char *>(nullptr));
-			_exit(127);
-		}
-		portal_pid = fork();
-		if (portal_pid == 0) {
-			prctl(PR_SET_PDEATHSIG, SIGTERM);
-			setpgid(0, 0); // the session dies as a group, leaving no one behind
-			sigset_t unblocked; // a TERM must reach the script's trap
-			sigemptyset(&unblocked);
-			sigprocmask(SIG_SETMASK, &unblocked, nullptr);
-			setenv("XDG_RUNTIME_DIR", portal_runtime.c_str(), 1);
-			setenv("XDG_CONFIG_HOME", std::format("{}/config", portal_dir).c_str(), 1);
-			setenv("XDG_DATA_HOME", std::format("{}/share", portal_dir).c_str(), 1);
-			setenv("XDG_CURRENT_DESKTOP", "wayland-canvas:wlroots", 1);
-			setenv("WAYLAND_DISPLAY", wayland.c_str(), 1);
-			setenv("DBUS_SESSION_BUS_ADDRESS", std::format("unix:path={}", bus).c_str(), 1);
-			// A service the session bus starts knows only what the session
-			// hands over: never the control socket's own variable.
-			unsetenv("WAYLAND_CANVAS_SOCKET");
-			setenv("PATH", std::format("{}:{}", bin_dir, std::getenv("PATH")).c_str(), 1);
-			setenv("GIO_USE_VFS", "local", 1);
-			setenv("GVFS_DISABLE_FUSE", "1", 1);
-			setenv("CHOOSER_MODE_FILE", std::format("{}/chooser-mode", portal_dir).c_str(), 1);
-			setenv("PORTAL_DIR", portal_dir.c_str(), 1);
-			execl("/bin/sh", "/bin/sh", "-c",
-				"exec >\"$PORTAL_DIR/session.out\" 2>\"$PORTAL_DIR/session.err\";"
-				"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/bus\" ]; do"
-				" sleep 0.1; i=$((i+1)); done;"
-				"pipewire >\"$PORTAL_DIR/pipewire.out\" 2>&1 & pw=$!;"
-				"i=0; while [ $i -lt 100 ] && [ ! -S \"$XDG_RUNTIME_DIR/pipewire-0\" ]; do"
-				" sleep 0.1; i=$((i+1)); done;"
-				"/usr/lib/xdg-desktop-portal-wlr -l DEBUG"
-				" >\"$PORTAL_DIR/xdpw.out\" 2>&1 & xw=$!;"
-				"trap 'kill $pw $xw 2>/dev/null' TERM EXIT;"
-				"sleep 1;"
-				"/usr/bin/python3 \"$PORTAL_DIR/client.py\""
-				" >\"$PORTAL_DIR/client.out\" 2>\"$PORTAL_DIR/client.err\";"
-				"echo $? >\"$PORTAL_DIR/client.code\"", nullptr);
-			_exit(127);
-		}
-		return 300;
-	}
-	case 12: {
-		if (portal_skip || portal_pid <= 0) {
-			return 300;
-		}
-		// While the portal session runs, its chooser is the compositor's own
-		// picker: answer each one by clicking the source the client asked
-		// for (the mode file it wrote before its request).
-		if (server->capture_ui.picking()) {
-			std::string mode = read_file(std::format("{}/chooser-mode", portal_dir));
-			View *wanted = mode.find("window") != std::string::npos
-				? view_titled("under") : nullptr;
-			if (wanted != nullptr) {
-				wlr_box f = view_on_screen(*wanted);
-				click(f.x + 60.0, f.y + 14.0); // the window's title bar
-			} else {
-				// A click no window covers answers with the output itself.
-				const double spots[][2] = {{40, 40}, {80, 650}, {640, 700}};
-				for (auto &spot : spots) {
-					bool covered = false;
-					for (View *v : server->views) {
-						if (v->mapped && !v->minimized) {
-							wlr_box f = view_on_screen(*v);
-							covered = covered || (spot[0] >= f.x && spot[0] < f.x + f.width
-								&& spot[1] >= f.y && spot[1] < f.y + f.height);
-						}
-					}
-					if (!covered) {
-						click(spot[0], spot[1]);
-						break;
-					}
-				}
-			}
-		}
-		int status = 0;
-		if (waitpid(portal_pid, &status, WNOHANG) == 0 && retries++ < 120) {
-			return -500; // still sharing; the whole session gets a minute
-		}
-		stop_portal();
-		// What the ScreenCast client saw, one line per source kind.
-		std::string out = read_file(std::format("{}/client.out", portal_dir));
-		auto node_of = [&out](std::string_view kind) {
-			std::string needle = std::format("portal-{} node=", kind);
-			std::size_t at = out.find(needle);
-			return at == std::string::npos
-				? 0 : std::atoi(out.c_str() + at + needle.size());
-		};
-		int monitor_node = node_of("monitor");
-		int window_node = node_of("window");
-		int code = std::atoi(read_file(std::format("{}/client.code", portal_dir)).c_str());
-		check(code == 0 && monitor_node > 0,
-			std::format("the portal shares a monitor: the ScreenCast client "
-				"got a PipeWire stream (node {}, exit {})", monitor_node, code));
-		check(code == 0 && window_node > 0,
-			std::format("the portal shares a window: the ScreenCast client "
-				"got a PipeWire stream (node {}, exit {})", window_node, code));
-		// stop_portal() left nothing of this run in /tmp.
-		return 300;
-	}
-	// A window cast of an X11 window: the cast client copies the frames of
-	// the X11 client's window through the toplevel source.
-	case 13: {
-		const char *x11 = std::getenv("CANVAS_X11_CLIENT");
-		if (x11 == nullptr || *x11 == '\0') {
-			std::println("SKIP: the X11 window cast, no X11 client built");
-			step = 17;
-			return 100;
-		}
-		x11_pid = spawn(std::format("exec \"$CANVAS_X11_CLIENT\" --title=x11-cast"
-			" > '{}/x11.out' 2>&1", shot_dir).c_str());
-		return 1500;
-	}
-	case 14: {
-		View *window = view_titled("x11-cast");
-		if (window == nullptr && retries++ < 200) {
-			return -100;
-		}
-		check(window != nullptr && window->as_x11() != nullptr,
-			"the X11 client's window mapped as an X11 view");
-		if (window == nullptr) {
-			step = 15;
-			return 100;
-		}
-		cast_pid = spawn(std::format("exec \"$CANVAS_CAST_CLIENT\" x11-cast {:06x}"
-			" > '{}/x11-cast.out' 2>&1", x11_colour, shot_dir).c_str());
-		return 800;
-	}
-	case 15: {
-		std::string said = read_file(std::format("{}/x11-cast.out", shot_dir));
-		View *window = view_titled("x11-cast");
-		if (said.find("CAST SHARE 3 ") == std::string::npos && retries++ < 100) {
-			return -100;
-		}
-		wlr_box frame = window != nullptr ? window->frame_box() : wlr_box{};
-		int w = 0, h = 0;
-		std::size_t ready = said.find("CAST READY ");
-		if (ready != std::string::npos) {
-			std::sscanf(said.c_str() + ready, "CAST READY %d %d", &w, &h);
-		}
-		check(w > 0 && w == frame.width && h == frame.height,
-			std::format("the X11 window's cast frames are the window's size "
-				"({}x{}, frame {}x{})", w, h, frame.width, frame.height));
-		for (int n = 1; n <= 3; n++) {
-			long hits = 0, total = 0;
-			std::size_t at = said.find(std::format("CAST SHARE {} ", n));
-			if (at != std::string::npos) {
-				std::sscanf(said.c_str() + at, "CAST SHARE %*d %ld %ld", &hits, &total);
-			}
-			check(total > 0 && hits * 10 > total * 7,
-				std::format("frame {} of the X11 window's cast shows the client's "
-					"colour ({} of {} px)", n, hits, total));
-		}
-		// The window goes while the cast runs: the session ends with it.
-		if (x11_pid > 0) {
-			kill(x11_pid, SIGKILL);
-			x11_pid = -1;
-		}
-		return 300;
-	}
-	case 16: {
-		if (x11_pid > 0) { // the window never mapped: nothing is left running
-			kill(x11_pid, SIGKILL);
-			x11_pid = -1;
-		}
-		if (cast_pid > 0
-				&& read_file(std::format("{}/x11-cast.out", shot_dir)).find("CAST STOPPED")
-					== std::string::npos
-				&& retries++ < 100) {
-			return -100;
-		}
-		if (cast_pid > 0) {
-			check(read_file(std::format("{}/x11-cast.out", shot_dir)).find("CAST STOPPED")
-					!= std::string::npos,
-				"the compositor ended the X11 window's cast with the window");
-			kill(cast_pid, SIGTERM);
-			cast_pid = -1;
-		}
-		run_client("state", "", "x11-state");
-		return 600;
-	}
-	case 17: {
-		std::string code = read_file(std::format("{}/x11-state.code", shot_dir));
-		if (code.empty() && retries++ < 50) {
-			return -100;
-		}
-		check(code == "0" && read_file(std::format("{}/x11-state.out", shot_dir))
-				.find("\"windows\"") != std::string::npos,
-			"the compositor still answers `msg state` after the X11 window's cast");
-		return 300;
-	}
-	default:
-		std::println("{}: {} failure(s)", failures ? "FAILED" : "ALL PASSED", failures);
-		finished = true;
-		run_client("quit", "", "quit");
-		return 300;
-	}
+	check(x11.start_client("CANVAS_X11_CLIENT", {"--title=x11-cast"}),
+		"the X11 client started");
+	return after(1500);
 }
 
-int handle_timer() {
-	if (grim_running()) {
-		wl_event_source_timer_update(timer, 30);
-		return 0;
+Result x11_window_is_cast() {
+	if (auto wait = wait_for(titled("x11-cast") != nullptr, {.budget_ms = 20'000})) {
+		return *wait;
 	}
-	t += 1000;
-	int delay = run_step();
-	if (delay < -1) {
-		wl_event_source_timer_update(timer, -delay);
-		return 0;
+	View *window = titled("x11-cast");
+	check(window != nullptr && window->as_x11() != nullptr,
+		"the X11 client's window mapped as an X11 view");
+	if (window == nullptr) {
+		return go_to("x11 cast ends with the window", 100);
 	}
-	if (delay == -1) {
-		return 0;
+	x11_cast_started = x11_cast.start_client("CANVAS_CAST_CLIENT",
+		{"x11-cast", std::format("{:06x}", x11_colour)});
+	check(x11_cast_started, "the cast client of the X11 window started");
+	return after(800);
+}
+
+Result x11_cast_shows_the_client() {
+	if (auto wait = wait_for(x11_cast.count("CAST SHARE 3 ") > 0)) {
+		return *wait;
 	}
-	step++;
-	retries = 0;
-	wl_event_source_timer_update(timer, delay > 0 ? delay : 1);
-	return 0;
+	std::string_view said = x11_cast.said();
+	View *window = titled("x11-cast");
+	wlr_box frame = window != nullptr ? window->frame_box() : wlr_box{};
+	int w = 0, h = 0;
+	if (std::size_t ready = said.find("CAST READY "); ready != std::string_view::npos) {
+		std::sscanf(said.data() + ready, "CAST READY %d %d", &w, &h);
+	}
+	check(w > 0 && w == frame.width && h == frame.height,
+		std::format("the X11 window's cast frames are the window's size "
+			"({}x{}, frame {}x{})", w, h, frame.width, frame.height));
+	for (int n = 1; n <= 3; n++) {
+		long hits = 0, total = 0;
+		if (std::size_t at = said.find(std::format("CAST SHARE {} ", n));
+				at != std::string_view::npos) {
+			std::sscanf(said.data() + at, "CAST SHARE %*d %ld %ld", &hits, &total);
+		}
+		check(total > 0 && hits * 10 > total * 7,
+			std::format("frame {} of the X11 window's cast shows the client's "
+				"colour ({} of {} px)", n, hits, total));
+	}
+	// The window goes while the cast runs: the session ends with it.
+	x11.kill();
+	return after(300);
+}
+
+Result x11_cast_ends_with_the_window() {
+	x11.kill(); // the window never mapped: nothing is left running
+	if (auto wait = wait_for(!x11_cast_started || x11_cast.count("CAST STOPPED") > 0)) {
+		return *wait;
+	}
+	if (x11_cast_started) {
+		check(x11_cast.count("CAST STOPPED") > 0,
+			"the compositor ended the X11 window's cast with the window");
+		x11_cast.ask_to_stop();
+	}
+	run_msg("state", "", "x11-state");
+	return after(600);
+}
+
+Result compositor_still_answers() {
+	if (auto wait = wait_for(command_done("x11-state"), {.budget_ms = 5000})) {
+		return *wait;
+	}
+	check(command_code("x11-state") == 0 && command_out("x11-state").contains("\"windows\""),
+		"the compositor still answers `msg state` after the X11 window's cast");
+	return after(300);
+}
+
+Result quit() {
+	return quit_by_msg();
 }
 
 } // namespace
 
 int main() {
-	if (std::getenv("WAYLAND_CANVAS_BIN") == nullptr) {
-		std::fprintf(stderr, "sharing: $WAYLAND_CANVAS_BIN is not set (meson passes it)\n");
+	if (!begin("sharing", {"WAYLAND_CANVAS_BIN"})) {
 		return 2;
 	}
-	const char *env = std::getenv("CANVAS_TMP");
-	std::string root = env && *env ? env : "tmp";
-	shot_dir = std::format("{}/scenarios/sharing", root);
-	mkdir_p(shot_dir);
 	// foot reads its config under $XDG_CONFIG_HOME: a scratch one keeps the
 	// terminal's cursor steady, so a window's pixels do not change between
 	// the captures that must compare equal.
-	std::string config_home = std::format("{}/scenarios/sharing/config", root);
-	mkdir_p(std::format("{}/foot", config_home));
-	write_file(std::format("{}/foot/foot.ini", config_home),
-		"[cursor]\nblink=false\nstyle=block\n");
-	setenv("XDG_CONFIG_HOME", config_home.c_str(), 1);
-	setenv("WLR_BACKENDS", "headless", 1);
-	setenv("WLR_RENDERER", "gles2", 1);
-	server.emplace();
+	write_file(scratch_dir("xdg-config/foot") + "/foot.ini", "[cursor]\nblink=false\nstyle=block\n");
 	Options options;
 	options.start_bar = false; // the suites never spawn the bar
-	if (!server->init(options) || !server->start()) {
-		server.reset();
-		return 2;
-	}
-	wlr_pointer_init(&ptr, &ptr_impl, "fake-pointer");
-	wl_signal_emit_mutable(&server->backend->events.new_input, &ptr.base);
-	timer = wl_event_loop_add_timer(server->loop, [](void *data) { return handle_timer(); },
-		nullptr);
-	wl_event_source_timer_update(timer, 200);
-	wl_display_run(server->display); // `msg quit` ends it
-	stop_portal(); // a run ended early still leaves no session behind
-	for (pid_t pid : {x11_pid, cast_pid}) { // an early end leaves no client behind
-		if (pid > 0) {
-			kill(pid, SIGKILL);
-		}
-	}
-	if (!finished) {
-		check(false, std::format("the run ended at step {}, before its last step", step));
-	}
-	wl_event_source_remove(timer);
-	wlr_pointer_finish(&ptr);
-	server.reset(); // releases the control socket
-	return failures != 0;
+	return run(options, {
+		{"foot windows open", foot_windows_open},
+		{"foot windows mapped", foot_windows_mapped},
+		{"over is pulled clear", over_is_pulled_clear},
+		{"windows are apart", windows_are_apart},
+		{"whole output matches grim", whole_output_matches_grim},
+		{"region matches grim", region_matches_grim},
+		{"over covers under", over_covers_under},
+		{"overlap leaves no trace", overlap_leaves_no_trace},
+		{"protocol shot", protocol_shot},
+		{"protocol screenshot matches", protocol_screenshot_matches},
+		{"window by identifier matches", window_by_identifier_matches},
+		{"portal starts", portal_starts},
+		{"portal shares a monitor and a window", portal_shares_a_monitor_and_a_window},
+		{"x11 client starts", x11_client_starts},
+		{"x11 window is cast", x11_window_is_cast},
+		{"x11 cast shows the client", x11_cast_shows_the_client},
+		{"x11 cast ends with the window", x11_cast_ends_with_the_window},
+		{"compositor still answers", compositor_still_answers},
+		{"quit", quit},
+	}, stop_portal);
 }

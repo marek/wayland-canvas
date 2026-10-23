@@ -75,7 +75,7 @@ bool Child::start(const std::vector<std::string> &argv, const Launch &launch) {
 		sigset_t none;
 		sigemptyset(&none);
 		sigprocmask(SIG_SETMASK, &none, nullptr);
-		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		prctl(PR_SET_PDEATHSIG, launch.death_signal);
 		if (piped) {
 			close(fds[0]);
 			dup2(fds[1], STDOUT_FILENO);

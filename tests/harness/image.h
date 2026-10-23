@@ -19,6 +19,9 @@ namespace harness {
 // form) in the scratch directory as <name>.png. grim runs beside the
 // compositor, so the driver holds the next step back until it has exited.
 void shot(std::string_view name, std::string_view geometry = {});
+// The same of one window, named by its ext-foreign-toplevel identifier
+// (`grim -T`).
+void shot_toplevel(std::string_view name, std::string_view identifier);
 bool shot_running();
 std::string shot_path(std::string_view name);
 
@@ -37,11 +40,17 @@ struct ImageCompare {
 	int tolerance = 0;
 };
 
-// A PNG read into memory.
+// An image read into memory.
 class Image {
 public:
 	// Nullopt when the file is missing or no PNG.
 	static std::optional<Image> read(const std::string &path);
+	// An image surface already in memory, such as a capture the compositor
+	// made. The image holds a reference of its own.
+	static Image of(cairo_surface_t *surface);
+
+	// Writes the image to the scratch directory as <name>.png.
+	void save(std::string_view name) const;
 
 	int width() const;
 	int height() const;

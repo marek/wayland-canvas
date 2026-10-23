@@ -5,6 +5,7 @@
 #include <format>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 #include "harness/files.h"
 
 namespace harness {
@@ -13,6 +14,23 @@ namespace {
 
 pid_t grim_pid = -1;
 
+// Starts grim with `options` and its picture going to the scratch directory
+// as <name>.png.
+void start_grim(const std::vector<std::string> &options, std::string_view name) {
+	std::string path = shot_path(name);
+	std::vector<char *> argv{const_cast<char *>("grim")};
+	for (const std::string &option : options) {
+		argv.push_back(const_cast<char *>(option.c_str()));
+	}
+	argv.push_back(path.data());
+	argv.push_back(nullptr);
+	grim_pid = fork();
+	if (grim_pid == 0) {
+		execvp("grim", argv.data());
+		_exit(127);
+	}
+}
+
 } // namespace
 
 std::string shot_path(std::string_view name) {
@@ -20,18 +38,15 @@ std::string shot_path(std::string_view name) {
 }
 
 void shot(std::string_view name, std::string_view geometry) {
-	std::string path = shot_path(name);
-	std::string area{geometry};
-	grim_pid = fork();
-	if (grim_pid != 0) {
-		return;
-	}
-	if (area.empty()) {
-		execlp("grim", "grim", path.c_str(), static_cast<char *>(nullptr));
+	if (geometry.empty()) {
+		start_grim({}, name);
 	} else {
-		execlp("grim", "grim", "-g", area.c_str(), path.c_str(), static_cast<char *>(nullptr));
+		start_grim({"-g", std::string{geometry}}, name);
 	}
-	_exit(127);
+}
+
+void shot_toplevel(std::string_view name, std::string_view identifier) {
+	start_grim({"-T", std::string{identifier}}, name);
 }
 
 bool shot_running() {
@@ -52,6 +67,15 @@ std::optional<Image> Image::read(const std::string &path) {
 	}
 	cairo_surface_flush(surface.get()); // read-only from here on
 	return Image(std::move(surface));
+}
+
+Image Image::of(cairo_surface_t *surface) {
+	cairo_surface_flush(surface); // read-only from here on
+	return Image(Surface(cairo_surface_reference(surface), cairo_surface_destroy));
+}
+
+void Image::save(std::string_view name) const {
+	cairo_surface_write_to_png(surface_.get(), shot_path(name).c_str());
 }
 
 int Image::width() const {

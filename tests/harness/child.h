@@ -5,6 +5,7 @@
 // without blocking; each dies with the scenario (a killed run leaks nothing)
 // and is stopped, SIGTERM first, when the run ends.
 
+#include <csignal>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
@@ -21,6 +22,9 @@ struct Launch {
 	// Not empty: stdin is /dev/null and stdout and stderr are appended to this
 	// file, so there is no pipe and said() stays empty.
 	std::string log;
+	// What the child gets when the scenario dies: SIGKILL, or SIGTERM for a
+	// shell whose trap reaps what it started.
+	int death_signal = SIGKILL;
 };
 
 class Child {

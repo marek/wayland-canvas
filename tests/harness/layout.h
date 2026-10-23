@@ -29,6 +29,10 @@ View *titled(std::string_view title);
 // at the camera the output shows now.
 Point on_screen(const View &view, double sx, double sy);
 
+// `view`'s whole frame, title bar and border included, where the output shows
+// it: the corner rounded to a pixel and the size at the camera's zoom.
+wlr_box frame_on_screen(const View &view);
+
 // The mapped layer surface of the shell client with this layer-shell
 // namespace, on any output; null when there is none.
 LayerSurface *layer_named(const char *ns);
