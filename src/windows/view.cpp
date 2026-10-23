@@ -294,7 +294,7 @@ void View::move(int new_x, int new_y) {
 	x = new_x;
 	y = new_y;
 	visibility_changed();
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 }
 
 void View::translate(int dx, int dy) {
@@ -333,7 +333,7 @@ void View::set_minimized(bool want) {
 		wlr_foreign_toplevel_handle_v1_set_minimized(foreign_.get(), want);
 	}
 	visibility_changed();
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 	server.canvas.settle(*this);
 }
 
@@ -604,7 +604,7 @@ void View::handle_map() {
 	}
 	launched_for.reset();
 	visibility_changed();
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 }
 
 void Server::view_gone(View &view) {
@@ -633,7 +633,7 @@ void View::handle_unmap() {
 	deco.set_hover(DecoPart::none);
 	deco.set_pressed(DecoPart::none);
 	visibility_changed();
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 }
 
 // The client's first commit, whichever shell it speaks: the window learns
@@ -669,7 +669,7 @@ void View::handle_kind_change() {
 		place(*this);
 	}
 	server.canvas.settle(*this);
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 	visibility_changed();
 }
 
@@ -691,7 +691,7 @@ void View::handle_destroy() {
 	}
 	std::erase(server.views, this);
 	destroy_foreign();
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 	destroy_owned(server.toplevels, this);
 }
 
@@ -726,7 +726,7 @@ void View::handle_set_title() {
 			.title = shell_title(), .app_id = shell_app_id()};
 		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 	damage();
 }
 
@@ -739,7 +739,7 @@ void View::handle_set_app_id() {
 			.title = shell_title(), .app_id = shell_app_id()};
 		wlr_ext_foreign_toplevel_handle_v1_update_state(ext_foreign_.get(), &state);
 	}
-	server.windows_dirty = true;
+	server.changed(Change::windows);
 	damage();
 }
 
@@ -802,7 +802,7 @@ View *Server::last_minimized_view() {
 void Server::focus_view(View *view) {
 	View *prev = focused_view;
 	if (prev != view) {
-		windows_dirty = true;
+		changed(Change::windows);
 		if (prev != nullptr) {
 			prev->tell_activated(false);
 			if (prev->foreign_) {

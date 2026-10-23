@@ -256,5 +256,5 @@ void SessionLock::request(const char *reason) {
 	}
 	requested_ = true;
 	wlr_log(WLR_INFO, "lock requested (%s)", reason);
-	server_.ipc.run_action(config::lock_action, "{}");
+	server_.ipc_events.emit_action(config::lock_action, "{}");
 }

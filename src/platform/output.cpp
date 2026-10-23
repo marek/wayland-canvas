@@ -410,10 +410,7 @@ void Output::handle_frame() {
 	// desktop before this frame shows where it is.
 	server.canvas.fullscreen_desktops.reconcile();
 	server.update_visibility();
-	if (server.windows_dirty) {
-		server.windows_dirty = false;
-		server.ipc.emit_windows();
-	}
+	server.ipc_events.flush();
 	if (server.pointer_focus_stale) {
 		server.pointer_focus_stale = false;
 		server.input.rebase_cursor();
@@ -438,7 +435,7 @@ void Output::handle_request_state(wlr_output_event_request_state *event) {
 	// Nested backends: the host resized our window.
 	wlr_output_commit_state(wlr, event->state);
 	damage();
-	server.ipc.emit_outputs(); // a committed scale or mode changes the state
+	server.changed(Change::outputs); // a committed scale or mode changes the state
 }
 
 void Output::handle_destroy() {
@@ -482,7 +479,7 @@ void Output::handle_destroy() {
 	}
 	server.visibility_changed();
 	destroy_owned(server.outputs, this);
-	server.ipc.emit_outputs(); // the state no longer lists this output
+	server.changed(Change::outputs); // the state no longer lists this output
 	server.input.outputs_changed(); // a touchscreen or a pen loses its output
 }
 
@@ -543,7 +540,7 @@ void Server::handle_layout_change() {
 		update_output_geometry(*output);
 	}
 	visibility_changed();
-	ipc.emit_outputs(); // a moved or resized output changes the state
+	changed(Change::outputs); // a moved or resized output changes the state
 }
 
 void Server::init_outputs() {

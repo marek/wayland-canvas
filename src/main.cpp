@@ -4,7 +4,7 @@
 #include <string>
 #include <unistd.h>
 
-#include "platform/ipc.h"
+#include "platform/ipc_client.h"
 #include "core/server.h"
 #include "core/settings.h"
 

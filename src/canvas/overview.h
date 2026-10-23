@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <utility>
 
 #include "canvas/desktop.h"
 #include "core/geometry.h"
@@ -53,6 +54,9 @@ public:
 	void combine(std::optional<DesktopId> into);
 	void new_desktop(double cx, double cy);
 	void pin_target(); // the target spot becomes a desktop
+	// Whether the overview was entered or left since the last call: the Ipc
+	// tells its subscribers once per frame.
+	bool take_changed() { return std::exchange(changed_, false); }
 
 private:
 	// The target the overview opens on and goes back to: the desktop the
@@ -61,6 +65,7 @@ private:
 
 	Output &output_;
 	bool active_ = false;
+	bool changed_ = false;
 	Camera home_;
 	double zoom_ = 0;
 	OverviewTarget target_;

@@ -280,7 +280,7 @@ void act_night_light(Server &server, Output *, KeyArg) {
 // A shortcut whose work belongs to a shell plugin: the compositor only
 // runs the named action, as `action.run` does.
 void act_shell(Server &server, Output *, KeyArg arg) {
-	server.ipc.run_action(std::get<const char *>(arg), "{}");
+	server.ipc_events.emit_action(std::get<const char *>(arg), "{}");
 }
 
 void act_vt(Server &server, Output *, KeyArg arg) {

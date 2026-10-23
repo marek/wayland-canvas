@@ -18,6 +18,7 @@
 #include "core/config.h"
 #include "core/fs.h"
 #include "core/text.h"
+#include "platform/ipc_methods.h"
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "platform/session_bus.h"
@@ -344,9 +345,10 @@ struct Server::Inhibitor {
 Server::Server()
 	: text_cache(*this), input(*this), bindings(*this), gestures(*this), hint(*this),
 	launcher(*this),
-	painter(*this), decorations(*this), canvas(*this), ipc(*this),
+	painter(*this), decorations(*this), canvas(*this), ipc(), ipc_events(*this, ipc),
 	image_capture(*this),
 	capture_ui(*this), lock(*this), night_light(*this), logind(*this) {
+	register_ipc_methods(ipc, *this);
 	input.set_layers({&capture_ui, &launcher});
 }
 
@@ -533,7 +535,7 @@ bool Server::start() {
 	unsetenv("I3SOCK");
 	unsetenv("NIRI_SOCKET");
 	// Before any client is spawned, so they inherit the socket path.
-	ipc.init();
+	ipc.init(display, loop);
 	// canvas.conf: written with every default when missing (its directory
 	// created with it), then watched — a save or a delete re-reads it and
 	// applies to the running session (docs/intents/input/config-file.md).
@@ -630,7 +632,7 @@ void Server::load_conf(bool first) {
 	std::string text = fs::read_text_file(conf_path).value_or("");
 	settings::Parsed parsed = settings::parse(text);
 	settings::Resolved resolved = settings::resolve(parsed);
-	bool changed = !first && !(resolved == conf);
+	bool differs = !first && !(resolved == conf);
 	conf = std::move(resolved);
 	conf_text = text;
 	conf_errors = std::move(parsed.errors);
@@ -652,8 +654,8 @@ void Server::load_conf(bool first) {
 		}
 		hint.set(hint_text);
 	}
-	if (changed) {
-		ipc.emit_settings();
+	if (differs) {
+		changed(Change::settings);
 	}
 }
 
@@ -710,7 +712,16 @@ void Server::set_theme(ThemeMode mode) {
 	// Every cached texture was drawn with the old palette.
 	text_cache.clear();
 	damage_all();
-	ipc.emit_theme();
+	changed(Change::theme);
+}
+
+void Server::changed(Change what) {
+	changes.set(what);
+	// IpcEvents reads the flags in a frame handler, and an idle compositor has
+	// no frame coming: ask for one.
+	if (!outputs.empty()) {
+		wlr_output_schedule_frame(outputs.front()->wlr);
+	}
 }
 
 void Server::handle_new_surface(wlr_surface *surface) {

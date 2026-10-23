@@ -1835,7 +1835,7 @@ Tests:
     (output.cpp:349-374) move beside the view.
   - Acceptance: view.cpp holds the view's state and its setters, and the
     scenarios are green.
-- [ ] `Ipc` is a transport, with methods registered by their owners
+- [x] `Ipc` is a transport, with methods registered by their owners
   - Split ipc.cpp's 1986 lines into:
     - `platform/ipc_server.{h,cpp}`: the socket, framing, clients,
       events, and `register_method(name, fn)` with phase 6's `Reply`;
@@ -1856,6 +1856,13 @@ Tests:
     `run_action`, an alias of `emit_action` (1681-1683), goes.
   - Acceptance: a new method is one `register_method` call in its owner,
     and the ipc scenario is green.
+  - Done: `ipc_server` (the transport and `register_method`, which ends
+    the compositor on a name given twice), `ipc_events` (reads
+    `Server::changed` flags once per frame), `ipc_state`, `ipc_params`,
+    `ipc_methods_{state,windows,settings,capture,surfaces,actions}`,
+    `ipc_client` and `portal_chooser`; the json-glib wrappers live in
+    `core/json.h`. Events are told once per frame, so the ipc scenario
+    makes its desktops changes a frame apart.
 - [x] `Painter` draws frames; the overview's chrome belongs to the
   overview
   - The drawing primitives (render.cpp:19-227) move to

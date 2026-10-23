@@ -218,7 +218,7 @@ Desktop &Desktops::insert(int number, wlr_box frame, double scale) {
 	next_id_ = DesktopId{static_cast<int>(next_id_) + 1};
 	stack_.insert(stack_.begin(), std::make_unique<Desktop>(id, number, frame, scale));
 	server_.damage_all();
-	server_.ipc.emit_desktops();
+	server_.changed(Change::desktops);
 	return *stack_.front();
 }
 
@@ -235,7 +235,7 @@ void Desktops::remove(DesktopId id) {
 	}
 	destroy_owned(stack_, desktop);
 	server_.damage_all();
-	server_.ipc.emit_desktops();
+	server_.changed(Change::desktops);
 }
 
 void Desktops::raise(DesktopId id) {
@@ -282,7 +282,7 @@ void Desktops::set_scale(DesktopId id, double scale) {
 	}
 	desktop->set_scale(scale);
 	server_.damage_all();
-	server_.ipc.emit_desktops();
+	server_.changed(Change::desktops);
 }
 
 void Desktops::set_tiling(DesktopId id, bool on) {

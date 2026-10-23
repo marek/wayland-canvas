@@ -47,6 +47,11 @@ std::optional<Server> server;
 wl_event_source *timer = nullptr;
 int step = 0, failures = 0, retries = 0;
 long long free_window_id = 0; // the window moved onto free canvas, for its jump
+// The desktops lifecycle step's progress: the change it makes next, the two
+// desktops it works on, and the desktops events heard before it began.
+int lifecycle = 0, lifecycle_heard = 0;
+std::optional<DesktopId> life_a, life_b;
+int flooded = 0; // desktops the flood step has created
 std::string conf_before; // canvas.conf's text before a settings.set that must change nothing
 bool finished = false; // the run reached its end; see main()
 uint32_t t = 90000;
@@ -971,23 +976,42 @@ int run_step() {
 		check(events_has("\"event\":\"desktops\""),
 			"`msg subscribe` receives desktops events");
 		return 200;
-	case 29: { // the rest of the desktops lifecycle: move, combine, abandon
-		Desktop &a = server->canvas.desktops.create(wlr_box{3840, 0, 1280, 720});
-		Desktop &b = server->canvas.desktops.create(wlr_box{5120, 0, 1280, 720});
-		server->canvas.desktops.move(b.id(), 5120, 720);
-		// combine() removes `a`; nothing may touch it afterwards.
-		server->canvas.combine(b.id(), a.id(), a.frame());
-		server->canvas.desktops.remove(b.id());
-		return 300;
-	}
-	case 30:
-		if (events_count("\"event\":\"desktops\"") < 4 && retries++ < 50) {
+	case 29: { // the rest of the desktops lifecycle: create, move, combine, abandon
+		// The subscribers hear a change once per frame: each change gets a
+		// frame of its own, so each is told.
+		Desktops &desktops = server->canvas.desktops;
+		switch (lifecycle++) {
+		case 0:
+			lifecycle_heard = events_count("\"event\":\"desktops\"");
+			life_a = desktops.create(wlr_box{3840, 0, 1280, 720}).id();
+			return -100;
+		case 1:
+			life_b = desktops.create(wlr_box{5120, 0, 1280, 720}).id();
+			return -100;
+		case 2:
+			desktops.move(*life_b, 5120, 720);
+			return -100;
+		case 3: {
+			// combine() removes `a`; nothing may touch it afterwards.
+			wlr_box from = desktops.find(*life_a)->frame();
+			server->canvas.combine(*life_b, *life_a, from);
 			return -100;
 		}
-		check(events_count("\"event\":\"desktops\"") >= 4,
+		default:
+			desktops.remove(*life_b);
+			return 300;
+		}
+	}
+	case 30: {
+		int told = events_count("\"event\":\"desktops\"") - lifecycle_heard;
+		if (told < 4 && retries++ < 50) {
+			return -100;
+		}
+		check(told >= 4,
 			std::format("create, move, combine and abandon each fired a desktops event ({})",
-				events_count("\"event\":\"desktops\"")));
+				told));
 		return 200;
+	}
 	case 31: // overview events reach the subscriber
 		run_client("overview.toggle", "", "sub-overview");
 		return 300;
@@ -1079,11 +1103,16 @@ int run_step() {
 		if (!file_exists(shot_dir + "/slow.ready") && retries++ < 50) {
 			return -100;
 		}
-		// A flood of desktops events: past 1 MiB of backlog, the drop is
-		// immediate, while the child sleeps without reading.
-		for (int i = 0; i < 300; i++) {
-			server->canvas.desktops.create(wlr_box{5120 + (i % 8) * 1280,
-				720 + (i / 8) * 720, 1280, 720});
+		// A flood of desktops events: a long list first, then one change a
+		// frame, each event carrying the whole list. Past 1 MiB of backlog the
+		// drop is immediate, while the child sleeps without reading.
+		int batch = flooded == 0 ? 300 : 1;
+		for (int i = 0; i < batch; i++, flooded++) {
+			server->canvas.desktops.create(wlr_box{5120 + (flooded % 8) * 1280,
+				720 + (flooded / 8) * 720, 1280, 720});
+		}
+		if (flooded < 420) {
+			return -20;
 		}
 		return 300;
 	}

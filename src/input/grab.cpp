@@ -10,6 +10,7 @@
 
 #include "core/config.h"
 #include "input/grab.h"
+#include "platform/ipc_methods.h"
 #include "platform/layer.h"
 #include "platform/output.h"
 #include "core/server.h"
@@ -376,7 +377,7 @@ void PointerGrab::release() {
 		// board when dropped outside. A resize ends back on its slice.
 	[this](Move &s) { server_.canvas.drop(*s.view); },
 	[this](Resize &s) { server_.canvas.settle(*s.view); },
-		[this](SurfaceDrag &s) { server_.ipc.answer_surface_drag(s.layer->canvas_box); },
+		[this](SurfaceDrag &s) { answer_surface_drag(server_.ipc, s.layer->canvas_box); },
 		[](auto &) {},
 	}, state_);
 	cancel();
@@ -475,7 +476,7 @@ void PointerGrab::cancel() {
 	} else if (std::holds_alternative<SurfaceDrag>(state_)) {
 		// Not ended by its release (the surface or the output went): the
 		// client still waiting is told, a release already answered it.
-		server_.ipc.answer_surface_drag(std::nullopt);
+		answer_surface_drag(server_.ipc, std::nullopt);
 	}
 	state_ = None{};
 	server_.damage_all();

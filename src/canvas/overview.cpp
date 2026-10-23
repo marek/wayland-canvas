@@ -107,7 +107,8 @@ void Overview::finish_enter(const Camera &far, double t) {
 	// a look away returns to (docs/intents/canvas/infinite-canvas.md).
 	output_.forget_look_away();
 	active_ = true;
-	output_.server.ipc.emit_overview(output_, true);
+	changed_ = true;
+	output_.server.changed(Change::overview);
 	wlr_seat_pointer_clear_focus(output_.server.seat);
 	output_.camera.animate_zoom(home_, far, t, 1);
 	output_.damage();
@@ -139,7 +140,8 @@ void Overview::finish_exit(const Camera &near, const Camera &far, double t) {
 	Server &server = output_.server;
 	server.input.grab.cancel();
 	active_ = false;
-	server.ipc.emit_overview(output_, false);
+	changed_ = true;
+	server.changed(Change::overview);
 	output_.camera.animate_zoom(near, far, t, 0);
 	server.focus_in(target_.box);
 	server.pointer_focus_stale = true;

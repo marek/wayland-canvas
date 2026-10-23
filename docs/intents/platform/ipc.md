@@ -142,6 +142,9 @@ settings of [../input/config-file.md](../input/config-file.md):
 | `capture.recording` | `active`, `path` | A recording started (the file it writes) or stopped |
 | `settings` | The settings, as `settings.get` returns them | The effective settings change: the file saved by hand or deleted, or a `settings.set` |
 
+Every event but `action` is told once per frame and carries the state at
+that frame: several changes of one fact between two frames make one event.
+
 ### Surfaces on the canvas
 
 A plugin that wants something of its own on the plane draws it in a

@@ -9,7 +9,9 @@
 #include "canvas/canvas.h"
 #include "input/gesture.h"
 #include "input/input.h"
-#include "platform/ipc.h"
+#include "core/changes.h"
+#include "platform/ipc_events.h"
+#include "platform/ipc_server.h"
 #include "platform/image_capture.h"
 #include "platform/lock.h"
 #include "platform/logind.h"
@@ -157,10 +159,11 @@ public:
 	View *focused_view = nullptr;
 	LayerSurface *focused_layer = nullptr; // keyboard-interactive layer surface
 	uint64_t minimize_counter = 0;
-	// A window list subscribers have not been told about yet: opened, closed,
-	// moved, retitled, minimized or focused. Flushed once per frame, and only
-	// when the list really reads differently (docs/intents/shell/app-bar.md).
-	bool windows_dirty = false;
+	// What the control socket's subscribers have not been told yet: the
+	// owner of a fact calls changed(), and IpcEvents reads the flags once per
+	// frame (docs/intents/shell/app-bar.md for the window list).
+	void changed(Change what);
+	Changes changes;
 	bool pointer_focus_stale = false; // the canvas moved under the pointer: rebase next frame
 	// X positions are canvas positions less this offset, one for every X11
 	// window, so they keep their places relative to each other.
@@ -176,7 +179,8 @@ public:
 	Theme theme;
 	Decorations decorations;
 	Canvas canvas;
-	Ipc ipc;
+	IpcServer ipc;
+	IpcEvents ipc_events;
 	ImageCapture image_capture;
 	CaptureUi capture_ui;
 	SessionLock lock;

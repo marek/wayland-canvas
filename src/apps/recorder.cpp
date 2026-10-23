@@ -139,7 +139,7 @@ void Recorder::start(Output &output, const std::optional<wlr_box> &area) {
 	if (frame_timer_) {
 		wl_event_source_timer_update(frame_timer_.get(), 1); // the first frame now
 	}
-	server_.ipc.emit_recording(true, path_);
+	server_.changed(Change::recording);
 	server_.hint.set("Recording — Alt+Print or the bar's red dot stops it");
 }
 
@@ -217,7 +217,7 @@ void Recorder::gone(int status) {
 	output_ = nullptr;
 	std::string path = std::move(path_);
 	path_.clear();
-	server_.ipc.emit_recording(false, path);
+	server_.changed(Change::recording);
 	struct stat st{};
 	bool saved = !path.empty() && stat(path.c_str(), &st) == 0 && st.st_size > 0;
 	wlr_log(WLR_INFO, "capture: the recorder exited with status %#x; %s", status,

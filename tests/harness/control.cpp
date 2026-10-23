@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <vector>
 #include "harness/files.h"
-#include "platform/ipc.h"
+#include "platform/ipc_client.h"
 
 namespace harness {
 
