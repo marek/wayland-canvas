@@ -20,7 +20,11 @@ std::string tmp_root() {
 }
 
 const std::string &make_scratch(std::string_view scenario) {
-	scratch_path = std::format("{}/scenarios/{}", tmp_root(), scenario);
+	return use_scratch(std::format("{}/scenarios/{}", tmp_root(), scenario));
+}
+
+const std::string &use_scratch(const std::string &path) {
+	scratch_path = path;
 	fresh_dir(scratch_path);
 	return scratch_path;
 }

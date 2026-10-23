@@ -3,12 +3,14 @@
 // Fake input devices. Each is announced on the headless backend's new_input,
 // the path libinput's devices take, so what a scenario sends goes through
 // the compositor's own device handling. Coordinates are output-local logical
-// pixels on the headless backend's one 1280 x 720 output.
+// pixels on the first output, which is 1280 x 720 (screen_w, screen_h) unless
+// the scenario adds one of another size.
 
 #include <cstdint>
 #include <linux/input-event-codes.h>
 #include <optional>
 #include <span>
+#include <string_view>
 #include "core/geometry.h"
 #include "core/wlr.h"
 
@@ -28,6 +30,9 @@ wlr_touch &touchscreen();
 // the driver by a second per step.
 uint32_t event_time();
 void advance_clock(uint32_t ms);
+// Stamps events with the compositor's own clock from here on: for a run whose
+// input is paced in real time, since gestures read their speed off the stamps.
+void use_real_time();
 
 // Takes the devices away: called by run().
 void detach_devices();
@@ -38,6 +43,10 @@ void key(uint32_t code, bool pressed);
 void tap(uint32_t code);
 // Holds `modifiers` and taps `code`, then lets go in reverse.
 void chord(uint32_t code, std::span<const uint32_t> modifiers = {});
+// Types `c` on a US layout, shift included; a character it has no key for is
+// skipped.
+void type_char(char c);
+void type_text(std::string_view text);
 
 namespace mods {
 inline constexpr uint32_t shift[] = {KEY_LEFTSHIFT};
@@ -55,6 +64,15 @@ void click(double x, double y, uint32_t code = BTN_LEFT);
 void drag(double x0, double y0, double x1, double y1);
 // A touchpad swipe through the entry points libinput's events reach.
 void swipe(int fingers, double dx, double dy);
+// The same in pieces, through the pointer device's events as libinput's
+// reach the compositor (with what it does before a gesture starts), for a
+// scenario that paces a gesture itself. A pinch's scale is the whole gesture's.
+void touchpad_swipe_begin(int fingers);
+void touchpad_swipe_update(int fingers, double dx, double dy);
+void touchpad_swipe_end();
+void touchpad_pinch_begin(int fingers);
+void touchpad_pinch_update(int fingers, double scale);
+void touchpad_pinch_end();
 
 // --------------------------------------------------------- touchscreen
 

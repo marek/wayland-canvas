@@ -15,7 +15,9 @@ std::string tmp_root();
 // The scenario's own scratch directory, <tmp_root>/scenarios/<scenario>,
 // made empty: an earlier run's files are never mistaken for this one's.
 const std::string &make_scratch(std::string_view scenario);
-// The directory make_scratch made.
+// The same in a folder the run's starter chooses: `path`, made empty.
+const std::string &use_scratch(const std::string &path);
+// The directory make_scratch or use_scratch made.
 const std::string &scratch();
 // <scratch>/<relative>, created: a place of the scenario's own.
 std::string scratch_dir(std::string_view relative);

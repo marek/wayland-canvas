@@ -1,13 +1,16 @@
 #include "harness/devices.h"
 
+#include <optional>
 #include <ranges>
 #include "harness/run.h"
+#include "platform/output.h"
 
 namespace harness {
 
 namespace {
 
 uint32_t now = 90000;
+bool real_time = false;
 
 wlr_pointer pointer_device{};
 const wlr_pointer_impl pointer_impl = {.name = "fake-pointer"};
@@ -21,23 +24,31 @@ wlr_tablet_tool pen{};
 
 bool has_pointer = false, has_keyboard = false, has_touch = false, has_tablet = false;
 
+// Fractions of the first output's logical size, as a device reports them.
 double fraction_x(double x) {
-	return x / screen_w;
+	return x / output().width;
 }
 
 double fraction_y(double y) {
-	return y / screen_h;
+	return y / output().height;
 }
 
 } // namespace
 
 uint32_t event_time() {
+	if (real_time) {
+		return static_cast<uint32_t>(now_ms());
+	}
 	now += 8;
 	return now;
 }
 
 void advance_clock(uint32_t ms) {
 	now += ms;
+}
+
+void use_real_time() {
+	real_time = true;
 }
 
 void attach_keyboard() {
@@ -113,6 +124,75 @@ void chord(uint32_t code, std::span<const uint32_t> modifiers) {
 	}
 }
 
+namespace {
+
+struct Stroke {
+	uint32_t code;
+	bool shift;
+};
+
+std::optional<Stroke> stroke_for(char c) {
+	static constexpr uint32_t letters[] = {KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G,
+		KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S,
+		KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z};
+	static constexpr uint32_t digits[] = {KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6,
+		KEY_7, KEY_8, KEY_9};
+	if (c >= 'a' && c <= 'z') {
+		return Stroke{letters[c - 'a'], false};
+	}
+	if (c >= 'A' && c <= 'Z') {
+		return Stroke{letters[c - 'A'], true};
+	}
+	if (c >= '0' && c <= '9') {
+		return Stroke{digits[c - '0'], false};
+	}
+	struct Punctuation {
+		char c;
+		Stroke stroke;
+	};
+	static constexpr Punctuation punctuation[] = {
+		{' ', {KEY_SPACE, false}}, {'\n', {KEY_ENTER, false}}, {'-', {KEY_MINUS, false}},
+		{'_', {KEY_MINUS, true}}, {'=', {KEY_EQUAL, false}}, {'+', {KEY_EQUAL, true}},
+		{'/', {KEY_SLASH, false}}, {'?', {KEY_SLASH, true}}, {'.', {KEY_DOT, false}},
+		{'>', {KEY_DOT, true}}, {',', {KEY_COMMA, false}}, {'<', {KEY_COMMA, true}},
+		{';', {KEY_SEMICOLON, false}}, {':', {KEY_SEMICOLON, true}},
+		{'\'', {KEY_APOSTROPHE, false}}, {'"', {KEY_APOSTROPHE, true}},
+		{'(', {KEY_9, true}}, {')', {KEY_0, true}}, {'!', {KEY_1, true}},
+		{'%', {KEY_5, true}}, {'*', {KEY_8, true}}, {'&', {KEY_7, true}},
+		{'#', {KEY_3, true}}, {'@', {KEY_2, true}}, {'[', {KEY_LEFTBRACE, false}},
+		{']', {KEY_RIGHTBRACE, false}}, {'{', {KEY_LEFTBRACE, true}},
+		{'}', {KEY_RIGHTBRACE, true}},
+	};
+	for (const Punctuation &p : punctuation) {
+		if (p.c == c) {
+			return p.stroke;
+		}
+	}
+	return std::nullopt;
+}
+
+} // namespace
+
+void type_char(char c) {
+	std::optional<Stroke> stroke = stroke_for(c);
+	if (!stroke.has_value()) {
+		return;
+	}
+	if (stroke->shift) {
+		key(KEY_LEFTSHIFT, true);
+	}
+	tap(stroke->code);
+	if (stroke->shift) {
+		key(KEY_LEFTSHIFT, false);
+	}
+}
+
+void type_text(std::string_view text) {
+	for (char c : text) {
+		type_char(c);
+	}
+}
+
 // ------------------------------------------------------------- pointer
 
 void move_to(double x, double y) {
@@ -151,6 +231,44 @@ void swipe(int fingers, double dx, double dy) {
 		server->gestures.swipe_update(event_time(), dx / 10, dy / 10);
 	}
 	server->gestures.swipe_end(event_time(), false);
+}
+
+void touchpad_swipe_begin(int fingers) {
+	wlr_pointer_swipe_begin_event event = {.pointer = &pointer_device,
+		.time_msec = event_time(), .fingers = static_cast<uint32_t>(fingers)};
+	wl_signal_emit_mutable(&pointer_device.events.swipe_begin, &event);
+}
+
+void touchpad_swipe_update(int fingers, double dx, double dy) {
+	wlr_pointer_swipe_update_event event = {.pointer = &pointer_device,
+		.time_msec = event_time(), .fingers = static_cast<uint32_t>(fingers), .dx = dx,
+		.dy = dy};
+	wl_signal_emit_mutable(&pointer_device.events.swipe_update, &event);
+}
+
+void touchpad_swipe_end() {
+	wlr_pointer_swipe_end_event event = {.pointer = &pointer_device,
+		.time_msec = event_time(), .cancelled = false};
+	wl_signal_emit_mutable(&pointer_device.events.swipe_end, &event);
+}
+
+void touchpad_pinch_begin(int fingers) {
+	wlr_pointer_pinch_begin_event event = {.pointer = &pointer_device,
+		.time_msec = event_time(), .fingers = static_cast<uint32_t>(fingers)};
+	wl_signal_emit_mutable(&pointer_device.events.pinch_begin, &event);
+}
+
+void touchpad_pinch_update(int fingers, double scale) {
+	wlr_pointer_pinch_update_event event = {.pointer = &pointer_device,
+		.time_msec = event_time(), .fingers = static_cast<uint32_t>(fingers), .dx = 0,
+		.dy = 0, .scale = scale, .rotation = 0};
+	wl_signal_emit_mutable(&pointer_device.events.pinch_update, &event);
+}
+
+void touchpad_pinch_end() {
+	wlr_pointer_pinch_end_event event = {.pointer = &pointer_device,
+		.time_msec = event_time(), .cancelled = false};
+	wl_signal_emit_mutable(&pointer_device.events.pinch_end, &event);
 }
 
 // --------------------------------------------------------- touchscreen

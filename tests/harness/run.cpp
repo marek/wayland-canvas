@@ -52,11 +52,15 @@ bool begin(std::string_view scenario, std::initializer_list<const char *> requir
 		}
 	}
 	make_scratch(scenario);
-	setenv("WLR_BACKENDS", "headless", 1);
-	setenv("WLR_RENDERER", "gles2", 1);
+	use_headless_backend();
 	// The compositor's own settings and config never come from the user's.
 	scratch_env("XDG_CONFIG_HOME", "xdg-config");
 	return true;
+}
+
+void use_headless_backend() {
+	setenv("WLR_BACKENDS", "headless", 1);
+	setenv("WLR_RENDERER", "gles2", 1);
 }
 
 std::string scratch_env(const char *name, std::string_view relative) {
@@ -70,7 +74,7 @@ void put_first_on_path(const std::string &dir) {
 	setenv("PATH", std::format("{}:{}", dir, path != nullptr ? path : "").c_str(), 1);
 }
 
-int run(const Options &options, std::vector<Step> steps) {
+int run(const Options &options, std::vector<Step> steps, std::function<void()> teardown) {
 	server.emplace();
 	if (!server->init(options) || !server->start()) {
 		server.reset();
@@ -80,6 +84,9 @@ int run(const Options &options, std::vector<Step> steps) {
 	timer = wl_event_loop_add_timer(server->loop, [](void *) { return on_tick(); }, nullptr);
 	wl_event_source_timer_update(timer, first_tick_ms);
 	wl_display_run(server->display);
+	if (teardown) {
+		teardown();
+	}
 	if (!sequence.error().empty()) {
 		check(false, sequence.error());
 	} else if (!sequence.finished()) {
@@ -92,6 +99,21 @@ int run(const Options &options, std::vector<Step> steps) {
 	detach_devices();
 	server.reset();
 	return failures() != 0;
+}
+
+wlr_output *add_output(int width, int height) {
+	wlr_backend *headless = nullptr;
+	wlr_multi_for_each_backend(server->backend,
+		[](wlr_backend *backend, void *found) {
+			if (wlr_backend_is_headless(backend)) {
+				*static_cast<wlr_backend **>(found) = backend;
+			}
+		}, &headless);
+	if (headless == nullptr) {
+		return nullptr;
+	}
+	return wlr_headless_add_output(headless, static_cast<unsigned>(width),
+		static_cast<unsigned>(height));
 }
 
 Output &output() {

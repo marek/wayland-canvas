@@ -50,8 +50,9 @@ signed in it borrows its token for the renderer's higher rate limit.
 
 The pictures in `docs/media/` and the walkthrough video are real captures.
 `tools/media.py` fetches the tour's public-domain assets, builds the
-compositor and runs `build/media-tour` — the headless backend with real
-apps, which lists what it captured in `manifest.json` — then encodes the
+compositor and runs `build/media-tour` — the scenarios' harness
+(`tests/harness/`) driving the headless backend with real apps; it lists
+what it captured in `manifest.json` — then encodes the
 stills into `docs/media/` and the video into
 `tmp/media/walkthrough.mp4`. The video is a GitHub attachment: upload it
 by dragging it into any issue or comment box on GitHub, and put the link

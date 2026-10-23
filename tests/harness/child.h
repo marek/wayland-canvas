@@ -1,9 +1,9 @@
 #pragma once
 
-// Child processes of a scenario: the test clients, the bus, the stand-ins.
-// Each has its stdout on a pipe the scenario reads without blocking, dies
-// with the scenario (a killed run leaks nothing), and is stopped, SIGTERM
-// first, when the run ends.
+// Child processes of a scenario: the test clients, the bus, the stand-ins,
+// the apps of a tour. A client has its stdout on a pipe the scenario reads
+// without blocking; each dies with the scenario (a killed run leaks nothing)
+// and is stopped, SIGTERM first, when the run ends.
 
 #include <string>
 #include <string_view>
@@ -11,6 +11,17 @@
 #include <vector>
 
 namespace harness {
+
+// How a child is started when it is an app rather than a client to listen to.
+struct Launch {
+	// The child leads a session of its own, and what it starts joins its
+	// process group: signal(), kill() and stop() reach the whole group, so
+	// a browser's helper processes go with it.
+	bool own_group = false;
+	// Not empty: stdin is /dev/null and stdout and stderr are appended to this
+	// file, so there is no pipe and said() stays empty.
+	std::string log;
+};
 
 class Child {
 public:
@@ -20,7 +31,7 @@ public:
 	Child &operator=(const Child &) = delete;
 
 	// Runs argv[0], found along $PATH. False when it cannot be started.
-	bool start(const std::vector<std::string> &argv);
+	bool start(const std::vector<std::string> &argv, const Launch &launch = {});
 	// Runs the test client meson names in the environment variable `env_name`
 	// (for example CANVAS_LOCK_CLIENT).
 	bool start_client(const char *env_name, const std::vector<std::string> &args = {});
@@ -46,12 +57,18 @@ public:
 	void kill();
 	// SIGTERM, then SIGKILL when the child is still there after two seconds.
 	void stop();
+	// SIGTERM without the wait: stop() after it only waits. Children that
+	// take long to quit are asked together and waited for together.
+	void ask_to_stop();
 
 private:
 	void drain();
 	void close_pipe();
+	pid_t target() const;
 
 	pid_t pid_ = -1;
+	bool group_ = false;
+	bool asked_ = false;
 	int out_ = -1;
 	std::string said_;
 };

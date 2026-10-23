@@ -684,8 +684,8 @@ executable(
 	'media-tour',
 	'tools/media/tour.cpp',
 	protocol_headers,
-	include_directories: src_inc,
-	link_with: core_lib,
+	include_directories: [src_inc, harness_inc],
+	link_with: [harness_lib, core_lib],
 	dependencies: core_deps,
 )
 

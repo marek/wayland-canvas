@@ -31,13 +31,28 @@ bool reaped(pid_t pid) {
 	return got == pid || got < 0;
 }
 
+// In the child: stdin from /dev/null, stdout and stderr appended to `log`,
+// and nothing else of the scenario's descriptors passed on to an app.
+void redirect_to_log(const std::string &log) {
+	int null = open("/dev/null", O_RDONLY);
+	int out = open(log.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (null >= 0) {
+		dup2(null, STDIN_FILENO);
+	}
+	if (out >= 0) {
+		dup2(out, STDOUT_FILENO);
+		dup2(out, STDERR_FILENO);
+	}
+	close_range(STDERR_FILENO + 1, ~0U, 0);
+}
+
 } // namespace
 
 Child::~Child() {
 	stop();
 }
 
-bool Child::start(const std::vector<std::string> &argv) {
+bool Child::start(const std::vector<std::string> &argv, const Launch &launch) {
 	stop();
 	if (argv.empty()) {
 		return false;
@@ -47,29 +62,45 @@ bool Child::start(const std::vector<std::string> &argv) {
 		args.push_back(const_cast<char *>(arg.c_str()));
 	}
 	args.push_back(nullptr);
-	int fds[2];
-	if (pipe(fds) != 0) {
+	bool piped = launch.log.empty();
+	int fds[2] = {-1, -1};
+	if (piped && pipe(fds) != 0) {
 		return false;
 	}
 	pid_ = fork();
 	if (pid_ == 0) {
-		close(fds[0]);
-		dup2(fds[1], STDOUT_FILENO);
-		close(fds[1]);
+		if (launch.own_group) {
+			setsid();
+		}
 		sigset_t none;
 		sigemptyset(&none);
 		sigprocmask(SIG_SETMASK, &none, nullptr);
 		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (piped) {
+			close(fds[0]);
+			dup2(fds[1], STDOUT_FILENO);
+			close(fds[1]);
+		} else {
+			redirect_to_log(launch.log);
+		}
 		execvp(args[0], args.data());
 		_exit(127);
 	}
-	close(fds[1]);
+	if (piped) {
+		close(fds[1]);
+	}
 	if (pid_ < 0) {
-		close(fds[0]);
+		if (piped) {
+			close(fds[0]);
+		}
 		return false;
 	}
-	fcntl(fds[0], F_SETFL, O_NONBLOCK);
-	out_ = fds[0];
+	group_ = launch.own_group;
+	asked_ = false;
+	if (piped) {
+		fcntl(fds[0], F_SETFL, O_NONBLOCK);
+		out_ = fds[0];
+	}
 	said_.clear();
 	started().push_back(this);
 	return true;
@@ -145,9 +176,13 @@ bool Child::prints(std::string_view marker, int timeout_ms) {
 	return true;
 }
 
+pid_t Child::target() const {
+	return group_ ? -pid_ : pid_;
+}
+
 void Child::signal(int number) {
 	if (pid_ > 0) {
-		::kill(pid_, number);
+		::kill(target(), number);
 	}
 }
 
@@ -160,7 +195,7 @@ void Child::close_pipe() {
 
 void Child::kill() {
 	if (pid_ > 0) {
-		::kill(pid_, SIGKILL);
+		::kill(target(), SIGKILL);
 		waitpid(pid_, nullptr, 0);
 		pid_ = -1;
 	}
@@ -168,22 +203,34 @@ void Child::kill() {
 	std::erase(started(), this);
 }
 
+void Child::ask_to_stop() {
+	if (pid_ > 0 && !asked_) {
+		asked_ = true;
+		::kill(target(), SIGTERM);
+	}
+}
+
 void Child::stop() {
-	if (pid_ > 0) {
-		::kill(pid_, SIGTERM);
-		for (int waited = 0; pid_ > 0 && waited < stop_grace_ms * 1000; waited += stop_poll_us) {
-			if (reaped(pid_)) {
-				pid_ = -1;
-				break;
+	ask_to_stop();
+	for (int waited = 0; pid_ > 0 && waited < stop_grace_ms * 1000; waited += stop_poll_us) {
+		if (reaped(pid_)) {
+			// the leader is gone, what it started may not be
+			if (group_) {
+				::kill(-pid_, SIGKILL);
 			}
-			usleep(stop_poll_us);
+			pid_ = -1;
+			break;
 		}
+		usleep(stop_poll_us);
 	}
 	kill();
 }
 
 void stop_children() {
 	std::vector<Child *> remaining = started();
+	for (Child *child : remaining) {
+		child->ask_to_stop();
+	}
 	for (Child *child : remaining) {
 		child->stop();
 	}
