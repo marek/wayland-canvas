@@ -2269,7 +2269,7 @@ Tests:
 
 ### 12. Comments
 
-- [ ] No banner separators
+- [x] No banner separators
   - These go: about 140 `// ----` lines in 22 files of `src/`, plus 11 in
     NetworkPanel, 13 in SettingsPanel, 6 in Toolbar, 29 in bar.cpp, 7 in
     tour.cpp and 5 in wayland-canvas-session. code-style forbids them.
@@ -2278,10 +2278,13 @@ Tests:
   - Acceptance:
     `git grep -nE '^\s*(//|#) ?(-{3,}|={3,})' -- src shell plugins tests tools packaging`
     prints nothing.
-- [ ] No block comments
+  - Done: the grep prints nothing over the whole tree.
+- [x] No block comments
   - desktop_entry.cpp:87-91, Toolbar.qml's 23-line header (7-29) and
     Host.qml:783-794 become one-liners stating behaviour. Host.qml's
     block also narrates how a fix was proven.
+  - Done: those three are one-liners, and every long header in the
+    tree is cut to what it must say; no `/* */` block is left in `src/`.
 - [ ] No false or stale comments
   - Correct or delete each of these, and any the splits leave behind:
   - In the compositor:
@@ -2317,7 +2320,12 @@ Tests:
   - Acceptance: a reviewer pass (`docs/roles/reviewer.md`) over the
     diff, and `grep -niE 'used to|previously|no longer|was changed'`
     over `src shell plugins tests tools` finds no history.
-- [ ] No comment restates its line
+  - Left: the reviewer pass found four comments wrong, now fixed, and
+    one true only for clicks: output.h says a layer's front is the
+    topmost, and `draw_layers` draws it first, so the newest surface is
+    drawn under the older ones. The draw order is being fixed; the
+    history grep finds only runtime states and check labels.
+- [x] No comment restates its line
   - These go:
     - render.cpp:1049 (`// clear`), 1053, 1071 and 1076, and 549-553,
       which repeats 531-532;
@@ -2330,7 +2338,7 @@ Tests:
     - NetworkPanel.qml:1396;
     - tour.cpp:209;
     - AppBar.qml:223-230 (the same fact twice).
-- [ ] The non-obvious places get their one line
+- [x] The non-obvious places get their one line
   - Add a line explaining each of these:
     - why `button & 31` is safe (input.cpp:953);
     - why the 4 px top strip is not divided by zoom while the margin and
@@ -2347,7 +2355,9 @@ Tests:
 ### Verify
 
 - [ ] `tools/check.sh` green after the last phase
-- [ ] The sanitizer suites of phase 3 run clean again after phases 9-11
+- [x] The sanitizer suites of phase 3 run clean again after phases 9-11
+  - Done: `tools/check.sh --sanitize` passes the unit suite and every
+    scenario side by side with no ASan, LSan or UBSan report.
 - [ ] A nested run (on screen owed) covers:
   - each strip edge;
   - the launcher;
