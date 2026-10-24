@@ -2285,7 +2285,7 @@ Tests:
     block also narrates how a fix was proven.
   - Done: those three are one-liners, and every long header in the
     tree is cut to what it must say; no `/* */` block is left in `src/`.
-- [ ] No false or stale comments
+- [x] No false or stale comments
   - Correct or delete each of these, and any the splits leave behind:
   - In the compositor:
     - config.h:6-7 (keybindings in input.cpp);
@@ -2320,11 +2320,10 @@ Tests:
   - Acceptance: a reviewer pass (`docs/roles/reviewer.md`) over the
     diff, and `grep -niE 'used to|previously|no longer|was changed'`
     over `src shell plugins tests tools` finds no history.
-  - Left: the reviewer pass found four comments wrong, now fixed, and
-    one true only for clicks: output.h says a layer's front is the
-    topmost, and `draw_layers` draws it first, so the newest surface is
-    drawn under the older ones. The draw order is being fixed; the
-    history grep finds only runtime states and check labels.
+  - Done: the reviewer pass found four comments wrong, now fixed, and
+    one true only for clicks: output.h's "the front is the topmost",
+    which drawing now honours too (layer surfaces draw newest on top).
+    The history grep finds only runtime states and check labels.
 - [x] No comment restates its line
   - These go:
     - render.cpp:1049 (`// clear`), 1053, 1071 and 1076, and 549-553,
@@ -2354,7 +2353,8 @@ Tests:
 
 ### Verify
 
-- [ ] `tools/check.sh` green after the last phase
+- [x] `tools/check.sh` green after the last phase
+  - Done: unit, packaging and every scenario side by side, in 231 s.
 - [x] The sanitizer suites of phase 3 run clean again after phases 9-11
   - Done: `tools/check.sh --sanitize` passes the unit suite and every
     scenario side by side with no ASan, LSan or UBSan report.
