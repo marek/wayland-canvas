@@ -16,7 +16,7 @@ without a policy is not added.
 | Xwayland | X11 applications: the window manager is the compositor, and an X11 window is a view ([../windows/x11.md](../windows/x11.md)); the X server starts with the first X11 client |
 | xdg-decoration | negotiating server-side decorations; server-side is what the compositor offers ([../windows/title-bars.md](../windows/title-bars.md)) |
 | server-decoration (KDE) | server-side decorations for clients that speak the KDE protocol instead |
-| layer-shell | bars, launchers, wallpapers, notifications; the top layer hides under a fullscreen window; exclusive zones carve the usable area ([outputs.md](outputs.md)) |
+| layer-shell | bars, launchers, wallpapers, notifications; the top layer hides under a fullscreen window; within a layer the newest surface is on top, for drawing and for input alike; exclusive zones carve the usable area ([outputs.md](outputs.md)) |
 | foreign-toplevel-management | taskbars and docks: each window's title, app id and state; activate, maximize, minimize, fullscreen and close requests are honoured ([../windows/window-management.md](../windows/window-management.md)) |
 | xdg-activation | activation only with tokens that came from real input |
 | pointer-gestures | the gestures the canvas does not claim are forwarded to clients ([../input/gestures.md](../input/gestures.md)) |

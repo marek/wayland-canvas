@@ -59,7 +59,8 @@ void draw_canvas_surfaces(const RenderCtx &ctx) {
 
 void draw_layers(const RenderCtx &ctx, int from, int to) {
 	for (int i = from; i <= to; i++) {
-		for (const auto &layer : ctx.output->layers[static_cast<std::size_t>(i)]) {
+		// the vector's front is the newest, which is on top: draw it last
+		for (const auto &layer : std::views::reverse(ctx.output->layers[static_cast<std::size_t>(i)])) {
 			if (!layer->mapped || layer->canvas_box.has_value()
 					|| layer->belongs_on_canvas()) {
 				continue; // the plane's, drawn with the canvas or not at all

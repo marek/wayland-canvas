@@ -1,8 +1,9 @@
 // End-to-end control-IPC scenario: the JSON-lines protocol on the socket the
 // compositor exports - every method, every error case (a malformed line, a
 // line over 64 KiB, a slow subscriber), each event type triggered for real,
-// the canvas-surface role's answers, the calls a client leaves pending
-// outliving it, and the `wayland-canvas msg` client with its exit codes.
+// the canvas-surface role's answers, two layer surfaces stacked in one layer,
+// the calls a client leaves pending outliving it, and the `wayland-canvas msg`
+// client with its exit codes.
 // Writes only under $CANVAS_TMP; meson passes $WAYLAND_CANVAS_BIN.
 #include <chrono>
 #include <cmath>
@@ -42,11 +43,17 @@ namespace {
 
 Child subscriber; // `msg subscribe`, from the subscription steps to its interrupt
 Child layer_client; // the layer-shell client drawing the plugin surface
+Child older_client, newer_client; // two layer clients stacking surfaces in one layer
 std::string socket_path;
 std::string output_name; // the headless output's name, for `output` params
 std::string conf_before; // canvas.conf's text before a settings.set that must change nothing
 // A plugin surface name no client draws: what the socket says of it.
 const std::string surface_name = "wayland-canvas-canvas-ipc.scenario/one";
+// The two stacked surfaces' namespaces (neither is a plugin's) and fills.
+const std::string older_name = "ipc-scenario-layer-older";
+const std::string newer_name = "ipc-scenario-layer-newer";
+constexpr uint32_t older_rgb = 0xcc3333;
+constexpr uint32_t newer_rgb = 0x33cc33;
 pid_t raw_pid = -1; // the raw client or slow subscriber being waited for
 pid_t pending_pid = -1; // a client that disconnects with a call pending
 // The desktops lifecycle's two desktops, and the desktops events heard
@@ -67,18 +74,23 @@ bool heard(std::string_view needle) {
 	return subscriber.said().find(needle) != std::string_view::npos;
 }
 
-// The plugin surface the layer client draws, once the compositor maps it.
-LayerSurface *plugin_surface() {
+// The mapped surface of the layer client with the namespace `name`.
+LayerSurface *mapped_surface(std::string_view name) {
 	for (const std::unique_ptr<Output> &output : server->outputs) {
 		for (const auto &layer : output->layers) {
 			for (const std::unique_ptr<LayerSurface> &surface : layer) {
-				if (surface->mapped && surface->name() == surface_name) {
+				if (surface->mapped && surface->name() == name) {
 					return surface.get();
 				}
 			}
 		}
 	}
 	return nullptr;
+}
+
+// The plugin surface the layer client draws, once the compositor maps it.
+LayerSurface *plugin_surface() {
+	return mapped_surface(surface_name);
 }
 
 // The compositor runs a drag the plugin handed it.
@@ -1094,6 +1106,68 @@ Result place_stayed_gone() {
 	return after(300);
 }
 
+// Two surfaces of the top layer, unanchored and so centred on the same spot,
+// overlap completely. The newer starts once the older is mapped.
+Result stacked_older_started() {
+	check(older_client.start_client("CANVAS_LAYER_CLIENT",
+			{older_name, std::format("{:06x}", older_rgb)}),
+		"the older stacked layer client started");
+	return after(300);
+}
+
+Result stacked_newer_started() {
+	if (auto wait = wait_for(mapped_surface(older_name) != nullptr)) {
+		return *wait;
+	}
+	check(newer_client.start_client("CANVAS_LAYER_CLIENT",
+			{newer_name, std::format("{:06x}", newer_rgb)}),
+		"the newer stacked layer client started");
+	return after(300);
+}
+
+Result stacked_shot() {
+	if (auto wait = wait_for(mapped_surface(newer_name) != nullptr)) {
+		return *wait;
+	}
+	shot("layer-stack");
+	return after(300);
+}
+
+// Within one layer the newest surface is on top: in the screenshot, for
+// layer_surface_at and for the pointer.
+Result stacked_newest_on_top() {
+	LayerSurface *older = mapped_surface(older_name);
+	LayerSurface *newer = mapped_surface(newer_name);
+	std::optional<Image> image = read_shot("layer-stack");
+	if (older == nullptr || newer == nullptr || !image.has_value()) {
+		check(false, "both stacked surfaces mapped and the screenshot was read");
+		return after(0);
+	}
+	Output &out = output();
+	wlr_box both{};
+	wlr_box_intersection(&both, &older->geo, &newer->geo);
+	check(!wlr_box_empty(&both), "the two surfaces overlap on the screen");
+	double x = both.x + both.width / 2.0, y = both.y + both.height / 2.0;
+	uint32_t shown = image->pixel(static_cast<int>(x * image->width() / out.width),
+		static_cast<int>(y * image->height() / out.height)) & 0xffffff;
+	check(shown == newer_rgb,
+		std::format("the screenshot shows the newer surface over the older where they"
+			" overlap (pixel {:06x}, newer {:06x})", shown, newer_rgb));
+	std::optional<LayerHit> hit = out.layer_surface_at(ZWLR_LAYER_SHELL_V1_LAYER_TOP, x, y);
+	check(hit.has_value() && hit->layer == newer,
+		"layer_surface_at finds the newer surface where they overlap");
+	move_to(out.lx + x, out.ly + y);
+	check(server->seat->pointer_state.focused_surface == newer->wlr->surface,
+		"the pointer reaches the newer surface where they overlap");
+	return after(0);
+}
+
+Result stacked_clients_stopped() {
+	older_client.signal(SIGTERM);
+	newer_client.signal(SIGTERM);
+	return after(300);
+}
+
 // The state lists the open window, and a jump goes to it.
 Result window_listed() {
 	if (auto wait = wait_for(command_done("state-windows"))) {
@@ -1334,6 +1408,11 @@ int main() {
 		{"place came back", place_came_back},
 		{"layer client third", layer_client_third},
 		{"place stayed gone", place_stayed_gone},
+		{"stacked older started", stacked_older_started},
+		{"stacked newer started", stacked_newer_started},
+		{"stacked shot", stacked_shot},
+		{"stacked newest on top", stacked_newest_on_top},
+		{"stacked clients stopped", stacked_clients_stopped},
 		{"window listed", window_listed},
 		{"window focused", window_focused},
 		{"free window focused", free_window_focused},

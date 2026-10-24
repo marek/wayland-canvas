@@ -1,8 +1,9 @@
 // A layer-shell client for the scenarios: one surface on the top layer in the
-// namespace argv[1], a solid colour at the size the compositor configures
-// (200x100 until it names one), so a plugin's surface on the canvas can be
-// mapped, placed and pressed without the shell. Prints CONFIGURED <w> <h>,
-// MAPPED and CLOSED. SIGTERM ends it.
+// namespace argv[1], a solid colour (argv[2] as rrggbb, else blue) at the size
+// the compositor configures (200x100 until it names one), so a plugin's
+// surface on the canvas can be mapped, placed and pressed without the shell,
+// and two of them stacked. Prints CONFIGURED <w> <h>, MAPPED and CLOSED.
+// SIGTERM ends it.
 #define _GNU_SOURCE
 #include <poll.h>
 #include <signal.h>
@@ -20,7 +21,7 @@ enum {
 	default_height = 100,
 };
 
-static const uint32_t colour = 0xff3366cc;
+static uint32_t colour = 0xff3366cc;
 
 static struct wl_compositor *compositor;
 static struct wl_shm *shm;
@@ -77,9 +78,18 @@ static void handle_sigterm(int signal) {
 }
 
 int main(int argc, char **argv) {
-	if (argc < 2) {
-		fprintf(stderr, "usage: layer-client <namespace>\n");
+	if (argc < 2 || argc > 3) {
+		fprintf(stderr, "usage: layer-client <namespace> [rrggbb]\n");
 		return 2;
+	}
+	if (argc == 3) {
+		char *end;
+		unsigned long rgb = strtoul(argv[2], &end, 16);
+		if (strlen(argv[2]) != 6 || *end != '\0') {
+			fprintf(stderr, "layer-client: the colour is six hex digits, rrggbb\n");
+			return 2;
+		}
+		colour = 0xff000000 | (uint32_t)rgb;
 	}
 	struct wl_display *display = wl_display_connect(NULL);
 	if (display == NULL) {
