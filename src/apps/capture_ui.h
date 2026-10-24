@@ -22,9 +22,10 @@ class Server;
 class View;
 
 // The shots-and-recordings UI the compositor draws itself. It routes the keys and the
-// pointer to the picker, the toolbar, the thumbnail and the recorder, takes their reports
-// and runs the countdown; shots and recordings come from the shared offscreen captures
-// (src/render/capture.h). While the picker, the toolbar or a countdown is up it owns the keyboard.
+// pointer to the picker, the toolbar and the thumbnail, takes their reports, runs the
+// countdown and starts and stops the recorder; shots and recordings come from the shared
+// offscreen captures (src/render/capture.h). While the picker, the toolbar or a countdown
+// is up it owns the keyboard.
 class CaptureUi final : public UiLayer {
 public:
 	explicit CaptureUi(Server &server);

@@ -50,8 +50,8 @@ void act_launcher(Server &server, Output *output, KeyArg) {
 }
 
 // Super+C and Super+V: the focused surface gets Ctrl+Insert (copy) or
-// Shift+Insert (paste), the keys GTK, Qt, Chrome, Electron and terminals take
-// natively, with only that modifier held rather than the shortcut's Super.
+// Shift+Insert (paste), the keys GTK, Qt, Chrome and Electron take natively and
+// terminals are set to take, with only that modifier held rather than Super.
 void act_clipboard_chord(Server &server, Output *, KeyArg arg) {
 	wlr_seat *seat = server.seat;
 	wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);

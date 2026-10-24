@@ -163,7 +163,7 @@ inline constexpr int tab_label_guess = 9; // px a character before the label is 
 
 // The overview's bottom stack, logical px, from the bottom edge up: the help
 // line, the row a hint takes, the shelf.
-inline constexpr int overview_help_margin = 12; // kept clear around the help line: above it, and at each side
+inline constexpr int overview_help_margin = 12; // kept clear around the help line: below it, and at each side
 inline constexpr int overview_hint_gap = 8; // between the help line and the hint's row
 inline constexpr int overview_shelf_gap = 16; // between the hint's row and the shelf
 inline constexpr int overview_help_guess_h = 28; // before the help line is drawn once

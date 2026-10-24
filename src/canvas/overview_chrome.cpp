@@ -76,8 +76,6 @@ void draw_tabs(const RenderCtx &ctx) {
 				layout->tab.y + (layout->tab.height - label.h) / 2,
 				label.w, label.h, 1.0);
 		}
-		// Glyphs follow the label's rule: accent text on the target's accent
-		// fill, panel text elsewhere; a lit Tile switch is accent except on it.
 		uint32_t ink = target ? server.theme.colors().accent_text
 			: server.theme.colors().panel_text;
 		uint32_t lit = target ? server.theme.colors().accent_text
